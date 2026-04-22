@@ -1,0 +1,19 @@
+# Claude Code per-machine settings (contains satellites hook token)
+.claude/settings.local.json
+
+# Go build output
+/satellites
+/satellites-agent
+*.exe
+*.test
+*.out
+*.prof
+
+# Dependencies
+/vendor/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
