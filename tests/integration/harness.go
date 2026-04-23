@@ -67,8 +67,24 @@ func runBinary(t *testing.T, path string, timeout time.Duration) string {
 // starts it as a testcontainer waiting on /healthz. Returns the base URL
 // (scheme+host+mapped-port) and a cleanup function the caller must defer.
 func startServerContainer(t *testing.T, ctx context.Context) (string, func()) {
+	return startServerContainerWithEnv(t, ctx, nil)
+}
+
+// startServerContainerWithEnv lets callers add or override environment
+// variables on the container (e.g. DEV_USERNAME / DEV_PASSWORD for the auth
+// smoke test).
+func startServerContainerWithEnv(t *testing.T, ctx context.Context, extraEnv map[string]string) (string, func()) {
 	t.Helper()
 	root := repoRoot(t)
+	env := map[string]string{
+		"PORT":      "8080",
+		"ENV":       "dev",
+		"LOG_LEVEL": "info",
+		"DEV_MODE":  "true",
+	}
+	for k, v := range extraEnv {
+		env[k] = v
+	}
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    root,
@@ -76,12 +92,7 @@ func startServerContainer(t *testing.T, ctx context.Context) (string, func()) {
 			KeepImage:  true,
 		},
 		ExposedPorts: []string{"8080/tcp"},
-		Env: map[string]string{
-			"PORT":      "8080",
-			"ENV":       "dev",
-			"LOG_LEVEL": "info",
-			"DEV_MODE":  "true",
-		},
+		Env:          env,
 		WaitingFor: wait.ForHTTP("/healthz").
 			WithPort("8080/tcp").
 			WithStartupTimeout(90 * time.Second).

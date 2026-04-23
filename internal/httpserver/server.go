@@ -26,20 +26,31 @@ type Server struct {
 	logger    arbor.ILogger
 	http      *http.Server
 	startedAt time.Time
+	mux       *http.ServeMux
+}
+
+// RouteRegistrar is anything that can attach its own routes to a mux. The
+// auth handlers satisfy this; later stories can plug in MCP + portal.
+type RouteRegistrar interface {
+	Register(mux *http.ServeMux)
 }
 
 // New constructs a Server that listens on cfg.Port, uses logger for request
 // and lifecycle logs, and stamps /healthz with the supplied startedAt instant.
-func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time) *Server {
+// Additional routes are registered via the variadic registrars.
+func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, registrars ...RouteRegistrar) *Server {
 	s := &Server{
 		cfg:       cfg,
 		logger:    logger,
 		startedAt: startedAt,
+		mux:       http.NewServeMux(),
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.healthz)
+	s.mux.HandleFunc("GET /healthz", s.healthz)
+	for _, r := range registrars {
+		r.Register(s.mux)
+	}
 
-	handler := requestID(accessLog(logger, mux))
+	handler := requestID(accessLog(logger, s.mux))
 
 	s.http = &http.Server{
 		Addr:              net.JoinHostPort("0.0.0.0", strconv.Itoa(cfg.Port)),

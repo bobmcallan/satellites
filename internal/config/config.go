@@ -34,6 +34,13 @@ type Config struct {
 
 	// FlyMachineID is injected by Fly.io at container start. Empty off-Fly.
 	FlyMachineID string
+
+	// DevUsername is the fixed credential allowed when DevMode is active
+	// (Env != "prod" && DevMode == true). Empty disables DevMode login.
+	DevUsername string
+
+	// DevPassword is the fixed DevMode password. Never logged.
+	DevPassword string
 }
 
 // Load reads the environment and returns a validated Config. Missing required
@@ -76,6 +83,12 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("FLY_MACHINE_ID"); v != "" {
 		cfg.FlyMachineID = v
+	}
+	if v := os.Getenv("DEV_USERNAME"); v != "" {
+		cfg.DevUsername = v
+	}
+	if v := os.Getenv("DEV_PASSWORD"); v != "" {
+		cfg.DevPassword = v
 	}
 
 	if err := cfg.validate(); err != nil {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/httpserver"
 )
@@ -38,7 +39,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	srv := httpserver.New(cfg, logger, startedAt)
+	users := auth.NewMemoryUserStore()
+	sessions := auth.NewMemorySessionStore()
+	authHandlers := &auth.Handlers{
+		Users:    users,
+		Sessions: sessions,
+		Logger:   logger,
+		Cfg:      cfg,
+	}
+
+	srv := httpserver.New(cfg, logger, startedAt, authHandlers)
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error().Str("error", err.Error()).Msg("server terminated with error")
 		os.Exit(1)
