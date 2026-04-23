@@ -1,6 +1,7 @@
 // Package mcpserver exposes the satellites MCP surface over Streamable HTTP.
 // v4 currently registers: satellites_info, document_ingest_file, document_get,
-// project_create, project_get, project_list. Subsequent epics add more.
+// project_create/get/list, ledger_append/list, story_create/get/list/update_status,
+// workspace_create/get/list. Subsequent epics add more.
 package mcpserver
 
 import (
@@ -19,6 +20,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 // Server bundles the mcp-go MCPServer + StreamableHTTPServer with the
@@ -35,12 +37,11 @@ type Server struct {
 	defaultProjectID string
 	ledger           ledger.Store
 	stories          story.Store
+	workspaces       workspace.Store
 }
 
 // Deps bundles the optional per-tool dependencies passed through to
-// handlers. A nil DocStore disables document_*. A nil ProjectStore disables
-// project_*. A nil LedgerStore disables ledger_*. A nil StoryStore
-// disables story_*.
+// handlers. A nil store field disables the associated verbs.
 type Deps struct {
 	DocStore         document.Store
 	DocsDir          string
@@ -48,6 +49,7 @@ type Deps struct {
 	DefaultProjectID string
 	LedgerStore      ledger.Store
 	StoryStore       story.Store
+	WorkspaceStore   workspace.Store
 }
 
 // New constructs the MCP server with the satellites_info tool registered.
@@ -64,6 +66,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		defaultProjectID: deps.DefaultProjectID,
 		ledger:           deps.LedgerStore,
 		stories:          deps.StoryStore,
+		workspaces:       deps.WorkspaceStore,
 	}
 
 	s.mcp = mcpserver.NewMCPServer(
@@ -198,6 +201,25 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("status", mcpgo.Required(), mcpgo.Description("Target status: ready | in_progress | done | cancelled.")),
 		)
 		s.mcp.AddTool(updateStatusTool, s.handleStoryUpdateStatus)
+	}
+
+	if s.workspaces != nil {
+		createWsTool := mcpgo.NewTool("workspace_create",
+			mcpgo.WithDescription("Create a new workspace and add the caller as admin. The caller must be authenticated."),
+			mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Workspace display name.")),
+		)
+		s.mcp.AddTool(createWsTool, s.handleWorkspaceCreate)
+
+		getWsTool := mcpgo.NewTool("workspace_get",
+			mcpgo.WithDescription("Return a workspace the caller is a member of. Non-member access returns not-found."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Workspace id (wksp_<8hex>).")),
+		)
+		s.mcp.AddTool(getWsTool, s.handleWorkspaceGet)
+
+		listWsTool := mcpgo.NewTool("workspace_list",
+			mcpgo.WithDescription("List the caller's member workspaces, newest-first."),
+		)
+		s.mcp.AddTool(listWsTool, s.handleWorkspaceList)
 	}
 
 	s.streamable = mcpserver.NewStreamableHTTPServer(s.mcp,
@@ -572,6 +594,80 @@ func (s *Server) handleStoryUpdateStatus(ctx context.Context, req mcpgo.CallTool
 		Str("tool", "story_update_status").
 		Str("story_id", id).
 		Str("new_status", status).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleWorkspaceCreate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	if caller.UserID == "" {
+		return mcpgo.NewToolResultError("no caller identity"), nil
+	}
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	w, err := s.workspaces.Create(ctx, caller.UserID, name, time.Now().UTC())
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(w)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "workspace_create").
+		Str("workspace_id", w.ID).
+		Str("owner_user_id", w.OwnerUserID).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleWorkspaceGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	if caller.UserID == "" {
+		return mcpgo.NewToolResultError("no caller identity"), nil
+	}
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	is, err := s.workspaces.IsMember(ctx, id, caller.UserID)
+	if err != nil || !is {
+		return mcpgo.NewToolResultError("workspace not found"), nil
+	}
+	w, err := s.workspaces.GetByID(ctx, id)
+	if err != nil {
+		return mcpgo.NewToolResultError("workspace not found"), nil
+	}
+	body, _ := json.Marshal(w)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "workspace_get").
+		Str("workspace_id", id).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleWorkspaceList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	if caller.UserID == "" {
+		return mcpgo.NewToolResultError("no caller identity"), nil
+	}
+	list, err := s.workspaces.ListByMember(ctx, caller.UserID)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(list)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "workspace_list").
+		Str("user_id", caller.UserID).
+		Int("count", len(list)).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil

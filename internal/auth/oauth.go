@@ -256,6 +256,9 @@ func (h *Handlers) upsertOAuthUser(provider string, info ProviderUserInfo) User 
 			Provider:    provider,
 		}
 		ms.Add(u)
+		if h.OnUserCreated != nil {
+			h.OnUserCreated(context.Background(), u.ID)
+		}
 		return u
 	}
 	// Unknown store implementation — return a transient user. Real store

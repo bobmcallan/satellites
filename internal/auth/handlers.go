@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -18,6 +19,12 @@ type Handlers struct {
 	Cfg       *config.Config
 	Providers *ProviderSet // optional; set to wire /auth/<provider>/start + /callback
 	States    *StateStore  // required if Providers is non-nil
+
+	// OnUserCreated fires once per first-sight of a user id, from either
+	// DevMode or an OAuth callback. Wired by main() to seed the user's
+	// default workspace per docs/architecture.md §8 (Workspace is the
+	// multi-tenant primitive). Optional; nil = no-op.
+	OnUserCreated func(ctx context.Context, userID string)
 }
 
 // UserStoreByEmail is the lookup surface the login handler needs. Kept
@@ -105,6 +112,9 @@ func (h *Handlers) authenticate(username, password string) (User, bool) {
 			if ms, ok := h.Users.(*MemoryUserStore); ok {
 				if _, err := ms.GetByID(u.ID); err != nil {
 					ms.Add(u)
+					if h.OnUserCreated != nil {
+						h.OnUserCreated(context.Background(), u.ID)
+					}
 				}
 			}
 			return u, true

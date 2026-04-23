@@ -22,6 +22,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/portal"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 func main() {
@@ -58,6 +59,8 @@ func main() {
 		Providers: providers,
 		States:    states,
 	}
+	// After the workspace store is wired (below), main() may set
+	// authHandlers.OnUserCreated to seed each new user's default workspace.
 
 	// Optional SurrealDB connection + document/project surfaces. When
 	// DB_DSN is empty we keep booting (tests, dev without Surreal) but the
@@ -67,6 +70,7 @@ func main() {
 		projStore        project.Store
 		ledgerStore      ledger.Store
 		storyStore       story.Store
+		wsStore          workspace.Store
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
 	)
@@ -86,7 +90,15 @@ func main() {
 		projStore = project.NewSurrealStore(conn)
 		ledgerStore = ledger.NewSurrealStore(conn)
 		storyStore = story.NewSurrealStore(conn, ledgerStore)
+		wsStore = workspace.NewSurrealStore(conn)
 		dbPing = func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) }
+
+		// Seed the system user's default workspace so bootstrap writes
+		// (default project, seeded documents) land in a workspace from day
+		// one. Idempotent — safe across reboots.
+		if _, err := workspace.EnsureDefault(ctx, wsStore, logger, project.DefaultOwnerUserID, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("system workspace seed failed")
+		}
 
 		// Seed default project, then idempotently stamp any legacy
 		// document rows that pre-date the project primitive.
@@ -104,6 +116,15 @@ func main() {
 
 		if _, err := document.SeedIfEmpty(ctx, docStore, logger, defaultProjectID, cfg.DocsDir); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("document seed failed")
+		}
+
+		// Wire user-creation → EnsureDefault once the workspace store is up.
+		// New DevMode / OAuth users will get a personal workspace on first
+		// login. Idempotent per user.
+		authHandlers.OnUserCreated = func(hookCtx context.Context, userID string) {
+			if _, err := workspace.EnsureDefault(hookCtx, wsStore, logger, userID, time.Now().UTC()); err != nil {
+				logger.Warn().Str("user_id", userID).Str("error", err.Error()).Msg("default workspace seed for user failed")
+			}
 		}
 	}
 
@@ -125,6 +146,7 @@ func main() {
 		DefaultProjectID: defaultProjectID,
 		LedgerStore:      ledgerStore,
 		StoryStore:       storyStore,
+		WorkspaceStore:   wsStore,
 	})
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions: sessions,
