@@ -12,10 +12,12 @@ import (
 
 // Handlers holds the dependencies shared by Login and Logout.
 type Handlers struct {
-	Users    UserStoreByEmail
-	Sessions SessionStore
-	Logger   arbor.ILogger
-	Cfg      *config.Config
+	Users     UserStoreByEmail
+	Sessions  SessionStore
+	Logger    arbor.ILogger
+	Cfg       *config.Config
+	Providers *ProviderSet // optional; set to wire /auth/<provider>/start + /callback
+	States    *StateStore  // required if Providers is non-nil
 }
 
 // UserStoreByEmail is the lookup surface the login handler needs. Kept
@@ -24,10 +26,11 @@ type UserStoreByEmail interface {
 	GetByEmail(email string) (User, error)
 }
 
-// Register attaches login + logout routes to mux.
+// Register attaches login + logout + enabled OAuth provider routes to mux.
 func (h *Handlers) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/login", h.Login)
 	mux.HandleFunc("POST /auth/logout", h.Logout)
+	h.RegisterOAuth(mux)
 }
 
 // Login authenticates the supplied username + password, creates a session,

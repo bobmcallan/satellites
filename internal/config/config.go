@@ -41,6 +41,13 @@ type Config struct {
 
 	// DevPassword is the fixed DevMode password. Never logged.
 	DevPassword string
+
+	// OAuth provider credentials (optional; empty disables the provider).
+	GoogleClientID       string
+	GoogleClientSecret   string
+	GithubClientID       string
+	GithubClientSecret   string
+	OAuthRedirectBaseURL string
 }
 
 // Load reads the environment and returns a validated Config. Missing required
@@ -89,6 +96,21 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DEV_PASSWORD"); v != "" {
 		cfg.DevPassword = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
+		cfg.GoogleClientID = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
+		cfg.GoogleClientSecret = v
+	}
+	if v := os.Getenv("GITHUB_CLIENT_ID"); v != "" {
+		cfg.GithubClientID = v
+	}
+	if v := os.Getenv("GITHUB_CLIENT_SECRET"); v != "" {
+		cfg.GithubClientSecret = v
+	}
+	if v := os.Getenv("OAUTH_REDIRECT_BASE_URL"); v != "" {
+		cfg.OAuthRedirectBaseURL = v
 	}
 
 	if err := cfg.validate(); err != nil {

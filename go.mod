@@ -7,6 +7,7 @@ require (
 	github.com/ternarybob/arbor v1.4.67
 	github.com/testcontainers/testcontainers-go v0.42.0
 	golang.org/x/crypto v0.48.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (

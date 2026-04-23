@@ -41,11 +41,15 @@ func main() {
 
 	users := auth.NewMemoryUserStore()
 	sessions := auth.NewMemorySessionStore()
+	providers := auth.BuildProviderSet(cfg)
+	states := auth.NewStateStore(10 * time.Minute)
 	authHandlers := &auth.Handlers{
-		Users:    users,
-		Sessions: sessions,
-		Logger:   logger,
-		Cfg:      cfg,
+		Users:     users,
+		Sessions:  sessions,
+		Logger:    logger,
+		Cfg:       cfg,
+		Providers: providers,
+		States:    states,
 	}
 
 	srv := httpserver.New(cfg, logger, startedAt, authHandlers)
