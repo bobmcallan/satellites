@@ -17,8 +17,11 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/httpserver"
+	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/portal"
+	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/story"
 )
 
 func main() {
@@ -56,18 +59,17 @@ func main() {
 		States:    states,
 	}
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, startedAt)
-	if err != nil {
-		logger.Error().Str("error", err.Error()).Msg("portal init failed")
-		os.Exit(1)
-	}
-
-	srv := httpserver.New(cfg, logger, startedAt, authHandlers, portalHandlers)
-
-	// Optional SurrealDB connection + document surface. When DB_DSN is
-	// empty we keep booting (tests, dev without Surreal) but the MCP doc
-	// tools are disabled and /healthz omits db_ok.
-	var docStore document.Store
+	// Optional SurrealDB connection + document/project surfaces. When
+	// DB_DSN is empty we keep booting (tests, dev without Surreal) but the
+	// MCP doc/project tools are disabled and /healthz omits db_ok.
+	var (
+		docStore         document.Store
+		projStore        project.Store
+		ledgerStore      ledger.Store
+		storyStore       story.Store
+		defaultProjectID string
+		dbPing           httpserver.HealthCheck
+	)
 	if cfg.DBDSN != "" {
 		dbCfg, err := db.ParseDSN(cfg.DBDSN)
 		if err != nil {
@@ -79,16 +81,50 @@ func main() {
 			logger.Error().Str("error", err.Error()).Msg("db connect failed")
 			os.Exit(1)
 		}
-		docStore = document.NewSurrealStore(conn)
-		srv.SetHealthCheck(func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) })
-		if _, err := document.SeedIfEmpty(ctx, docStore, logger, cfg.DocsDir); err != nil {
+		surrealDocs := document.NewSurrealStore(conn)
+		docStore = surrealDocs
+		projStore = project.NewSurrealStore(conn)
+		ledgerStore = ledger.NewSurrealStore(conn)
+		storyStore = story.NewSurrealStore(conn, ledgerStore)
+		dbPing = func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) }
+
+		// Seed default project, then idempotently stamp any legacy
+		// document rows that pre-date the project primitive.
+		id, err := project.SeedDefault(ctx, projStore, logger)
+		if err != nil {
+			logger.Error().Str("error", err.Error()).Msg("default project seed failed")
+			os.Exit(1)
+		}
+		defaultProjectID = id
+		if n, err := surrealDocs.BackfillProjectID(ctx, defaultProjectID); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("document backfill failed")
+		} else if n > 0 {
+			logger.Info().Int("rows", n).Str("project_id", defaultProjectID).Msg("document project_id backfilled")
+		}
+
+		if _, err := document.SeedIfEmpty(ctx, docStore, logger, defaultProjectID, cfg.DocsDir); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("document seed failed")
 		}
 	}
 
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, startedAt)
+	if err != nil {
+		logger.Error().Str("error", err.Error()).Msg("portal init failed")
+		os.Exit(1)
+	}
+
+	srv := httpserver.New(cfg, logger, startedAt, authHandlers, portalHandlers)
+	if dbPing != nil {
+		srv.SetHealthCheck(dbPing)
+	}
+
 	mcp := mcpserver.New(cfg, logger, startedAt, mcpserver.Deps{
-		DocStore: docStore,
-		DocsDir:  cfg.DocsDir,
+		DocStore:         docStore,
+		DocsDir:          cfg.DocsDir,
+		ProjectStore:     projStore,
+		DefaultProjectID: defaultProjectID,
+		LedgerStore:      ledgerStore,
+		StoryStore:       storyStore,
 	})
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions: sessions,

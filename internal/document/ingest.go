@@ -16,14 +16,14 @@ import (
 // resolves outside of docsDir (path-traversal attack protection).
 var ErrPathEscapes = errors.New("document: path escapes docs directory")
 
-// IngestFile reads docsDir/relPath and upserts a document keyed on the
-// file's basename. Returns the resulting document and whether content
+// IngestFile reads docsDir/relPath and upserts a document keyed on
+// (projectID, filename). Returns the resulting document and whether content
 // changed (version bumped). Arbor logs one line per ingest carrying
-// filename + version + bytes.
+// project_id + filename + version + bytes.
 //
 // relPath is rejected with ErrPathEscapes if it resolves outside docsDir
-// (absolute paths or `..` traversal). This is the mitigation for AC 6.
-func IngestFile(ctx context.Context, store Store, logger arbor.ILogger, docsDir, relPath string, now time.Time) (UpsertResult, error) {
+// (absolute paths or `..` traversal).
+func IngestFile(ctx context.Context, store Store, logger arbor.ILogger, projectID, docsDir, relPath string, now time.Time) (UpsertResult, error) {
 	abs, err := resolveInside(docsDir, relPath)
 	if err != nil {
 		return UpsertResult{}, err
@@ -34,12 +34,13 @@ func IngestFile(ctx context.Context, store Store, logger arbor.ILogger, docsDir,
 	}
 	filename := filepath.Base(abs)
 	docType := InferType(filename)
-	res, err := store.Upsert(ctx, filename, docType, body, now)
+	res, err := store.Upsert(ctx, projectID, filename, docType, body, now)
 	if err != nil {
 		return UpsertResult{}, err
 	}
 	logger.Info().
 		Str("event", "document-ingest").
+		Str("project_id", projectID).
 		Str("filename", filename).
 		Str("type", docType).
 		Int("version", res.Document.Version).

@@ -24,15 +24,13 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	return s
 }
 
-type surrealQueryResult[T any] struct {
-	Status string `json:"status"`
-	Result T      `json:"result"`
-	Time   string `json:"time"`
-}
+// selectCols preserves the string form of id. SurrealDB otherwise returns
+// id as a RecordID object which JSON-unmarshals as empty into `ID string`.
+const selectCols = "meta::id(id) AS id, project_id, filename, type, body, body_hash, status, version, created_at, updated_at"
 
-func (s *SurrealStore) Upsert(ctx context.Context, filename, docType string, body []byte, now time.Time) (UpsertResult, error) {
+func (s *SurrealStore) Upsert(ctx context.Context, projectID, filename, docType string, body []byte, now time.Time) (UpsertResult, error) {
 	hash := HashBody(body)
-	existing, err := s.GetByFilename(ctx, filename)
+	existing, err := s.GetByFilename(ctx, projectID, filename)
 	if err == nil {
 		if existing.BodyHash == hash {
 			return UpsertResult{Document: existing}, nil
@@ -50,6 +48,7 @@ func (s *SurrealStore) Upsert(ctx context.Context, filename, docType string, bod
 	}
 	doc := Document{
 		ID:        NewID(),
+		ProjectID: projectID,
 		Filename:  filename,
 		Type:      docType,
 		Body:      string(body),
@@ -77,9 +76,9 @@ func (s *SurrealStore) write(ctx context.Context, doc Document) error {
 	return nil
 }
 
-func (s *SurrealStore) GetByFilename(ctx context.Context, filename string) (Document, error) {
-	sql := "SELECT * FROM documents WHERE filename = $filename AND status = 'active' LIMIT 1"
-	vars := map[string]any{"filename": filename}
+func (s *SurrealStore) GetByFilename(ctx context.Context, projectID, filename string) (Document, error) {
+	sql := fmt.Sprintf("SELECT %s FROM documents WHERE project_id = $project AND filename = $filename AND status = 'active' LIMIT 1", selectCols)
+	vars := map[string]any{"project": projectID, "filename": filename}
 	results, err := surrealdb.Query[[]Document](ctx, s.db, sql, vars)
 	if err != nil {
 		return Document{}, fmt.Errorf("document: select by filename: %w", err)
@@ -90,12 +89,13 @@ func (s *SurrealStore) GetByFilename(ctx context.Context, filename string) (Docu
 	return (*results)[0].Result[0], nil
 }
 
-func (s *SurrealStore) Count(ctx context.Context) (int, error) {
-	sql := "SELECT count() AS n FROM documents WHERE status = 'active' GROUP ALL"
+func (s *SurrealStore) Count(ctx context.Context, projectID string) (int, error) {
+	sql := "SELECT count() AS n FROM documents WHERE project_id = $project AND status = 'active' GROUP ALL"
 	type row struct {
 		N int `json:"n"`
 	}
-	results, err := surrealdb.Query[[]row](ctx, s.db, sql, nil)
+	vars := map[string]any{"project": projectID}
+	results, err := surrealdb.Query[[]row](ctx, s.db, sql, vars)
 	if err != nil {
 		return 0, fmt.Errorf("document: count: %w", err)
 	}
@@ -104,3 +104,23 @@ func (s *SurrealStore) Count(ctx context.Context) (int, error) {
 	}
 	return (*results)[0].Result[0].N, nil
 }
+
+// BackfillProjectID stamps rows that lack a project_id with defaultID. This
+// is a one-pass idempotent migration for documents seeded before the
+// project primitive existed. Second boot is a no-op because the WHERE
+// clause filters out already-stamped rows.
+func (s *SurrealStore) BackfillProjectID(ctx context.Context, defaultID string) (int, error) {
+	sql := "UPDATE documents SET project_id = $project WHERE project_id IS NONE OR project_id = '' RETURN AFTER"
+	vars := map[string]any{"project": defaultID}
+	results, err := surrealdb.Query[[]Document](ctx, s.db, sql, vars)
+	if err != nil {
+		return 0, fmt.Errorf("document: backfill project_id: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return 0, nil
+	}
+	return len((*results)[0].Result), nil
+}
+
+// Compile-time assertion.
+var _ Store = (*SurrealStore)(nil)

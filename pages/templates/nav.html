@@ -1,6 +1,11 @@
 {{define "nav.html"}}
 <header class="portal-nav">
-  <div class="nav-brand">satellites</div>
+  <div class="nav-brand"><a href="/">satellites</a></div>
+  {{if .User.Email}}
+  <nav class="nav-links">
+    <a href="/projects">projects</a>
+  </nav>
+  {{end}}
   <div class="nav-spacer"></div>
   <span class="version-chip" title="commit {{.Commit}}">v{{.Version}} · {{.Commit}}</span>
   {{if .User.Email}}

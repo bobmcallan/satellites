@@ -13,10 +13,12 @@ import (
 )
 
 // Document is the single schema, type-discriminated shape shared by every
-// type of authored content in satellites-v4. Workspace + project fields are
-// reserved for a later epic.
+// type of authored content in satellites-v4. Every row scopes to exactly
+// one project via ProjectID — see principle pr_7ade92ae. Workspace scoping
+// is reserved for a later epic.
 type Document struct {
 	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
 	Filename  string    `json:"filename"`
 	Type      string    `json:"type"`
 	Body      string    `json:"body"`

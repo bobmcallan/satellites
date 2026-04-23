@@ -23,23 +23,28 @@ type UpsertResult struct {
 
 // Store is the persistence surface for documents. SurrealStore is the
 // production implementation; MemoryStore is the in-process test double.
+//
+// All read/write operations are scoped by projectID — a document belongs to
+// exactly one project per principle pr_7ade92ae.
 type Store interface {
-	// Upsert inserts or updates a document keyed by filename. If the body
-	// hash matches the existing row, no write happens and Changed=false.
-	Upsert(ctx context.Context, filename, docType string, body []byte, now time.Time) (UpsertResult, error)
+	// Upsert inserts or updates a document keyed by (projectID, filename).
+	// If the body hash matches the existing row, no write happens and
+	// Changed=false.
+	Upsert(ctx context.Context, projectID, filename, docType string, body []byte, now time.Time) (UpsertResult, error)
 
-	// GetByFilename returns the active document with the given filename.
-	GetByFilename(ctx context.Context, filename string) (Document, error)
+	// GetByFilename returns the active document with the given filename
+	// inside projectID.
+	GetByFilename(ctx context.Context, projectID, filename string) (Document, error)
 
-	// Count returns the number of active documents. Boot seeding uses this
-	// to skip work on a pre-populated DB.
-	Count(ctx context.Context) (int, error)
+	// Count returns the number of active documents in projectID. Boot
+	// seeding uses this to skip work on a pre-populated project.
+	Count(ctx context.Context, projectID string) (int, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
 type MemoryStore struct {
 	mu   sync.Mutex
-	rows map[string]Document // key = filename
+	rows map[string]Document // key = projectID|filename
 }
 
 // NewMemoryStore returns an empty MemoryStore.
@@ -47,12 +52,17 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{rows: make(map[string]Document)}
 }
 
+func memKey(projectID, filename string) string {
+	return projectID + "|" + filename
+}
+
 // Upsert implements Store for MemoryStore.
-func (m *MemoryStore) Upsert(ctx context.Context, filename, docType string, body []byte, now time.Time) (UpsertResult, error) {
+func (m *MemoryStore) Upsert(ctx context.Context, projectID, filename, docType string, body []byte, now time.Time) (UpsertResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hash := HashBody(body)
-	if existing, ok := m.rows[filename]; ok {
+	k := memKey(projectID, filename)
+	if existing, ok := m.rows[k]; ok {
 		if existing.BodyHash == hash {
 			return UpsertResult{Document: existing}, nil
 		}
@@ -61,11 +71,12 @@ func (m *MemoryStore) Upsert(ctx context.Context, filename, docType string, body
 		existing.Version++
 		existing.UpdatedAt = now
 		existing.Type = docType
-		m.rows[filename] = existing
+		m.rows[k] = existing
 		return UpsertResult{Document: existing, Changed: true}, nil
 	}
 	doc := Document{
-		ID:        "doc_" + uuid.NewString()[:8],
+		ID:        NewID(),
+		ProjectID: projectID,
 		Filename:  filename,
 		Type:      docType,
 		Body:      string(body),
@@ -75,15 +86,15 @@ func (m *MemoryStore) Upsert(ctx context.Context, filename, docType string, body
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	m.rows[filename] = doc
+	m.rows[k] = doc
 	return UpsertResult{Document: doc, Changed: true, Created: true}, nil
 }
 
 // GetByFilename implements Store for MemoryStore.
-func (m *MemoryStore) GetByFilename(ctx context.Context, filename string) (Document, error) {
+func (m *MemoryStore) GetByFilename(ctx context.Context, projectID, filename string) (Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	doc, ok := m.rows[filename]
+	doc, ok := m.rows[memKey(projectID, filename)]
 	if !ok {
 		return Document{}, ErrNotFound
 	}
@@ -91,10 +102,16 @@ func (m *MemoryStore) GetByFilename(ctx context.Context, filename string) (Docum
 }
 
 // Count implements Store for MemoryStore.
-func (m *MemoryStore) Count(ctx context.Context) (int, error) {
+func (m *MemoryStore) Count(ctx context.Context, projectID string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.rows), nil
+	n := 0
+	for _, d := range m.rows {
+		if d.ProjectID == projectID {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // NewID returns a fresh document id in the canonical `doc_<8hex>` form.

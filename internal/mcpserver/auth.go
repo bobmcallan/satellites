@@ -15,9 +15,12 @@ type ctxKey int
 const userKey ctxKey = iota
 
 // CallerIdentity is what handlers read from ctx: the resolved user's email
-// (for sessions) or a synthetic api-key id.
+// (for sessions) or a synthetic api-key id. UserID is the stable opaque
+// identifier used by project/document ownership — sess.UserID for session
+// callers, the literal "apikey" for API-key callers.
 type CallerIdentity struct {
 	Email  string
+	UserID string
 	Source string // "session" | "apikey"
 }
 
@@ -54,6 +57,7 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 				if _, ok := keyset[token]; ok {
 					ctx := context.WithValue(r.Context(), userKey, CallerIdentity{
 						Email:  "apikey",
+						UserID: "apikey",
 						Source: "apikey",
 					})
 					next.ServeHTTP(w, r.WithContext(ctx))
@@ -68,6 +72,7 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 					if err == nil {
 						ctx := context.WithValue(r.Context(), userKey, CallerIdentity{
 							Email:  user.Email,
+							UserID: user.ID,
 							Source: "session",
 						})
 						next.ServeHTTP(w, r.WithContext(ctx))
