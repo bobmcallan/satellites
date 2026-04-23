@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/surrealdb/surrealdb.go"
 )
@@ -71,10 +72,28 @@ func ParseDSN(dsn string) (Config, error) {
 // Connect opens a SurrealDB connection, signs in, and selects ns/db. The
 // returned *surrealdb.DB is safe for concurrent use (the driver owns
 // multiplexing).
+//
+// Retries the initial dial up to 30 times with a 1 s backoff — tolerates the
+// common docker-compose race where the satellites container starts before
+// surrealdb's websocket is listening.
 func Connect(ctx context.Context, cfg Config) (*surrealdb.DB, error) {
-	db, err := surrealdb.FromEndpointURLString(ctx, cfg.DSN)
-	if err != nil {
-		return nil, fmt.Errorf("db: connect: %w", err)
+	var (
+		db      *surrealdb.DB
+		lastErr error
+	)
+	for attempt := 1; attempt <= 30; attempt++ {
+		db, lastErr = surrealdb.FromEndpointURLString(ctx, cfg.DSN)
+		if lastErr == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("db: connect (ctx cancelled after %d attempts): %w", attempt, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("db: connect (30 attempts): %w", lastErr)
 	}
 	if _, err := db.SignIn(ctx, &surrealdb.Auth{Username: cfg.Username, Password: cfg.Password}); err != nil {
 		return nil, fmt.Errorf("db: signin: %w", err)
