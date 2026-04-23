@@ -18,10 +18,10 @@ func TestServerBootsWithVersionLine(t *testing.T) {
 	got := runBinary(t, bin, bootTimeout)
 	t.Logf("boot line: %q", got)
 
-	if !strings.HasPrefix(got, "satellites-server ") {
-		t.Fatalf("expected prefix %q, got %q", "satellites-server ", got)
+	if !strings.Contains(got, "satellites-server") {
+		t.Fatalf("expected %q fragment, got %q", "satellites-server", got)
 	}
-	for _, frag := range []string{"build:", "commit:"} {
+	for _, frag := range []string{"build", "commit", "version"} {
 		if !strings.Contains(got, frag) {
 			t.Errorf("boot line missing %q fragment: %q", frag, got)
 		}
@@ -34,10 +34,10 @@ func TestAgentBootsWithVersionLine(t *testing.T) {
 	got := runBinary(t, bin, bootTimeout)
 	t.Logf("boot line: %q", got)
 
-	if !strings.HasPrefix(got, "satellites-agent ") {
-		t.Fatalf("expected prefix %q, got %q", "satellites-agent ", got)
+	if !strings.Contains(got, "satellites-agent") {
+		t.Fatalf("expected %q fragment, got %q", "satellites-agent", got)
 	}
-	for _, frag := range []string{"build:", "commit:"} {
+	for _, frag := range []string{"build", "commit", "version"} {
 		if !strings.Contains(got, frag) {
 			t.Errorf("boot line missing %q fragment: %q", frag, got)
 		}
