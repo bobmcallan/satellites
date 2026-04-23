@@ -6,21 +6,35 @@ Module path: `github.com/bobmcallan/satellites`.
 
 ## Build
 
-Use `script/build.sh` for everyday build, lint, and maintenance tasks. It's a plain bash dispatcher — `script/build.sh <command>`, with `build` as the default.
+Use `scripts/build.sh` for everyday build, lint, and maintenance tasks. It's a plain bash dispatcher — `scripts/build.sh <command>`, with `build` as the default.
 
 ```
-./script/build.sh build     # stamps each binary from its own .version section (default)
-./script/build.sh server    # builds satellites only  (reads [satellites])
-./script/build.sh agent     # builds satellites-agent only  (reads [satellites-agent])
-./script/build.sh fmt       # gofmt -s -w .
-./script/build.sh vet       # go vet ./...
-./script/build.sh lint      # golangci-lint run (skipped if not installed)
-./script/build.sh test      # go test ./...
-./script/build.sh clean     # remove built binaries
-./script/build.sh help      # show usage
+./scripts/build.sh build     # stamps each binary from its own .version section (default)
+./scripts/build.sh server    # builds satellites only  (reads [satellites])
+./scripts/build.sh agent     # builds satellites-agent only  (reads [satellites-agent])
+./scripts/build.sh fmt       # gofmt -s -w .
+./scripts/build.sh vet       # go vet ./...
+./scripts/build.sh lint      # golangci-lint run (skipped if not installed)
+./scripts/build.sh test      # go test ./...
+./scripts/build.sh clean     # remove built binaries
+./scripts/build.sh help      # show usage
 ```
 
 Plain `go build ./...` also works and produces `dev`-stamped binaries with build/commit defaults of `unknown` — suitable for quick iteration without ldflags.
+
+## Deploy locally
+
+The local docker stack (satellites + SurrealDB) is driven by `docker/docker-compose.yml`. Use `scripts/deploy.sh` as the single operator entry point — it wraps `docker compose` with the compose file + a mandatory `.env`.
+
+```
+cp .env.example .env       # copy template and edit DEV_USERNAME / DEV_PASSWORD / OAuth creds
+./scripts/deploy.sh up     # build + start the stack (default subcommand)
+./scripts/deploy.sh logs   # tail combined logs
+./scripts/deploy.sh restart
+./scripts/deploy.sh down
+```
+
+`.env.example` enumerates every env var the server reads (server, auth, OAuth, MCP, documents). `.env` is gitignored — treat it as machine-local.
 
 ## Run
 
@@ -43,7 +57,7 @@ version = 0.0.1
 version = 0.0.1
 ```
 
-`script/build.sh`:
+`scripts/build.sh`:
 - parses the appropriate section for `version` (section-scoped — never reads across sections),
 - generates `build` via `date -u +"%Y-%m-%d-%H-%M-%S"` at build time,
 - generates `commit` via `git rev-parse --short HEAD` at build time,

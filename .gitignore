@@ -1,6 +1,9 @@
 # Claude Code per-machine settings (contains satellites hook token)
 .claude/settings.local.json
 
+# Local .env (use .env.example as the committed template)
+.env
+
 # Go build output
 /satellites
 /satellites-agent
