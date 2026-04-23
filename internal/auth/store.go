@@ -28,6 +28,12 @@ type SessionStore interface {
 	Create(userID string, ttl time.Duration) (Session, error)
 	Get(id string) (Session, error)
 	Delete(id string) error
+
+	// SetActiveWorkspace mutates the session's ActiveWorkspaceID. Used by
+	// the portal switcher (feature-order:5) so the caller's preferred
+	// workspace persists across requests. Caller is responsible for
+	// validating that the user is a member of workspaceID before calling.
+	SetActiveWorkspace(id, workspaceID string) error
 }
 
 // Session is the server-side session record. ActiveWorkspaceID is the
@@ -142,6 +148,24 @@ func (s *MemorySessionStore) Delete(id string) error {
 	s.mu.Lock()
 	delete(s.byID, id)
 	s.mu.Unlock()
+	return nil
+}
+
+// SetActiveWorkspace implements SessionStore for MemorySessionStore. Returns
+// ErrSessionNotFound when id is unknown or expired (consistent with Get).
+func (s *MemorySessionStore) SetActiveWorkspace(id, workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.byID[id]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.clock().After(sess.ExpiresAt) {
+		delete(s.byID, id)
+		return ErrSessionNotFound
+	}
+	sess.ActiveWorkspaceID = workspaceID
+	s.byID[id] = sess
 	return nil
 }
 

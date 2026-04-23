@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 func newTestPortal(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *project.MemoryStore, *ledger.MemoryStore, *story.MemoryStore) {
@@ -697,3 +699,123 @@ func TestHead_HasBlockingThemeScript(t *testing.T) {
 		t.Errorf("theme script must NOT be defer/async (causes flash)")
 	}
 }
+
+// newPortalWithWorkspace boots a Portal wired to workspace.NewMemoryStore so
+// the switcher tests can exercise the full chrome.
+func newPortalWithWorkspace(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *workspace.MemoryStore) {
+	t.Helper()
+	users := auth.NewMemoryUserStore()
+	sessions := auth.NewMemorySessionStore()
+	projects := project.NewMemoryStore()
+	ledgerStore := ledger.NewMemoryStore()
+	stories := story.NewMemoryStore(ledgerStore)
+	ws := workspace.NewMemoryStore()
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, ws, time.Now())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p, users, sessions, ws
+}
+
+func TestWorkspaceSwitcher_RendersChips(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, ws := newPortalWithWorkspace(t, &config.Config{Env: "dev"})
+
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	_, _ = ws.Create(testCtx(), user.ID, "alpha-ws", time.Now().UTC())
+	_, _ = ws.Create(testCtx(), user.ID, "beta-ws", time.Now().UTC().Add(time.Hour))
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "alpha-ws") || !strings.Contains(body, "beta-ws") {
+		t.Errorf("nav must render both workspace chips; body=%q", body)
+	}
+	if !strings.Contains(body, "WORKSPACE / ") {
+		t.Errorf("nav must render the breadcrumb prefix")
+	}
+}
+
+func TestWorkspaceSelect_PersistsAndRedirects(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, ws := newPortalWithWorkspace(t, &config.Config{Env: "dev"})
+
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	wsA, _ := ws.Create(testCtx(), user.ID, "alpha", time.Now().UTC())
+	_, _ = ws.Create(testCtx(), user.ID, "beta", time.Now().UTC().Add(time.Hour))
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/select?id="+wsA.ID+"&next=/projects", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/projects" {
+		t.Errorf("redirect = %q, want /projects", loc)
+	}
+	stored, err := sessions.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("session get: %v", err)
+	}
+	if stored.ActiveWorkspaceID != wsA.ID {
+		t.Errorf("ActiveWorkspaceID = %q, want %q", stored.ActiveWorkspaceID, wsA.ID)
+	}
+
+	// Subsequent landing render reflects the chosen workspace.
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if !strings.Contains(rec2.Body.String(), "WORKSPACE / alpha") {
+		t.Errorf("breadcrumb did not switch to alpha; got %q", rec2.Body.String())
+	}
+}
+
+func TestWorkspaceSelect_CrossWorkspaceIgnored(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, ws := newPortalWithWorkspace(t, &config.Config{Env: "dev"})
+
+	alice := auth.User{ID: "u_alice", Email: "alice@local"}
+	bob := auth.User{ID: "u_bob", Email: "bob@local"}
+	users.Add(alice)
+	users.Add(bob)
+	wsBob, _ := ws.Create(testCtx(), bob.ID, "bob-ws", time.Now().UTC())
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	sess, _ := sessions.Create(alice.ID, auth.DefaultSessionTTL)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/select?id="+wsBob.ID+"&next=/projects", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", rec.Code)
+	}
+	stored, _ := sessions.Get(sess.ID)
+	if stored.ActiveWorkspaceID == wsBob.ID {
+		t.Errorf("alice should not have been able to switch into bob's workspace")
+	}
+}
+
+func testCtx() context.Context { return context.Background() }
+

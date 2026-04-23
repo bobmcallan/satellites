@@ -62,22 +62,78 @@ func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, u
 	}, nil
 }
 
-// resolveMemberships mirrors the MCP handler helper: nil when the workspace
-// store is absent (pre-tenant tests), empty slice when the user has no
-// memberships (deny-all), non-empty slice of workspace ids otherwise.
-func (p *Portal) resolveMemberships(r *http.Request, user auth.User) []string {
+// wsChip is the view-model for a workspace shown in the switcher and
+// breadcrumb. Kept terse so the same shape works for the dropdown items
+// and the header label.
+type wsChip struct {
+	ID   string
+	Name string
+}
+
+// memberWorkspaces returns the caller's full workspace membership set as
+// view-model chips, plus the canonical id slice the store reads expect.
+func (p *Portal) memberWorkspaces(r *http.Request, user auth.User) ([]wsChip, []string) {
 	if p.workspaces == nil {
-		return nil
+		return nil, nil
 	}
 	list, err := p.workspaces.ListByMember(r.Context(), user.ID)
 	if err != nil || len(list) == 0 {
-		return []string{}
+		return []wsChip{}, []string{}
 	}
-	out := make([]string, 0, len(list))
+	chips := make([]wsChip, 0, len(list))
+	ids := make([]string, 0, len(list))
 	for _, w := range list {
-		out = append(out, w.ID)
+		chips = append(chips, wsChip{ID: w.ID, Name: w.Name})
+		ids = append(ids, w.ID)
 	}
-	return out
+	return chips, ids
+}
+
+// currentSession reads the session cookie. Returns (Session{}, false) when
+// no valid session is present.
+func (p *Portal) currentSession(r *http.Request) (auth.Session, bool) {
+	id := auth.ReadCookie(r)
+	if id == "" {
+		return auth.Session{}, false
+	}
+	sess, err := p.sessions.Get(id)
+	if err != nil {
+		return auth.Session{}, false
+	}
+	return sess, true
+}
+
+// activeWorkspace returns the user's current scope chip + the id slice
+// the store reads expect. When the session has an ActiveWorkspaceID and
+// the user is still a member of it, scope narrows to that single workspace.
+// Otherwise scope spans every workspace the user belongs to.
+func (p *Portal) activeWorkspace(r *http.Request, user auth.User) (wsChip, []wsChip, []string) {
+	chips, ids := p.memberWorkspaces(r, user)
+	if chips == nil {
+		return wsChip{}, nil, nil
+	}
+	if len(chips) == 0 {
+		return wsChip{}, chips, []string{}
+	}
+	sess, ok := p.currentSession(r)
+	if ok && sess.ActiveWorkspaceID != "" {
+		for _, c := range chips {
+			if c.ID == sess.ActiveWorkspaceID {
+				return c, chips, []string{c.ID}
+			}
+		}
+	}
+	return chips[0], chips, ids
+}
+
+// resolveMemberships mirrors the MCP handler helper: nil when the workspace
+// store is absent (pre-tenant tests), empty slice when the user has no
+// memberships (deny-all), non-empty slice of workspace ids otherwise.
+// When the session has a valid ActiveWorkspaceID the slice narrows to that
+// workspace (sticky session scope); otherwise it spans every membership.
+func (p *Portal) resolveMemberships(r *http.Request, user auth.User) []string {
+	_, _, ids := p.activeWorkspace(r, user)
+	return ids
 }
 
 // Register attaches the portal's routes to mux. Uses `{$}` for the exact-
@@ -91,6 +147,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects/{id}/ledger", p.handleProjectLedger)
 	mux.HandleFunc("GET /projects/{id}/stories", p.handleStoriesList)
 	mux.HandleFunc("GET /projects/{id}/stories/{story_id}", p.handleStoryDetail)
+	mux.HandleFunc("GET /workspaces/select", p.handleWorkspaceSelect)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -98,12 +155,14 @@ func (p *Portal) Register(mux *http.ServeMux) {
 }
 
 type landingData struct {
-	Title     string
-	Version   string
-	Build     string
-	Commit    string
-	StartedAt string
-	User      auth.User
+	Title           string
+	Version         string
+	Build           string
+	Commit          string
+	StartedAt       string
+	User            auth.User
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 type loginData struct {
@@ -117,21 +176,25 @@ type loginData struct {
 }
 
 type projectsListData struct {
-	Title    string
-	Version  string
-	Commit   string
-	User     auth.User
-	Projects []projectRow
-	Disabled bool
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Projects        []projectRow
+	Disabled        bool
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 type projectDetailData struct {
-	Title    string
-	Version  string
-	Commit   string
-	User     auth.User
-	Project  projectRow
-	OwnerYou bool
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Project         projectRow
+	OwnerYou        bool
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 // projectRow is the view-model for a project — formats the timestamps to
@@ -154,13 +217,16 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 		p.redirectToLogin(w, r)
 		return
 	}
+	active, chips, _ := p.activeWorkspace(r, user)
 	data := landingData{
-		Title:     "home",
-		Version:   config.Version,
-		Build:     config.Build,
-		Commit:    config.GitCommit,
-		StartedAt: p.startedAt.UTC().Format(time.RFC3339),
-		User:      user,
+		Title:           "home",
+		Version:         config.Version,
+		Build:           config.Build,
+		Commit:          config.GitCommit,
+		StartedAt:       p.startedAt.UTC().Format(time.RFC3339),
+		User:            user,
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		p.logger.Error().Str("template", "index.html").Str("error", err.Error()).Msg("template render failed")
@@ -193,16 +259,19 @@ func (p *Portal) handleProjectsList(w http.ResponseWriter, r *http.Request) {
 		p.redirectToLogin(w, r)
 		return
 	}
+	active, chips, memberships := p.activeWorkspace(r, user)
 	data := projectsListData{
-		Title:   "projects",
-		Version: config.Version,
-		Commit:  config.GitCommit,
-		User:    user,
+		Title:           "projects",
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if p.projects == nil {
 		data.Disabled = true
 	} else {
-		list, err := p.projects.ListByOwner(r.Context(), user.ID, p.resolveMemberships(r, user))
+		list, err := p.projects.ListByOwner(r.Context(), user.ID, memberships)
 		if err != nil {
 			p.logger.Error().Str("error", err.Error()).Msg("projects list failed")
 			http.Error(w, "list failed", http.StatusInternalServerError)
@@ -233,18 +302,21 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	pr, err := p.projects.GetByID(r.Context(), id, p.resolveMemberships(r, user))
+	active, chips, memberships := p.activeWorkspace(r, user)
+	pr, err := p.projects.GetByID(r.Context(), id, memberships)
 	if err != nil || pr.OwnerUserID != user.ID {
 		http.NotFound(w, r)
 		return
 	}
 	data := projectDetailData{
-		Title:    pr.Name,
-		Version:  config.Version,
-		Commit:   config.GitCommit,
-		User:     user,
-		Project:  viewRow(pr),
-		OwnerYou: true,
+		Title:           pr.Name,
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Project:         viewRow(pr),
+		OwnerYou:        true,
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "project_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "project_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -253,14 +325,16 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 type projectLedgerData struct {
-	Title    string
-	Version  string
-	Commit   string
-	User     auth.User
-	Project  projectRow
-	Entries  []ledgerRow
-	Limit    int
-	Disabled bool
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Project         projectRow
+	Entries         []ledgerRow
+	Limit           int
+	Disabled        bool
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 // ledgerRow pre-formats ledger fields for the template.
@@ -286,18 +360,20 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	memberships := p.resolveMemberships(r, user)
+	active, chips, memberships := p.activeWorkspace(r, user)
 	proj, err := p.projects.GetByID(r.Context(), id, memberships)
 	if err != nil || proj.OwnerUserID != user.ID {
 		http.NotFound(w, r)
 		return
 	}
 	data := projectLedgerData{
-		Title:   proj.Name + " · ledger",
-		Version: config.Version,
-		Commit:  config.GitCommit,
-		User:    user,
-		Project: viewRow(proj),
+		Title:           proj.Name + " · ledger",
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Project:         viewRow(proj),
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if p.ledger == nil {
 		data.Disabled = true
@@ -334,25 +410,29 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 }
 
 type storiesListData struct {
-	Title      string
-	Version    string
-	Commit     string
-	User       auth.User
-	Project    projectRow
-	Stories    []storyRow
-	StatusAll  bool
-	Disabled   bool
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Project         projectRow
+	Stories         []storyRow
+	StatusAll       bool
+	Disabled        bool
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 type storyDetailData struct {
-	Title     string
-	Version   string
-	Commit    string
-	User      auth.User
-	Project   projectRow
-	Story     storyRow
-	History   []historyRow
-	Disabled  bool
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Project         projectRow
+	Story           storyRow
+	History         []historyRow
+	Disabled        bool
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
 }
 
 type storyRow struct {
@@ -404,18 +484,20 @@ func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	memberships := p.resolveMemberships(r, user)
+	active, chips, memberships := p.activeWorkspace(r, user)
 	proj, err := p.projects.GetByID(r.Context(), id, memberships)
 	if err != nil || proj.OwnerUserID != user.ID {
 		http.NotFound(w, r)
 		return
 	}
 	data := storiesListData{
-		Title:   proj.Name + " · stories",
-		Version: config.Version,
-		Commit:  config.GitCommit,
-		User:    user,
-		Project: viewRow(proj),
+		Title:           proj.Name + " · stories",
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Project:         viewRow(proj),
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if p.stories == nil {
 		data.Disabled = true
@@ -461,7 +543,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	projID := r.PathValue("id")
 	storyID := r.PathValue("story_id")
-	memberships := p.resolveMemberships(r, user)
+	active, chips, memberships := p.activeWorkspace(r, user)
 	proj, err := p.projects.GetByID(r.Context(), projID, memberships)
 	if err != nil || proj.OwnerUserID != user.ID {
 		http.NotFound(w, r)
@@ -473,12 +555,14 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := storyDetailData{
-		Title:   s.Title,
-		Version: config.Version,
-		Commit:  config.GitCommit,
-		User:    user,
-		Project: viewRow(proj),
-		Story:   viewStoryRow(s),
+		Title:           s.Title,
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Project:         viewRow(proj),
+		Story:           viewStoryRow(s),
+		Workspaces:      chips,
+		ActiveWorkspace: active,
 	}
 	if p.ledger != nil {
 		entries, err := p.ledger.List(r.Context(), proj.ID, ledger.ListOptions{Type: story.LedgerEntryType, Limit: 50}, memberships)
@@ -514,6 +598,46 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error().Str("template", "story_detail.html").Str("error", err.Error()).Msg("template render failed")
 		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
+}
+
+// handleWorkspaceSelect persists the chosen workspace on the session and
+// redirects back to ?next= (default /). Rejects unauthenticated callers
+// (redirect to login) and rejects switching to a workspace the user is
+// not a member of (302 back to ?next= without changing session — the
+// caller's view stays scoped to whatever they had before).
+func (p *Portal) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
+	user, ok := p.resolveUser(r)
+	if !ok {
+		p.redirectToLogin(w, r)
+		return
+	}
+	target := r.URL.Query().Get("id")
+	next := r.URL.Query().Get("next")
+	if next == "" {
+		next = "/"
+	}
+	if p.workspaces == nil || target == "" {
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
+	is, err := p.workspaces.IsMember(r.Context(), target, user.ID)
+	if err != nil || !is {
+		// Cross-workspace switch attempt — silently ignore. The next
+		// request still resolves the prior active workspace.
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
+	sess, ok := p.currentSession(r)
+	if !ok {
+		p.redirectToLogin(w, r)
+		return
+	}
+	if err := p.sessions.SetActiveWorkspace(sess.ID, target); err != nil {
+		p.logger.Warn().Str("error", err.Error()).Msg("set active workspace failed")
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func viewRow(p project.Project) projectRow {

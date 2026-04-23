@@ -5,6 +5,23 @@
   <nav class="nav-links">
     <a href="/projects">projects</a>
   </nav>
+  {{if .Workspaces}}
+  <div class="nav-workspace" x-data="{open: false}">
+    <button type="button" class="btn-link" @click="open = !open" @keydown.escape.window="open = false">
+      WORKSPACE / {{if .ActiveWorkspace.ID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
+      <span aria-hidden="true">▾</span>
+    </button>
+    <ul class="nav-workspace-menu" x-show="open" x-cloak @click.outside="open = false">
+      {{range .Workspaces}}
+      <li>
+        <a href="/workspaces/select?id={{.ID}}&amp;next=/projects" {{if eq .ID $.ActiveWorkspace.ID}}aria-current="true"{{end}}>
+          {{.Name}}
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
   {{end}}
   <div class="nav-spacer"></div>
   <span class="version-chip" title="commit {{.Commit}}">v{{.Version}} · {{.Commit}}</span>
