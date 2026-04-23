@@ -91,6 +91,22 @@ cmd_clean() {
   rm -f satellites satellites-agent
 }
 
+cmd_docker() {
+  local version build commit
+  version="$(read_kv satellites version)"
+  [ -z "$version" ] && version="dev"
+  build="$(build_timestamp)"
+  commit="$(git_commit)"
+  docker build \
+    -f docker/Dockerfile \
+    -t "satellites:${version}" \
+    -t "satellites:local" \
+    --build-arg "VERSION=${version}" \
+    --build-arg "BUILD=${build}" \
+    --build-arg "GIT_COMMIT=${commit}" \
+    .
+}
+
 usage() {
   cat >&2 <<'EOF'
 usage: script/build.sh <command>
@@ -105,6 +121,8 @@ Commands:
   lint     Run golangci-lint run (skipped if not installed)
   test     Run go test ./...
   clean    Remove built binaries from repo root
+  docker   Build a local docker image tagged satellites:<version> + satellites:local
+           (stamps VERSION/BUILD/GIT_COMMIT as build args)
 EOF
 }
 
@@ -119,6 +137,7 @@ main() {
     lint)   cmd_lint ;;
     test)   cmd_test ;;
     clean)  cmd_clean ;;
+    docker) cmd_docker ;;
     -h|--help|help) usage; exit 0 ;;
     *)      echo "unknown subcommand: $sub" >&2; usage; exit 2 ;;
   esac

@@ -1,0 +1,14 @@
+.git
+.github
+.gitignore
+.dockerignore
+*.md
+docs/
+tests/integration/
+satellites
+satellites-agent
+bin/
+coverage.out
+*.log
+.claude/
+.mcp.json
