@@ -153,6 +153,19 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("mode", mcpgo.Description("archive (default) | hard")),
 		)
 		s.mcp.AddTool(deleteTool, s.handleDocumentDelete)
+
+		searchTool := mcpgo.NewTool("document_search",
+			mcpgo.WithDescription("Search documents in the caller's workspaces. Combines structured filters (type/scope/tags/contract_binding/project_id) with a case-insensitive substring match on name + body when query is supplied. Empty query + at least one filter returns an updated_at DESC list. Workspace scoping is enforced at the handler."),
+			mcpgo.WithString("query", mcpgo.Description("Free-text query; case-insensitive substring on name + body.")),
+			mcpgo.WithString("type", mcpgo.Description("Filter by type.")),
+			mcpgo.WithString("scope", mcpgo.Description("Filter by scope.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Filter by project.")),
+			mcpgo.WithString("contract_binding", mcpgo.Description("Filter by contract_binding.")),
+			mcpgo.WithArray("tags", mcpgo.Description("Filter by tags (any-of)."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithNumber("top_k", mcpgo.Description("Max rows to return (default 20, capped at 100).")),
+		)
+		s.mcp.AddTool(searchTool, s.handleDocumentSearch)
 	}
 
 	if s.projects != nil {
@@ -690,6 +703,37 @@ func (s *Server) handleDocumentList(ctx context.Context, req mcpgo.CallToolReque
 		Str("tool", "document_list").
 		Str("type", opts.Type).
 		Str("scope", opts.Scope).
+		Int("count", len(rows)).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleDocumentSearch(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	opts := document.SearchOptions{
+		ListOptions: document.ListOptions{
+			Type:            req.GetString("type", ""),
+			Scope:           req.GetString("scope", ""),
+			ContractBinding: req.GetString("contract_binding", ""),
+			ProjectID:       req.GetString("project_id", ""),
+			Tags:            req.GetStringSlice("tags", nil),
+		},
+		Query: req.GetString("query", ""),
+		TopK:  int(req.GetFloat("top_k", 0)),
+	}
+	rows, err := s.docs.Search(ctx, opts, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(rows)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "document_search").
+		Str("query", opts.Query).
+		Str("type", opts.Type).
 		Int("count", len(rows)).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")

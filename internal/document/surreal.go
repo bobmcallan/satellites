@@ -237,6 +237,70 @@ func (s *SurrealStore) List(ctx context.Context, opts ListOptions, memberships [
 	return (*results)[0].Result, nil
 }
 
+// Search implements Store for SurrealStore.
+func (s *SurrealStore) Search(ctx context.Context, opts SearchOptions, memberships []string) ([]Document, error) {
+	if memberships != nil && len(memberships) == 0 {
+		return nil, nil
+	}
+	conds := []string{}
+	vars := map[string]any{}
+	if opts.Type != "" {
+		if _, ok := validTypes[opts.Type]; !ok {
+			return nil, fmt.Errorf("document: invalid type filter %q", opts.Type)
+		}
+		conds = append(conds, "type = $type")
+		vars["type"] = opts.Type
+	}
+	if opts.Scope != "" {
+		if _, ok := validScopes[opts.Scope]; !ok {
+			return nil, fmt.Errorf("document: invalid scope filter %q", opts.Scope)
+		}
+		conds = append(conds, "scope = $scope")
+		vars["scope"] = opts.Scope
+	}
+	if opts.ProjectID != "" {
+		conds = append(conds, "project_id = $project")
+		vars["project"] = opts.ProjectID
+	}
+	if opts.ContractBinding != "" {
+		conds = append(conds, "contract_binding = $binding")
+		vars["binding"] = opts.ContractBinding
+	}
+	if len(opts.Tags) > 0 {
+		conds = append(conds, "tags ANYINSIDE $tags")
+		vars["tags"] = opts.Tags
+	}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	q := strings.ToLower(strings.TrimSpace(opts.Query))
+	if q != "" {
+		conds = append(conds, "(string::lowercase(name) CONTAINS $q OR string::lowercase(body) CONTAINS $q)")
+		vars["q"] = q
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	sql := fmt.Sprintf("SELECT %s FROM documents%s ORDER BY updated_at DESC LIMIT %d", selectCols, where, topK)
+	results, err := surrealdb.Query[[]Document](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("document: search: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+	return (*results)[0].Result, nil
+}
+
 // validateBinding rejects a non-nil binding that does not resolve to an
 // active type=contract row. nil binding is a no-op.
 func (s *SurrealStore) validateBinding(ctx context.Context, binding *string) error {

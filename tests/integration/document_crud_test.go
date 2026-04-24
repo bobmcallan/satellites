@@ -224,6 +224,31 @@ func TestDocumentCRUDVerbs_RoundTrip(t *testing.T) {
 	if !isToolError(gone) {
 		t.Errorf("after hard delete document_get should isError; got %+v", gone)
 	}
+
+	// 11. document_search — query matches body of the contract row;
+	// type=contract narrows; empty-query+tag returns updated_at DESC
+	// list.
+	searchHits := callToolArray(t, ctx, mcpURL, "key_crud", "document_search", map[string]any{
+		"query": "contract body",
+	})
+	if len(searchHits) != 1 || searchHits[0].(map[string]any)["id"] != contractID {
+		t.Errorf("search(query=contract body) = %+v, want only the contract row", searchHits)
+	}
+
+	combined := callToolArray(t, ctx, mcpURL, "key_crud", "document_search", map[string]any{
+		"query": "contract body",
+		"type":  "principle",
+	})
+	if len(combined) != 0 {
+		t.Errorf("search(query=contract body, type=principle) = %d rows, want 0 (AND filter)", len(combined))
+	}
+
+	emptyQ := callToolArray(t, ctx, mcpURL, "key_crud", "document_search", map[string]any{
+		"type": "skill",
+	})
+	if len(emptyQ) != 1 {
+		t.Errorf("search(empty query, type=skill) = %d rows, want 1", len(emptyQ))
+	}
 }
 
 func rpcInit(t *testing.T, ctx context.Context, mcpURL, apiKey string) {

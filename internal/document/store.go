@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +80,16 @@ type ListOptions struct {
 	Limit           int
 }
 
+// SearchOptions extend ListOptions with a free-text Query and an upper
+// bound TopK on the rank. Query is matched against name + body using
+// case-insensitive substring; the semantic-ranking path lands when the
+// embeddings primitive ships.
+type SearchOptions struct {
+	ListOptions
+	Query string
+	TopK  int
+}
+
 // Store is the persistence surface for documents. SurrealStore is the
 // production implementation; MemoryStore is the in-process test double.
 //
@@ -108,6 +119,11 @@ type Store interface {
 
 	// List returns documents matching opts. Filters compose with AND.
 	List(ctx context.Context, opts ListOptions, memberships []string) ([]Document, error)
+
+	// Search returns documents matching the structured filters AND
+	// (when opts.Query is non-empty) a case-insensitive substring match
+	// on name + body. Rows ranked by updated_at DESC; capped at TopK.
+	Search(ctx context.Context, opts SearchOptions, memberships []string) ([]Document, error)
 
 	// GetByID returns the document with the given id, or ErrNotFound.
 	GetByID(ctx context.Context, id string, memberships []string) (Document, error)
@@ -352,6 +368,35 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 		out = out[:opts.Limit]
 	}
 	return out, nil
+}
+
+// Search implements Store for MemoryStore.
+func (m *MemoryStore) Search(ctx context.Context, opts SearchOptions, memberships []string) ([]Document, error) {
+	rows, err := m.List(ctx, opts.ListOptions, memberships)
+	if err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(strings.TrimSpace(opts.Query))
+	if q != "" {
+		filtered := rows[:0]
+		for _, d := range rows {
+			if strings.Contains(strings.ToLower(d.Name), q) || strings.Contains(strings.ToLower(d.Body), q) {
+				filtered = append(filtered, d)
+			}
+		}
+		rows = filtered
+	}
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	if len(rows) > topK {
+		rows = rows[:topK]
+	}
+	return rows, nil
 }
 
 func anyTagMatch(have, want []string) bool {
