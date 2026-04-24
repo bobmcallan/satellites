@@ -153,9 +153,10 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 
 	// For ready CIs (preplan re-entry closes pre-claim): transition
 	// ready→claimed before passing, because ValidTransition rejects
-	// ready→passed.
+	// ready→passed. grantID is empty here — the CI flips to passed
+	// immediately below so the binding is ephemeral.
 	if ci.Status == contract.StatusReady {
-		if _, err := s.contracts.Claim(ctx, ci.ID, caller.UserID, now, memberships); err != nil {
+		if _, err := s.contracts.Claim(ctx, ci.ID, "", now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 	}
@@ -330,6 +331,16 @@ func (s *Server) handleStoryContractResume(ctx context.Context, req mcpgo.CallTo
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
+	// Resolve the incoming session's orchestrator grant so Claim /
+	// RebindGrant / downstream-rollback writes all carry the grant
+	// binding (story_4608a82c). A gate error here is fatal — resume
+	// onto a session whose grant doesn't cover the CI's required_role
+	// is rejected the same way claim rejects it.
+	newGrantID, gateErr := s.resolveRequiredRoleGrant(ctx, ci, caller.UserID, sessionID)
+	if gateErr != nil {
+		return mcpgo.NewToolResultError(gateErr.Error()), nil
+	}
+
 	// Resume caps.
 	capCI := intEnv("SATELLITES_MAX_RESUMES_PER_CI", resumeCapCI)
 	capStory := intEnv("SATELLITES_MAX_RESUMES_PER_STORY", resumeCapStory)
@@ -356,11 +367,12 @@ func (s *Server) handleStoryContractResume(ctx context.Context, req mcpgo.CallTo
 		if priorAC := s.findLatestActionClaim(ctx, ci, memberships); priorAC != "" {
 			_, _ = s.ledger.Dereference(ctx, priorAC, "resume: reopen", caller.UserID, now, memberships)
 		}
-		// Flip CI back to ready + clear claim fields, then claim anew.
+		// Flip CI back to ready + clear claim fields, then claim anew
+		// under the new session's grant.
 		if _, err := s.contracts.ClearClaim(ctx, ci.ID, now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
-		if _, err := s.contracts.Claim(ctx, ci.ID, sessionID, now, memberships); err != nil {
+		if _, err := s.contracts.Claim(ctx, ci.ID, newGrantID, now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 		// Downstream rollback: every required CI with Sequence >
@@ -383,7 +395,7 @@ func (s *Server) handleStoryContractResume(ctx context.Context, req mcpgo.CallTo
 			rolledBack = append(rolledBack, p.ID)
 		}
 	} else if ci.Status == contract.StatusClaimed {
-		if _, err := s.contracts.RebindSession(ctx, ci.ID, sessionID, now, memberships); err != nil {
+		if _, err := s.contracts.RebindGrant(ctx, ci.ID, newGrantID, now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 	} else {

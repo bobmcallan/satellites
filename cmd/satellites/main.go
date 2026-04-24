@@ -170,6 +170,28 @@ func main() {
 			logger.Info().Int("rows", n).Msg("contract required_role backfill stamped")
 		}
 
+		// Migrate pre-6.5 contract_instance rows off the legacy
+		// claimed_by_session_id column (story_4608a82c): first stamp
+		// claimed_via_grant_id by resolving each row's legacy session
+		// through the session registry, then UNSET the column. The two
+		// operations are idempotent — a clean DB short-circuits both.
+		if surrealContracts, ok := contractStore.(*contract.SurrealStore); ok {
+			sessionMap, err := buildSessionGrantLookup(ctx, sessionStore)
+			if err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("contract grant backfill: session lookup failed")
+			} else {
+				stamped, missed, err := surrealContracts.BackfillClaimedViaGrant(ctx, sessionMap, time.Now().UTC())
+				if err != nil {
+					logger.Warn().Str("error", err.Error()).Msg("contract grant backfill failed")
+				} else if stamped > 0 || missed > 0 {
+					logger.Info().Int("stamped", stamped).Int("missed", missed).Msg("contract claimed_via_grant_id backfill complete")
+				}
+			}
+			if err := surrealContracts.DropLegacySessionColumn(ctx); err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("contract drop legacy session column failed")
+			}
+		}
+
 		if surrealLedger, ok := ledgerStore.(*ledger.SurrealStore); ok {
 			if n, err := surrealLedger.MigrateLegacyRows(ctx, time.Now().UTC()); err != nil {
 				logger.Warn().Str("error", err.Error()).Msg("ledger migrate legacy rows failed")
@@ -322,6 +344,28 @@ func stampRequiredRoleOnContracts(ctx context.Context, docStore document.Store, 
 		stamped++
 	}
 	return stamped, nil
+}
+
+// buildSessionGrantLookup walks every registered session and returns a
+// map session_id → orchestrator_grant_id for the subset carrying a
+// grant. Used by the boot-time contract_instance grant backfill in
+// story_4608a82c. Empty map on nil store — the caller tolerates that.
+func buildSessionGrantLookup(ctx context.Context, sessions session.Store) (map[string]string, error) {
+	out := make(map[string]string)
+	if sessions == nil {
+		return out, nil
+	}
+	rows, err := sessions.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row.OrchestratorGrantID == "" {
+			continue
+		}
+		out[row.SessionID] = row.OrchestratorGrantID
+	}
+	return out, nil
 }
 
 // addRequiredRoleIfMissing inserts `required_role=roleName` into the

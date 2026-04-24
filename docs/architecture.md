@@ -309,7 +309,7 @@ contract_instance {
   contract_id (FK document),
   contract_name, phase, sequence,
   status:      enum(ready, claimed, passed, failed, skipped),
-  claimed_by_session_id, claimed_at,
+  claimed_via_grant_id, claimed_at,
   plan_ledger_id, close_ledger_id,
   required_for_close,
 }

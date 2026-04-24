@@ -86,6 +86,19 @@ func (s *SurrealStore) Touch(ctx context.Context, userID, sessionID string, now 
 	return sess, nil
 }
 
+// ListAll implements Store for SurrealStore.
+func (s *SurrealStore) ListAll(ctx context.Context) ([]Session, error) {
+	sql := fmt.Sprintf("SELECT %s FROM sessions", selectCols)
+	results, err := surrealdb.Query[[]Session](ctx, s.db, sql, nil)
+	if err != nil {
+		return nil, fmt.Errorf("session: list all: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Session{}, nil
+	}
+	return (*results)[0].Result, nil
+}
+
 // SetOrchestratorGrant implements Store for SurrealStore.
 func (s *SurrealStore) SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error) {
 	sess, err := s.Get(ctx, userID, sessionID)

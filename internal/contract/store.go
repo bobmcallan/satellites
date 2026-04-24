@@ -56,29 +56,29 @@ type Store interface {
 	UpdateLedgerRefs(ctx context.Context, id string, plan, close *string, actor string, now time.Time, memberships []string) (ContractInstance, error)
 
 	// Claim atomically transitions a CI from ready → claimed and binds
-	// it to sessionID. Rejects with ErrInvalidTransition if CI.Status
-	// is not ready; callers handle the same-session amend path
-	// explicitly before calling Claim.
-	Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error)
+	// it to the caller's orchestrator grant. Rejects with
+	// ErrInvalidTransition if CI.Status is not ready; callers handle the
+	// same-grant amend path explicitly before calling Claim. grantID may
+	// be empty for the rare edge path where the close handler transitions
+	// a ready CI to claimed purely to satisfy the ready→passed transition
+	// chain (the CI flips to passed immediately after, so the binding is
+	// ephemeral).
+	Claim(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error)
 
-	// RebindSession updates ClaimedBySessionID on a CI that is already
-	// claimed. Used by resume to rebind after a session restart.
-	RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error)
+	// RebindGrant updates ClaimedViaGrantID on a CI that is already
+	// claimed. Used by resume after a session restart mints a fresh
+	// orchestrator grant on behalf of the returning session.
+	RebindGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error)
 
 	// ClearClaim flips a CI back to ready and clears
-	// ClaimedBySessionID + ClaimedAt + PlanLedgerID. Used by the resume
-	// downstream-rollback path when an earlier CI is re-opened.
+	// ClaimedViaGrantID + ClaimedAt + PlanLedgerID + CloseLedgerID. Used
+	// by the resume downstream-rollback path when an earlier CI is
+	// re-opened.
 	ClearClaim(ctx context.Context, id string, now time.Time, memberships []string) (ContractInstance, error)
 
 	// BackfillWorkspaceID stamps workspace_id on rows matching projectID
 	// whose workspace_id is empty. Idempotent boot-time migration.
 	BackfillWorkspaceID(ctx context.Context, projectID, workspaceID string, now time.Time) (int, error)
-
-	// SetClaimedViaGrant stamps the grant id on a CI that has already
-	// been claimed. Called by the claim handler after it resolves the
-	// caller's orchestrator grant (story_85675c33). Returns ErrNotFound
-	// if the CI does not exist.
-	SetClaimedViaGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -205,7 +205,7 @@ func (m *MemoryStore) UpdateStatus(ctx context.Context, id, newStatus, actor str
 }
 
 // Claim implements Store for MemoryStore.
-func (m *MemoryStore) Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+func (m *MemoryStore) Claim(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ci, ok := m.rows[id]
@@ -216,22 +216,22 @@ func (m *MemoryStore) Claim(ctx context.Context, id, sessionID string, now time.
 		return ContractInstance{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, ci.Status, StatusClaimed)
 	}
 	ci.Status = StatusClaimed
-	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedViaGrantID = grantID
 	ci.ClaimedAt = now
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil
 }
 
-// RebindSession implements Store for MemoryStore.
-func (m *MemoryStore) RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+// RebindGrant implements Store for MemoryStore.
+func (m *MemoryStore) RebindGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ci, ok := m.rows[id]
 	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
 		return ContractInstance{}, ErrNotFound
 	}
-	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedViaGrantID = grantID
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil
@@ -246,7 +246,7 @@ func (m *MemoryStore) ClearClaim(ctx context.Context, id string, now time.Time, 
 		return ContractInstance{}, ErrNotFound
 	}
 	ci.Status = StatusReady
-	ci.ClaimedBySessionID = ""
+	ci.ClaimedViaGrantID = ""
 	ci.ClaimedAt = time.Time{}
 	ci.PlanLedgerID = ""
 	ci.CloseLedgerID = ""
@@ -269,20 +269,6 @@ func (m *MemoryStore) UpdateLedgerRefs(ctx context.Context, id string, plan, clo
 	if closeRef != nil {
 		ci.CloseLedgerID = *closeRef
 	}
-	ci.UpdatedAt = now
-	m.rows[id] = ci
-	return ci, nil
-}
-
-// SetClaimedViaGrant implements Store for MemoryStore.
-func (m *MemoryStore) SetClaimedViaGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	ci, ok := m.rows[id]
-	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
-		return ContractInstance{}, ErrNotFound
-	}
-	ci.ClaimedViaGrantID = grantID
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil

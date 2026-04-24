@@ -10,7 +10,6 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/ledger"
-	"github.com/bobmcallan/satellites/internal/session"
 )
 
 // closeFixture is newClaimFixture with a helper for claiming a CI.
@@ -263,11 +262,9 @@ func TestResume_RebindSameSessionClaimed(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	f.claim(t, 0, "")
-	// Register a new session and resume onto it.
+	// Mint a fresh session + grant for the rebind target.
 	newSess := "resume-newsession"
-	if _, err := f.server.sessions.Register(f.ctx, "user_alice", newSess, session.SourceSessionStart, f.now); err != nil {
-		t.Fatalf("register: %v", err)
-	}
+	newGrant := f.mintSessionGrant(t, newSess)
 	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           newSess,
@@ -277,8 +274,8 @@ func TestResume_RebindSameSessionClaimed(t *testing.T) {
 		t.Fatalf("resume: err=%v text=%s", err, firstText(res))
 	}
 	ci, _ := f.server.contracts.GetByID(f.ctx, f.cis[0].ID, nil)
-	if ci.ClaimedBySessionID != newSess {
-		t.Fatalf("session not rebound: %q", ci.ClaimedBySessionID)
+	if ci.ClaimedViaGrantID != newGrant {
+		t.Fatalf("grant not rebound: got %q want %q", ci.ClaimedViaGrantID, newGrant)
 	}
 	if ci.Status != contract.StatusClaimed {
 		t.Fatalf("status changed: %q", ci.Status)

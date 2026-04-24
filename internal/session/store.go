@@ -30,6 +30,12 @@ type Store interface {
 	// (story_7d9c4b1b). Returns ErrNotFound if the session does not
 	// exist.
 	SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error)
+
+	// ListAll returns every registered session row. Used by the
+	// boot-time CI grant-backfill migration in story_4608a82c to build a
+	// session_id → orchestrator_grant_id lookup. Unscoped read — callers
+	// must handle cross-user rows themselves.
+	ListAll(ctx context.Context) ([]Session, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -95,6 +101,17 @@ func (m *MemoryStore) Touch(ctx context.Context, userID, sessionID string, now t
 	sess.LastSeenAt = now
 	m.rows[key] = sess
 	return sess, nil
+}
+
+// ListAll implements Store for MemoryStore.
+func (m *MemoryStore) ListAll(ctx context.Context) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Session, 0, len(m.rows))
+	for _, sess := range m.rows {
+		out = append(out, sess)
+	}
+	return out, nil
 }
 
 // SetOrchestratorGrant implements Store for MemoryStore.

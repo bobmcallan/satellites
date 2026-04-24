@@ -41,7 +41,7 @@ func NewSurrealStore(db *surrealdb.DB, docs document.Store, stories story.Store)
 }
 
 // selectCols preserves the string form of id (see document/surreal.go).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, contract_name, phase, sequence, status, claimed_by_session_id, claimed_via_grant_id, claimed_at, plan_ledger_id, close_ledger_id, required_for_close, created_at, updated_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, contract_name, phase, sequence, status, claimed_via_grant_id, claimed_at, plan_ledger_id, close_ledger_id, required_for_close, created_at, updated_at"
 
 // Create implements Store for SurrealStore.
 func (s *SurrealStore) Create(ctx context.Context, ci ContractInstance, now time.Time) (ContractInstance, error) {
@@ -146,7 +146,7 @@ func (s *SurrealStore) UpdateStatus(ctx context.Context, id, newStatus, actor st
 }
 
 // Claim implements Store for SurrealStore.
-func (s *SurrealStore) Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+func (s *SurrealStore) Claim(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
 	ci, err := s.GetByID(ctx, id, memberships)
 	if err != nil {
 		return ContractInstance{}, err
@@ -155,7 +155,7 @@ func (s *SurrealStore) Claim(ctx context.Context, id, sessionID string, now time
 		return ContractInstance{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, ci.Status, StatusClaimed)
 	}
 	ci.Status = StatusClaimed
-	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedViaGrantID = grantID
 	ci.ClaimedAt = now
 	ci.UpdatedAt = now
 	if err := s.write(ctx, ci); err != nil {
@@ -164,13 +164,13 @@ func (s *SurrealStore) Claim(ctx context.Context, id, sessionID string, now time
 	return ci, nil
 }
 
-// RebindSession implements Store for SurrealStore.
-func (s *SurrealStore) RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+// RebindGrant implements Store for SurrealStore.
+func (s *SurrealStore) RebindGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
 	ci, err := s.GetByID(ctx, id, memberships)
 	if err != nil {
 		return ContractInstance{}, err
 	}
-	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedViaGrantID = grantID
 	ci.UpdatedAt = now
 	if err := s.write(ctx, ci); err != nil {
 		return ContractInstance{}, err
@@ -185,7 +185,7 @@ func (s *SurrealStore) ClearClaim(ctx context.Context, id string, now time.Time,
 		return ContractInstance{}, err
 	}
 	ci.Status = StatusReady
-	ci.ClaimedBySessionID = ""
+	ci.ClaimedViaGrantID = ""
 	ci.ClaimedAt = time.Time{}
 	ci.PlanLedgerID = ""
 	ci.CloseLedgerID = ""
@@ -194,6 +194,64 @@ func (s *SurrealStore) ClearClaim(ctx context.Context, id string, now time.Time,
 		return ContractInstance{}, err
 	}
 	return ci, nil
+}
+
+// DropLegacySessionColumn UNSETs the `claimed_by_session_id` column from
+// every contract_instances row. Idempotent — SurrealDB's UNSET is a
+// no-op on rows that already lack the column. Called by the boot-time
+// migration in cmd/satellites/main.go to complete the transition away
+// from the session-id-bound claim binding (story_4608a82c).
+func (s *SurrealStore) DropLegacySessionColumn(ctx context.Context) error {
+	sql := "UPDATE contract_instances UNSET claimed_by_session_id RETURN NONE"
+	if _, err := surrealdb.Query[any](ctx, s.db, sql, nil); err != nil {
+		return fmt.Errorf("contract: drop legacy session column: %w", err)
+	}
+	return nil
+}
+
+// BackfillClaimedViaGrant stamps claimed_via_grant_id on rows whose
+// legacy claimed_by_session_id matches a key in sessionToGrant. Only
+// rows with empty claimed_via_grant_id are touched — never overwrite an
+// already-stamped grant binding. Returns (stamped, missed) where missed
+// counts rows with legacy session ids that do not resolve to any grant
+// in the lookup map. Idempotent: a second call after DropLegacySessionColumn
+// finds zero legacy rows. Called by cmd/satellites/main.go
+// (story_4608a82c).
+func (s *SurrealStore) BackfillClaimedViaGrant(ctx context.Context, sessionToGrant map[string]string, now time.Time) (stamped int, missed int, err error) {
+	sql := "SELECT meta::id(id) AS id, claimed_by_session_id, claimed_via_grant_id FROM contract_instances WHERE claimed_by_session_id != NONE AND claimed_by_session_id != ''"
+	type row struct {
+		ID                 string `json:"id"`
+		ClaimedBySessionID string `json:"claimed_by_session_id"`
+		ClaimedViaGrantID  string `json:"claimed_via_grant_id"`
+	}
+	results, qerr := surrealdb.Query[[]row](ctx, s.db, sql, nil)
+	if qerr != nil {
+		return 0, 0, fmt.Errorf("contract: backfill scan: %w", qerr)
+	}
+	if results == nil || len(*results) == 0 {
+		return 0, 0, nil
+	}
+	for _, r := range (*results)[0].Result {
+		if r.ClaimedViaGrantID != "" {
+			continue
+		}
+		grantID, ok := sessionToGrant[r.ClaimedBySessionID]
+		if !ok || grantID == "" {
+			missed++
+			continue
+		}
+		upd := "UPDATE $rid SET claimed_via_grant_id = $grant, updated_at = $now RETURN NONE"
+		vars := map[string]any{
+			"rid":   surrealmodels.NewRecordID("contract_instances", r.ID),
+			"grant": grantID,
+			"now":   now,
+		}
+		if _, uerr := surrealdb.Query[any](ctx, s.db, upd, vars); uerr != nil {
+			return stamped, missed, fmt.Errorf("contract: stamp grant on %s: %w", r.ID, uerr)
+		}
+		stamped++
+	}
+	return stamped, missed, nil
 }
 
 // UpdateLedgerRefs implements Store for SurrealStore.
@@ -208,20 +266,6 @@ func (s *SurrealStore) UpdateLedgerRefs(ctx context.Context, id string, plan, cl
 	if closeRef != nil {
 		ci.CloseLedgerID = *closeRef
 	}
-	ci.UpdatedAt = now
-	if err := s.write(ctx, ci); err != nil {
-		return ContractInstance{}, err
-	}
-	return ci, nil
-}
-
-// SetClaimedViaGrant implements Store for SurrealStore.
-func (s *SurrealStore) SetClaimedViaGrant(ctx context.Context, id, grantID string, now time.Time, memberships []string) (ContractInstance, error) {
-	ci, err := s.GetByID(ctx, id, memberships)
-	if err != nil {
-		return ContractInstance{}, err
-	}
-	ci.ClaimedViaGrantID = grantID
 	ci.UpdatedAt = now
 	if err := s.write(ctx, ci); err != nil {
 		return ContractInstance{}, err

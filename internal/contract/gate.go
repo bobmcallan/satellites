@@ -6,8 +6,8 @@ import "fmt"
 // when a claim is blocked. It surfaces enough fields for the handler
 // to render a JSON-shaped tool-result body.
 type GateRejection struct {
-	Kind     string // ci_not_ready | predecessor_not_terminal | wrong_session | ci_not_found
-	CIID     string // the CI being claimed (on ci_not_ready / wrong_session)
+	Kind     string // ci_not_ready | predecessor_not_terminal | grant_mismatch | ci_not_found
+	CIID     string // the CI being claimed (on ci_not_ready / grant_mismatch)
 	Blocking string // the blocking predecessor id (predecessor_not_terminal)
 	Current  string // the CI's current status (for ci_not_ready / predecessor)
 }
@@ -20,8 +20,8 @@ func (e *GateRejection) Error() string {
 		return fmt.Sprintf("contract: CI not ready (status=%q)", e.Current)
 	case "predecessor_not_terminal":
 		return fmt.Sprintf("contract: predecessor %q not terminal (status=%q)", e.Blocking, e.Current)
-	case "wrong_session":
-		return fmt.Sprintf("contract: CI %q already claimed by another session", e.CIID)
+	case "grant_mismatch":
+		return fmt.Sprintf("contract: CI %q already claimed under a different grant", e.CIID)
 	case "ci_not_found":
 		return fmt.Sprintf("contract: CI %q not found", e.CIID)
 	default:

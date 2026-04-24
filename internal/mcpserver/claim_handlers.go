@@ -54,15 +54,34 @@ func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToo
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
 
-	// Same-session amend path: CI already claimed, claimer = this
-	// session → dereference prior action_claim + plan rows and write
-	// fresh ones.
-	amend := ci.Status == contract.StatusClaimed && ci.ClaimedBySessionID == sessionID
+	// Session registry: must be registered + not stale. Gate runs
+	// before grant resolution so a stale/missing session short-circuits
+	// before we touch the grant store.
+	if err := s.verifyCallerSession(ctx, caller.UserID, sessionID, time.Now().UTC()); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+
+	// Role-grant gate. When the contract's structured payload names a
+	// required_role AND we have the grant/doc machinery wired, verify
+	// the caller's active orchestrator grant's role id matches. No
+	// required_role OR no wiring = grantID stays empty (legacy path for
+	// tests that don't wire grants).
+	grantID, gateErr := s.resolveRequiredRoleGrant(ctx, ci, caller.UserID, sessionID)
+	if gateErr != nil {
+		return mcpgo.NewToolResultError(gateErr.Error()), nil
+	}
+
+	// Same-grant amend path: CI already claimed, claimer's grant id
+	// matches the one bound on the CI → dereference prior action_claim
+	// + plan rows and write fresh ones. A missing grantID (unwired
+	// tests) falls back to the empty-string match so unit tests that
+	// re-claim without grant plumbing still exercise the amend branch.
+	amend := ci.Status == contract.StatusClaimed && ci.ClaimedViaGrantID == grantID
 	if ci.Status == contract.StatusClaimed && !amend {
 		body, _ := json.Marshal(map[string]any{
-			"error":                "wrong_session",
+			"error":                "grant_mismatch",
 			"contract_instance_id": ciID,
-			"claimed_by":           ci.ClaimedBySessionID,
+			"claimed_via_grant_id": ci.ClaimedViaGrantID,
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
@@ -78,21 +97,6 @@ func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToo
 		if err := contract.PredecessorGate(peers, ci); err != nil {
 			return mcpgo.NewToolResultError(marshalGateRejection(err)), nil
 		}
-	}
-
-	// Session registry: must be registered + not stale.
-	if err := s.verifyCallerSession(ctx, caller.UserID, sessionID, time.Now().UTC()); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
-	// Role-grant gate (story_85675c33). If the contract's structured
-	// payload names a required_role AND we have the grant/doc machinery
-	// wired, verify the caller's active orchestrator grant's role id
-	// matches. No required_role OR no wiring = fall through to the
-	// legacy session-only path.
-	grantID, gateErr := s.resolveRequiredRoleGrant(ctx, ci, caller.UserID, sessionID)
-	if gateErr != nil {
-		return mcpgo.NewToolResultError(gateErr.Error()), nil
 	}
 
 	// If amending, dereference prior action_claim + plan rows before
@@ -148,16 +152,8 @@ func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToo
 	}
 
 	if !amend {
-		if _, err := s.contracts.Claim(ctx, ci.ID, sessionID, now, memberships); err != nil {
+		if _, err := s.contracts.Claim(ctx, ci.ID, grantID, now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
-		}
-	}
-	if grantID != "" {
-		if _, err := s.contracts.SetClaimedViaGrant(ctx, ci.ID, grantID, now, memberships); err != nil {
-			// Non-fatal — the session_id path still authoritative.
-			if s.logger != nil {
-				s.logger.Warn().Str("ci_id", ci.ID).Str("grant_id", grantID).Str("error", err.Error()).Msg("claim: SetClaimedViaGrant failed; session_id path preserved")
-			}
 		}
 	}
 	if planRowID != "" {
