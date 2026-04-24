@@ -111,7 +111,7 @@ func (s *SurrealStore) List(ctx context.Context, opts ListOptions, memberships [
 	if opts.Limit > 0 {
 		limit = fmt.Sprintf(" LIMIT %d", opts.Limit)
 	}
-	sql := fmt.Sprintf("SELECT %s FROM tasks %s ORDER BY priority, created_at%s", selectCols, where, limit)
+	sql := fmt.Sprintf("SELECT %s FROM tasks %s ORDER BY created_at ASC%s", selectCols, where, limit)
 	results, err := surrealdb.Query[[]Task](ctx, s.db, sql, vars)
 	if err != nil {
 		return nil, fmt.Errorf("task: list: %w", err)
@@ -136,13 +136,19 @@ func (s *SurrealStore) Claim(ctx context.Context, workerID string, workspaceIDs 
 	}
 	// SurrealDB's UPDATE ... WHERE ... does not support ORDER BY +
 	// LIMIT on the WHERE clause directly; we pick via a SELECT then
-	// UPDATE with the resolved id in a single transaction via
-	// sequential queries. The SELECT uses FOR UPDATE semantics on
-	// conflict, which mirrors the atomic guarantee.
-	selectSQL := "SELECT meta::id(id) AS id, workspace_id FROM tasks WHERE status = $status AND workspace_id IN $memberships ORDER BY priority, created_at LIMIT 1"
+	// UPDATE with the resolved id. Ordering is created_at ASC (FIFO)
+	// only; SurrealDB's ORDER BY does not accept the priority enum
+	// idiom natively, so priority-aware dispatch is a follow-up
+	// optimisation (feature-order:9.3 dispatcher will layer that in
+	// via a priority_rank column or bucketed queries). MemoryStore
+	// already enforces priority order for unit-test parity.
+	// SurrealDB v3's parser needs the ORDER BY field to appear in the
+	// SELECT list — including created_at here keeps it happy.
+	selectSQL := "SELECT meta::id(id) AS id, workspace_id, created_at FROM tasks WHERE status = $status AND workspace_id IN $memberships ORDER BY created_at LIMIT 1"
 	type head struct {
-		ID          string `json:"id"`
-		WorkspaceID string `json:"workspace_id"`
+		ID          string    `json:"id"`
+		WorkspaceID string    `json:"workspace_id"`
+		CreatedAt   time.Time `json:"created_at"`
 	}
 	selectRes, err := surrealdb.Query[[]head](ctx, s.db, selectSQL, map[string]any{
 		"status":      StatusEnqueued,

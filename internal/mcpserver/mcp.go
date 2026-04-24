@@ -24,6 +24,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
@@ -46,6 +47,7 @@ type Server struct {
 	sessions         session.Store
 	reviewer         reviewer.Reviewer
 	grants           rolegrant.Store
+	tasks            task.Store
 }
 
 // Deps bundles the optional per-tool dependencies passed through to
@@ -65,6 +67,9 @@ type Deps struct {
 	// verbs and forces the grant middleware into pass-through mode even
 	// when Config.GrantsEnforced is true. Story_1efbfc48.
 	RoleGrantStore rolegrant.Store
+	// TaskStore is optional; nil disables the task_* MCP verbs.
+	// Story_a8fee0cc.
+	TaskStore task.Store
 }
 
 // New constructs the MCP server with the satellites_info tool registered.
@@ -86,6 +91,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		sessions:         deps.SessionStore,
 		reviewer:         deps.Reviewer,
 		grants:           deps.RoleGrantStore,
+		tasks:            deps.TaskStore,
 	}
 	if s.reviewer == nil {
 		s.reviewer = reviewer.AcceptAll{}
@@ -494,6 +500,50 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
 		)
 		s.mcp.AddTool(listTool, s.handleAgentRoleList)
+	}
+
+	if s.tasks != nil {
+		enqueueTool := mcpgo.NewTool("task_enqueue",
+			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. Story_a8fee0cc."),
+			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | free_preplan | event")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
+			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
+			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
+			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload (contract_instance_id, story_id, ...).")),
+			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
+		)
+		s.mcp.AddTool(enqueueTool, s.handleTaskEnqueue)
+
+		getTaskTool := mcpgo.NewTool("task_get",
+			mcpgo.WithDescription("Return a task by id. Workspace-scoped."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Task id.")),
+		)
+		s.mcp.AddTool(getTaskTool, s.handleTaskGet)
+
+		listTaskTool := mcpgo.NewTool("task_list",
+			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped."),
+			mcpgo.WithString("origin", mcpgo.Description("Filter by origin.")),
+			mcpgo.WithString("status", mcpgo.Description("Filter by status.")),
+			mcpgo.WithString("priority", mcpgo.Description("Filter by priority.")),
+			mcpgo.WithString("claimed_by", mcpgo.Description("Filter by claimed_by worker id.")),
+			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
+		)
+		s.mcp.AddTool(listTaskTool, s.handleTaskList)
+
+		claimTaskTool := mcpgo.NewTool("task_claim",
+			mcpgo.WithDescription("Atomic claim: picks highest-priority oldest-queued task from the worker's workspace(s). Returns null when queue is empty. Writes a kind:task-claimed ledger row."),
+			mcpgo.WithString("worker_id", mcpgo.Description("Worker id. Defaults to the caller's user id.")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Narrow to one workspace. Defaults to all caller memberships.")),
+		)
+		s.mcp.AddTool(claimTaskTool, s.handleTaskClaim)
+
+		closeTaskTool := mcpgo.NewTool("task_close",
+			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off)."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Task id.")),
+			mcpgo.WithString("outcome", mcpgo.Required(), mcpgo.Description("success | failure | timeout")),
+		)
+		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
 	}
 
 	s.streamable = mcpserver.NewStreamableHTTPServer(s.mcp,
