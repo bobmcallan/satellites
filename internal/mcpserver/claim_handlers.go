@@ -167,63 +167,6 @@ func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToo
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryContractResume rebinds a claimed CI to a new session_id
-// (e.g. after a harness restart). Writes a kind:resume ledger row.
-func (s *Server) handleStoryContractResume(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	start := time.Now()
-	caller, _ := UserFrom(ctx)
-	ciID, err := req.RequireString("contract_instance_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	sessionID, err := req.RequireString("session_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	reason, err := req.RequireString("reason")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
-	if err != nil {
-		body, _ := json.Marshal(map[string]any{"error": "ci_not_found"})
-		return mcpgo.NewToolResultError(string(body)), nil
-	}
-	if err := s.verifyCallerSession(ctx, caller.UserID, sessionID, time.Now().UTC()); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	now := time.Now().UTC()
-	if _, err := s.contracts.RebindSession(ctx, ci.ID, sessionID, now, memberships); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: ci.WorkspaceID,
-		ProjectID:   ci.ProjectID,
-		StoryID:     ledger.StringPtr(ci.StoryID),
-		ContractID:  ledger.StringPtr(ci.ID),
-		Type:        ledger.TypeDecision,
-		Tags:        []string{"kind:resume", "phase:" + ci.ContractName},
-		Content:     reason,
-		CreatedBy:   caller.UserID,
-	}, now)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	body, _ := json.Marshal(map[string]any{
-		"contract_instance_id": ci.ID,
-		"resume_ledger_id":     row.ID,
-		"session_id":           sessionID,
-	})
-	s.logger.Info().
-		Str("method", "tools/call").
-		Str("tool", "story_contract_resume").
-		Str("ci_id", ci.ID).
-		Int64("duration_ms", time.Since(start).Milliseconds()).
-		Msg("mcp tool call")
-	return mcpgo.NewToolResultText(string(body)), nil
-}
-
 // handleSessionWhoami returns the caller's registered session row, or
 // a structured not-registered error. Used by tests + agents to verify
 // the SessionStart hook populated the registry.

@@ -65,6 +65,11 @@ type Store interface {
 	// claimed. Used by resume to rebind after a session restart.
 	RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error)
 
+	// ClearClaim flips a CI back to ready and clears
+	// ClaimedBySessionID + ClaimedAt + PlanLedgerID. Used by the resume
+	// downstream-rollback path when an earlier CI is re-opened.
+	ClearClaim(ctx context.Context, id string, now time.Time, memberships []string) (ContractInstance, error)
+
 	// BackfillWorkspaceID stamps workspace_id on rows matching projectID
 	// whose workspace_id is empty. Idempotent boot-time migration.
 	BackfillWorkspaceID(ctx context.Context, projectID, workspaceID string, now time.Time) (int, error)
@@ -221,6 +226,24 @@ func (m *MemoryStore) RebindSession(ctx context.Context, id, sessionID string, n
 		return ContractInstance{}, ErrNotFound
 	}
 	ci.ClaimedBySessionID = sessionID
+	ci.UpdatedAt = now
+	m.rows[id] = ci
+	return ci, nil
+}
+
+// ClearClaim implements Store for MemoryStore.
+func (m *MemoryStore) ClearClaim(ctx context.Context, id string, now time.Time, memberships []string) (ContractInstance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ci, ok := m.rows[id]
+	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
+		return ContractInstance{}, ErrNotFound
+	}
+	ci.Status = StatusReady
+	ci.ClaimedBySessionID = ""
+	ci.ClaimedAt = time.Time{}
+	ci.PlanLedgerID = ""
+	ci.CloseLedgerID = ""
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil

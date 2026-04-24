@@ -352,11 +352,31 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			)
 			s.mcp.AddTool(claimTool, s.handleStoryContractClaim)
 
-			resumeTool := mcpgo.NewTool("story_contract_resume",
-				mcpgo.WithDescription("Rebind a claimed CI to a (possibly new) session_id — the post-restart handshake. Writes a kind:resume ledger row with the supplied reason."),
+			closeTool := mcpgo.NewTool("story_contract_close",
+				mcpgo.WithDescription("Close a contract instance: writes a phase:close kind:close-request row, optional kind:evidence row, flips CI to passed, rolls the story to done when every required CI is terminal. On preplan close, proposed_workflow is validated against the project spec and written as a kind:workflow-claim row."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session to rebind onto.")),
-				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Human-readable reason recorded on the resume row.")),
+				mcpgo.WithString("close_markdown", mcpgo.Description("Close summary markdown.")),
+				mcpgo.WithString("evidence_markdown", mcpgo.Description("Optional evidence markdown; writes a kind:evidence row when non-empty.")),
+				mcpgo.WithArray("evidence_ledger_ids", mcpgo.Description("IDs of prior evidence rows referenced from the close."),
+					mcpgo.Items(map[string]any{"type": "string"})),
+				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — used when the CI was claimed without a plan (deferred plan path).")),
+				mcpgo.WithArray("proposed_workflow", mcpgo.Description("Preplan-only: list of contract_names forming the remainder of the workflow."),
+					mcpgo.Items(map[string]any{"type": "string"})),
+			)
+			s.mcp.AddTool(closeTool, s.handleStoryContractClose)
+
+			respondTool := mcpgo.NewTool("story_contract_respond",
+				mcpgo.WithDescription("Write a kind:review-response ledger row addressing the latest unresolved review-question on a CI. Reviewer re-invocation happens on the next close."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
+				mcpgo.WithString("response_markdown", mcpgo.Required(), mcpgo.Description("Agent's response markdown.")),
+			)
+			s.mcp.AddTool(respondTool, s.handleStoryContractRespond)
+
+			resumeTool := mcpgo.NewTool("story_contract_resume",
+				mcpgo.WithDescription("Resume a CI. When the CI is claimed, rebinds the session. When the CI is passed, reopens it: flips it back to claimed, dereferences its prior plan + action-claim rows, and flips downstream required CIs back to ready. Enforces per-CI + per-story resume caps (SATELLITES_MAX_RESUMES_PER_CI / _PER_STORY)."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
+				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session to bind onto the CI.")),
+				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Human-readable reason written to the resume row.")),
 			)
 			s.mcp.AddTool(resumeTool, s.handleStoryContractResume)
 

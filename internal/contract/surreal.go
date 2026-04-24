@@ -178,6 +178,24 @@ func (s *SurrealStore) RebindSession(ctx context.Context, id, sessionID string, 
 	return ci, nil
 }
 
+// ClearClaim implements Store for SurrealStore.
+func (s *SurrealStore) ClearClaim(ctx context.Context, id string, now time.Time, memberships []string) (ContractInstance, error) {
+	ci, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return ContractInstance{}, err
+	}
+	ci.Status = StatusReady
+	ci.ClaimedBySessionID = ""
+	ci.ClaimedAt = time.Time{}
+	ci.PlanLedgerID = ""
+	ci.CloseLedgerID = ""
+	ci.UpdatedAt = now
+	if err := s.write(ctx, ci); err != nil {
+		return ContractInstance{}, err
+	}
+	return ci, nil
+}
+
 // UpdateLedgerRefs implements Store for SurrealStore.
 func (s *SurrealStore) UpdateLedgerRefs(ctx context.Context, id string, plan, closeRef *string, actor string, now time.Time, memberships []string) (ContractInstance, error) {
 	ci, err := s.GetByID(ctx, id, memberships)
