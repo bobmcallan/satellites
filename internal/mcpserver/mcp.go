@@ -20,6 +20,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
@@ -40,6 +41,7 @@ type Server struct {
 	stories          story.Store
 	workspaces       workspace.Store
 	contracts        contract.Store
+	sessions         session.Store
 }
 
 // Deps bundles the optional per-tool dependencies passed through to
@@ -53,6 +55,7 @@ type Deps struct {
 	StoryStore       story.Store
 	WorkspaceStore   workspace.Store
 	ContractStore    contract.Store
+	SessionStore     session.Store
 }
 
 // New constructs the MCP server with the satellites_info tool registered.
@@ -71,6 +74,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		stories:          deps.StoryStore,
 		workspaces:       deps.WorkspaceStore,
 		contracts:        deps.ContractStore,
+		sessions:         deps.SessionStore,
 	}
 
 	s.mcp = mcpserver.NewMCPServer(
@@ -334,6 +338,41 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
 		)
 		s.mcp.AddTool(contractNextTool, s.handleStoryContractNext)
+
+		if s.sessions != nil {
+			claimTool := mcpgo.NewTool("story_contract_claim",
+				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true)."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
+				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Claude Code harness chat UUID — must be registered in the session registry.")),
+				mcpgo.WithArray("permissions_claim", mcpgo.Description("Tool:pattern strings the agent needs during this claim."),
+					mcpgo.Items(map[string]any{"type": "string"})),
+				mcpgo.WithArray("skills_used", mcpgo.Description("Skill IDs / names the agent is applying (informational)."),
+					mcpgo.Items(map[string]any{"type": "string"})),
+				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown. Written as a kind:plan ledger row and stamped on the CI's PlanLedgerID.")),
+			)
+			s.mcp.AddTool(claimTool, s.handleStoryContractClaim)
+
+			resumeTool := mcpgo.NewTool("story_contract_resume",
+				mcpgo.WithDescription("Rebind a claimed CI to a (possibly new) session_id — the post-restart handshake. Writes a kind:resume ledger row with the supplied reason."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
+				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session to rebind onto.")),
+				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Human-readable reason recorded on the resume row.")),
+			)
+			s.mcp.AddTool(resumeTool, s.handleStoryContractResume)
+
+			whoamiTool := mcpgo.NewTool("session_whoami",
+				mcpgo.WithDescription("Return the caller's session registry row for the given session_id. Returns a structured session_not_registered error when the session is not in the registry."),
+				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session id to inspect.")),
+			)
+			s.mcp.AddTool(whoamiTool, s.handleSessionWhoami)
+
+			registerTool := mcpgo.NewTool("session_register",
+				mcpgo.WithDescription("Upsert a session row keyed by (caller_user_id, session_id). Called by the SessionStart hook + by tests. LastSeenAt is set to now."),
+				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session id to register.")),
+				mcpgo.WithString("source", mcpgo.Description("Source string (session_start | enforce_hook | apikey). Defaults to session_start.")),
+			)
+			s.mcp.AddTool(registerTool, s.handleSessionRegister)
+		}
 	}
 
 	if s.workspaces != nil {

@@ -55,6 +55,16 @@ type Store interface {
 	// close verbs in 8.3 / 8.4.
 	UpdateLedgerRefs(ctx context.Context, id string, plan, close *string, actor string, now time.Time, memberships []string) (ContractInstance, error)
 
+	// Claim atomically transitions a CI from ready → claimed and binds
+	// it to sessionID. Rejects with ErrInvalidTransition if CI.Status
+	// is not ready; callers handle the same-session amend path
+	// explicitly before calling Claim.
+	Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error)
+
+	// RebindSession updates ClaimedBySessionID on a CI that is already
+	// claimed. Used by resume to rebind after a session restart.
+	RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error)
+
 	// BackfillWorkspaceID stamps workspace_id on rows matching projectID
 	// whose workspace_id is empty. Idempotent boot-time migration.
 	BackfillWorkspaceID(ctx context.Context, projectID, workspaceID string, now time.Time) (int, error)
@@ -178,6 +188,39 @@ func (m *MemoryStore) UpdateStatus(ctx context.Context, id, newStatus, actor str
 		return ContractInstance{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, ci.Status, newStatus)
 	}
 	ci.Status = newStatus
+	ci.UpdatedAt = now
+	m.rows[id] = ci
+	return ci, nil
+}
+
+// Claim implements Store for MemoryStore.
+func (m *MemoryStore) Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ci, ok := m.rows[id]
+	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
+		return ContractInstance{}, ErrNotFound
+	}
+	if !ValidTransition(ci.Status, StatusClaimed) {
+		return ContractInstance{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, ci.Status, StatusClaimed)
+	}
+	ci.Status = StatusClaimed
+	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedAt = now
+	ci.UpdatedAt = now
+	m.rows[id] = ci
+	return ci, nil
+}
+
+// RebindSession implements Store for MemoryStore.
+func (m *MemoryStore) RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ci, ok := m.rows[id]
+	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
+		return ContractInstance{}, ErrNotFound
+	}
+	ci.ClaimedBySessionID = sessionID
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil

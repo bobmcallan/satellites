@@ -145,6 +145,39 @@ func (s *SurrealStore) UpdateStatus(ctx context.Context, id, newStatus, actor st
 	return ci, nil
 }
 
+// Claim implements Store for SurrealStore.
+func (s *SurrealStore) Claim(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+	ci, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return ContractInstance{}, err
+	}
+	if !ValidTransition(ci.Status, StatusClaimed) {
+		return ContractInstance{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, ci.Status, StatusClaimed)
+	}
+	ci.Status = StatusClaimed
+	ci.ClaimedBySessionID = sessionID
+	ci.ClaimedAt = now
+	ci.UpdatedAt = now
+	if err := s.write(ctx, ci); err != nil {
+		return ContractInstance{}, err
+	}
+	return ci, nil
+}
+
+// RebindSession implements Store for SurrealStore.
+func (s *SurrealStore) RebindSession(ctx context.Context, id, sessionID string, now time.Time, memberships []string) (ContractInstance, error) {
+	ci, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return ContractInstance{}, err
+	}
+	ci.ClaimedBySessionID = sessionID
+	ci.UpdatedAt = now
+	if err := s.write(ctx, ci); err != nil {
+		return ContractInstance{}, err
+	}
+	return ci, nil
+}
+
 // UpdateLedgerRefs implements Store for SurrealStore.
 func (s *SurrealStore) UpdateLedgerRefs(ctx context.Context, id string, plan, closeRef *string, actor string, now time.Time, memberships []string) (ContractInstance, error) {
 	ci, err := s.GetByID(ctx, id, memberships)

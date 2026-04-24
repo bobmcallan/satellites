@@ -22,6 +22,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/portal"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
@@ -73,6 +74,7 @@ func main() {
 		storyStore       story.Store
 		wsStore          workspace.Store
 		contractStore    contract.Store
+		sessionStore     session.Store
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
 	)
@@ -94,6 +96,7 @@ func main() {
 		storyStore = story.NewSurrealStore(conn, ledgerStore)
 		wsStore = workspace.NewSurrealStore(conn)
 		contractStore = contract.NewSurrealStore(conn, docStore, storyStore)
+		sessionStore = session.NewSurrealStore(conn)
 		dbPing = func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) }
 
 		// Seed the system user's default workspace so bootstrap writes
@@ -181,6 +184,7 @@ func main() {
 		StoryStore:       storyStore,
 		WorkspaceStore:   wsStore,
 		ContractStore:    contractStore,
+		SessionStore:     sessionStore,
 	})
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions: sessions,
