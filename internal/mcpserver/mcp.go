@@ -466,13 +466,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.grants != nil {
 		claimTool := mcpgo.NewTool("agent_role_claim",
-			mcpgo.WithDescription("Claim a role-grant binding a grantee (session/task/worker) to a role under an agent document. Validates role in agent.permitted_roles and that agent.tool_ceiling covers role.allowed_mcp_verbs. Writes a kind:role-grant,event:claimed ledger row."),
+			mcpgo.WithDescription("Claim a role-grant binding a grantee (session/task/worker) to a role under an agent document. Validates role in agent.permitted_roles and that agent.tool_ceiling covers role.allowed_mcp_verbs. Writes a kind:role-grant,event:claimed ledger row. When provider_override=\"mechanical\" OR no agent-document resolves for the role, falls through to the deterministic mechanical runner and tags resulting ledger rows provider:mechanical (story_548ab5a5)."),
 			mcpgo.WithString("workspace_id", mcpgo.Required(), mcpgo.Description("Workspace scope for the grant.")),
 			mcpgo.WithString("role_id", mcpgo.Required(), mcpgo.Description("Role document id (type=role).")),
-			mcpgo.WithString("agent_id", mcpgo.Required(), mcpgo.Description("Agent document id (type=agent).")),
+			mcpgo.WithString("agent_id", mcpgo.Description("Agent document id (type=agent). Optional when provider_override=\"mechanical\" or when the server should auto-resolve.")),
 			mcpgo.WithString("grantee_kind", mcpgo.Required(), mcpgo.Description("session | task | worker")),
 			mcpgo.WithString("grantee_id", mcpgo.Required(), mcpgo.Description("Stable id for the grantee (chat UUID for session, task id for task, worker id for worker).")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope for the grant.")),
+			mcpgo.WithString("provider_override", mcpgo.Description("Skip the provider chain when set to \"mechanical\"; routes to the deterministic runner directly.")),
 		)
 		s.mcp.AddTool(claimTool, s.handleAgentRoleClaim)
 

@@ -10,6 +10,7 @@ import (
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/bobmcallan/satellites/internal/agent/mechanical"
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -22,6 +23,12 @@ import (
 // On success: writes a role_grant row (status=active) + a kind:role-grant,
 // event:claimed ledger row; returns {grant_id, effective_verbs, role_id,
 // agent_id, workspace_id, grantee_kind, grantee_id, issued_at}.
+//
+// Mechanical fallback (story_548ab5a5): when provider_override is
+// "mechanical" OR no active agent-document resolves the role, the
+// handler routes to the deterministic runner. Runner-produced evidence
+// rows carry provider:mechanical so downstream queries distinguish
+// mechanical and LLM-backed runs.
 func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	if s.grants == nil {
 		return mcpgo.NewToolResultError("agent_role_claim unavailable: role-grant store not configured"), nil
@@ -36,9 +43,16 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	granteeKind := getString(args, "grantee_kind")
 	granteeID := getString(args, "grantee_id")
 	projectID := getString(args, "project_id")
+	providerOverride := getString(args, "provider_override")
 
-	if workspaceID == "" || roleID == "" || agentID == "" || granteeKind == "" || granteeID == "" {
-		return mcpgo.NewToolResultError("agent_role_claim requires workspace_id, role_id, agent_id, grantee_kind, grantee_id"), nil
+	if workspaceID == "" || roleID == "" || granteeKind == "" || granteeID == "" {
+		return mcpgo.NewToolResultError("agent_role_claim requires workspace_id, role_id, grantee_kind, grantee_id"), nil
+	}
+	if providerOverride == "mechanical" {
+		return s.mechanicalClaimResponse(ctx, mechanical.TriggerForceFlag, workspaceID, projectID, roleID, agentID, granteeKind, granteeID, "provider_override=mechanical")
+	}
+	if agentID == "" {
+		return s.mechanicalClaimResponse(ctx, mechanical.TriggerNoAgent, workspaceID, projectID, roleID, "", granteeKind, granteeID, "no agent_id supplied and no resolver configured")
 	}
 
 	roleDoc, err := s.docs.GetByID(ctx, roleID, nil)
@@ -47,7 +61,7 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	}
 	agentDoc, err := s.docs.GetByID(ctx, agentID, nil)
 	if err != nil || agentDoc.Type != document.TypeAgent || agentDoc.Status != document.StatusActive {
-		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: agent_id %q does not resolve to an active type=agent document", agentID)), nil
+		return s.mechanicalClaimResponse(ctx, mechanical.TriggerNoAgent, workspaceID, projectID, roleID, agentID, granteeKind, granteeID, fmt.Sprintf("agent_id %q unresolved", agentID))
 	}
 
 	agentPayload, err := decodeAgentPayload(agentDoc.Structured)
@@ -288,6 +302,55 @@ func verbMatches(verb, pattern string) bool {
 func getString(args map[string]any, key string) string {
 	v, _ := args[key].(string)
 	return v
+}
+
+// mechanicalClaimResponse routes an agent_role_claim call through the
+// deterministic mechanical runner and returns a response payload in the
+// same shape a normal grant-mint would return. Called when
+// provider_override="mechanical", when no agent-document resolves, or
+// when the agent's provider_chain is exhausted. Story_548ab5a5.
+func (s *Server) mechanicalClaimResponse(ctx context.Context, trigger mechanical.Trigger, workspaceID, projectID, roleID, agentID, granteeKind, granteeID, reason string) (*mcpgo.CallToolResult, error) {
+	runner := mechanical.NewRunner(s.ledger)
+	caller, _ := UserFrom(ctx)
+	now := time.Now().UTC()
+	// Resolve role for effective_verbs when the role doc is available.
+	var effective []string
+	if s.docs != nil {
+		if role, err := s.docs.GetByID(ctx, roleID, nil); err == nil {
+			if rp, perr := decodeRolePayload(role.Structured); perr == nil {
+				effective = rp.AllowedMCPVerbs
+			}
+		}
+	}
+	result, err := runner.Run(ctx, mechanical.Request{
+		Trigger:        trigger,
+		WorkspaceID:    workspaceID,
+		ProjectID:      projectID,
+		RoleID:         roleID,
+		AgentID:        agentID,
+		GranteeKind:    granteeKind,
+		GranteeID:      granteeID,
+		Actor:          caller.UserID,
+		EffectiveVerbs: effective,
+		Reason:         reason,
+	}, now)
+	if err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim mechanical: %s", err)), nil
+	}
+	payload := map[string]any{
+		"grant_id":        result.LedgerRowID,
+		"workspace_id":    result.WorkspaceID,
+		"role_id":         result.RoleID,
+		"agent_id":        agentID,
+		"grantee_kind":    result.GranteeKind,
+		"grantee_id":      result.GranteeID,
+		"status":          "active",
+		"issued_at":       now,
+		"effective_verbs": result.EffectiveVerbs,
+		"provider":        "mechanical",
+		"trigger_reason":  string(result.Trigger),
+	}
+	return jsonResult(payload)
 }
 
 // jsonResult wraps an arbitrary payload as a structured MCP tool result.
