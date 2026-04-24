@@ -21,10 +21,21 @@
     }
   })();
 </script>
+{{if .WSConfig.WorkspaceID}}
+<script>
+  window.SATELLITES_WS = {
+    workspaceId: {{.WSConfig.WorkspaceID}},
+    debug: {{.WSConfig.Debug}}
+  };
+</script>
+{{end}}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/portal.css?v={{.Version}}">
 <script src="/static/common.js?v={{.Version}}"></script>
+{{if .WSConfig.WorkspaceID}}
+<script src="/static/ws.js?v={{.Version}}"></script>
+{{end}}
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 {{end}}

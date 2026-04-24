@@ -1302,3 +1302,85 @@ code {
 [data-theme="dark"] .doc-thumb:hover {
     border-color: #888;
 }
+
+/* Websocket connection indicator (slice 10.4) */
+.ws-indicator {
+    position: relative;
+    margin-right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+}
+.ws-indicator-btn {
+    background: transparent;
+    border: 0;
+    padding: 0.25rem;
+    cursor: pointer;
+    color: inherit;
+}
+.ws-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #666;
+}
+.ws-indicator-live .ws-dot { background: #4caf50; }
+.ws-indicator-connecting .ws-dot,
+.ws-indicator-reconnecting .ws-dot {
+    background: #f5a623;
+    animation: ws-pulse 1.2s infinite ease-in-out;
+}
+.ws-indicator-disconnected .ws-dot { background: #e04f5f; }
+.ws-indicator-idle .ws-dot { background: #666; }
+@keyframes ws-pulse {
+    0%, 100% { opacity: 0.4; }
+    50%      { opacity: 1; }
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+.ws-debug {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    min-width: 18rem;
+    background: #181818;
+    border: 1px solid #333;
+    padding: 0.5rem;
+    font-size: 0.8rem;
+    z-index: 60;
+}
+.ws-debug-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+.ws-debug-events {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+.ws-debug-events li {
+    padding: 0.15rem 0;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+}
+.ws-debug-empty {
+    color: #888;
+    font-style: italic;
+}
+.ws-debug-ts {
+    color: #888;
+    font-size: 0.75rem;
+}

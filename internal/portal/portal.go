@@ -70,6 +70,24 @@ type wsChip struct {
 	Name string
 }
 
+// WSConfig is the websocket bootstrap payload emitted in the page head.
+// WorkspaceID is empty on unauthenticated pages (login), causing the
+// script bootstrap + connection-indicator widget to render as no-ops.
+// Debug flips the debug panel behind `?debug=true`.
+type WSConfig struct {
+	WorkspaceID string
+	Debug       bool
+}
+
+// buildWSConfig resolves the websocket bootstrap payload from the
+// active workspace and the `?debug=true` query param.
+func buildWSConfig(active wsChip, r *http.Request) WSConfig {
+	return WSConfig{
+		WorkspaceID: active.ID,
+		Debug:       r.URL.Query().Get("debug") == "true",
+	}
+}
+
 // memberWorkspaces returns the caller's full workspace membership set as
 // view-model chips, plus the canonical id slice the store reads expect.
 func (p *Portal) memberWorkspaces(r *http.Request, user auth.User) ([]wsChip, []string) {
@@ -163,6 +181,7 @@ type landingData struct {
 	User            auth.User
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 type loginData struct {
@@ -173,6 +192,7 @@ type loginData struct {
 	GoogleEnabled  bool
 	GithubEnabled  bool
 	DevModeEnabled bool
+	WSConfig       WSConfig
 }
 
 type projectsListData struct {
@@ -184,6 +204,7 @@ type projectsListData struct {
 	Disabled        bool
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 type projectDetailData struct {
@@ -195,6 +216,7 @@ type projectDetailData struct {
 	OwnerYou        bool
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 // projectRow is the view-model for a project — formats the timestamps to
@@ -227,6 +249,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 		User:            user,
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		p.logger.Error().Str("template", "index.html").Str("error", err.Error()).Msg("template render failed")
@@ -267,6 +290,7 @@ func (p *Portal) handleProjectsList(w http.ResponseWriter, r *http.Request) {
 		User:            user,
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if p.projects == nil {
 		data.Disabled = true
@@ -317,6 +341,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		OwnerYou:        true,
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "project_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "project_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -335,6 +360,7 @@ type projectLedgerData struct {
 	Disabled        bool
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 // ledgerRow pre-formats ledger fields for the template.
@@ -374,6 +400,7 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 		Project:         viewRow(proj),
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if p.ledger == nil {
 		data.Disabled = true
@@ -420,6 +447,7 @@ type storiesListData struct {
 	Disabled        bool
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 type storyDetailData struct {
@@ -433,6 +461,7 @@ type storyDetailData struct {
 	Disabled        bool
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
+	WSConfig        WSConfig
 }
 
 type storyRow struct {
@@ -498,6 +527,7 @@ func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
 		Project:         viewRow(proj),
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if p.stories == nil {
 		data.Disabled = true
@@ -563,6 +593,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		Story:           viewStoryRow(s),
 		Workspaces:      chips,
 		ActiveWorkspace: active,
+		WSConfig:        buildWSConfig(active, r),
 	}
 	if p.ledger != nil {
 		entries, err := p.ledger.List(r.Context(), proj.ID, ledger.ListOptions{Type: ledger.TypeDecision, Limit: 200}, memberships)

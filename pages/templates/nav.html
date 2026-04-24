@@ -24,6 +24,29 @@
   {{end}}
   {{end}}
   <div class="nav-spacer"></div>
+  {{if .WSConfig.WorkspaceID}}
+  <div class="ws-indicator" x-data="wsIndicator()" x-init="start()" :class="'ws-indicator-' + status">
+    <button type="button" class="ws-indicator-btn" @click="toggleDebug()" :title="statusText()" :aria-label="statusText()">
+      <span class="ws-dot" aria-hidden="true"></span>
+      <span class="sr-only" x-text="statusText()"></span>
+    </button>
+    <div class="ws-debug" x-show="debugOpen" x-cloak @click.outside="debugOpen = false">
+      <div class="ws-debug-header">
+        <span x-text="statusText()"></span>
+        <button type="button" class="btn-link" x-show="status === 'disconnected'" @click="retry()">retry</button>
+      </div>
+      <ul class="ws-debug-events">
+        <template x-for="ev in recentEvents" :key="ev.id">
+          <li>
+            <code x-text="ev.kind"></code>
+            <span class="ws-debug-ts" x-text="ev.created_at"></span>
+          </li>
+        </template>
+        <li x-show="recentEvents.length === 0" class="ws-debug-empty">no events yet</li>
+      </ul>
+    </div>
+  </div>
+  {{end}}
   <span class="version-chip" title="commit {{.Commit}}">v{{.Version}} · {{.Commit}}</span>
   {{if .User.Email}}
   <form action="/auth/logout" method="post" class="nav-logout">
