@@ -19,12 +19,15 @@ const (
 	TypeSkill     = "skill"
 	TypePrinciple = "principle"
 	TypeReviewer  = "reviewer"
+	TypeAgent     = "agent"
+	TypeRole      = "role"
 )
 
 // Scope enum values per docs/architecture.md §2.
 const (
-	ScopeSystem  = "system"
-	ScopeProject = "project"
+	ScopeSystem    = "system"
+	ScopeProject   = "project"
+	ScopeWorkspace = "workspace"
 )
 
 // Status enum values.
@@ -39,11 +42,14 @@ var validTypes = map[string]struct{}{
 	TypeSkill:     {},
 	TypePrinciple: {},
 	TypeReviewer:  {},
+	TypeAgent:     {},
+	TypeRole:      {},
 }
 
 var validScopes = map[string]struct{}{
-	ScopeSystem:  {},
-	ScopeProject: {},
+	ScopeSystem:    {},
+	ScopeProject:   {},
+	ScopeWorkspace: {},
 }
 
 // Document is the unified, type-discriminated row backing every authored
@@ -90,15 +96,28 @@ func (d Document) Validate() error {
 		if d.ProjectID != nil && *d.ProjectID != "" {
 			return errors.New("document: project_id must be nil when scope=system")
 		}
+	case ScopeWorkspace:
+		if d.Type != TypeRole {
+			return fmt.Errorf("document: scope=workspace only valid for type=role, got type=%s", d.Type)
+		}
+		if d.WorkspaceID == "" {
+			return errors.New("document: workspace_id required when scope=workspace")
+		}
+		if d.ProjectID != nil && *d.ProjectID != "" {
+			return errors.New("document: project_id must be nil when scope=workspace")
+		}
 	}
 	switch d.Type {
 	case TypeSkill, TypeReviewer:
 		if d.ContractBinding == nil || *d.ContractBinding == "" {
 			return fmt.Errorf("document: contract_binding required for type=%s", d.Type)
 		}
+	case TypeAgent:
+		// agent documents may optionally pin to a contract via contract_binding
+		// (mirrors reviewer); the field is permitted but not required.
 	default:
 		if d.ContractBinding != nil && *d.ContractBinding != "" {
-			return errors.New("document: contract_binding allowed only for type=skill or type=reviewer")
+			return errors.New("document: contract_binding allowed only for type=skill, type=reviewer, or type=agent")
 		}
 	}
 	return nil

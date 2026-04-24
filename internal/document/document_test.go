@@ -229,6 +229,8 @@ func TestValidate_TypeEnum(t *testing.T) {
 		{TypePrinciple, false},
 		{TypeReviewer, false},
 		{TypeSkill, false},
+		{TypeAgent, false},
+		{TypeRole, false},
 		{"", true},
 		{"architecture", true},
 		{"random", true},
@@ -282,6 +284,88 @@ func TestValidate_ScopeEnum(t *testing.T) {
 		if !tc.wantErr && err != nil {
 			t.Errorf("Validate(scope=%q) rejected: %v", tc.scope, err)
 		}
+	}
+}
+
+func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
+	t.Parallel()
+	// Role with scope=workspace + workspace_id: accepted.
+	roleHappy := Document{
+		Type:        TypeRole,
+		Scope:       ScopeWorkspace,
+		Name:        "role_custom",
+		WorkspaceID: "wksp_a",
+	}
+	if err := roleHappy.Validate(); err != nil {
+		t.Errorf("role scope=workspace happy: %v", err)
+	}
+	// Role with scope=workspace but empty workspace_id: rejected.
+	roleNoWS := Document{
+		Type:  TypeRole,
+		Scope: ScopeWorkspace,
+		Name:  "role_custom",
+	}
+	if err := roleNoWS.Validate(); err == nil {
+		t.Errorf("role scope=workspace without workspace_id accepted; want rejection")
+	}
+	// Role with scope=workspace + project_id: rejected.
+	roleWithProject := Document{
+		Type:        TypeRole,
+		Scope:       ScopeWorkspace,
+		Name:        "role_custom",
+		WorkspaceID: "wksp_a",
+		ProjectID:   StringPtr("proj_x"),
+	}
+	if err := roleWithProject.Validate(); err == nil {
+		t.Errorf("role scope=workspace with project_id accepted; want rejection")
+	}
+	// Non-role document with scope=workspace: rejected (scope=workspace
+	// is a role-only shape in 6.2).
+	agentWS := Document{
+		Type:        TypeAgent,
+		Scope:       ScopeWorkspace,
+		Name:        "agent_custom",
+		WorkspaceID: "wksp_a",
+	}
+	if err := agentWS.Validate(); err == nil {
+		t.Errorf("agent scope=workspace accepted; want rejection in 6.2")
+	}
+}
+
+func TestValidate_AgentContractBindingOptional(t *testing.T) {
+	t.Parallel()
+	// Agent without contract_binding: accepted.
+	unbound := Document{
+		Type:      TypeAgent,
+		Scope:     ScopeProject,
+		Name:      "agent_a",
+		ProjectID: StringPtr("proj_x"),
+	}
+	if err := unbound.Validate(); err != nil {
+		t.Errorf("agent without contract_binding: %v", err)
+	}
+	// Agent with contract_binding: also accepted (optional).
+	bound := Document{
+		Type:            TypeAgent,
+		Scope:           ScopeProject,
+		Name:            "agent_b",
+		ProjectID:       StringPtr("proj_x"),
+		ContractBinding: StringPtr("doc_contract_x"),
+	}
+	if err := bound.Validate(); err != nil {
+		t.Errorf("agent with contract_binding: %v", err)
+	}
+	// Role with contract_binding: rejected (roles do not pin to
+	// contracts — required_role lives on the contract side).
+	roleBound := Document{
+		Type:            TypeRole,
+		Scope:           ScopeProject,
+		Name:            "role_x",
+		ProjectID:       StringPtr("proj_x"),
+		ContractBinding: StringPtr("doc_contract_x"),
+	}
+	if err := roleBound.Validate(); err == nil {
+		t.Errorf("role with contract_binding accepted; want rejection")
 	}
 }
 

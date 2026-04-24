@@ -30,6 +30,8 @@ func (s *Server) registerDocumentWrappers() {
 		document.TypeContract,
 		document.TypeSkill,
 		document.TypeReviewer,
+		document.TypeAgent,
+		document.TypeRole,
 	} {
 		s.registerWrapperFamily(kind)
 	}
