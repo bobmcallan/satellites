@@ -154,6 +154,8 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(deleteTool, s.handleDocumentDelete)
 
+		s.registerDocumentWrappers()
+
 		searchTool := mcpgo.NewTool("document_search",
 			mcpgo.WithDescription("Search documents in the caller's workspaces. Combines structured filters (type/scope/tags/contract_binding/project_id) with a case-insensitive substring match on name + body when query is supplied. Empty query + at least one filter returns an updated_at DESC list. Workspace scoping is enforced at the handler."),
 			mcpgo.WithString("query", mcpgo.Description("Free-text query; case-insensitive substring on name + body.")),
