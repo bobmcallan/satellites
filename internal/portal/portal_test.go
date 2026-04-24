@@ -357,9 +357,9 @@ func TestProjectLedger_RendersNewestFirst(t *testing.T) {
 	proj, _ := projects.Create(ctx, user.ID, "", "alpha", time.Now().UTC())
 
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: "story.created", Actor: "u_alice", Content: "first-event"}, t0)
-	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: "story.status_change", Actor: "u_alice", Content: "second-event"}, t0.Add(time.Hour))
-	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: "document.ingest", Actor: "u_alice", Content: "third-event"}, t0.Add(2*time.Hour))
+	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, CreatedBy: "u_alice", Content: "first-event"}, t0)
+	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, CreatedBy: "u_alice", Content: "second-event"}, t0.Add(time.Hour))
+	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, CreatedBy: "u_alice", Content: "third-event"}, t0.Add(2*time.Hour))
 
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
 	req := httptest.NewRequest(http.MethodGet, "/projects/"+proj.ID+"/ledger", nil)
@@ -371,7 +371,7 @@ func TestProjectLedger_RendersNewestFirst(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"story.created", "story.status_change", "document.ingest", "first-event", "second-event", "third-event", "panel-body"} {
+	for _, want := range []string{"first-event", "second-event", "third-event", "panel-body"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("ledger body missing %q", want)
 		}
@@ -395,7 +395,7 @@ func TestProjectLedger_LimitParamTruncates(t *testing.T) {
 
 	t0 := time.Now().UTC()
 	for i := 0; i < 4; i++ {
-		_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: "t", Content: "entry-" + string(rune('A'+i))}, t0.Add(time.Duration(i)*time.Second))
+		_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, Content: "entry-" + string(rune('A'+i))}, t0.Add(time.Duration(i)*time.Second))
 	}
 
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)

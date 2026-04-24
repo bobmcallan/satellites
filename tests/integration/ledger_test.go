@@ -55,16 +55,16 @@ func TestLedgerSurrealStore_RoundTrip(t *testing.T) {
 	for i, spec := range []struct {
 		pid, etype string
 	}{
-		{"proj_a", "story.status_change"},
-		{"proj_a", "story.status_change"},
-		{"proj_a", "document.ingest"},
-		{"proj_b", "story.status_change"},
+		{"proj_a", ledger.TypeDecision},
+		{"proj_a", ledger.TypeDecision},
+		{"proj_a", ledger.TypeArtifact},
+		{"proj_b", ledger.TypeDecision},
 	} {
 		_, err := store.Append(ctx, ledger.LedgerEntry{
 			ProjectID: spec.pid,
 			Type:      spec.etype,
 			Content:   fmt.Sprintf("row %d", i),
-			Actor:     "u_test",
+			CreatedBy: "u_test",
 		}, t0.Add(time.Duration(i)*time.Second))
 		if err != nil {
 			t.Fatalf("Append[%d]: %v", i, err)
@@ -92,12 +92,12 @@ func TestLedgerSurrealStore_RoundTrip(t *testing.T) {
 	}
 
 	// Type filter.
-	statusOnly, _ := store.List(ctx, "proj_a", ledger.ListOptions{Type: "story.status_change"}, nil)
+	statusOnly, _ := store.List(ctx, "proj_a", ledger.ListOptions{Type: ledger.TypeDecision}, nil)
 	if len(statusOnly) != 2 {
 		t.Errorf("type filter: count = %d, want 2", len(statusOnly))
 	}
 	for _, e := range statusOnly {
-		if e.Type != "story.status_change" {
+		if e.Type != ledger.TypeDecision {
 			t.Errorf("type filter leaked %q", e.Type)
 		}
 	}

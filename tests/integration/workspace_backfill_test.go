@@ -81,9 +81,9 @@ func TestWorkspaceBackfill_AcrossPrimitives(t *testing.T) {
 	}
 	e, err := ledStore.Append(ctx, ledger.LedgerEntry{
 		ProjectID: p.ID,
-		Type:      "test.event",
+		Type:      ledger.TypeDecision,
 		Content:   "legacy",
-		Actor:     "user_alice",
+		CreatedBy: "user_alice",
 	}, now)
 	if err != nil {
 		t.Fatalf("ledger append: %v", err)

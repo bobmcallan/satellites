@@ -203,7 +203,7 @@ func TestMemoryStore_UpdateStatus_EmitsLedger(t *testing.T) {
 		t.Errorf("final status = %q, want done", s.Status)
 	}
 
-	entries, _ := led.List(ctx, "proj_a", ledger.ListOptions{Type: LedgerEntryType}, nil)
+	entries, _ := led.List(ctx, "proj_a", ledger.ListOptions{Type: ledger.TypeDecision}, nil)
 	if len(entries) != 3 {
 		t.Fatalf("ledger rows: got %d, want 3", len(entries))
 	}

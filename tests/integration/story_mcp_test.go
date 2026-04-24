@@ -10,6 +10,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/bobmcallan/satellites/internal/ledger"
 )
 
 // TestStoryMCPRoundTrip drives the full story primitive MCP surface:
@@ -186,14 +188,14 @@ func TestStoryMCPRoundTrip(t *testing.T) {
 		t.Errorf("terminal state should isError on further transition; got %+v", badResult)
 	}
 
-	// Ledger must contain exactly 3 story.status_change rows.
+	// Ledger must contain exactly 3 decision rows tagged kind:story.status_change.
 	ledgerResp := rpcCall(t, ctx, mcpURL, "key_story", map[string]any{
 		"jsonrpc": "2.0", "id": 30, "method": "tools/call",
 		"params": map[string]any{
 			"name": "ledger_list",
 			"arguments": map[string]any{
 				"project_id": projID,
-				"type":       "story.status_change",
+				"type":       ledger.TypeDecision,
 			},
 		},
 	})
@@ -205,8 +207,8 @@ func TestStoryMCPRoundTrip(t *testing.T) {
 		t.Fatalf("status_change rows = %d, want 3; entries=%+v", len(entries), entries)
 	}
 	for _, e := range entries {
-		if actor, _ := e["actor"].(string); actor != "apikey" {
-			t.Errorf("actor = %q, want apikey", actor)
+		if cb, _ := e["created_by"].(string); cb != "apikey" {
+			t.Errorf("created_by = %q, want apikey", cb)
 		}
 		if content, _ := e["content"].(string); !strings.Contains(content, storyID) {
 			t.Errorf("entry content missing story id: %q", content)

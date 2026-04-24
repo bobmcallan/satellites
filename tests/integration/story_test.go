@@ -94,7 +94,7 @@ func TestStorySurrealStore_RoundTrip(t *testing.T) {
 	}
 
 	// Ledger contains exactly 3 rows for this story.
-	entries, _ := led.List(ctx, "proj_a", ledger.ListOptions{Type: story.LedgerEntryType}, nil)
+	entries, _ := led.List(ctx, "proj_a", ledger.ListOptions{Type: ledger.TypeDecision}, nil)
 	if len(entries) != 3 {
 		t.Errorf("ledger rows = %d, want 3", len(entries))
 	}

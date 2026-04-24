@@ -395,7 +395,7 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, ledgerRow{
 				ID:        e.ID,
 				Type:      e.Type,
-				Actor:     e.Actor,
+				Actor:     e.CreatedBy,
 				Content:   e.Content,
 				CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339),
 			})
@@ -565,7 +565,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 	}
 	if p.ledger != nil {
-		entries, err := p.ledger.List(r.Context(), proj.ID, ledger.ListOptions{Type: story.LedgerEntryType, Limit: 50}, memberships)
+		entries, err := p.ledger.List(r.Context(), proj.ID, ledger.ListOptions{Type: ledger.TypeDecision, Limit: 200}, memberships)
 		if err != nil {
 			p.logger.Error().Str("error", err.Error()).Msg("ledger list failed")
 			http.Error(w, "list failed", http.StatusInternalServerError)
@@ -573,6 +573,9 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		rows := make([]historyRow, 0)
 		for _, e := range entries {
+			if !hasTag(e.Tags, "kind:"+story.LedgerEntryType) {
+				continue
+			}
 			var payload struct {
 				StoryID string `json:"story_id"`
 				From    string `json:"from"`
@@ -638,6 +641,15 @@ func (p *Portal) handleWorkspaceSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+func hasTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 func viewRow(p project.Project) projectRow {

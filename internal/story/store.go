@@ -195,9 +195,11 @@ func (m *MemoryStore) UpdateStatus(ctx context.Context, id, newStatus, actor str
 	if _, err := m.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: s.WorkspaceID,
 		ProjectID:   s.ProjectID,
-		Type:        LedgerEntryType,
+		StoryID:     ledger.StringPtr(s.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:" + LedgerEntryType},
 		Content:     string(content),
-		Actor:       actor,
+		CreatedBy:   actor,
 	}, now); err != nil {
 		// Revert the in-memory status change — the ledger emission is
 		// load-bearing (pr_20440c77). Caller sees the original error.

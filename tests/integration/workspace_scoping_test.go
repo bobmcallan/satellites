@@ -84,7 +84,7 @@ func TestWorkspaceScoping_CrossWorkspaceDenial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice story: %v", err)
 	}
-	if _, err := ledStore.Append(ctx, ledger.LedgerEntry{WorkspaceID: wsA.ID, ProjectID: pA.ID, Type: "alice.event", Actor: "user_alice"}, now); err != nil {
+	if _, err := ledStore.Append(ctx, ledger.LedgerEntry{WorkspaceID: wsA.ID, ProjectID: pA.ID, Type: ledger.TypeDecision, CreatedBy: "user_alice"}, now); err != nil {
 		t.Fatalf("alice ledger: %v", err)
 	}
 	if _, err := docStore.Upsert(ctx, document.UpsertInput{

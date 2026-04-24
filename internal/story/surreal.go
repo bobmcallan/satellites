@@ -142,9 +142,11 @@ func (s *SurrealStore) UpdateStatus(ctx context.Context, id, newStatus, actor st
 	if _, err := s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: current.WorkspaceID,
 		ProjectID:   current.ProjectID,
-		Type:        LedgerEntryType,
+		StoryID:     ledger.StringPtr(current.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:" + LedgerEntryType},
 		Content:     string(content),
-		Actor:       actor,
+		CreatedBy:   actor,
 	}, now); err != nil {
 		// Compensating write — revert the status. Any error on the revert
 		// is wrapped alongside the original failure so the caller sees

@@ -853,12 +853,14 @@ func (s *Server) handleLedgerAppend(ctx context.Context, req mcpgo.CallToolReque
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	wsID := s.resolveProjectWorkspaceID(ctx, resolvedID)
+	entryType, tags := classifyLedgerEvent(eventType)
 	e, err := s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: wsID,
 		ProjectID:   resolvedID,
-		Type:        eventType,
+		Type:        entryType,
+		Tags:        tags,
 		Content:     content,
-		Actor:       caller.UserID,
+		CreatedBy:   caller.UserID,
 	}, time.Now().UTC())
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -1129,10 +1131,28 @@ func (s *Server) appendMembershipAudit(ctx context.Context, workspaceID, kind, a
 	_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: workspaceID,
 		ProjectID:   s.defaultProjectID,
-		Type:        "workspace." + kind,
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:workspace." + kind},
 		Content:     string(body),
-		Actor:       actor,
+		CreatedBy:   actor,
 	}, time.Now().UTC())
+}
+
+// classifyLedgerEvent maps a caller-supplied event-type string into the
+// §6 enum. When the caller's value is one of the lifecycle types
+// (plan/action_claim/etc.) it passes through. Otherwise the event is
+// recorded as a generic decision with the original event-type preserved
+// as a `kind:<value>` tag — keeping the §6 enum closed without
+// forcing scripts that emitted v3-style domain events to be rewritten.
+func classifyLedgerEvent(eventType string) (string, []string) {
+	switch eventType {
+	case ledger.TypePlan, ledger.TypeActionClaim, ledger.TypeArtifact,
+		ledger.TypeEvidence, ledger.TypeDecision, ledger.TypeCloseRequest,
+		ledger.TypeVerdict, ledger.TypeWorkflowClaim, ledger.TypeKV:
+		return eventType, nil
+	default:
+		return ledger.TypeDecision, []string{"kind:" + eventType}
+	}
 }
 
 func (s *Server) handleWorkspaceMemberAdd(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

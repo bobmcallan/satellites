@@ -69,12 +69,31 @@ func NewMemoryStore() *MemoryStore {
 
 // Append implements Store for MemoryStore.
 func (m *MemoryStore) Append(ctx context.Context, entry LedgerEntry, now time.Time) (LedgerEntry, error) {
+	applyDefaults(&entry)
+	if err := entry.Validate(); err != nil {
+		return LedgerEntry{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry.ID = NewID()
 	entry.CreatedAt = now
 	m.rows = append(m.rows, entry)
 	return entry, nil
+}
+
+// applyDefaults stamps the v4 enum fields that callers may leave empty.
+// The default shape (Durability=durable, SourceType=agent, Status=active)
+// matches the most common write — agents emitting durable evidence.
+func applyDefaults(entry *LedgerEntry) {
+	if entry.Durability == "" {
+		entry.Durability = DurabilityDurable
+	}
+	if entry.SourceType == "" {
+		entry.SourceType = SourceAgent
+	}
+	if entry.Status == "" {
+		entry.Status = StatusActive
+	}
 }
 
 // List implements Store for MemoryStore.

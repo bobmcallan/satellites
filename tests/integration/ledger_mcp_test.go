@@ -9,6 +9,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/bobmcallan/satellites/internal/ledger"
 )
 
 // TestLedgerMCPRoundTrip exercises ledger_append + ledger_list over the
@@ -108,9 +110,9 @@ func TestLedgerMCPRoundTrip(t *testing.T) {
 	// calls ensures created_at differs enough for the DESC ORDER BY to be
 	// deterministic across SurrealDB's time-precision floor.
 	for i, spec := range []struct{ etype, content string }{
-		{"story.status_change", "one"},
-		{"story.status_change", "two"},
-		{"document.ingest", "three"},
+		{ledger.TypeDecision, "one"},
+		{ledger.TypeDecision, "two"},
+		{ledger.TypeArtifact, "three"},
 	} {
 		if i > 0 {
 			time.Sleep(1100 * time.Millisecond)
@@ -133,8 +135,8 @@ func TestLedgerMCPRoundTrip(t *testing.T) {
 		if id, _ := entry["id"].(string); id == "" {
 			t.Errorf("ledger_append[%d]: empty id", i)
 		}
-		if actor, _ := entry["actor"].(string); actor != "apikey" {
-			t.Errorf("ledger_append[%d]: actor = %q, want apikey", i, actor)
+		if cb, _ := entry["created_by"].(string); cb != "apikey" {
+			t.Errorf("ledger_append[%d]: created_by = %q, want apikey", i, cb)
 		}
 	}
 
@@ -167,7 +169,7 @@ func TestLedgerMCPRoundTrip(t *testing.T) {
 			"name": "ledger_list",
 			"arguments": map[string]any{
 				"project_id": projID,
-				"type":       "story.status_change",
+				"type":       ledger.TypeDecision,
 			},
 		},
 	})
@@ -179,7 +181,7 @@ func TestLedgerMCPRoundTrip(t *testing.T) {
 		t.Errorf("type filter: count = %d, want 2", len(filtered))
 	}
 	for _, e := range filtered {
-		if tt, _ := e["type"].(string); tt != "story.status_change" {
+		if tt, _ := e["type"].(string); tt != ledger.TypeDecision {
 			t.Errorf("filter leaked %q", tt)
 		}
 	}

@@ -134,6 +134,14 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("document seed failed")
 		}
 
+		if surrealLedger, ok := ledgerStore.(*ledger.SurrealStore); ok {
+			if n, err := surrealLedger.MigrateLegacyRows(ctx, time.Now().UTC()); err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("ledger migrate legacy rows failed")
+			} else if n > 0 {
+				logger.Info().Int("rows", n).Msg("ledger legacy rows migrated to v4 schema")
+			}
+		}
+
 		// Backfill workspace_id across primitives. Idempotent on every
 		// boot — second invocation finds no rows with empty workspace_id.
 		if _, err := workspace.BackfillPrimitives(ctx, wsStore, projStore, storyStore, ledgerStore, docStore, logger, time.Now().UTC()); err != nil {
