@@ -172,7 +172,7 @@ func TestProjectMCPRoundTrip(t *testing.T) {
 		"jsonrpc": "2.0", "id": 6, "method": "tools/call",
 		"params": map[string]any{
 			"name":      "document_get",
-			"arguments": map[string]any{"filename": "architecture.md", "project_id": projID},
+			"arguments": map[string]any{"name": "architecture.md", "project_id": projID},
 		},
 	})
 	var doc map[string]any
@@ -189,7 +189,7 @@ func TestProjectMCPRoundTrip(t *testing.T) {
 		"jsonrpc": "2.0", "id": 7, "method": "tools/call",
 		"params": map[string]any{
 			"name":      "document_get",
-			"arguments": map[string]any{"filename": "architecture.md", "project_id": "proj_doesnotexist"},
+			"arguments": map[string]any{"name": "architecture.md", "project_id": "proj_doesnotexist"},
 		},
 	})
 	bogusResult, _ := bogus["result"].(map[string]any)
