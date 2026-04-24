@@ -95,16 +95,64 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(ingestTool, s.handleDocumentIngestFile)
 
 		getTool := mcpgo.NewTool("document_get",
-			mcpgo.WithDescription("Return the stored document body by (project_id, name)."),
+			mcpgo.WithDescription("Return a stored document by id (preferred) or by (project_id, name). When both are supplied, id wins."),
+			mcpgo.WithString("id",
+				mcpgo.Description("Document id (doc_<8hex>). When supplied, name + project_id are ignored."),
+			),
 			mcpgo.WithString("name",
-				mcpgo.Required(),
-				mcpgo.Description("Document name (e.g. architecture.md)."),
+				mcpgo.Description("Document name. Used only when id is omitted."),
 			),
 			mcpgo.WithString("project_id",
-				mcpgo.Description("Optional project scope. Defaults to caller's first owned project or the system default."),
+				mcpgo.Description("Optional project scope for name-keyed lookups. Defaults to caller's first owned project or the system default."),
 			),
 		)
 		s.mcp.AddTool(getTool, s.handleDocumentGet)
+
+		createTool := mcpgo.NewTool("document_create",
+			mcpgo.WithDescription("Create a new document. Workspace is resolved from the caller; project_id is required when scope=project and forbidden when scope=system."),
+			mcpgo.WithString("type", mcpgo.Required(), mcpgo.Description("artifact | contract | skill | principle | reviewer")),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("system | project")),
+			mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Document name.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Project scope. Required when scope=project; rejected when scope=system.")),
+			mcpgo.WithString("body", mcpgo.Description("Markdown body.")),
+			mcpgo.WithString("structured", mcpgo.Description("Type-specific JSON payload (raw JSON string).")),
+			mcpgo.WithString("contract_binding", mcpgo.Description("Document id of an active type=contract row. Required for type=skill or type=reviewer; forbidden otherwise.")),
+			mcpgo.WithArray("tags", mcpgo.Description("Free-form tags."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithString("status", mcpgo.Description("active (default) | archived")),
+		)
+		s.mcp.AddTool(createTool, s.handleDocumentCreate)
+
+		updateTool := mcpgo.NewTool("document_update",
+			mcpgo.WithDescription("Patch the mutable fields of a document. Immutable fields (id, workspace_id, project_id, type, scope, name) are rejected."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Document id (doc_<8hex>).")),
+			mcpgo.WithString("body", mcpgo.Description("Markdown body.")),
+			mcpgo.WithString("structured", mcpgo.Description("Type-specific JSON payload (raw JSON string).")),
+			mcpgo.WithArray("tags", mcpgo.Description("Replace the tag set."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithString("status", mcpgo.Description("active | archived")),
+			mcpgo.WithString("contract_binding", mcpgo.Description("Document id of an active type=contract row.")),
+		)
+		s.mcp.AddTool(updateTool, s.handleDocumentUpdate)
+
+		listTool := mcpgo.NewTool("document_list",
+			mcpgo.WithDescription("List documents in the caller's workspaces, filtered by type/scope/tags/contract_binding/project_id. Workspace scoping is enforced at the handler."),
+			mcpgo.WithString("type", mcpgo.Description("Filter by type.")),
+			mcpgo.WithString("scope", mcpgo.Description("Filter by scope.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Filter by project. Defaults to all visible projects.")),
+			mcpgo.WithString("contract_binding", mcpgo.Description("Filter by contract_binding (skill/reviewer rows bound to a contract id).")),
+			mcpgo.WithArray("tags", mcpgo.Description("Filter by tags (any-of)."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return (server caps at 500).")),
+		)
+		s.mcp.AddTool(listTool, s.handleDocumentList)
+
+		deleteTool := mcpgo.NewTool("document_delete",
+			mcpgo.WithDescription("Archive (default) or hard-delete a document."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Document id.")),
+			mcpgo.WithString("mode", mcpgo.Description("archive (default) | hard")),
+		)
+		s.mcp.AddTool(deleteTool, s.handleDocumentDelete)
 	}
 
 	if s.projects != nil {
@@ -440,12 +488,27 @@ func (s *Server) handleDocumentIngestFile(ctx context.Context, req mcpgo.CallToo
 func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	id := req.GetString("id", "")
+	if id != "" {
+		doc, err := s.docs.GetByID(ctx, id, memberships)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		body, _ := json.Marshal(doc)
+		s.logger.Info().
+			Str("method", "tools/call").
+			Str("tool", "document_get").
+			Str("id", id).
+			Int64("duration_ms", time.Since(start).Milliseconds()).
+			Msg("mcp tool call")
+		return mcpgo.NewToolResultText(string(body)), nil
+	}
 	name, err := req.RequireString("name")
 	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+		return mcpgo.NewToolResultError("either id or name is required"), nil
 	}
 	projectID := req.GetString("project_id", "")
-	memberships := s.resolveCallerMemberships(ctx, caller)
 	resolvedID, err := s.resolveProjectID(ctx, projectID, caller, memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -460,6 +523,197 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 		Str("tool", "document_get").
 		Str("project_id", resolvedID).
 		Str("name", name).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// immutableUpdateFields are the document keys that document_update must
+// reject if the caller supplies them. The Store interface's UpdateFields
+// only carries the mutable subset, so the only place to enforce this is
+// the handler.
+var immutableUpdateFields = []string{"workspace_id", "project_id", "type", "scope", "name", "id"}
+
+func (s *Server) handleDocumentCreate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	if caller.UserID == "" {
+		return mcpgo.NewToolResultError("no caller identity"), nil
+	}
+	docType, err := req.RequireString("type")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	scope, err := req.RequireString("scope")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	wsID := s.resolveCallerWorkspaceID(ctx, caller)
+	requestedProject := req.GetString("project_id", "")
+
+	doc := document.Document{
+		WorkspaceID: wsID,
+		Type:        docType,
+		Scope:       scope,
+		Name:        name,
+		Body:        req.GetString("body", ""),
+		Tags:        req.GetStringSlice("tags", nil),
+		Status:      req.GetString("status", document.StatusActive),
+		CreatedBy:   caller.UserID,
+		UpdatedBy:   caller.UserID,
+	}
+
+	switch scope {
+	case document.ScopeProject:
+		resolvedID, err := s.resolveProjectID(ctx, requestedProject, caller, memberships)
+		if err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		doc.ProjectID = document.StringPtr(resolvedID)
+		if cascade := s.resolveProjectWorkspaceID(ctx, resolvedID); cascade != "" {
+			doc.WorkspaceID = cascade
+		}
+	case document.ScopeSystem:
+		if requestedProject != "" {
+			return mcpgo.NewToolResultError("scope=system does not accept project_id"), nil
+		}
+	}
+	if binding := req.GetString("contract_binding", ""); binding != "" {
+		doc.ContractBinding = document.StringPtr(binding)
+	}
+	if structured := req.GetString("structured", ""); structured != "" {
+		if !json.Valid([]byte(structured)) {
+			return mcpgo.NewToolResultError("structured must be valid JSON"), nil
+		}
+		doc.Structured = []byte(structured)
+	}
+
+	created, err := s.docs.Create(ctx, doc, time.Now().UTC())
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(created)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "document_create").
+		Str("doc_id", created.ID).
+		Str("type", created.Type).
+		Str("scope", created.Scope).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleDocumentUpdate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	args := req.GetArguments()
+	for _, k := range immutableUpdateFields {
+		if k == "id" {
+			continue
+		}
+		if _, ok := args[k]; ok {
+			return mcpgo.NewToolResultError("immutable field rejected: " + k), nil
+		}
+	}
+	fields := document.UpdateFields{}
+	if v, ok := args["body"]; ok {
+		s, _ := v.(string)
+		fields.Body = &s
+	}
+	if v, ok := args["structured"]; ok {
+		s, _ := v.(string)
+		if s != "" && !json.Valid([]byte(s)) {
+			return mcpgo.NewToolResultError("structured must be valid JSON"), nil
+		}
+		buf := []byte(s)
+		fields.Structured = &buf
+	}
+	if _, ok := args["tags"]; ok {
+		tags := req.GetStringSlice("tags", nil)
+		fields.Tags = &tags
+	}
+	if v, ok := args["status"]; ok {
+		s, _ := v.(string)
+		fields.Status = &s
+	}
+	if v, ok := args["contract_binding"]; ok {
+		s, _ := v.(string)
+		fields.ContractBinding = &s
+	}
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	updated, err := s.docs.Update(ctx, id, fields, caller.UserID, time.Now().UTC(), memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(updated)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "document_update").
+		Str("doc_id", id).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleDocumentList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	opts := document.ListOptions{
+		Type:            req.GetString("type", ""),
+		Scope:           req.GetString("scope", ""),
+		ContractBinding: req.GetString("contract_binding", ""),
+		ProjectID:       req.GetString("project_id", ""),
+		Tags:            req.GetStringSlice("tags", nil),
+		Limit:           int(req.GetFloat("limit", 0)),
+	}
+	if opts.Limit > 500 {
+		opts.Limit = 500
+	}
+	rows, err := s.docs.List(ctx, opts, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(rows)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "document_list").
+		Str("type", opts.Type).
+		Str("scope", opts.Scope).
+		Int("count", len(rows)).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleDocumentDelete(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	mode := document.DeleteMode(req.GetString("mode", string(document.DeleteArchive)))
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	if err := s.docs.Delete(ctx, id, mode, memberships); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(map[string]any{"id": id, "mode": string(mode), "deleted": true})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "document_delete").
+		Str("doc_id", id).
+		Str("mode", string(mode)).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
