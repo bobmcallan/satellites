@@ -12,7 +12,9 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/story"
 )
 
@@ -158,8 +160,32 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 		}
 	}
 
-	if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusPassed, caller.UserID, now, memberships); err != nil {
+	// Reviewer branch — consult the contract document's
+	// validation_mode. On needs_more the close is rejected; on
+	// accepted/rejected the CI is transitioned accordingly.
+	verdictOutcome, verdictRowID, llmUsageRowID, err := s.runReviewer(ctx, ci, evidenceMarkdown, evidenceIDs, caller.UserID, now, memberships)
+	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	switch verdictOutcome {
+	case reviewer.VerdictNeedsMore:
+		// CI stays claimed; structured error names the unresolved
+		// review questions so the agent can call story_contract_respond
+		// + re-close.
+		body, _ := json.Marshal(map[string]any{
+			"error":             "needs_more",
+			"verdict_ledger_id": verdictRowID,
+			"message":           "reviewer needs more; call story_contract_respond then re-invoke close",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	case reviewer.VerdictRejected:
+		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusFailed, caller.UserID, now, memberships); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	default: // accepted | skip (no-verdict path for mode=agent)
+		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusPassed, caller.UserID, now, memberships); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
 	}
 
 	// Preplan workflow-claim — written after the CI close so the claim
@@ -201,15 +227,22 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 		storyStatus = s.walkStoryToDone(ctx, ci.StoryID, caller.UserID, now, memberships)
 	}
 
+	finalStatus := contract.StatusPassed
+	if verdictOutcome == reviewer.VerdictRejected {
+		finalStatus = contract.StatusFailed
+	}
 	body, _ := json.Marshal(map[string]any{
 		"contract_instance_id":     ci.ID,
 		"story_id":                 ci.StoryID,
-		"status":                   contract.StatusPassed,
+		"status":                   finalStatus,
 		"close_ledger_id":          closeRow.ID,
 		"evidence_ledger_id":       evidenceRowID,
 		"plan_ledger_id":           planRowID,
 		"workflow_claim_ledger_id": workflowClaimID,
 		"story_status":             storyStatus,
+		"verdict_ledger_id":        verdictRowID,
+		"llm_usage_ledger_id":      llmUsageRowID,
+		"verdict":                  verdictOutcome,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
@@ -468,6 +501,201 @@ func (s *Server) findLatestReviewQuestion(ctx context.Context, ci contract.Contr
 		}
 	}
 	return ""
+}
+
+// runReviewer dispatches on the CI's contract document's
+// validation_mode and writes the verdict + (for llm mode) llm-usage
+// rows. Returns the verdict outcome string, the verdict row id, the
+// llm-usage row id, and any error. A verdict outcome of "" means "no
+// reviewer ran" (agent mode or the contract doc is unreadable) and
+// the caller treats that as an accepted-equivalent.
+func (s *Server) runReviewer(
+	ctx context.Context,
+	ci contract.ContractInstance,
+	evidenceMarkdown string,
+	evidenceLedgerIDs []string,
+	actor string,
+	now time.Time,
+	memberships []string,
+) (string, string, string, error) {
+	contractDoc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
+	if err != nil {
+		// Can't read the contract doc → treat as agent mode (no
+		// verdict row). The outer close path still writes evidence +
+		// close-request; this just skips reviewer invocation.
+		return "", "", "", nil
+	}
+	mode, checks := parseContractStructured(contractDoc.Structured)
+	switch mode {
+	case reviewer.ModeCheckBased:
+		input := s.gatherChecksInput(ctx, ci, memberships)
+		verdict, outcomes := reviewer.RunChecks(checks, input)
+		rowID, err := s.writeVerdictRow(ctx, ci, verdict, actor, now, map[string]any{
+			"mode":     reviewer.ModeCheckBased,
+			"outcomes": outcomes,
+		})
+		return verdict.Outcome, rowID, "", err
+	case reviewer.ModeLLM:
+		req := reviewer.Request{
+			ContractID:       contractDoc.ID,
+			ContractName:     contractDoc.Name,
+			AgentInstruction: contractDoc.Body,
+			ReviewerRubric:   s.lookupReviewerRubric(ctx, ci.ContractID, memberships),
+			EvidenceMarkdown: evidenceMarkdown,
+			EvidenceRefs:     evidenceLedgerIDs,
+		}
+		verdict, usage, err := s.reviewer.Review(ctx, req)
+		if err != nil {
+			return "", "", "", fmt.Errorf("reviewer: %w", err)
+		}
+		var usageRowID string
+		usageRowID, _ = s.writeLLMUsageRow(ctx, ci, usage, actor, now)
+		rowID, err := s.writeVerdictRow(ctx, ci, verdict, actor, now, map[string]any{
+			"mode":             reviewer.ModeLLM,
+			"principles_cited": verdict.PrinciplesCited,
+			"review_questions": verdict.ReviewQuestions,
+			"model":            usage.Model,
+			"cost_usd":         usage.CostUSD,
+		})
+		if err != nil {
+			return "", "", "", err
+		}
+		// On needs_more write one kind:review-question row per item so
+		// story_contract_respond can target them.
+		if verdict.Outcome == reviewer.VerdictNeedsMore {
+			for _, q := range verdict.ReviewQuestions {
+				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+					WorkspaceID: ci.WorkspaceID,
+					ProjectID:   ci.ProjectID,
+					StoryID:     ledger.StringPtr(ci.StoryID),
+					ContractID:  ledger.StringPtr(ci.ID),
+					Type:        ledger.TypeDecision,
+					Tags:        []string{"kind:review-question", "phase:" + ci.ContractName},
+					Content:     q,
+					CreatedBy:   actor,
+				}, now)
+			}
+		}
+		return verdict.Outcome, rowID, usageRowID, nil
+	default:
+		// agent mode (or missing). No verdict row; caller proceeds as
+		// accepted.
+		return "", "", "", nil
+	}
+}
+
+// parseContractStructured reads validation_mode + checks from a
+// contract document's structured field. Tolerant of unknown JSON —
+// returns "" when structured is empty or malformed.
+func parseContractStructured(raw []byte) (string, []reviewer.Check) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var payload struct {
+		ValidationMode string           `json:"validation_mode"`
+		Checks         []reviewer.Check `json:"checks"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", nil
+	}
+	return payload.ValidationMode, payload.Checks
+}
+
+// gatherChecksInput collects the artifact names already present on
+// the CI's ledger. Used by the check-based runner's artifact_exists
+// check.
+func (s *Server) gatherChecksInput(ctx context.Context, ci contract.ContractInstance, memberships []string) reviewer.ChecksInput {
+	input := reviewer.ChecksInput{Artifacts: map[string]bool{}}
+	rows, err := s.ledger.List(ctx, ci.ProjectID, ledger.ListOptions{
+		Type: ledger.TypeArtifact,
+	}, memberships)
+	if err != nil {
+		return input
+	}
+	for _, r := range rows {
+		if r.ContractID == nil || *r.ContractID != ci.ID {
+			continue
+		}
+		for _, tag := range r.Tags {
+			const prefix = "artifact:"
+			if len(tag) > len(prefix) && tag[:len(prefix)] == prefix {
+				input.Artifacts[tag[len(prefix):]] = true
+			}
+		}
+	}
+	return input
+}
+
+// writeVerdictRow appends a kind:verdict ledger row carrying the
+// reviewer's outcome + rationale + structured metadata.
+func (s *Server) writeVerdictRow(ctx context.Context, ci contract.ContractInstance, v reviewer.Verdict, actor string, now time.Time, extra map[string]any) (string, error) {
+	payload := map[string]any{
+		"verdict":   v.Outcome,
+		"rationale": v.Rationale,
+	}
+	for k, val := range extra {
+		payload[k] = val
+	}
+	structured, _ := json.Marshal(payload)
+	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: ci.WorkspaceID,
+		ProjectID:   ci.ProjectID,
+		StoryID:     ledger.StringPtr(ci.StoryID),
+		ContractID:  ledger.StringPtr(ci.ID),
+		Type:        ledger.TypeVerdict,
+		Tags:        []string{"kind:verdict", "phase:" + ci.ContractName},
+		Content:     v.Rationale,
+		Structured:  structured,
+		CreatedBy:   actor,
+	}, now)
+	if err != nil {
+		return "", err
+	}
+	return row.ID, nil
+}
+
+// writeLLMUsageRow appends a kind:llm-usage decision row consumed by
+// the CostRollup derivation from slice 7.3. Skipped when usage is
+// zero (no tokens claimed).
+func (s *Server) writeLLMUsageRow(ctx context.Context, ci contract.ContractInstance, usage reviewer.UsageCost, actor string, now time.Time) (string, error) {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CostUSD == 0 {
+		return "", nil
+	}
+	structured, _ := json.Marshal(map[string]any{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"cost_usd":      usage.CostUSD,
+		"model":         usage.Model,
+	})
+	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: ci.WorkspaceID,
+		ProjectID:   ci.ProjectID,
+		StoryID:     ledger.StringPtr(ci.StoryID),
+		ContractID:  ledger.StringPtr(ci.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:llm-usage", "phase:" + ci.ContractName},
+		Content:     "reviewer llm usage",
+		Structured:  structured,
+		CreatedBy:   actor,
+	}, now)
+	if err != nil {
+		return "", err
+	}
+	return row.ID, nil
+}
+
+// lookupReviewerRubric returns the body of the first active
+// document{type=reviewer, contract_binding=contractID} visible in
+// memberships. Empty when none exists.
+func (s *Server) lookupReviewerRubric(ctx context.Context, contractID string, memberships []string) string {
+	rows, err := s.docs.List(ctx, document.ListOptions{
+		Type:            document.TypeReviewer,
+		ContractBinding: contractID,
+	}, memberships)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	return rows[0].Body
 }
 
 // ensureCloseHandlersCompile references the error + fmt packages to

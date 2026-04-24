@@ -20,6 +20,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -42,6 +43,7 @@ type Server struct {
 	workspaces       workspace.Store
 	contracts        contract.Store
 	sessions         session.Store
+	reviewer         reviewer.Reviewer
 }
 
 // Deps bundles the optional per-tool dependencies passed through to
@@ -56,6 +58,7 @@ type Deps struct {
 	WorkspaceStore   workspace.Store
 	ContractStore    contract.Store
 	SessionStore     session.Store
+	Reviewer         reviewer.Reviewer
 }
 
 // New constructs the MCP server with the satellites_info tool registered.
@@ -75,6 +78,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		workspaces:       deps.WorkspaceStore,
 		contracts:        deps.ContractStore,
 		sessions:         deps.SessionStore,
+		reviewer:         deps.Reviewer,
+	}
+	if s.reviewer == nil {
+		s.reviewer = reviewer.AcceptAll{}
 	}
 
 	s.mcp = mcpserver.NewMCPServer(
