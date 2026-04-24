@@ -194,6 +194,7 @@ func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest)
 	}
 	caller, _ := UserFrom(ctx)
 	memberships := s.resolveCallerMemberships(ctx, caller)
+	args := req.GetArguments()
 	id, err := req.RequireString("id")
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -201,6 +202,24 @@ func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest)
 	outcome, err := req.RequireString("outcome")
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	// Stale-claim rejection: when the caller supplies worker_id, verify
+	// the task's current ClaimedBy matches. A mismatch means the task
+	// was reclaimed by the watchdog (and possibly re-picked by another
+	// worker) between claim and close. Story_b4513c8c.
+	workerID := getString(args, "worker_id")
+	if workerID != "" {
+		existing, err := s.tasks.GetByID(ctx, id, memberships)
+		if err == nil && existing.ClaimedBy != "" && existing.ClaimedBy != workerID {
+			body, _ := json.Marshal(map[string]any{
+				"error":           "stale_claim",
+				"task_id":         id,
+				"current_claimer": existing.ClaimedBy,
+				"caller":          workerID,
+				"reclaim_count":   existing.ReclaimCount,
+			})
+			return mcpgo.NewToolResultError(string(body)), nil
+		}
 	}
 	now := time.Now().UTC()
 	closed, err := s.tasks.Close(ctx, id, outcome, now, memberships)

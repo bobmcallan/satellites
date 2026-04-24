@@ -539,9 +539,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(claimTaskTool, s.handleTaskClaim)
 
 		closeTaskTool := mcpgo.NewTool("task_close",
-			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off)."),
+			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off). When worker_id is supplied and does not match the task's current ClaimedBy, the close is rejected with stale_claim (story_b4513c8c)."),
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Task id.")),
 			mcpgo.WithString("outcome", mcpgo.Required(), mcpgo.Description("success | failure | timeout")),
+			mcpgo.WithString("worker_id", mcpgo.Description("Optional worker id; when supplied, the handler rejects the close if the task has been reclaimed to a different worker since claim time.")),
 		)
 		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
 	}

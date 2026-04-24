@@ -177,6 +177,43 @@ func TestTaskList_FiltersByStatus(t *testing.T) {
 	}
 }
 
+func TestTaskClose_StaleClaim_Rejected(t *testing.T) {
+	t.Parallel()
+	s := taskTestServer(t)
+	enq := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
+		"origin":       task.OriginScheduled,
+		"workspace_id": "wksp_a",
+	})
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(enq.Content[0].(mcpgo.TextContent).Text), &out))
+	taskID := out["task_id"].(string)
+
+	// worker_a claims.
+	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
+		"worker_id":    "worker_a",
+		"workspace_id": "wksp_a",
+	})
+	// Simulate watchdog reclaim: flip status back to enqueued.
+	now := time.Now().UTC()
+	_, err := s.tasks.Reclaim(context.Background(), taskID, "expired", now, nil)
+	require.NoError(t, err)
+	// worker_b picks it up.
+	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
+		"worker_id":    "worker_b",
+		"workspace_id": "wksp_a",
+	})
+
+	// worker_a's close now supplies worker_id and gets rejected.
+	res := callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
+		"id":        taskID,
+		"outcome":   task.OutcomeSuccess,
+		"worker_id": "worker_a",
+	})
+	assert.True(t, res.IsError, "stale close should be rejected")
+	text := res.Content[0].(mcpgo.TextContent).Text
+	assert.Contains(t, text, "stale_claim")
+}
+
 // TestTaskClose_LedgerRowWritten verifies the handler writes the
 // kind:task-closed ledger row per AC 5.
 func TestTaskClose_LedgerRowWritten(t *testing.T) {

@@ -102,6 +102,7 @@ type Task struct {
 	Outcome          string        `json:"outcome,omitempty"`
 	LedgerRootID     string        `json:"ledger_root_id,omitempty"`
 	ExpectedDuration time.Duration `json:"expected_duration,omitempty"`
+	ReclaimCount     int           `json:"reclaim_count,omitempty"`
 	CreatedAt        time.Time     `json:"created_at"`
 }
 

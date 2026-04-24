@@ -28,7 +28,7 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	return s
 }
 
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, created_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
 
 // Enqueue implements Store for SurrealStore.
 func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task, error) {
@@ -220,10 +220,49 @@ func (s *SurrealStore) Reclaim(ctx context.Context, id, reason string, now time.
 	t.Status = StatusEnqueued
 	t.ClaimedBy = ""
 	t.ClaimedAt = nil
+	t.ReclaimCount++
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
 	return t, nil
+}
+
+// ListExpiring implements Store for SurrealStore.
+func (s *SurrealStore) ListExpiring(ctx context.Context, now time.Time, multiplier float64, memberships []string) ([]Task, error) {
+	// Fetch all claimed/in_flight tasks in the caller's workspaces and
+	// filter in-process. Simpler than encoding the expected_duration *
+	// multiplier comparison in SurrealDB SQL; the in-flight set is
+	// bounded by worker concurrency per workspace, so the linear scan
+	// cost is acceptable.
+	if memberships != nil && len(memberships) == 0 {
+		return []Task{}, nil
+	}
+	conds := []string{"status IN [$claimed, $in_flight]"}
+	vars := map[string]any{"claimed": StatusClaimed, "in_flight": StatusInFlight}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	sql := fmt.Sprintf("SELECT %s FROM tasks WHERE %s", selectCols, strings.Join(conds, " AND "))
+	results, err := surrealdb.Query[[]Task](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("task: list expiring: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Task{}, nil
+	}
+	out := make([]Task, 0)
+	for _, t := range (*results)[0].Result {
+		if t.ExpectedDuration <= 0 || t.ClaimedAt == nil {
+			continue
+		}
+		budget := time.Duration(float64(t.ExpectedDuration) * multiplier)
+		if now.Sub(*t.ClaimedAt) <= budget {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func (s *SurrealStore) write(ctx context.Context, t Task) error {

@@ -63,8 +63,17 @@ type Store interface {
 
 	// Reclaim transitions a claimed task back to Status=enqueued
 	// (typically after watchdog expiry). Outcome=timeout is the
-	// convention but not enforced at this layer.
+	// convention but not enforced at this layer. Increments
+	// Task.ReclaimCount so a subsequent stale task_close from the
+	// original claimer can be detected and rejected.
 	Reclaim(ctx context.Context, id, reason string, now time.Time, memberships []string) (Task, error)
+
+	// ListExpiring returns tasks whose Status is claimed or in_flight
+	// AND (now - ClaimedAt) exceeds `threshold * ExpectedDuration`. Used
+	// by the dispatcher watchdog. When ExpectedDuration is zero, the
+	// row is skipped (no expiry budget to compute against).
+	// Story_b4513c8c.
+	ListExpiring(ctx context.Context, now time.Time, multiplier float64, memberships []string) ([]Task, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -225,8 +234,33 @@ func (m *MemoryStore) Reclaim(ctx context.Context, id, reason string, now time.T
 	t.Status = StatusEnqueued
 	t.ClaimedBy = ""
 	t.ClaimedAt = nil
+	t.ReclaimCount++
 	m.rows[id] = t
 	return t, nil
+}
+
+// ListExpiring implements Store for MemoryStore.
+func (m *MemoryStore) ListExpiring(ctx context.Context, now time.Time, multiplier float64, memberships []string) ([]Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Task, 0)
+	for _, t := range m.rows {
+		if t.Status != StatusClaimed && t.Status != StatusInFlight {
+			continue
+		}
+		if !workspaceVisible(t.WorkspaceID, memberships) {
+			continue
+		}
+		if t.ExpectedDuration <= 0 || t.ClaimedAt == nil {
+			continue
+		}
+		budget := time.Duration(float64(t.ExpectedDuration) * multiplier)
+		if now.Sub(*t.ClaimedAt) <= budget {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 // sortByPriorityThenCreated orders tasks by priority rank (critical

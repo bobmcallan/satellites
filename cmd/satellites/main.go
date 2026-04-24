@@ -18,6 +18,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/dispatcher"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/httpserver"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -224,6 +225,18 @@ func main() {
 		Logger:   logger,
 	})
 	srv.Mount("/mcp", mcpAuth(mcp))
+
+	// Dispatch watchdog: scans for expired claims and reclaims them
+	// into the queue. Story_b4513c8c. Runs only when the task store is
+	// wired (DB_DSN present).
+	if taskStore != nil {
+		disp := dispatcher.New(taskStore, ledgerStore, logger, dispatcher.Options{})
+		if err := disp.Start(ctx); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("dispatcher watchdog start failed")
+		} else {
+			defer disp.Stop()
+		}
+	}
 
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error().Str("error", err.Error()).Msg("server terminated with error")
