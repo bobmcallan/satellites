@@ -16,10 +16,10 @@ import (
 // resolves outside of docsDir (path-traversal attack protection).
 var ErrPathEscapes = errors.New("document: path escapes docs directory")
 
-// IngestFile reads docsDir/relPath and upserts a document keyed on
-// (projectID, filename). Returns the resulting document and whether content
-// changed (version bumped). Arbor logs one line per ingest carrying
-// workspace_id + project_id + filename + version + bytes.
+// IngestFile reads docsDir/relPath and upserts a project-scoped artifact
+// keyed on (project_id, name). Returns the resulting document and whether
+// content changed (version bumped). Arbor logs one line per ingest carrying
+// workspace_id + project_id + name + version + bytes.
 //
 // relPath is rejected with ErrPathEscapes if it resolves outside docsDir
 // (absolute paths or `..` traversal).
@@ -32,9 +32,16 @@ func IngestFile(ctx context.Context, store Store, logger arbor.ILogger, workspac
 	if err != nil {
 		return UpsertResult{}, fmt.Errorf("document: read %q: %w", abs, err)
 	}
-	filename := filepath.Base(abs)
-	docType := InferType(filename)
-	res, err := store.Upsert(ctx, workspaceID, projectID, filename, docType, body, now)
+	name := filepath.Base(abs)
+	res, err := store.Upsert(ctx, UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   StringPtr(projectID),
+		Type:        TypeArtifact,
+		Name:        name,
+		Body:        body,
+		Scope:       ScopeProject,
+		Actor:       "system",
+	}, now)
 	if err != nil {
 		return UpsertResult{}, err
 	}
@@ -42,8 +49,8 @@ func IngestFile(ctx context.Context, store Store, logger arbor.ILogger, workspac
 		Str("event", "document-ingest").
 		Str("workspace_id", workspaceID).
 		Str("project_id", projectID).
-		Str("filename", filename).
-		Str("type", docType).
+		Str("name", name).
+		Str("type", TypeArtifact).
 		Int("version", res.Document.Version).
 		Int("bytes", len(body)).
 		Bool("changed", res.Changed).

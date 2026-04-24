@@ -88,7 +88,14 @@ func TestWorkspaceBackfill_AcrossPrimitives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ledger append: %v", err)
 	}
-	d, err := docStore.Upsert(ctx, "", p.ID, "x.md", "architecture", []byte("legacy doc"), now)
+	d, err := docStore.Upsert(ctx, document.UpsertInput{
+		ProjectID: document.StringPtr(p.ID),
+		Type:      document.TypeArtifact,
+		Name:      "x.md",
+		Body:      []byte("legacy doc"),
+		Scope:     document.ScopeProject,
+		Actor:     "test",
+	}, now)
 	if err != nil {
 		t.Fatalf("document upsert: %v", err)
 	}
@@ -157,7 +164,7 @@ func TestWorkspaceBackfill_AcrossPrimitives(t *testing.T) {
 	if len(entries) == 0 || entries[0].WorkspaceID != wsID {
 		t.Errorf("ledger workspace_id = %+v, want %q", entries, wsID)
 	}
-	docGot, err := docStore.GetByFilename(ctx, p.ID, "x.md", nil)
+	docGot, err := docStore.GetByName(ctx, p.ID, "x.md", nil)
 	if err != nil {
 		t.Fatalf("document get: %v", err)
 	}

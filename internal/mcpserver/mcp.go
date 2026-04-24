@@ -83,7 +83,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.docs != nil {
 		ingestTool := mcpgo.NewTool("document_ingest_file",
-			mcpgo.WithDescription("Ingest a file from the server's DOCS_DIR into the document store. Path is repo-relative; server reads the file and upserts by (project_id, filename). If project_id is omitted, defaults to the caller's first owned project or the system default."),
+			mcpgo.WithDescription("Ingest a file from the server's DOCS_DIR into the document store. Path is repo-relative; server reads the file and upserts by (project_id, name). If project_id is omitted, defaults to the caller's first owned project or the system default."),
 			mcpgo.WithString("path",
 				mcpgo.Required(),
 				mcpgo.Description("Repo-relative path inside DOCS_DIR."),
@@ -95,10 +95,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(ingestTool, s.handleDocumentIngestFile)
 
 		getTool := mcpgo.NewTool("document_get",
-			mcpgo.WithDescription("Return the stored document body by (project_id, filename)."),
-			mcpgo.WithString("filename",
+			mcpgo.WithDescription("Return the stored document body by (project_id, name)."),
+			mcpgo.WithString("name",
 				mcpgo.Required(),
-				mcpgo.Description("Document filename (e.g. architecture.md)."),
+				mcpgo.Description("Document name (e.g. architecture.md)."),
 			),
 			mcpgo.WithString("project_id",
 				mcpgo.Description("Optional project scope. Defaults to caller's first owned project or the system default."),
@@ -420,8 +420,8 @@ func (s *Server) handleDocumentIngestFile(ctx context.Context, req mcpgo.CallToo
 	}
 	payload := map[string]any{
 		"id":         res.Document.ID,
-		"project_id": res.Document.ProjectID,
-		"filename":   res.Document.Filename,
+		"project_id": resolvedID,
+		"name":       res.Document.Name,
 		"version":    res.Document.Version,
 		"changed":    res.Changed,
 		"created":    res.Created,
@@ -431,7 +431,7 @@ func (s *Server) handleDocumentIngestFile(ctx context.Context, req mcpgo.CallToo
 		Str("method", "tools/call").
 		Str("tool", "document_ingest_file").
 		Str("project_id", resolvedID).
-		Str("filename", res.Document.Filename).
+		Str("name", res.Document.Name).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
@@ -440,7 +440,7 @@ func (s *Server) handleDocumentIngestFile(ctx context.Context, req mcpgo.CallToo
 func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
-	filename, err := req.RequireString("filename")
+	name, err := req.RequireString("name")
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -450,7 +450,7 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	doc, err := s.docs.GetByFilename(ctx, resolvedID, filename, memberships)
+	doc, err := s.docs.GetByName(ctx, resolvedID, name, memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -459,7 +459,7 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 		Str("method", "tools/call").
 		Str("tool", "document_get").
 		Str("project_id", resolvedID).
-		Str("filename", filename).
+		Str("name", name).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil

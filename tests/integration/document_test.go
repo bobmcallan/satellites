@@ -112,7 +112,7 @@ func TestDocumentIngestAndGetRoundTrip(t *testing.T) {
 		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
 		"params": map[string]any{
 			"name":      "document_get",
-			"arguments": map[string]any{"filename": "architecture.md"},
+			"arguments": map[string]any{"name": "architecture.md"},
 		},
 	})
 	body := extractToolText(t, getResp)
@@ -120,8 +120,14 @@ func TestDocumentIngestAndGetRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("decode document_get body: %v; raw=%s", err, body)
 	}
-	if filename, _ := doc["filename"].(string); filename != "architecture.md" {
-		t.Errorf("seeded doc filename = %q, want architecture.md", filename)
+	if got, _ := doc["name"].(string); got != "architecture.md" {
+		t.Errorf("seeded doc name = %q, want architecture.md", got)
+	}
+	if got, _ := doc["type"].(string); got != "artifact" {
+		t.Errorf("seeded doc type = %q, want artifact", got)
+	}
+	if got, _ := doc["scope"].(string); got != "project" {
+		t.Errorf("seeded doc scope = %q, want project", got)
 	}
 	seededBody, _ := doc["body"].(string)
 	if !strings.Contains(seededBody, "Satellites v4 — Architecture") {

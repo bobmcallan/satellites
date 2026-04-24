@@ -1,34 +1,107 @@
-// Package document is the satellites-v4 document primitive: a type-
-// discriminated row in SurrealDB with hash-based version bumping. v4 ships
-// enough surface to back document_ingest_file + document_get; later epics
-// attach more type-specific shapes (contracts, skills, principles, etc.).
+// Package document is the satellites-v4 document primitive: a unified
+// row in SurrealDB discriminated by `type` per docs/architecture.md §2.
+// One schema covers artifacts, contracts, skills, principles, and
+// reviewers; per-type behaviour layers on top of the shared store.
 package document
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"path/filepath"
-	"strings"
+	"errors"
+	"fmt"
 	"time"
 )
 
-// Document is the single schema, type-discriminated shape shared by every
-// type of authored content in satellites-v4. Every row scopes to exactly
-// one project via ProjectID — see principle pr_7ade92ae — and to exactly
-// one workspace via WorkspaceID per docs/architecture.md §8. WorkspaceID
-// cascades from the parent project at write time.
+// Type enum values per docs/architecture.md §2 Documents sub-section.
+const (
+	TypeArtifact  = "artifact"
+	TypeContract  = "contract"
+	TypeSkill     = "skill"
+	TypePrinciple = "principle"
+	TypeReviewer  = "reviewer"
+)
+
+// Scope enum values per docs/architecture.md §2.
+const (
+	ScopeSystem  = "system"
+	ScopeProject = "project"
+)
+
+// Status enum values.
+const (
+	StatusActive   = "active"
+	StatusArchived = "archived"
+)
+
+var validTypes = map[string]struct{}{
+	TypeArtifact:  {},
+	TypeContract:  {},
+	TypeSkill:     {},
+	TypePrinciple: {},
+	TypeReviewer:  {},
+}
+
+var validScopes = map[string]struct{}{
+	ScopeSystem:  {},
+	ScopeProject: {},
+}
+
+// Document is the unified, type-discriminated row backing every authored
+// content kind in satellites-v4. Every row scopes to exactly one workspace
+// (per docs/architecture.md §8) and — when Scope=ScopeProject — to exactly
+// one project (per principle pr_7ade92ae). Scope=ScopeSystem rows have nil
+// ProjectID and are globally readable inside their workspace.
 type Document struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	ProjectID   string    `json:"project_id"`
-	Filename    string    `json:"filename"`
-	Type        string    `json:"type"`
-	Body        string    `json:"body"`
-	BodyHash    string    `json:"body_hash"`
-	Status      string    `json:"status"` // "active" | "archived"
-	Version     int       `json:"version"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	WorkspaceID     string    `json:"workspace_id"`
+	ProjectID       *string   `json:"project_id,omitempty"`
+	Type            string    `json:"type"`
+	Name            string    `json:"name"`
+	Body            string    `json:"body"`
+	Structured      []byte    `json:"structured,omitempty"`
+	ContractBinding *string   `json:"contract_binding,omitempty"`
+	Scope           string    `json:"scope"`
+	Tags            []string  `json:"tags,omitempty"`
+	Status          string    `json:"status"`
+	BodyHash        string    `json:"body_hash"`
+	Version         int       `json:"version"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedBy       string    `json:"created_by,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	UpdatedBy       string    `json:"updated_by,omitempty"`
+}
+
+// Validate returns the first invariant violation on d, or nil if d is
+// well-formed. Validate covers shape only; FK existence on
+// ContractBinding is enforced by the store at write time.
+func (d Document) Validate() error {
+	if _, ok := validTypes[d.Type]; !ok {
+		return fmt.Errorf("document: invalid type %q", d.Type)
+	}
+	if _, ok := validScopes[d.Scope]; !ok {
+		return fmt.Errorf("document: invalid scope %q", d.Scope)
+	}
+	switch d.Scope {
+	case ScopeProject:
+		if d.ProjectID == nil || *d.ProjectID == "" {
+			return errors.New("document: project_id required when scope=project")
+		}
+	case ScopeSystem:
+		if d.ProjectID != nil && *d.ProjectID != "" {
+			return errors.New("document: project_id must be nil when scope=system")
+		}
+	}
+	switch d.Type {
+	case TypeSkill, TypeReviewer:
+		if d.ContractBinding == nil || *d.ContractBinding == "" {
+			return fmt.Errorf("document: contract_binding required for type=%s", d.Type)
+		}
+	default:
+		if d.ContractBinding != nil && *d.ContractBinding != "" {
+			return errors.New("document: contract_binding allowed only for type=skill or type=reviewer")
+		}
+	}
+	return nil
 }
 
 // HashBody returns a sha256 content hash prefixed with "sha256:"; used as
@@ -38,20 +111,14 @@ func HashBody(body []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// InferType maps a filename to a human-readable document type. The walking
-// skeleton only cares about architecture + design + development docs; later
-// types (principle, contract, skill, reviewer) override this via explicit
-// type params at creation time.
-func InferType(filename string) string {
-	base := strings.ToLower(filepath.Base(filename))
-	switch base {
-	case "architecture.md":
-		return "architecture"
-	case "ui-design.md":
-		return "design"
-	case "development.md":
-		return "development"
-	default:
-		return "document"
+// StringPtr returns nil for the empty string, otherwise a pointer to a
+// fresh copy of s. Callers building Documents use it to honour the
+// "ProjectID nil when scope=system" invariant without sprinkling
+// conditional pointer construction across the call sites.
+func StringPtr(s string) *string {
+	if s == "" {
+		return nil
 	}
+	v := s
+	return &v
 }

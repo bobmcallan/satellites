@@ -124,6 +124,12 @@ func main() {
 			logger.Info().Int("rows", n).Str("project_id", defaultProjectID).Msg("document project_id backfilled")
 		}
 
+		if n, err := surrealDocs.MigrateLegacyRows(ctx, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("document migrate legacy rows failed")
+		} else if n > 0 {
+			logger.Info().Int("rows", n).Msg("document legacy rows migrated to v4 schema")
+		}
+
 		if _, err := document.SeedIfEmpty(ctx, docStore, logger, systemWsID, defaultProjectID, cfg.DocsDir); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("document seed failed")
 		}

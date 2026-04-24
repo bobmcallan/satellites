@@ -87,7 +87,15 @@ func TestWorkspaceScoping_CrossWorkspaceDenial(t *testing.T) {
 	if _, err := ledStore.Append(ctx, ledger.LedgerEntry{WorkspaceID: wsA.ID, ProjectID: pA.ID, Type: "alice.event", Actor: "user_alice"}, now); err != nil {
 		t.Fatalf("alice ledger: %v", err)
 	}
-	if _, err := docStore.Upsert(ctx, wsA.ID, pA.ID, "alice.md", "architecture", []byte("alice-body"), now); err != nil {
+	if _, err := docStore.Upsert(ctx, document.UpsertInput{
+		WorkspaceID: wsA.ID,
+		ProjectID:   document.StringPtr(pA.ID),
+		Type:        document.TypeArtifact,
+		Name:        "alice.md",
+		Body:        []byte("alice-body"),
+		Scope:       document.ScopeProject,
+		Actor:       "test",
+	}, now); err != nil {
 		t.Fatalf("alice doc: %v", err)
 	}
 
@@ -112,9 +120,9 @@ func TestWorkspaceScoping_CrossWorkspaceDenial(t *testing.T) {
 	if err != nil || len(lList) != 1 {
 		t.Errorf("alice ledger List scoped: got %+v err %v", lList, err)
 	}
-	dGot, err := docStore.GetByFilename(ctx, pA.ID, "alice.md", aliceMem)
+	dGot, err := docStore.GetByName(ctx, pA.ID, "alice.md", aliceMem)
 	if err != nil || dGot.ID == "" {
-		t.Errorf("alice doc GetByFilename scoped: got %+v err %v", dGot, err)
+		t.Errorf("alice doc GetByName scoped: got %+v err %v", dGot, err)
 	}
 	dCount, err := docStore.Count(ctx, pA.ID, aliceMem)
 	if err != nil || dCount != 1 {
@@ -140,8 +148,8 @@ func TestWorkspaceScoping_CrossWorkspaceDenial(t *testing.T) {
 	if err != nil || len(blList) != 0 {
 		t.Errorf("bob ledger List scoped: got %+v err %v", blList, err)
 	}
-	if _, err := docStore.GetByFilename(ctx, pA.ID, "alice.md", bobMem); !errors.Is(err, document.ErrNotFound) {
-		t.Errorf("bob doc GetByFilename should be not-found; err=%v", err)
+	if _, err := docStore.GetByName(ctx, pA.ID, "alice.md", bobMem); !errors.Is(err, document.ErrNotFound) {
+		t.Errorf("bob doc GetByName should be not-found; err=%v", err)
 	}
 	bdCount, err := docStore.Count(ctx, pA.ID, bobMem)
 	if err != nil || bdCount != 0 {
