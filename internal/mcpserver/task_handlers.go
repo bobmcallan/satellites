@@ -291,13 +291,26 @@ func (s *Server) enqueueStageHandoff(ctx context.Context, closed task.Task, acto
 		"contract_instance_id": next.ID,
 		"story_id":             next.StoryID,
 	})
+	// Derive the hand-off task's priority from the parent story per
+	// §4 dispatch rule 2 ("Priority is the story's priority for
+	// origin=story_stage tasks"). Falls through to medium when the
+	// story can't be resolved or carries a non-canonical priority.
+	priority := task.PriorityMedium
+	if s.stories != nil {
+		if story, err := s.stories.GetByID(ctx, next.StoryID, memberships); err == nil {
+			switch story.Priority {
+			case task.PriorityCritical, task.PriorityHigh, task.PriorityMedium, task.PriorityLow:
+				priority = story.Priority
+			}
+		}
+	}
 	handoff, err := s.tasks.Enqueue(ctx, task.Task{
 		WorkspaceID: next.WorkspaceID,
 		ProjectID:   next.ProjectID,
 		Origin:      task.OriginStoryStage,
 		Trigger:     triggerBytes,
 		Payload:     payloadBytes,
-		Priority:    task.PriorityMedium,
+		Priority:    priority,
 	}, now)
 	if err != nil {
 		if s.logger != nil {

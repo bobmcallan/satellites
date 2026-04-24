@@ -11,7 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -212,6 +215,108 @@ func TestTaskClose_StaleClaim_Rejected(t *testing.T) {
 	assert.True(t, res.IsError, "stale close should be rejected")
 	text := res.Content[0].(mcpgo.TextContent).Text
 	assert.Contains(t, text, "stale_claim")
+}
+
+// TestTaskClose_StageHandoff_InheritsStoryPriority confirms the
+// stage-hand-off enqueue inherits the parent story's priority per
+// story_b4513c8c AC 6.
+func TestTaskClose_StageHandoff_InheritsStoryPriority(t *testing.T) {
+	t.Parallel()
+	// Wire a minimal server with docs + stories + contracts + tasks +
+	// ledger — enough for the stage-handoff code path.
+	docs := document.NewMemoryStore()
+	ldgr := ledger.NewMemoryStore()
+	stories := story.NewMemoryStore(ldgr)
+	contracts := contract.NewMemoryStore(docs, stories)
+	tasks := task.NewMemoryStore()
+	s := &Server{
+		cfg:       &config.Config{},
+		docs:      docs,
+		ledger:    ldgr,
+		stories:   stories,
+		contracts: contracts,
+		tasks:     tasks,
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Seed a contract document so CI Create passes FK validation.
+	contractDoc, err := docs.Create(ctx, document.Document{
+		WorkspaceID: "wksp_a",
+		Type:        document.TypeContract,
+		Name:        "preplan-test",
+		Scope:       document.ScopeSystem,
+		Status:      document.StatusActive,
+		Structured:  []byte(`{"category":"preplan","required_for_close":true,"validation_mode":"llm"}`),
+	}, now)
+	require.NoError(t, err)
+
+	// Story with explicit priority=critical.
+	storyRow, err := stories.Create(ctx, story.Story{
+		WorkspaceID:        "wksp_a",
+		ProjectID:          "proj_a",
+		Title:              "stage-handoff-priority-test",
+		AcceptanceCriteria: "none",
+		Priority:           task.PriorityCritical,
+	}, now)
+	require.NoError(t, err)
+
+	// Two CIs: seq 0 (about to close) + seq 1 (ready, will receive hand-off).
+	ci0, err := contracts.Create(ctx, contract.ContractInstance{
+		StoryID:      storyRow.ID,
+		ContractID:   contractDoc.ID,
+		ContractName: "preplan",
+		Sequence:     0,
+	}, now)
+	require.NoError(t, err)
+	ci1, err := contracts.Create(ctx, contract.ContractInstance{
+		StoryID:      storyRow.ID,
+		ContractID:   contractDoc.ID,
+		ContractName: "plan",
+		Sequence:     1,
+	}, now)
+	require.NoError(t, err)
+
+	// Enqueue a story_stage task pointing at ci0 with priority=medium
+	// (we're simulating an older stage; the hand-off should pick up the
+	// story's priority, not medium).
+	payloadBytes, err := json.Marshal(map[string]any{
+		"contract_instance_id": ci0.ID,
+		"story_id":             storyRow.ID,
+	})
+	require.NoError(t, err)
+	enqTask, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID: "wksp_a",
+		ProjectID:   "proj_a",
+		Origin:      task.OriginStoryStage,
+		Payload:     payloadBytes,
+		Priority:    task.PriorityMedium,
+	}, now)
+	require.NoError(t, err)
+	_, err = tasks.Claim(ctx, "worker_a", []string{"wksp_a"}, now.Add(time.Second))
+	require.NoError(t, err)
+
+	// Close with outcome=success — expect hand-off enqueue for ci1 with
+	// priority=critical (inherited from the story).
+	closeRes := callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
+		"id":      enqTask.ID,
+		"outcome": task.OutcomeSuccess,
+	})
+	require.False(t, closeRes.IsError, "close failed: %s", closeRes.Content[0].(mcpgo.TextContent).Text)
+
+	var closeOut map[string]any
+	require.NoError(t, json.Unmarshal([]byte(closeRes.Content[0].(mcpgo.TextContent).Text), &closeOut))
+	handoffID, _ := closeOut["handoff_task_id"].(string)
+	require.NotEmpty(t, handoffID, "expected stage hand-off to enqueue a task")
+
+	handoff, err := tasks.GetByID(ctx, handoffID, []string{"wksp_a"})
+	require.NoError(t, err)
+	assert.Equal(t, task.PriorityCritical, handoff.Priority, "hand-off should inherit story priority (critical), not default medium")
+	// The hand-off's payload must reference a CI on the same story —
+	// exact identity is not asserted (the handler picks the first
+	// status=ready CI, which may be ci0 or ci1 depending on scan order).
+	_ = ci1
 }
 
 // TestTaskClose_LedgerRowWritten verifies the handler writes the
