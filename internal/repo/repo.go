@@ -34,6 +34,7 @@ type Repo struct {
 	SymbolCount   int       `json:"symbol_count"`
 	FileCount     int       `json:"file_count"`
 	Status        string    `json:"status"`
+	WebhookSecret string    `json:"webhook_secret,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

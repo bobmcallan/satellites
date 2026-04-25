@@ -32,7 +32,7 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 
 // selectCols preserves the string id (see story / project surreal
 // stores for the same idiom).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, git_remote, default_branch, head_sha, last_indexed_at, index_version, symbol_count, file_count, status, created_at, updated_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, git_remote, default_branch, head_sha, last_indexed_at, index_version, symbol_count, file_count, status, webhook_secret, created_at, updated_at"
 
 // Create implements Store for SurrealStore. Performs the
 // one-per-project pre-check via a count query so the rejection path
@@ -189,6 +189,34 @@ func (s *SurrealStore) write(ctx context.Context, r Repo) error {
 		return fmt.Errorf("repo: upsert: %w", err)
 	}
 	return nil
+}
+
+// ListActive implements Store for SurrealStore.
+func (s *SurrealStore) ListActive(ctx context.Context) ([]Repo, error) {
+	sql := fmt.Sprintf("SELECT %s FROM repos WHERE status = $status ORDER BY created_at ASC", selectCols)
+	vars := map[string]any{"status": StatusActive}
+	results, err := surrealdb.Query[[]Repo](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list active: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Repo{}, nil
+	}
+	return (*results)[0].Result, nil
+}
+
+// LookupByRemote implements Store for SurrealStore.
+func (s *SurrealStore) LookupByRemote(ctx context.Context, gitRemote string) ([]Repo, error) {
+	sql := fmt.Sprintf("SELECT %s FROM repos WHERE git_remote = $remote", selectCols)
+	vars := map[string]any{"remote": gitRemote}
+	results, err := surrealdb.Query[[]Repo](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("repo: lookup by remote: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Repo{}, nil
+	}
+	return (*results)[0].Result, nil
 }
 
 // Compile-time assertion.

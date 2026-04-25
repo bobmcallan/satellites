@@ -40,6 +40,14 @@ type Store interface {
 	GetByRemote(ctx context.Context, workspaceID, gitRemote string) (Repo, error)
 	UpdateIndexState(ctx context.Context, id, headSHA string, lastIndexedAt time.Time, symbolCount, fileCount int) (Repo, error)
 	Archive(ctx context.Context, id string) (Repo, error)
+	// ListActive returns every active repo across all workspaces. Used
+	// by the stale-check cron worker (system identity, no membership
+	// scope). Story_21d22880.
+	ListActive(ctx context.Context) ([]Repo, error)
+	// LookupByRemote returns every repo (across all workspaces) whose
+	// git_remote matches. Used by the push-webhook receiver to find the
+	// tracked repo before signature verification. Story_21d22880.
+	LookupByRemote(ctx context.Context, gitRemote string) ([]Repo, error)
 }
 
 // validateStatus rejects writes that supply a status outside the
@@ -193,6 +201,35 @@ func (m *MemoryStore) Archive(ctx context.Context, id string) (Repo, error) {
 	r.UpdatedAt = time.Now().UTC()
 	m.rows[id] = r
 	return r, nil
+}
+
+// ListActive implements Store for MemoryStore.
+func (m *MemoryStore) ListActive(ctx context.Context) ([]Repo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Repo, 0)
+	for _, r := range m.rows {
+		if r.Status == StatusActive {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// LookupByRemote implements Store for MemoryStore.
+func (m *MemoryStore) LookupByRemote(ctx context.Context, gitRemote string) ([]Repo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Repo, 0)
+	for _, r := range m.rows {
+		if r.GitRemote == gitRemote {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // Compile-time assertion.
