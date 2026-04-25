@@ -1,0 +1,81 @@
+{{define "documents_list.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+  <script src="/static/documents_view.js?v={{.Version}}"></script>
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main" x-data="documentsView()" x-init="start()">
+
+    <section class="panel-headed" data-testid="documents-header">
+      <header class="panel-header">
+        <h1>documents</h1>
+        <span class="panel-header-meta">
+          <code>(<span x-text="cards.length">{{len .Composite.Cards}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <div class="documents-tabs" data-testid="type-tabs">
+          <a :class="filters.type === '' ? 'tab-active' : ''" href="/documents" data-testid="tab-all">all</a>
+          <a :class="filters.type === 'artifact' ? 'tab-active' : ''" href="/documents?type=artifact" data-testid="tab-artifact">artifact</a>
+          <a :class="filters.type === 'contract' ? 'tab-active' : ''" href="/documents?type=contract" data-testid="tab-contract">contract</a>
+          <a :class="filters.type === 'skill' ? 'tab-active' : ''" href="/documents?type=skill" data-testid="tab-skill">skill</a>
+          <a :class="filters.type === 'principle' ? 'tab-active' : ''" href="/documents?type=principle" data-testid="tab-principle">principle</a>
+          <a :class="filters.type === 'reviewer' ? 'tab-active' : ''" href="/documents?type=reviewer" data-testid="tab-reviewer">reviewer</a>
+        </div>
+        <input type="text" class="documents-search" placeholder="search name + body…"
+               x-model.debounce.300ms="filters.query" @input="reload()"
+               data-testid="documents-search">
+        <select x-model="filters.sort" @change="reload()" data-testid="documents-sort">
+          <option value="">updated_at desc</option>
+          <option value="name_asc">name asc</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="documents-list-panel">
+      <header class="panel-header"><h2>list</h2></header>
+      <div class="panel-body">
+        <template x-if="cards.length === 0">
+          <p class="muted" data-testid="documents-empty">No documents match the current filters.</p>
+        </template>
+        {{if not .Composite.Cards}}<noscript><p class="muted" data-testid="documents-empty-ssr">No documents match.</p></noscript>{{end}}
+        <ul class="document-cards">
+          <template x-for="d in cards" :key="d.id">
+            <li :data-testid="'document-card-' + d.id">
+              <a :href="'/documents/' + d.id" class="document-card-link">
+                <code class="type-pill" x-text="d.type"></code>
+                <code class="scope-pill" x-text="d.scope"></code>
+                <span class="document-name" x-text="d.name"></span>
+                <code class="version-pill">v<span x-text="d.version"></span></code>
+                <template x-for="t in (d.tags || [])" :key="t">
+                  <code class="tag-chip" x-text="t"></code>
+                </template>
+                <span class="muted" x-text="d.updated_at"></span>
+              </a>
+            </li>
+          </template>
+          {{range .Composite.Cards}}
+          <noscript>
+            <li data-testid="document-card-ssr-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+          </noscript>
+          {{end}}
+        </ul>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

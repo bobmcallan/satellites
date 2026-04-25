@@ -230,7 +230,7 @@ func main() {
 		}
 	}
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, nil, nil, grantStore, wsStore, startedAt)
 	if err != nil {
 		logger.Error().Str("error", err.Error()).Msg("portal init failed")
 		os.Exit(1)

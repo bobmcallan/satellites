@@ -1,0 +1,36 @@
+{{define "roles.html"}}
+<!doctype html>
+<html lang="en">
+<head>{{template "head.html" .}}</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="roles-page">
+      <header class="panel-header"><h1>roles</h1></header>
+      <div class="panel-body">
+        {{if not .Composite.Rows}}
+          <p class="muted" data-testid="roles-empty">No roles defined yet.</p>
+        {{else}}
+          <table class="data-table">
+            <thead>
+              <tr><th>name</th><th>scope</th><th>active grants</th><th>verbs</th><th>required hooks</th></tr>
+            </thead>
+            <tbody>
+              {{range .Composite.Rows}}
+              <tr data-testid="role-row-{{.ID}}">
+                <td><code>{{.Name}}</code></td>
+                <td><code class="scope-pill">{{.Scope}}</code></td>
+                <td><code>{{.ActiveGrants}}</code></td>
+                <td>{{range .AllowedMcpVerbs}}<code class="tag-chip">{{.}}</code> {{end}}</td>
+                <td>{{range .RequiredHooks}}<code class="tag-chip">{{.}}</code> {{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{end}}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

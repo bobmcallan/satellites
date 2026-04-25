@@ -27,9 +27,9 @@ import (
 type Trigger string
 
 const (
-	TriggerNoAgent    Trigger = "no-agent-resolved"
-	TriggerExhausted  Trigger = "provider-exhausted"
-	TriggerForceFlag  Trigger = "explicit-force"
+	TriggerNoAgent   Trigger = "no-agent-resolved"
+	TriggerExhausted Trigger = "provider-exhausted"
+	TriggerForceFlag Trigger = "explicit-force"
 )
 
 var validTriggers = map[Trigger]struct{}{
@@ -42,14 +42,14 @@ var validTriggers = map[Trigger]struct{}{
 // synthesize an agent_role_claim response without a live LLM provider
 // having participated.
 type Result struct {
-	Trigger         Trigger
-	RoleID          string
-	WorkspaceID     string
-	GranteeKind     string
-	GranteeID       string
-	EffectiveVerbs  []string
-	LedgerRowID     string
-	Content         string
+	Trigger        Trigger
+	RoleID         string
+	WorkspaceID    string
+	GranteeKind    string
+	GranteeID      string
+	EffectiveVerbs []string
+	LedgerRowID    string
+	Content        string
 }
 
 // Runner owns the deterministic fallback path. A Runner is stateless —

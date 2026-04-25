@@ -17,11 +17,11 @@ import (
 // or (b) the grant-lifecycle verbs themselves — a caller needs them to
 // obtain a grant in the first place.
 var bootstrapVerbs = map[string]struct{}{
-	"satellites_info":     {},
-	"session_whoami":      {},
-	"agent_role_claim":    {},
-	"agent_role_release":  {},
-	"agent_role_list":     {},
+	"satellites_info":    {},
+	"session_whoami":     {},
+	"agent_role_claim":   {},
+	"agent_role_release": {},
+	"agent_role_list":    {},
 }
 
 // grantMiddleware returns a mcp-go ToolHandlerMiddleware that enforces

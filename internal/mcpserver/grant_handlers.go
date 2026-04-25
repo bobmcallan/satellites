@@ -482,10 +482,10 @@ func (s *Server) resolveRequiredRoleGrant(ctx context.Context, ci contract.Contr
 	}
 	if grant.RoleID != cp.RequiredRole {
 		body, _ := json.Marshal(map[string]any{
-			"error":          "required_role_mismatch",
-			"required_role":  cp.RequiredRole,
-			"grant_role":     grant.RoleID,
-			"grant_id":       grant.ID,
+			"error":         "required_role_mismatch",
+			"required_role": cp.RequiredRole,
+			"grant_role":    grant.RoleID,
+			"grant_id":      grant.ID,
 		})
 		return "", errors.New(string(body))
 	}

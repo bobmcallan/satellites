@@ -10,10 +10,16 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/repo"
+	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
@@ -24,16 +30,65 @@ func newTestPortal(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserS
 	projects := project.NewMemoryStore()
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, nil, time.Now())
+	docs := document.NewMemoryStore()
+	contracts := contract.NewMemoryStore(docs, stories)
+	tasks := task.NewMemoryStore()
+	repos := repo.NewMemoryStore()
+	grants := rolegrant.NewMemoryStore(docs)
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return p, users, sessions, projects, ledgerStore, stories
 }
 
+// newTestPortalWithContracts mirrors newTestPortal but exposes the
+// contract + document stores so story-view tests can seed CIs. Wires
+// nil for the workspace store to keep memberships unfiltered (matches
+// newTestPortal's pre-tenant test mode).
+func newTestPortalWithContracts(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *project.MemoryStore, *ledger.MemoryStore, *story.MemoryStore, *contract.MemoryStore, *document.MemoryStore, *workspace.MemoryStore) {
+	t.Helper()
+	users := auth.NewMemoryUserStore()
+	sessions := auth.NewMemorySessionStore()
+	projects := project.NewMemoryStore()
+	ledgerStore := ledger.NewMemoryStore()
+	stories := story.NewMemoryStore(ledgerStore)
+	docs := document.NewMemoryStore()
+	contracts := contract.NewMemoryStore(docs, stories)
+	tasks := task.NewMemoryStore()
+	repos := repo.NewMemoryStore()
+	grants := rolegrant.NewMemoryStore(docs)
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p, users, sessions, projects, ledgerStore, stories, contracts, docs, nil
+}
+
+// newTestPortalWithTasks mirrors newTestPortal but exposes the task
+// store so the task-queue view tests can seed task rows.
+func newTestPortalWithTasks(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *project.MemoryStore, *ledger.MemoryStore, *story.MemoryStore, *task.MemoryStore) {
+	t.Helper()
+	users := auth.NewMemoryUserStore()
+	sessions := auth.NewMemorySessionStore()
+	projects := project.NewMemoryStore()
+	ledgerStore := ledger.NewMemoryStore()
+	stories := story.NewMemoryStore(ledgerStore)
+	docs := document.NewMemoryStore()
+	contracts := contract.NewMemoryStore(docs, stories)
+	tasks := task.NewMemoryStore()
+	repos := repo.NewMemoryStore()
+	grants := rolegrant.NewMemoryStore(docs)
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p, users, sessions, projects, ledgerStore, stories, tasks
+}
+
 func TestLanding_UnauthRedirects(t *testing.T) {
 	t.Parallel()
-	p, _, _, _, _, _ := newTestPortal(t,&config.Config{Env: "dev"})
+	p, _, _, _, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -83,7 +138,7 @@ func TestLanding_AuthRenders(t *testing.T) {
 func TestLogin_RendersBasicForm(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, _, _, _, _, _ := newTestPortal(t,cfg)
+	p, _, _, _, _, _ := newTestPortal(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -113,7 +168,7 @@ func TestLogin_ShowsOAuthWhenConfigured(t *testing.T) {
 		GoogleClientID: "gid", GoogleClientSecret: "gs",
 		GithubClientID: "hid", GithubClientSecret: "hs",
 	}
-	p, _, _, _, _, _ := newTestPortal(t,cfg)
+	p, _, _, _, _, _ := newTestPortal(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -137,7 +192,7 @@ func TestLogin_ShowsOAuthWhenConfigured(t *testing.T) {
 func TestLogin_HidesDevModeInProd(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "prod", DevMode: true, DBDSN: "x"}
-	p, _, _, _, _, _ := newTestPortal(t,cfg)
+	p, _, _, _, _, _ := newTestPortal(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -382,7 +437,7 @@ func TestProjectLedger_RendersNewestFirst(t *testing.T) {
 	}
 }
 
-func TestProjectLedger_LimitParamTruncates(t *testing.T) {
+func TestProjectLedger_FiltersByType(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	p, users, sessions, projects, ledgerStore, _ := newTestPortal(t, &config.Config{Env: "dev"})
@@ -394,12 +449,11 @@ func TestProjectLedger_LimitParamTruncates(t *testing.T) {
 	proj, _ := projects.Create(ctx, user.ID, "", "alpha", time.Now().UTC())
 
 	t0 := time.Now().UTC()
-	for i := 0; i < 4; i++ {
-		_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, Content: "entry-" + string(rune('A'+i))}, t0.Add(time.Duration(i)*time.Second))
-	}
+	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeDecision, Content: "decision-row"}, t0)
+	_, _ = ledgerStore.Append(ctx, ledger.LedgerEntry{ProjectID: proj.ID, Type: ledger.TypeArtifact, Content: "artifact-row"}, t0.Add(time.Second))
 
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
-	req := httptest.NewRequest(http.MethodGet, "/projects/"+proj.ID+"/ledger?limit=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/projects/"+proj.ID+"/ledger?type=decision", nil)
 	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -408,12 +462,11 @@ func TestProjectLedger_LimitParamTruncates(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	// Two newest: D and C; A and B must not appear in content.
-	if !strings.Contains(body, "entry-D") || !strings.Contains(body, "entry-C") {
-		t.Errorf("body missing newest two entries")
+	if !strings.Contains(body, "decision-row") {
+		t.Errorf("body missing matching row")
 	}
-	if strings.Contains(body, "entry-A") || strings.Contains(body, "entry-B") {
-		t.Errorf("limit=2 leaked older entries")
+	if strings.Contains(body, "artifact-row") {
+		t.Errorf("body must not include filtered-out row")
 	}
 }
 
@@ -437,8 +490,8 @@ func TestProjectLedger_EmptyState(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "No ledger entries yet") {
-		t.Errorf("missing empty-state copy")
+	if !strings.Contains(rec.Body.String(), `data-testid="ledger-empty-ssr"`) {
+		t.Errorf("missing empty-state SSR marker")
 	}
 }
 
@@ -631,13 +684,9 @@ func TestStoryDetail_RendersFieldsAndHistory(t *testing.T) {
 		"the-subject",
 		"the-description",
 		"the-AC",
-		"the-AC",
 		"epic:v4-stories",
-		"status history",
-		"backlog",
-		"ready",
-		"in_progress",
-		"done",
+		`data-testid="ci-timeline-panel"`,
+		`data-testid="excerpts-panel"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("detail body missing %q", want)
@@ -675,7 +724,7 @@ func TestStoryDetail_CrossOwner404(t *testing.T) {
 
 func TestHead_HasBlockingThemeScript(t *testing.T) {
 	t.Parallel()
-	p, _, _, _, _, _ := newTestPortal(t,&config.Config{Env: "dev", DevMode: true})
+	p, _, _, _, _, _ := newTestPortal(t, &config.Config{Env: "dev", DevMode: true})
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -709,8 +758,13 @@ func newPortalWithWorkspace(t *testing.T, cfg *config.Config) (*Portal, *auth.Me
 	projects := project.NewMemoryStore()
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
+	docs := document.NewMemoryStore()
+	contracts := contract.NewMemoryStore(docs, stories)
+	tasks := task.NewMemoryStore()
+	repos := repo.NewMemoryStore()
+	grants := rolegrant.NewMemoryStore(docs)
 	ws := workspace.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, ws, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, ws, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -818,4 +872,3 @@ func TestWorkspaceSelect_CrossWorkspaceIgnored(t *testing.T) {
 }
 
 func testCtx() context.Context { return context.Background() }
-

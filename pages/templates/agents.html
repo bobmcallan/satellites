@@ -1,0 +1,37 @@
+{{define "agents.html"}}
+<!doctype html>
+<html lang="en">
+<head>{{template "head.html" .}}</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="agents-page">
+      <header class="panel-header"><h1>agents</h1></header>
+      <div class="panel-body">
+        {{if not .Composite.Rows}}
+          <p class="muted" data-testid="agents-empty">No agents defined yet.</p>
+        {{else}}
+          <table class="data-table">
+            <thead>
+              <tr><th>name</th><th>scope</th><th>provider chain</th><th>tier</th><th>permitted roles</th><th>contract binding</th></tr>
+            </thead>
+            <tbody>
+              {{range .Composite.Rows}}
+              <tr data-testid="agent-row-{{.ID}}">
+                <td><code>{{.Name}}</code></td>
+                <td><code class="scope-pill">{{.Scope}}</code></td>
+                <td>{{range .ProviderChain}}<code class="tag-chip">{{.}}</code> {{end}}</td>
+                <td><code>{{.Tier}}</code></td>
+                <td>{{range .PermittedRoles}}<code class="tag-chip">{{.}}</code> {{end}}</td>
+                <td><code>{{.ContractBinding}}</code></td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{end}}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

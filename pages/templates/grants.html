@@ -1,0 +1,71 @@
+{{define "grants.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+  <script>
+    window.SATELLITES_GRANTS = {
+      releaseURL: "/api/grants/",
+      isAdmin: {{.Composite.IsAdmin}}
+    };
+  </script>
+  <script src="/static/grants_view.js?v={{.Version}}"></script>
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main" x-data="grantsView()" x-init="start()">
+    <section class="panel-headed" data-testid="grants-page">
+      <header class="panel-header">
+        <h1>grants</h1>
+        <span class="panel-header-meta">
+          <code>(<span x-text="rows.length">{{len .Composite.Rows}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="rows.length === 0">
+          <p class="muted" data-testid="grants-empty">No active grants.</p>
+        </template>
+        {{if not .Composite.Rows}}<noscript><p class="muted" data-testid="grants-empty-ssr">No active grants.</p></noscript>{{end}}
+        <table class="data-table">
+          <thead>
+            <tr><th>id</th><th>role</th><th>agent</th><th>grantee</th><th>issued</th><th>action</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="g in rows" :key="g.id">
+              <tr :data-testid="'grant-row-' + g.id">
+                <td><code x-text="g.id"></code></td>
+                <td><code x-text="g.role_name || g.role_id"></code></td>
+                <td><code x-text="g.agent_name || g.agent_id"></code></td>
+                <td><code x-text="g.grantee_kind + ':' + g.grantee_id"></code></td>
+                <td><code x-text="g.issued_at"></code></td>
+                <td>
+                  <template x-if="isAdmin">
+                    <button type="button" class="btn-link" @click="release(g)" :data-testid="'revoke-' + g.id">revoke</button>
+                  </template>
+                  <template x-if="!isAdmin">
+                    <button type="button" class="btn-link" disabled title="admin only" :data-testid="'revoke-disabled-' + g.id">revoke</button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+            {{range .Composite.Rows}}
+            <noscript>
+              <tr data-testid="grant-row-ssr-{{.ID}}">
+                <td><code>{{.ID}}</code></td>
+                <td><code>{{if .RoleName}}{{.RoleName}}{{else}}{{.RoleID}}{{end}}</code></td>
+                <td><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></td>
+                <td><code>{{.GranteeKind}}:{{.GranteeID}}</code></td>
+                <td><code>{{.IssuedAt}}</code></td>
+                <td><code class="muted">JS required to revoke</code></td>
+              </tr>
+            </noscript>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

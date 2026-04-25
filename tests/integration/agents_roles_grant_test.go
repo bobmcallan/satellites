@@ -91,9 +91,9 @@ func TestAgentsRolesGrant_MCPSurface_EndToEnd(t *testing.T) {
 	require.NotEmpty(t, roleID)
 
 	agent := callTool(t, ctx, mcpURL, "key_gr", "agent_create", map[string]any{
-		"scope": "system",
-		"name":  "agent_grant_it",
-		"body":  "integration-test delivery agent",
+		"scope":      "system",
+		"name":       "agent_grant_it",
+		"body":       "integration-test delivery agent",
 		"structured": `{"provider_chain":[{"provider":"claude","model":"opus-4"}],"tier":"opus","permitted_roles":["` + roleID + `"],"tool_ceiling":["document_*"]}`,
 	})
 	agentID, _ := agent["id"].(string)

@@ -250,11 +250,11 @@ func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest)
 	}
 
 	return jsonResult(map[string]any{
-		"task_id":             closed.ID,
-		"status":              closed.Status,
-		"outcome":             closed.Outcome,
-		"completed_at":        closed.CompletedAt,
-		"handoff_task_id":     handoffTaskID,
+		"task_id":         closed.ID,
+		"status":          closed.Status,
+		"outcome":         closed.Outcome,
+		"completed_at":    closed.CompletedAt,
+		"handoff_task_id": handoffTaskID,
 	})
 }
 

@@ -3,57 +3,149 @@
 <html lang="en">
 <head>
   {{template "head.html" .}}
+  <script>
+    window.SATELLITES_LEDGER = {
+      projectID: {{.Project.ID}},
+      apiURL: "/projects/" + {{.Project.ID}} + "/api/ledger"
+    };
+  </script>
+  <script src="/static/ledger_view.js?v={{.Version}}"></script>
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main">
-    <section class="panel-headed">
+  <main class="portal-main" x-data="ledgerView()" x-init="start()">
+
+    <section class="panel-headed" data-testid="ledger-header">
       <header class="panel-header">
         <h1>{{.Project.Name}} · ledger</h1>
+        <span class="panel-header-meta">
+          <code>(<span x-text="rows.length">{{len .Composite.Rows}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <label class="ledger-tail-toggle">
+            <input type="checkbox" x-model="tailing" data-testid="tail-toggle">
+            <span>tailing</span>
+          </label>
+        </span>
       </header>
       <div class="panel-body">
-        <p class="muted">
-          <a href="/projects/{{.Project.ID}}">&larr; back to project</a>
-          &nbsp;·&nbsp;
-          showing {{.Limit}} entries (newest first)
-        </p>
-        {{if .Disabled}}
-          <p class="muted">Ledger is unavailable in this environment (no database configured).</p>
-        {{else if not .Entries}}
-          <p class="muted">No ledger entries yet for this project.</p>
-        {{else}}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>created</th>
-                <th>type</th>
-                <th>actor</th>
-                <th>content</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .Entries}}
-              <tr>
-                <td><code>{{.CreatedAt}}</code></td>
-                <td><code>{{.Type}}</code></td>
-                <td><code>{{.Actor}}</code></td>
-                <td>
-                  {{if .Content}}
-                  <details>
-                    <summary class="muted">expand</summary>
-                    <pre class="ledger-content">{{.Content}}</pre>
-                  </details>
-                  {{else}}
-                  <span class="muted">—</span>
-                  {{end}}
-                </td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
-        {{end}}
+        <p class="muted"><a href="/projects/{{.Project.ID}}">&larr; back to project</a></p>
+        <input type="text" class="ledger-search" placeholder="search content + tags…"
+               x-model.debounce.300ms="filters.query"
+               @input="reload()"
+               data-testid="ledger-search">
       </div>
     </section>
+
+    <div class="ledger-layout">
+
+      <aside class="panel-headed ledger-sidebar" data-testid="ledger-sidebar">
+        <header class="panel-header"><h2>filters</h2></header>
+        <div class="panel-body">
+          <label>type
+            <select x-model="filters.type" @change="reload()" data-testid="filter-type">
+              <option value="">all</option>
+              <option value="plan">plan</option>
+              <option value="action_claim">action_claim</option>
+              <option value="artifact">artifact</option>
+              <option value="evidence">evidence</option>
+              <option value="decision">decision</option>
+              <option value="close-request">close-request</option>
+              <option value="verdict">verdict</option>
+              <option value="workflow-claim">workflow-claim</option>
+              <option value="kv">kv</option>
+            </select>
+          </label>
+          <label>durability
+            <select x-model="filters.durability" @change="reload()" data-testid="filter-durability">
+              <option value="">all</option>
+              <option value="ephemeral">ephemeral</option>
+              <option value="pipeline">pipeline</option>
+              <option value="durable">durable</option>
+            </select>
+          </label>
+          <label>source
+            <select x-model="filters.source_type" @change="reload()" data-testid="filter-source">
+              <option value="">all</option>
+              <option value="agent">agent</option>
+              <option value="user">user</option>
+              <option value="system">system</option>
+              <option value="manifest">manifest</option>
+              <option value="feedback">feedback</option>
+              <option value="migration">migration</option>
+            </select>
+          </label>
+          <label>status
+            <select x-model="filters.status" @change="reload()" data-testid="filter-status">
+              <option value="">active+archived</option>
+              <option value="active">active</option>
+              <option value="archived">archived</option>
+              <option value="dereferenced">dereferenced</option>
+            </select>
+          </label>
+          <label>story id
+            <input type="text" x-model.debounce.300ms="filters.story_id" @input="reload()"
+                   data-testid="filter-story-id" placeholder="sty_…">
+          </label>
+          <label>contract id
+            <input type="text" x-model.debounce.300ms="filters.contract_id" @input="reload()"
+                   data-testid="filter-contract-id" placeholder="ci_…">
+          </label>
+          <label>tag
+            <input type="text" x-model.debounce.300ms="tagInput" @input="reloadTags()"
+                   data-testid="filter-tag" placeholder="kind:verdict,phase:plan">
+          </label>
+        </div>
+      </aside>
+
+      <section class="panel-headed ledger-rows-panel" data-testid="ledger-rows-panel">
+        <header class="panel-header">
+          <h2>rows</h2>
+          <button type="button"
+                  x-show="!tailing && pendingRows.length > 0"
+                  data-testid="new-rows-pill"
+                  class="ledger-new-pill"
+                  @click="flushPending()">
+            <span x-text="pendingRows.length"></span> new rows · jump to top
+          </button>
+        </header>
+        <div class="panel-body">
+          <template x-if="rows.length === 0">
+            <p class="muted" data-testid="ledger-empty">No rows match the current filters.</p>
+          </template>
+          {{if not .Composite.Rows}}<noscript><p class="muted" data-testid="ledger-empty-ssr">No rows match.</p></noscript>{{end}}
+          <ul class="ledger-rows">
+            <template x-for="row in rows" :key="row.id">
+              <li :data-testid="'ledger-row-' + row.id">
+                <div class="ledger-row-summary" @click="toggleExpand(row.id)">
+                  <code x-text="row.created_at"></code>
+                  <code class="type-pill" x-text="row.type"></code>
+                  <template x-for="t in (row.tags || [])" :key="t">
+                    <code class="tag-chip" x-text="t"></code>
+                  </template>
+                  <template x-if="row.story_id">
+                    <code class="ledger-link" x-text="row.story_id"></code>
+                  </template>
+                  <span class="muted ledger-content" x-text="row.content"></span>
+                </div>
+                <pre class="ledger-row-detail" x-show="expanded[row.id]" x-cloak><span x-text="row.content"></span><template x-if="row.structured"><span x-text="row.structured"></span></template></pre>
+              </li>
+            </template>
+            {{range .Composite.Rows}}
+            <noscript>
+              <li data-testid="ledger-row-ssr-{{.ID}}">
+                <code>{{.CreatedAt}}</code>
+                <code class="type-pill">{{.Type}}</code>
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                {{if .StoryID}}<code class="ledger-link">{{.StoryID}}</code>{{end}}
+                <span class="muted ledger-content">{{.Content}}</span>
+              </li>
+            </noscript>
+            {{end}}
+          </ul>
+        </div>
+      </section>
+
+    </div>
   </main>
 </body>
 </html>

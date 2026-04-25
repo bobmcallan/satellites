@@ -34,12 +34,18 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/hub"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/portal"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/repo"
+	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/internal/wshandler"
 )
@@ -58,6 +64,18 @@ type Harness struct {
 	// chromedp's network.SetCookie under auth.CookieName so the indicator
 	// widget renders without driving the login form.
 	SessionCookieValue string
+
+	// Stores exposed for chromedp tests that need to seed fixtures
+	// (project + story rows the story-view page reads). Kept on the
+	// harness so each test owns its own server + isolated state.
+	Projects  *project.MemoryStore
+	Stories   *story.MemoryStore
+	Ledger    *ledger.MemoryStore
+	Contracts *contract.MemoryStore
+	Tasks     *task.MemoryStore
+	Documents *document.MemoryStore
+	Repos     *repo.MemoryStore
+	Grants    *rolegrant.MemoryStore
 
 	// wsEnabled gates the /ws upgrade. When false, /ws returns 503 and any
 	// previously upgraded conns are closed (see DisableWS).
@@ -111,8 +129,13 @@ func StartHarness(t *testing.T) *Harness {
 	ledgerStore := ledger.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledgerStore)
 	projectStore := project.NewMemoryStore()
+	docStore := document.NewMemoryStore()
+	contractStore := contract.NewMemoryStore(docStore, storyStore)
+	taskStore := task.NewMemoryStore()
+	repoStore := repo.NewMemoryStore()
+	grantStore := rolegrant.NewMemoryStore(docStore)
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projectStore, ledgerStore, storyStore, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projectStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, codeindex.NewStub(), grantStore, wsStore, startedAt)
 	if err != nil {
 		t.Fatalf("portal.New: %v", err)
 	}
@@ -152,6 +175,14 @@ func StartHarness(t *testing.T) *Harness {
 		AuthHub:     authHub,
 		UserID:      user.ID,
 		WorkspaceID: ws.ID,
+		Projects:    projectStore,
+		Stories:     storyStore,
+		Ledger:      ledgerStore,
+		Contracts:   contractStore,
+		Tasks:       taskStore,
+		Documents:   docStore,
+		Repos:       repoStore,
+		Grants:      grantStore,
 		tracker:     newConnTracker(),
 	}
 	h.wsEnabled.Store(true)

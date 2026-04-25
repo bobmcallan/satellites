@@ -96,12 +96,12 @@ func TestNewID_Format(t *testing.T) {
 func TestValidTransition_Matrix(t *testing.T) {
 	t.Parallel()
 	allowed := map[[2]string]bool{
-		{StatusBacklog, StatusReady}:         true,
-		{StatusBacklog, StatusCancelled}:     true,
-		{StatusReady, StatusInProgress}:      true,
-		{StatusReady, StatusCancelled}:       true,
-		{StatusInProgress, StatusDone}:       true,
-		{StatusInProgress, StatusCancelled}:  true,
+		{StatusBacklog, StatusReady}:        true,
+		{StatusBacklog, StatusCancelled}:    true,
+		{StatusReady, StatusInProgress}:     true,
+		{StatusReady, StatusCancelled}:      true,
+		{StatusInProgress, StatusDone}:      true,
+		{StatusInProgress, StatusCancelled}: true,
 	}
 	all := []string{StatusBacklog, StatusReady, StatusInProgress, StatusDone, StatusCancelled}
 	for _, from := range all {

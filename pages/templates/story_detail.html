@@ -3,11 +3,34 @@
 <html lang="en">
 <head>
   {{template "head.html" .}}
+  <script>
+    window.SATELLITES_STORY = {
+      storyID: {{.Story.ID}},
+      compositeURL: "/api/stories/" + {{.Story.ID}} + "/composite"
+    };
+  </script>
+  <script src="/static/story_view.js?v={{.Version}}"></script>
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main">
-    <section class="panel-headed">
+  <main class="portal-main" x-data="storyView()" x-init="start()">
+
+    <!-- Delivery status strip — banner per ui-design §2.2 -->
+    <section class="panel-headed delivery-strip" data-testid="delivery-strip">
+      <header class="panel-header">
+        <h2>delivery</h2>
+        <span class="panel-header-meta" data-testid="delivery-status">
+          <code class="status-pill status-{{.Composite.Delivery.Status}}" x-text="'[' + composite.delivery.status + ']'">[{{.Composite.Delivery.Status}}]</code>
+          <template x-if="composite.delivery.resolution">
+            <code class="resolution-pill" x-text="composite.delivery.resolution"></code>
+          </template>
+          {{if .Composite.Delivery.Resolution}}<noscript><code class="resolution-pill">{{.Composite.Delivery.Resolution}}</code></noscript>{{end}}
+        </span>
+      </header>
+    </section>
+
+    <!-- Header + scope panel — id, title, status, tags, description, AC -->
+    <section class="panel-headed" data-testid="scope-panel">
       <header class="panel-header">
         <h1>{{.Story.Title}}</h1>
       </header>
@@ -34,35 +57,169 @@
         {{end}}
       </div>
     </section>
-    <section class="panel-headed">
-      <header class="panel-header"><h2>status history</h2></header>
+
+    <!-- Source documents panel — derived from `source:` tags -->
+    <section class="panel-headed" data-testid="source-docs-panel">
+      <header class="panel-header"><h2>source documents</h2></header>
       <div class="panel-body">
-        {{if not .History}}
-          <p class="muted">No status changes recorded yet.</p>
+        {{if not .Composite.SourceDocs}}
+          <p class="muted" data-testid="source-docs-empty">No source documents — feature stories should cite a document via a <code>source:</code> tag.</p>
         {{else}}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>when</th>
-                <th>from</th>
-                <th>to</th>
-                <th>actor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .History}}
-              <tr>
-                <td><code>{{.CreatedAt}}</code></td>
-                <td><code>{{.From}}</code></td>
-                <td><code>{{.To}}</code></td>
-                <td><code>{{.Actor}}</code></td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
+          <ul class="source-doc-list">
+            {{range .Composite.SourceDocs}}
+            <li>
+              <code class="tag-chip">{{.Tag}}</code>
+              <span class="source-doc-display">{{.Display}}</span>
+            </li>
+            {{end}}
+          </ul>
         {{end}}
       </div>
     </section>
+
+    <!-- Contract instance timeline — live -->
+    <section class="panel-headed" data-testid="ci-timeline-panel">
+      <header class="panel-header">
+        <h2>contracts</h2>
+        <span class="panel-header-meta" data-testid="ci-count">
+          <code>(<span x-text="composite.contract_instances.length">{{len .Composite.CIs}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="composite.contract_instances.length === 0">
+          <p class="muted" data-testid="ci-empty">No contract instances yet.</p>
+        </template>
+        {{if not .Composite.CIs}}<noscript><p class="muted" data-testid="ci-empty-ssr">No contract instances yet.</p></noscript>{{end}}
+        <ul class="ci-timeline">
+          <template x-for="ci in composite.contract_instances" :key="ci.id">
+            <li :data-ci-id="ci.id" :data-status="ci.status" :data-testid="'ci-row-' + ci.id">
+              <code class="ci-seq" x-text="'#' + ci.sequence"></code>
+              <code class="ci-name" x-text="ci.contract_name"></code>
+              <code :class="'status-pill status-' + ci.status" x-text="ci.status"></code>
+              <span class="ci-times">
+                <template x-if="ci.claimed_at"><code x-text="'claimed ' + ci.claimed_at"></code></template>
+                <template x-if="ci.closed_at"><code x-text="'closed ' + ci.closed_at"></code></template>
+              </span>
+            </li>
+          </template>
+          {{range .Composite.CIs}}
+          <noscript>
+            <li data-ci-id="{{.ID}}" data-status="{{.Status}}">
+              <code class="ci-seq">#{{.Sequence}}</code>
+              <code class="ci-name">{{.ContractName}}</code>
+              <code class="status-pill status-{{.Status}}">{{.Status}}</code>
+              <span class="ci-times">
+                {{if .ClaimedAt}}<code>claimed {{.ClaimedAt}}</code>{{end}}
+                {{if .ClosedAt}}<code>closed {{.ClosedAt}}</code>{{end}}
+              </span>
+            </li>
+          </noscript>
+          {{end}}
+        </ul>
+      </div>
+    </section>
+
+    <!-- Reviewer verdict panel — newest first, prominent first card -->
+    <section class="panel-headed" data-testid="verdict-panel">
+      <header class="panel-header">
+        <h2>reviewer verdicts</h2>
+        <span class="panel-header-meta" data-testid="verdict-count">
+          <code>(<span x-text="composite.verdicts.length">{{len .Composite.Verdicts}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="composite.verdicts.length === 0">
+          <p class="muted" data-testid="verdict-empty">No reviewer verdicts yet.</p>
+        </template>
+        {{if not .Composite.Verdicts}}<noscript><p class="muted" data-testid="verdict-empty-ssr">No reviewer verdicts yet.</p></noscript>{{end}}
+        <ul class="verdict-list">
+          <template x-for="(v, idx) in composite.verdicts" :key="v.ledger_id">
+            <li :class="idx === 0 ? 'verdict-prominent' : ''" :data-testid="'verdict-row-' + v.ledger_id">
+              <code class="verdict-pill" x-text="v.verdict || 'pending'"></code>
+              <code x-text="v.contract_name || '—'"></code>
+              <span class="verdict-score" x-show="v.score">score <code x-text="v.score"></code></span>
+              <span class="verdict-when muted" x-text="v.created_at"></span>
+              <p class="verdict-reasoning" x-text="v.reasoning"></p>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Repo provenance panel — kind:commit ledger rows -->
+    <section class="panel-headed" data-testid="repo-provenance-panel">
+      <header class="panel-header">
+        <h2>repo provenance</h2>
+        <span class="panel-header-meta">
+          <code>(<span x-text="composite.commits.length">{{len .Composite.Commits}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="composite.commits.length === 0">
+          <p class="muted" data-testid="repo-empty">No commits linked yet. Commits get linked when a future commit-receiver writes <code>kind:commit</code> ledger rows scoped to this story id.</p>
+        </template>
+        {{if not .Composite.Commits}}<noscript><p class="muted" data-testid="repo-empty-ssr">No commits linked yet.</p></noscript>{{end}}
+        <ul class="commit-list">
+          <template x-for="c in composite.commits" :key="c.ledger_id">
+            <li>
+              <code class="commit-sha" x-text="c.sha ? c.sha.substring(0, 8) : ''"></code>
+              <span class="commit-subject" x-text="c.subject"></span>
+              <span class="muted commit-when" x-text="c.created_at"></span>
+              <template x-if="c.url"><a :href="c.url" rel="noreferrer">link</a></template>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Ledger excerpts — bounded window, live updates -->
+    <section class="panel-headed" data-testid="excerpts-panel">
+      <header class="panel-header">
+        <h2>ledger excerpts</h2>
+        <span class="panel-header-meta">
+          <code>(<span x-text="composite.ledger_excerpts.length">{{len .Composite.Excerpts}}</span>)</code>
+          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="composite.ledger_excerpts.length === 0">
+          <p class="muted" data-testid="excerpts-empty">No ledger rows yet.</p>
+        </template>
+        <table class="data-table">
+          <thead>
+            <tr><th>when</th><th>type</th><th>tags</th><th>content</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="row in composite.ledger_excerpts" :key="row.id">
+              <tr :data-testid="'excerpt-row-' + row.id">
+                <td><code x-text="row.created_at"></code></td>
+                <td><code x-text="row.type"></code></td>
+                <td>
+                  <template x-for="t in (row.tags || [])" :key="t">
+                    <code class="tag-chip" x-text="t"></code>
+                  </template>
+                </td>
+                <td><span class="excerpt-content" x-text="row.content"></span></td>
+              </tr>
+            </template>
+            {{range .Composite.Excerpts}}
+            <noscript>
+              <tr data-testid="excerpt-row-ssr-{{.ID}}">
+                <td><code>{{.CreatedAt}}</code></td>
+                <td><code>{{.Type}}</code></td>
+                <td>{{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}</td>
+                <td><span class="excerpt-content">{{.Content}}</span></td>
+              </tr>
+            </noscript>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
   </main>
 </body>
 </html>
