@@ -20,6 +20,8 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/dispatcher"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/embeddings"
+	"github.com/bobmcallan/satellites/internal/embedworker"
 	"github.com/bobmcallan/satellites/internal/httpserver"
 	"github.com/bobmcallan/satellites/internal/hub"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -290,6 +292,38 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("dispatcher watchdog start failed")
 		} else {
 			defer disp.Stop()
+		}
+	}
+
+	// Embedding ingestion worker (story_5abfe61c). Boots only when an
+	// embeddings provider is configured AND the task + chunk stores are
+	// wired. The Surreal-backed chunk store is a follow-up; until it
+	// ships, the worker no-ops on a deploy without DB_DSN+EMBEDDINGS_*.
+	embedCfg, err := embeddings.LoadFromEnv()
+	if err != nil {
+		logger.Warn().Str("error", err.Error()).Msg("embeddings config invalid; semantic search disabled")
+	} else if taskStore != nil {
+		embedder, err := embeddings.New(embedCfg)
+		if err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("embeddings provider construction failed; semantic search disabled")
+		} else if embedder != nil {
+			worker := embedworker.New(embedworker.Deps{
+				Tasks:        taskStore,
+				Embedder:     embedder,
+				Docs:         docStore,
+				DocChunks:    nil, // Surreal chunk store deferred; follow-up
+				Ledger:       ledgerStore,
+				LedgerChunks: nil, // ditto
+				Logger:       logger,
+			})
+			if worker != nil {
+				logger.Info().Str("provider", embedCfg.Provider).Str("model", embedder.Model()).Msg("embedding worker disabled — Surreal chunk store wiring deferred (story_5abfe61c follow-up)")
+				// Worker.Start would race with a missing chunk store
+				// today; explicitly defer until the follow-up lands the
+				// Surreal-backed ChunkStore. Memory-store tests still
+				// exercise the worker path end-to-end.
+				_ = worker
+			}
 		}
 	}
 

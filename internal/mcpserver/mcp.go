@@ -1064,7 +1064,21 @@ func (s *Server) handleDocumentSearch(ctx context.Context, req mcpgo.CallToolReq
 		Query: req.GetString("query", ""),
 		TopK:  int(req.GetFloat("top_k", 0)),
 	}
-	rows, err := s.docs.Search(ctx, opts, memberships)
+	// Route the non-empty-query branch to SearchSemantic (story_5abfe61c).
+	// On ErrSemanticUnavailable (deploy without an embedder configured)
+	// fall back to the structured-filter Search so callers don't error
+	// out — they just get a filter-only result instead of semantic
+	// ranking.
+	var rows []document.Document
+	var err error
+	if opts.Query != "" {
+		rows, err = s.docs.SearchSemantic(ctx, opts.Query, opts, memberships)
+		if errors.Is(err, document.ErrSemanticUnavailable) {
+			rows, err = s.docs.Search(ctx, opts, memberships)
+		}
+	} else {
+		rows, err = s.docs.Search(ctx, opts, memberships)
+	}
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -1271,7 +1285,17 @@ func (s *Server) handleLedgerSearch(ctx context.Context, req mcpgo.CallToolReque
 		Query:       req.GetString("query", ""),
 		TopK:        int(req.GetFloat("top_k", 0)),
 	}
-	rows, err := s.ledger.Search(ctx, resolvedID, opts, memberships)
+	// Route non-empty-query branch to SearchSemantic with graceful
+	// fallback on ErrSemanticUnavailable.
+	var rows []ledger.LedgerEntry
+	if opts.Query != "" {
+		rows, err = s.ledger.SearchSemantic(ctx, resolvedID, opts.Query, opts, memberships)
+		if errors.Is(err, ledger.ErrSemanticUnavailable) {
+			rows, err = s.ledger.Search(ctx, resolvedID, opts, memberships)
+		}
+	} else {
+		rows, err = s.ledger.Search(ctx, resolvedID, opts, memberships)
+	}
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}

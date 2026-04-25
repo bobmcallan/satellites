@@ -110,6 +110,27 @@ document {
 
 Indexes: `(workspace_id, project_id, type, status)` for the default query path; `(workspace_id, type, scope)` for system-scope reads; `(contract_binding)` for skill/reviewer lookups.
 
+#### Semantic search & document_chunks (story_5abfe61c)
+
+Embeddings sit alongside the parent row in a sibling table `document_chunks`:
+
+```
+document_chunks {
+  id:               ULID
+  document_id:      FK document
+  workspace_id:     FK (every query scoped)
+  chunk_idx:        int
+  body:             string  // chunked window of document.body
+  embedding:        []float32
+  embedding_model:  string  // e.g. "text-embedding-004"
+  created_at:       timestamp
+}
+```
+
+Chunks are written by a Gemini-backed ingestion path (`internal/embeddings`). The `document_search` MCP verb routes its non-empty-query branch to `document.Store.SearchSemantic`, which embeds the query, runs cosine similarity over chunks pre-filtered by structured filters (type/scope/tags/contract_binding/project_id), groups hits by parent and returns documents in score order with `BestChunkScore` populated. Empty-query calls fall through to `Search` (filter-only). On deploys without an embedder configured (no `EMBEDDINGS_PROVIDER`) the verb falls back gracefully to `Search`.
+
+Provider config flows from env vars: `EMBEDDINGS_PROVIDER` (`gemini` / `stub` / `none`), `EMBEDDINGS_MODEL`, `EMBEDDINGS_API_KEY`, `EMBEDDINGS_DIMENSION`, `EMBEDDINGS_BASE_URL`. See `internal/embeddings/config.go`.
+
 ### Stories
 
 Unit of deliverable work. Epics exist only as `epic:<tag>`; no sub-stories, no subtasks.
@@ -379,6 +400,27 @@ ledger {
 ```
 
 Indexes: `(workspace_id, story_id, created_at)` for story timeline; `(workspace_id, contract_id)` for contract evidence scans; `(workspace_id, tags)` partial GIN for tag-filtered lookups.
+
+#### Semantic search & ledger_chunks (story_5abfe61c)
+
+Mirroring the documents shape, ledger rows have a sibling `ledger_chunks` table:
+
+```
+ledger_chunks {
+  id:               ULID
+  ledger_id:        FK ledger
+  workspace_id:     FK (every query scoped)
+  chunk_idx:        int
+  body:             string  // chunked window of ledger.content
+  embedding:        []float32
+  embedding_model:  string
+  created_at:       timestamp
+}
+```
+
+Only `Content` is chunked — `Structured` JSON payloads stay queryable through the existing tag/JSON filter path. The `ledger_search` MCP verb routes its non-empty-query branch to `ledger.Store.SearchSemantic`, which embeds the query and runs cosine over chunks pre-filtered by ListOptions (type/story_id/contract_id/tags/...). Dereferenced rows are excluded; `Dereference` cascades to `chunkStore.DeleteByLedgerID` so chunks vanish on status flip — the parent-status filter at search time is the defence-in-depth.
+
+Skip rules at ingestion time: `Type=kv` rows shorter than 64 chars (single-value KV), `Type=action_claim` rows (JSON-shaped permission lists), empty Content, archived rows. The same Gemini-backed `internal/embeddings` client serves both primitives.
 
 ### Websocket fan-out
 

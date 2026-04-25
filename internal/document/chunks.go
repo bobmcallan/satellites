@@ -40,9 +40,9 @@ type ChunkHit struct {
 // (Type/Scope/Tags/...) — when non-empty, only chunks whose DocumentID is
 // in the slice are scored.
 type ChunkSearchOptions struct {
-	Embedding            []float32
-	TopK                 int
-	RestrictDocumentIDs  []string
+	Embedding           []float32
+	TopK                int
+	RestrictDocumentIDs []string
 }
 
 const defaultChunkTopK = 32
@@ -67,8 +67,8 @@ type ChunkStore interface {
 
 // MemoryChunkStore is the in-process ChunkStore used by unit tests.
 type MemoryChunkStore struct {
-	mu     sync.Mutex
-	byDoc  map[string][]Chunk
+	mu    sync.Mutex
+	byDoc map[string][]Chunk
 }
 
 // NewMemoryChunkStore returns an empty store.
