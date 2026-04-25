@@ -75,6 +75,12 @@ type Document struct {
 	CreatedBy       string    `json:"created_by,omitempty"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	UpdatedBy       string    `json:"updated_by,omitempty"`
+
+	// BestChunkScore is populated transiently by SearchSemantic with the
+	// cosine similarity of the highest-scoring chunk that backed this
+	// match. Not persisted; nil on rows that didn't come through a
+	// semantic search path.
+	BestChunkScore *float32 `json:"best_chunk_score,omitempty"`
 }
 
 // Validate returns the first invariant violation on d, or nil if d is

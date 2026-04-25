@@ -274,11 +274,9 @@ func (s *SurrealStore) Search(ctx context.Context, opts SearchOptions, membershi
 		conds = append(conds, "workspace_id IN $memberships")
 		vars["memberships"] = memberships
 	}
-	q := strings.ToLower(strings.TrimSpace(opts.Query))
-	if q != "" {
-		conds = append(conds, "(string::lowercase(name) CONTAINS $q OR string::lowercase(body) CONTAINS $q)")
-		vars["q"] = q
-	}
+	// The substring-on-Query branch (slice 6.3 stand-in) was removed when
+	// the semantic path landed (story_5abfe61c). SearchSemantic is the
+	// query path now.
 	where := ""
 	if len(conds) > 0 {
 		where = " WHERE " + strings.Join(conds, " AND ")
@@ -299,6 +297,15 @@ func (s *SurrealStore) Search(ctx context.Context, opts SearchOptions, membershi
 		return nil, nil
 	}
 	return (*results)[0].Result, nil
+}
+
+// SearchSemantic implements Store for SurrealStore. The Surreal-backed
+// chunk store + embedder wiring is added by C4 of story_5abfe61c — for
+// now this method returns ErrSemanticUnavailable so deploys without the
+// embedding pipeline boot cleanly. Memory-store callers exercise the
+// real SearchSemantic path; integration tests use the stub provider.
+func (s *SurrealStore) SearchSemantic(_ context.Context, _ string, _ SearchOptions, _ []string) ([]Document, error) {
+	return nil, ErrSemanticUnavailable
 }
 
 // validateBinding rejects a non-nil binding that does not resolve to an

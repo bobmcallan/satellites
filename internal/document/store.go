@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/bobmcallan/satellites/internal/embeddings"
 )
 
 // ErrNotFound is returned when a document lookup misses.
@@ -120,10 +122,19 @@ type Store interface {
 	// List returns documents matching opts. Filters compose with AND.
 	List(ctx context.Context, opts ListOptions, memberships []string) ([]Document, error)
 
-	// Search returns documents matching the structured filters AND
-	// (when opts.Query is non-empty) a case-insensitive substring match
-	// on name + body. Rows ranked by updated_at DESC; capped at TopK.
+	// Search returns documents matching the structured filters. The
+	// previous substring-on-Query branch (6.3 stand-in) was removed when
+	// SearchSemantic landed; the query path lives on SearchSemantic now.
+	// Rows ranked by updated_at DESC; capped at TopK.
 	Search(ctx context.Context, opts SearchOptions, memberships []string) ([]Document, error)
+
+	// SearchSemantic embeds query, pre-filters parents via opts (Type /
+	// Scope / Tags / ContractBinding / ProjectID), runs cosine over the
+	// chunk store restricted to those parents, and returns documents in
+	// score order with BestChunkScore populated. Returns
+	// ErrSemanticUnavailable when the store wasn't constructed with an
+	// Embedder + ChunkStore.
+	SearchSemantic(ctx context.Context, query string, opts SearchOptions, memberships []string) ([]Document, error)
 
 	// GetByID returns the document with the given id, or ErrNotFound.
 	GetByID(ctx context.Context, id string, memberships []string) (Document, error)
@@ -143,13 +154,29 @@ type Store interface {
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
 type MemoryStore struct {
-	mu   sync.Mutex
-	rows map[string]Document // key = id
+	mu       sync.Mutex
+	rows     map[string]Document // key = id
+	embedder embeddings.Embedder // optional; nil disables SearchSemantic
+	chunks   ChunkStore          // optional; nil disables SearchSemantic
 }
 
-// NewMemoryStore returns an empty MemoryStore.
+// NewMemoryStore returns an empty MemoryStore without semantic search.
+// SearchSemantic returns ErrSemanticUnavailable. Use NewMemoryStoreWithEmbeddings
+// to opt in.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{rows: make(map[string]Document)}
+}
+
+// NewMemoryStoreWithEmbeddings is the SearchSemantic-capable constructor.
+// Either argument can be nil; both must be non-nil for SearchSemantic to
+// run. Tests that exercise the semantic path pass a stub embedder + a
+// fresh MemoryChunkStore.
+func NewMemoryStoreWithEmbeddings(embedder embeddings.Embedder, chunks ChunkStore) *MemoryStore {
+	return &MemoryStore{
+		rows:     make(map[string]Document),
+		embedder: embedder,
+		chunks:   chunks,
+	}
 }
 
 // findByName scans for the active row matching (projectID, name). Caller
@@ -370,21 +397,15 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 	return out, nil
 }
 
-// Search implements Store for MemoryStore.
-func (m *MemoryStore) Search(ctx context.Context, opts SearchOptions, memberships []string) ([]Document, error) {
-	rows, err := m.List(ctx, opts.ListOptions, memberships)
+// Search implements Store for MemoryStore. The previous substring-on-Query
+// branch (slice 6.3 stand-in) was removed when the semantic-search path
+// landed (story_5abfe61c) per pr_no_unrequested_compat. Search is now a
+// structured-filter list capped at TopK, ordered by updated_at DESC; the
+// query path lives on SearchSemantic.
+func (m *MemoryStore) Search(_ context.Context, opts SearchOptions, memberships []string) ([]Document, error) {
+	rows, err := m.List(context.Background(), opts.ListOptions, memberships)
 	if err != nil {
 		return nil, err
-	}
-	q := strings.ToLower(strings.TrimSpace(opts.Query))
-	if q != "" {
-		filtered := rows[:0]
-		for _, d := range rows {
-			if strings.Contains(strings.ToLower(d.Name), q) || strings.Contains(strings.ToLower(d.Body), q) {
-				filtered = append(filtered, d)
-			}
-		}
-		rows = filtered
 	}
 	topK := opts.TopK
 	if topK <= 0 {
@@ -397,6 +418,86 @@ func (m *MemoryStore) Search(ctx context.Context, opts SearchOptions, membership
 		rows = rows[:topK]
 	}
 	return rows, nil
+}
+
+// SearchSemantic implements Store for MemoryStore. Returns
+// ErrSemanticUnavailable when no embedder + chunk store were configured.
+// The order of operations is: pre-filter parents via opts → embed query
+// → cosine via the chunk store → group by parent → take best score per
+// parent → return parents in score order with BestChunkScore populated.
+func (m *MemoryStore) SearchSemantic(ctx context.Context, query string, opts SearchOptions, memberships []string) ([]Document, error) {
+	if m.embedder == nil || m.chunks == nil {
+		return nil, ErrSemanticUnavailable
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return m.Search(ctx, opts, memberships)
+	}
+	parents, err := m.List(ctx, opts.ListOptions, memberships)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) == 0 {
+		return nil, nil
+	}
+	parentIDs := make([]string, 0, len(parents))
+	parentByID := make(map[string]Document, len(parents))
+	for _, p := range parents {
+		parentIDs = append(parentIDs, p.ID)
+		parentByID[p.ID] = p
+	}
+	vecs, err := m.embedder.Embed(ctx, []string{q})
+	if err != nil {
+		return nil, fmt.Errorf("document: embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, nil
+	}
+	hits, err := m.chunks.SearchByEmbedding(ctx, ChunkSearchOptions{
+		Embedding:           vecs[0],
+		TopK:                opts.TopK * 4, // over-fetch so per-parent best can win
+		RestrictDocumentIDs: parentIDs,
+	}, memberships)
+	if err != nil {
+		return nil, err
+	}
+	bestPerDoc := make(map[string]float32, len(parentIDs))
+	for _, h := range hits {
+		if cur, ok := bestPerDoc[h.DocumentID]; !ok || h.Score > cur {
+			bestPerDoc[h.DocumentID] = h.Score
+		}
+	}
+	out := make([]Document, 0, len(bestPerDoc))
+	for id, score := range bestPerDoc {
+		d, ok := parentByID[id]
+		if !ok {
+			continue
+		}
+		s := score
+		d.BestChunkScore = &s
+		out = append(out, d)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := float32(0), float32(0)
+		if out[i].BestChunkScore != nil {
+			si = *out[i].BestChunkScore
+		}
+		if out[j].BestChunkScore != nil {
+			sj = *out[j].BestChunkScore
+		}
+		return si > sj
+	})
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out, nil
 }
 
 func anyTagMatch(have, want []string) bool {

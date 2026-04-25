@@ -550,69 +550,10 @@ func TestMemoryStore_FilterByTags(t *testing.T) {
 	}
 }
 
-func TestMemoryStore_Search_QueryMatchesNameOrBody(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	store := NewMemoryStore()
-	now := time.Now()
-
-	if _, err := store.Create(ctx, Document{
-		Type: TypePrinciple, Scope: ScopeSystem, Name: "alpha", Body: "the quick fox",
-	}, now); err != nil {
-		t.Fatalf("Create alpha: %v", err)
-	}
-	if _, err := store.Create(ctx, Document{
-		Type: TypePrinciple, Scope: ScopeSystem, Name: "beta", Body: "lazy DOG",
-	}, now); err != nil {
-		t.Fatalf("Create beta: %v", err)
-	}
-
-	got, err := store.Search(ctx, SearchOptions{Query: "FOX"}, nil)
-	if err != nil {
-		t.Fatalf("Search query=fox: %v", err)
-	}
-	if len(got) != 1 || got[0].Name != "alpha" {
-		t.Errorf("Search(query=fox) = %+v, want only alpha", got)
-	}
-
-	// Substring on name.
-	got, err = store.Search(ctx, SearchOptions{Query: "bet"}, nil)
-	if err != nil {
-		t.Fatalf("Search query=bet: %v", err)
-	}
-	if len(got) != 1 || got[0].Name != "beta" {
-		t.Errorf("Search(query=bet) = %+v, want only beta", got)
-	}
-}
-
-func TestMemoryStore_Search_FilterAndQuery(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	store := NewMemoryStore()
-	now := time.Now()
-
-	if _, err := store.Create(ctx, Document{
-		Type: TypePrinciple, Scope: ScopeSystem, Name: "match-principle", Body: "match",
-	}, now); err != nil {
-		t.Fatalf("Create principle: %v", err)
-	}
-	if _, err := store.Create(ctx, Document{
-		Type: TypeContract, Scope: ScopeSystem, Name: "match-contract", Body: "match",
-	}, now); err != nil {
-		t.Fatalf("Create contract: %v", err)
-	}
-
-	got, err := store.Search(ctx, SearchOptions{
-		ListOptions: ListOptions{Type: TypePrinciple},
-		Query:       "match",
-	}, nil)
-	if err != nil {
-		t.Fatalf("Search filter+query: %v", err)
-	}
-	if len(got) != 1 || got[0].Type != TypePrinciple {
-		t.Errorf("Search(type=principle, query=match) = %+v, want only principle", got)
-	}
-}
+// The substring-on-Query Search tests that lived here (slice 6.3 stand-in)
+// were removed when the semantic path landed (story_5abfe61c) per
+// pr_no_unrequested_compat. Semantic-search behaviour is asserted by the
+// SearchSemantic tests below.
 
 func TestMemoryStore_Search_EmptyQueryFilterOnly(t *testing.T) {
 	t.Parallel()
