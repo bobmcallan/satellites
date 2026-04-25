@@ -61,6 +61,20 @@ func githubPushBody(remote, ref string) []byte {
 	return body
 }
 
+func githubPushBodyWithCommits(remote, ref string, commits []map[string]any) []byte {
+	body, _ := json.Marshal(map[string]any{
+		"ref":   ref,
+		"after": "new-sha",
+		"repository": map[string]any{
+			"clone_url":      remote,
+			"ssh_url":        remote,
+			"default_branch": "main",
+		},
+		"commits": commits,
+	})
+	return body
+}
+
 func githubSign(body []byte, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
@@ -208,6 +222,61 @@ func TestWebhook_UnknownProvider(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for unknown provider", rec.Code)
+	}
+}
+
+func TestWebhook_EmitsCommitLedgerRows(t *testing.T) {
+	t.Parallel()
+	_, r, mux, deps := newWebhookFixture(t)
+	body := githubPushBodyWithCommits(r.GitRemote, "refs/heads/main", []map[string]any{
+		{
+			"id":      "deadbeef00000000000000000000000000000000",
+			"message": "feat(thing): wire panel (story_abcd1234)",
+			"url":     "https://example.com/commit/deadbeef",
+			"author":  map[string]any{"name": "Alice", "email": "a@x"},
+		},
+		{
+			"id":      "cafebabe00000000000000000000000000000000",
+			"message": "chore: bump deps", // no story ref → no row
+			"author":  map[string]any{"name": "Bob"},
+		},
+	})
+	req := newGitHubReq(body, githubSign(body, testSecret), "delivery-with-commits")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+
+	rows, _ := deps.Ledger.List(context.Background(), "", ledger.ListOptions{}, nil)
+	var commitRow *ledger.LedgerEntry
+	commitRows := 0
+	hasReindex := false
+	for i, row := range rows {
+		if hasTag(row.Tags, tagCommit) {
+			commitRows++
+			if commitRow == nil {
+				commitRow = &rows[i]
+			}
+		}
+		if hasTag(row.Tags, "kind:task-enqueued") {
+			hasReindex = true
+		}
+	}
+	if commitRow == nil {
+		t.Fatalf("no kind:commit row written; rows=%d", len(rows))
+	}
+	if commitRow.StoryID == nil || *commitRow.StoryID != "story_abcd1234" {
+		t.Errorf("commit row StoryID = %v, want story_abcd1234", commitRow.StoryID)
+	}
+	if !hasTag(commitRow.Tags, "sha:deadbeef00000000000000000000000000000000") {
+		t.Errorf("commit row missing sha tag in %v", commitRow.Tags)
+	}
+	if !hasReindex {
+		t.Errorf("expected kind:task-enqueued (reindex) row alongside kind:commit row")
+	}
+	if commitRows != 1 {
+		t.Errorf("kind:commit rows = %d, want 1 (the no-ref commit must not produce a row)", commitRows)
 	}
 }
 

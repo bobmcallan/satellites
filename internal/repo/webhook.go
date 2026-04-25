@@ -75,6 +75,7 @@ type pushPayload struct {
 	Ref        string         `json:"ref"`
 	Repository pushRepository `json:"repository"`
 	After      string         `json:"after,omitempty"` // GitHub uses 'after' for the new head sha
+	Commits    []pushCommit   `json:"commits,omitempty"`
 }
 
 type pushRepository struct {
@@ -83,6 +84,20 @@ type pushRepository struct {
 	GitSSHURL     string `json:"git_ssh_url,omitempty"`  // GitLab
 	GitHTTPURL    string `json:"git_http_url,omitempty"` // GitLab
 	DefaultBranch string `json:"default_branch,omitempty"`
+}
+
+// pushCommit is the per-commit shape both GitHub and GitLab share on
+// push payloads. Only the fields the commit-emitter needs are captured.
+type pushCommit struct {
+	ID      string           `json:"id"`
+	Message string           `json:"message"`
+	URL     string           `json:"url,omitempty"`
+	Author  pushCommitAuthor `json:"author"`
+}
+
+type pushCommitAuthor struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // candidateRemotes returns every URL the payload says identifies the
@@ -162,6 +177,7 @@ func (h *WebhookHandler) serve(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	h.recordDelivery(r.Context(), *tracked, deliveryID, payload.Ref, now)
+	emitCommitRows(r.Context(), h.deps.Ledger, *tracked, payload.Commits, now)
 
 	taskID := h.enqueueWebhookReindex(r.Context(), *tracked, deliveryID, now)
 	if taskID == "" {
