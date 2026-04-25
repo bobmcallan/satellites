@@ -61,6 +61,13 @@ func (e *erroringLedger) Search(ctx context.Context, projectID string, opts ledg
 	return e.backing.Search(ctx, projectID, opts, memberships)
 }
 
+func (e *erroringLedger) SearchSemantic(ctx context.Context, projectID, query string, opts ledger.SearchOptions, memberships []string) ([]ledger.LedgerEntry, error) {
+	if e.backing == nil {
+		return nil, ledger.ErrSemanticUnavailable
+	}
+	return e.backing.SearchSemantic(ctx, projectID, query, opts, memberships)
+}
+
 func (e *erroringLedger) Recall(ctx context.Context, rootID string, memberships []string) ([]ledger.LedgerEntry, error) {
 	if e.backing == nil {
 		return nil, nil

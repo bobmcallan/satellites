@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/embeddings"
 	"github.com/bobmcallan/satellites/internal/hubemit"
 )
 
@@ -73,6 +74,12 @@ type Store interface {
 	GetByID(ctx context.Context, id string, memberships []string) (LedgerEntry, error)
 	List(ctx context.Context, projectID string, opts ListOptions, memberships []string) ([]LedgerEntry, error)
 	Search(ctx context.Context, projectID string, opts SearchOptions, memberships []string) ([]LedgerEntry, error)
+	// SearchSemantic embeds query, pre-filters via opts, runs cosine over
+	// the chunk store restricted to those parents, and returns rows in
+	// score order with BestChunkScore populated. Returns
+	// ErrSemanticUnavailable when the store wasn't constructed with an
+	// Embedder + ChunkStore. Dereferenced rows are excluded from results.
+	SearchSemantic(ctx context.Context, projectID, query string, opts SearchOptions, memberships []string) ([]LedgerEntry, error)
 	Recall(ctx context.Context, rootID string, memberships []string) ([]LedgerEntry, error)
 	Dereference(ctx context.Context, id, reason, actor string, now time.Time, memberships []string) (LedgerEntry, error)
 	BackfillWorkspaceID(ctx context.Context, projectID, workspaceID string) (int, error)
@@ -83,11 +90,27 @@ type MemoryStore struct {
 	mu        sync.Mutex
 	rows      []LedgerEntry
 	publisher hubemit.Publisher
+	embedder  embeddings.Embedder
+	chunks    ChunkStore
 }
 
-// NewMemoryStore returns an empty MemoryStore.
+// NewMemoryStore returns an empty MemoryStore without semantic search.
+// SearchSemantic returns ErrSemanticUnavailable. Use
+// NewMemoryStoreWithEmbeddings to opt in.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{rows: make([]LedgerEntry, 0)}
+}
+
+// NewMemoryStoreWithEmbeddings is the SearchSemantic-capable constructor.
+// Either argument can be nil; both must be non-nil for SearchSemantic to
+// run. Tests that exercise the semantic path pass a stub embedder + a
+// fresh MemoryChunkStore.
+func NewMemoryStoreWithEmbeddings(embedder embeddings.Embedder, chunks ChunkStore) *MemoryStore {
+	return &MemoryStore{
+		rows:     make([]LedgerEntry, 0),
+		embedder: embedder,
+		chunks:   chunks,
+	}
 }
 
 // SetPublisher installs the hub emit sink for subsequent mutations.
@@ -203,22 +226,15 @@ func (m *MemoryStore) List(ctx context.Context, projectID string, opts ListOptio
 	return out, nil
 }
 
-// Search implements Store for MemoryStore.
+// Search implements Store for MemoryStore. The previous substring-on-Query
+// branch (slice 7.2 stand-in) was removed when SearchSemantic landed
+// (story_5abfe61c) per pr_no_unrequested_compat. Search is now a
+// structured-filter list capped at TopK; the query path lives on
+// SearchSemantic.
 func (m *MemoryStore) Search(ctx context.Context, projectID string, opts SearchOptions, memberships []string) ([]LedgerEntry, error) {
 	rows, err := m.List(ctx, projectID, opts.ListOptions, memberships)
 	if err != nil {
 		return nil, err
-	}
-	q := strings.ToLower(strings.TrimSpace(opts.Query))
-	if q != "" {
-		filtered := rows[:0]
-		for _, e := range rows {
-			if strings.Contains(strings.ToLower(e.Content), q) ||
-				strings.Contains(strings.ToLower(string(e.Structured)), q) {
-				filtered = append(filtered, e)
-			}
-		}
-		rows = filtered
 	}
 	topK := opts.TopK
 	if topK <= 0 {
@@ -231,6 +247,92 @@ func (m *MemoryStore) Search(ctx context.Context, projectID string, opts SearchO
 		rows = rows[:topK]
 	}
 	return rows, nil
+}
+
+// SearchSemantic implements Store for MemoryStore. Returns
+// ErrSemanticUnavailable when no embedder + chunk store were configured.
+// Dereferenced rows are filtered out — both as a list pre-filter and by
+// the chunk store's natural absence of chunks for those rows (Dereference
+// cascades to DeleteByLedgerID).
+func (m *MemoryStore) SearchSemantic(ctx context.Context, projectID, query string, opts SearchOptions, memberships []string) ([]LedgerEntry, error) {
+	if m.embedder == nil || m.chunks == nil {
+		return nil, ErrSemanticUnavailable
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return m.Search(ctx, projectID, opts, memberships)
+	}
+	parents, err := m.List(ctx, projectID, opts.ListOptions, memberships)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) == 0 {
+		return nil, nil
+	}
+	parentIDs := make([]string, 0, len(parents))
+	parentByID := make(map[string]LedgerEntry, len(parents))
+	for _, p := range parents {
+		if p.Status == StatusDereferenced {
+			continue
+		}
+		parentIDs = append(parentIDs, p.ID)
+		parentByID[p.ID] = p
+	}
+	if len(parentIDs) == 0 {
+		return nil, nil
+	}
+	vecs, err := m.embedder.Embed(ctx, []string{q})
+	if err != nil {
+		return nil, fmt.Errorf("ledger: embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, nil
+	}
+	hits, err := m.chunks.SearchByEmbedding(ctx, ChunkSearchOptions{
+		Embedding:         vecs[0],
+		TopK:              opts.TopK * 4,
+		RestrictLedgerIDs: parentIDs,
+	}, memberships)
+	if err != nil {
+		return nil, err
+	}
+	bestPerRow := make(map[string]float32, len(parentIDs))
+	for _, h := range hits {
+		if cur, ok := bestPerRow[h.LedgerID]; !ok || h.Score > cur {
+			bestPerRow[h.LedgerID] = h.Score
+		}
+	}
+	out := make([]LedgerEntry, 0, len(bestPerRow))
+	for id, score := range bestPerRow {
+		row, ok := parentByID[id]
+		if !ok {
+			continue
+		}
+		s := score
+		row.BestChunkScore = &s
+		out = append(out, row)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := float32(0), float32(0)
+		if out[i].BestChunkScore != nil {
+			si = *out[i].BestChunkScore
+		}
+		if out[j].BestChunkScore != nil {
+			sj = *out[j].BestChunkScore
+		}
+		return si > sj
+	})
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out, nil
 }
 
 // Recall returns the chain of ledger rows that share the recall_root tag
@@ -311,7 +413,17 @@ func (m *MemoryStore) Dereference(ctx context.Context, id, reason, actor string,
 		}
 	}
 	pub := m.publisher
+	chunks := m.chunks
 	m.mu.Unlock()
+	// Cascade: drop the dereferenced row's chunks so it vanishes from
+	// SearchSemantic results. Best-effort — a failed delete logs upstream
+	// (caller-supplied logger via the publisher path) but does not block
+	// the dereference write. The SearchSemantic parent-status filter is
+	// the defence-in-depth: even if the cascade fails, dereferenced rows
+	// are excluded from results.
+	if chunks != nil {
+		_ = chunks.DeleteByLedgerID(ctx, id)
+	}
 	emitDereferenced(ctx, pub, target.WorkspaceID, id, reason)
 	return written, nil
 }

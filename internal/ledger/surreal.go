@@ -139,11 +139,9 @@ func (s *SurrealStore) Search(ctx context.Context, projectID string, opts Search
 	}
 	listOpts := opts.normalised()
 	conds, vars := s.buildListWhere(projectID, listOpts, memberships)
-	q := strings.ToLower(strings.TrimSpace(opts.Query))
-	if q != "" {
-		conds = append(conds, "string::lowercase(content) CONTAINS $q")
-		vars["q"] = q
-	}
+	// The substring-on-Query branch (slice 7.2 stand-in) was removed when
+	// the semantic path landed (story_5abfe61c). SearchSemantic is the
+	// query path now.
 	topK := opts.TopK
 	if topK <= 0 {
 		topK = 20
@@ -160,6 +158,15 @@ func (s *SurrealStore) Search(ctx context.Context, projectID string, opts Search
 		return nil, nil
 	}
 	return (*results)[0].Result, nil
+}
+
+// SearchSemantic implements Store for SurrealStore. The Surreal-backed
+// chunk store + embedder wiring is added by C4 of story_5abfe61c — for
+// now this method returns ErrSemanticUnavailable so deploys without the
+// embedding pipeline boot cleanly. Memory-store callers exercise the
+// real SearchSemantic path; integration tests use the stub provider.
+func (s *SurrealStore) SearchSemantic(_ context.Context, _ string, _ string, _ SearchOptions, _ []string) ([]LedgerEntry, error) {
+	return nil, ErrSemanticUnavailable
 }
 
 // Recall implements Store for SurrealStore. Returns the chain of rows

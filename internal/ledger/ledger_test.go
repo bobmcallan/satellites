@@ -30,7 +30,8 @@ func TestStoreInterface_Surface(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
 		"Append": true, "GetByID": true, "List": true, "Search": true,
-		"Recall": true, "Dereference": true, "BackfillWorkspaceID": true,
+		"SearchSemantic": true,
+		"Recall":         true, "Dereference": true, "BackfillWorkspaceID": true,
 	}
 	typ := reflect.TypeOf((*Store)(nil)).Elem()
 	if typ.NumMethod() != len(want) {
@@ -273,7 +274,7 @@ func TestMemoryStore_FilterByStoryAndContractAndTags(t *testing.T) {
 	}
 }
 
-func TestMemoryStore_Search_QueryAndFilter(t *testing.T) {
+func TestMemoryStore_Search_FilterOnly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := NewMemoryStore()
@@ -282,20 +283,14 @@ func TestMemoryStore_Search_QueryAndFilter(t *testing.T) {
 	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeArtifact, Content: "PLAN-shipped"}, now.Add(time.Second))
 	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeDecision, Content: "unrelated"}, now.Add(2*time.Second))
 
-	got, _ := store.Search(ctx, "proj_a", SearchOptions{
-		ListOptions: ListOptions{Type: TypeDecision},
-		Query:       "plan",
-	}, nil)
-	if len(got) != 1 || got[0].Content != "plan-shipped" {
-		t.Errorf("Search(type=decision, query=plan) = %+v", got)
-	}
-
-	// Empty query + filter: returns ordered by CreatedAt DESC.
+	// Substring-on-Query branch removed (slice 7.2 stand-in) per
+	// pr_no_unrequested_compat. Search now applies structured filters
+	// only; the query path lives on SearchSemantic.
 	allDecisions, _ := store.Search(ctx, "proj_a", SearchOptions{
 		ListOptions: ListOptions{Type: TypeDecision},
 	}, nil)
 	if len(allDecisions) != 2 {
-		t.Errorf("empty-query+filter = %d, want 2", len(allDecisions))
+		t.Errorf("filter-only = %d, want 2", len(allDecisions))
 	}
 }
 

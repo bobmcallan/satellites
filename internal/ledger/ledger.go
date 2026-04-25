@@ -91,6 +91,12 @@ type LedgerEntry struct {
 	Status      string     `json:"status"`
 	CreatedAt   time.Time  `json:"created_at"`
 	CreatedBy   string     `json:"created_by"`
+
+	// BestChunkScore is populated transiently by SearchSemantic with the
+	// cosine similarity of the highest-scoring chunk that backed this
+	// match. Not persisted; nil on rows that didn't come through the
+	// semantic path.
+	BestChunkScore *float32 `json:"best_chunk_score,omitempty"`
 }
 
 // Validate returns the first invariant violation on e, or nil if e is
