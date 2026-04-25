@@ -1,0 +1,151 @@
+{{define "repo.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+  <script>
+    window.SATELLITES_REPO = {
+      repoID: {{.Composite.Repo.ID}},
+      symbolsURL: "/api/repos/" + {{.Composite.Repo.ID}} + "/symbols",
+      sourceURL: "/api/repos/" + {{.Composite.Repo.ID}} + "/symbols/"
+    };
+  </script>
+  <script src="/static/repo_view.js?v={{.Version}}"></script>
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main" x-data="repoView()" x-init="start()">
+
+    {{if .Composite.Empty}}
+      <section class="panel-headed" data-testid="repo-empty">
+        <header class="panel-header"><h1>repo</h1></header>
+        <div class="panel-body">
+          <p class="muted">No repo registered for this project. Add one via the <code>satellites_repo_add</code> MCP verb.</p>
+        </div>
+      </section>
+    {{else}}
+      <section class="panel-headed" data-testid="repo-header">
+        <header class="panel-header">
+          <h1>{{.Composite.Repo.GitRemote}}</h1>
+          <span class="panel-header-meta">
+            <code>branch {{.Composite.Repo.DefaultBranch}}</code>
+            <code class="status-pill status-{{.Composite.Repo.Status}}">{{.Composite.Repo.Status}}</code>
+            <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          </span>
+        </header>
+        <div class="panel-body">
+          <dl class="kv-list">
+            <dt>head</dt><dd><code>{{.Composite.Repo.HeadSHA}}</code></dd>
+            <dt>last indexed</dt><dd><code>{{.Composite.Repo.LastIndexedAt}}</code></dd>
+            <dt>symbols</dt><dd><code>{{.Composite.Repo.SymbolCount}}</code></dd>
+            <dt>files</dt><dd><code>{{.Composite.Repo.FileCount}}</code></dd>
+            <dt>index version</dt><dd><code>{{.Composite.Repo.IndexVersion}}</code></dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel-headed" data-testid="symbol-search-panel">
+        <header class="panel-header"><h2>symbol search</h2></header>
+        <div class="panel-body">
+          <div class="repo-symbol-search">
+            <input type="text" placeholder="symbol query…"
+                   x-model="symbolQuery"
+                   @keydown.enter="searchSymbols()"
+                   data-testid="symbol-query">
+            <select x-model="symbolKind" data-testid="symbol-kind">
+              <option value="">all kinds</option>
+              <option value="function">function</option>
+              <option value="struct">struct</option>
+              <option value="interface">interface</option>
+              <option value="constant">constant</option>
+              <option value="variable">variable</option>
+            </select>
+            <select x-model="symbolLanguage" data-testid="symbol-language">
+              <option value="">all languages</option>
+              <option value="go">go</option>
+            </select>
+            <button type="button" @click="searchSymbols()" data-testid="symbol-search-btn">search</button>
+          </div>
+          <template x-if="symbolError">
+            <p class="muted" data-testid="symbol-error" x-text="symbolError"></p>
+          </template>
+          <template x-if="symbols.length === 0 && !symbolError">
+            <p class="muted" data-testid="symbol-empty">Run a search to list symbols.</p>
+          </template>
+          <ul class="symbol-results">
+            <template x-for="s in symbols" :key="s.id">
+              <li :data-testid="'symbol-row-' + s.id" @click="openSymbol(s)">
+                <code class="symbol-kind" x-text="s.kind"></code>
+                <code class="symbol-name" x-text="s.name"></code>
+                <span class="muted" x-text="s.file + ':' + s.start_line"></span>
+                <span class="symbol-signature" x-text="s.signature"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </section>
+
+      <section class="panel-headed" data-testid="recent-commits-panel">
+        <header class="panel-header"><h2>recent commits</h2></header>
+        <div class="panel-body">
+          {{if not .Composite.Commits}}
+            <p class="muted" data-testid="commits-empty">No commits persisted yet. Push to this repo to populate the history.</p>
+          {{else}}
+            <ul class="commit-list" data-testid="commit-list">
+              {{range .Composite.Commits}}
+              <li data-testid="commit-row-{{.SHA}}">
+                <code class="commit-sha">{{.SHA}}</code>
+                <span class="commit-subject">{{.Subject}}</span>
+                <span class="muted commit-author">{{.Author}}</span>
+                <span class="muted commit-when">{{.CreatedAt}}</span>
+                {{if .URL}}<a class="muted" href="{{.URL}}">↗</a>{{end}}
+              </li>
+              {{end}}
+            </ul>
+          {{end}}
+        </div>
+      </section>
+
+      <section class="panel-headed" data-testid="branch-diff-panel">
+        <header class="panel-header"><h2>branch diff</h2></header>
+        <div class="panel-body">
+          <form class="diff-form" @submit.prevent="loadDiff()">
+            <input type="text" placeholder="from ref (sha or branch)" x-model="diff.from" data-testid="diff-from">
+            <input type="text" placeholder="to ref (sha or branch)" x-model="diff.to" data-testid="diff-to">
+            <button type="submit" data-testid="diff-submit">compare</button>
+          </form>
+          <template x-if="diff.error">
+            <p class="muted" data-testid="diff-error" x-text="diff.error"></p>
+          </template>
+          <template x-if="diff.result">
+            <div data-testid="diff-result">
+              <p class="muted" x-show="diff.result.diff_source === 'unavailable'" data-testid="diff-source-unavailable">
+                Unified diff content is not yet wired (follow-up story will integrate the GitHub Compare API). Commits between the two refs are listed below.
+              </p>
+              <ul class="commit-list">
+                <template x-for="c in (diff.result.commits || [])" :key="c.sha">
+                  <li>
+                    <code class="commit-sha" x-text="c.sha"></code>
+                    <span class="commit-subject" x-text="c.subject"></span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <aside class="symbol-drawer" x-show="drawer.open" x-cloak data-testid="symbol-drawer">
+        <header class="panel-header">
+          <h2>symbol <code x-text="drawer.symbol.name"></code></h2>
+          <button type="button" class="btn-link" @click="closeDrawer()">close</button>
+        </header>
+        <div class="panel-body">
+          <pre class="story-prose" x-text="drawer.source"></pre>
+        </div>
+      </aside>
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

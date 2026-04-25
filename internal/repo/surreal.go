@@ -27,6 +27,8 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS repos SCHEMALESS", nil)
 	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE INDEX IF NOT EXISTS repos_workspace_project_status ON TABLE repos FIELDS workspace_id, project_id, status", nil)
 	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE INDEX IF NOT EXISTS repos_workspace_remote ON TABLE repos FIELDS workspace_id, git_remote", nil)
+	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS commits SCHEMALESS", nil)
+	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE INDEX IF NOT EXISTS commits_repo_committed_at ON TABLE commits FIELDS repo_id, committed_at", nil)
 	return s
 }
 
@@ -217,6 +219,97 @@ func (s *SurrealStore) LookupByRemote(ctx context.Context, gitRemote string) ([]
 		return []Repo{}, nil
 	}
 	return (*results)[0].Result, nil
+}
+
+// commitSelectCols pins the column projection for the commits table.
+const commitSelectCols = "repo_id, sha, subject, author, url, committed_at, parent_sha, story_ids"
+
+// commitRowID returns the canonical record id for the commits table.
+// Idempotent on retry: re-writing the same (repoID, sha) replaces in
+// place rather than duplicating.
+func commitRowID(repoID, sha string) string {
+	return repoID + "_" + sha
+}
+
+// UpsertCommit implements Store for SurrealStore.
+func (s *SurrealStore) UpsertCommit(ctx context.Context, c Commit) (Commit, error) {
+	if c.RepoID == "" || c.SHA == "" {
+		return Commit{}, fmt.Errorf("repo: commit requires repo_id and sha")
+	}
+	sql := "UPSERT $rid CONTENT $doc"
+	vars := map[string]any{
+		"rid": surrealmodels.NewRecordID("commits", commitRowID(c.RepoID, c.SHA)),
+		"doc": c,
+	}
+	if _, err := surrealdb.Query[[]Commit](ctx, s.db, sql, vars); err != nil {
+		return Commit{}, fmt.Errorf("repo: upsert commit: %w", err)
+	}
+	return c, nil
+}
+
+// GetCommit implements Store for SurrealStore.
+func (s *SurrealStore) GetCommit(ctx context.Context, repoID, sha string, memberships []string) (Commit, error) {
+	if _, err := s.GetByID(ctx, repoID, memberships); err != nil {
+		return Commit{}, err
+	}
+	sql := fmt.Sprintf("SELECT %s FROM commits WHERE id = $rid LIMIT 1", commitSelectCols)
+	vars := map[string]any{"rid": surrealmodels.NewRecordID("commits", commitRowID(repoID, sha))}
+	results, err := surrealdb.Query[[]Commit](ctx, s.db, sql, vars)
+	if err != nil {
+		return Commit{}, fmt.Errorf("repo: get commit: %w", err)
+	}
+	if results == nil || len(*results) == 0 || len((*results)[0].Result) == 0 {
+		return Commit{}, ErrNotFound
+	}
+	return (*results)[0].Result[0], nil
+}
+
+// ListCommits implements Store for SurrealStore.
+func (s *SurrealStore) ListCommits(ctx context.Context, repoID, branch string, limit int, memberships []string) ([]Commit, error) {
+	if _, err := s.GetByID(ctx, repoID, memberships); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = defaultCommitListLimit
+	}
+	sql := fmt.Sprintf("SELECT %s FROM commits WHERE repo_id = $repo ORDER BY committed_at DESC LIMIT $limit", commitSelectCols)
+	vars := map[string]any{"repo": repoID, "limit": limit}
+	results, err := surrealdb.Query[[]Commit](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("repo: list commits: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Commit{}, nil
+	}
+	return (*results)[0].Result, nil
+}
+
+// Diff implements Store for SurrealStore. Walks the persisted parent
+// chain via repeat GetCommit calls.
+func (s *SurrealStore) Diff(ctx context.Context, repoID, fromRef, toRef string, memberships []string) (Diff, error) {
+	if _, err := s.GetByID(ctx, repoID, memberships); err != nil {
+		return Diff{}, err
+	}
+	out := Diff{
+		RepoID:           repoID,
+		FromRef:          fromRef,
+		ToRef:            toRef,
+		Commits:          []Commit{},
+		Unified:          "",
+		SymbolChanges:    []SymbolChange{},
+		DiffSource:       DiffSourceUnavailable,
+		DiffSourceReason: "satellites does not clone repos and webhook payloads do not carry file diffs; follow-up story will integrate the GitHub Compare API",
+	}
+	cur := toRef
+	for steps := 0; cur != "" && cur != fromRef && steps < 1000; steps++ {
+		c, err := s.GetCommit(ctx, repoID, cur, memberships)
+		if err != nil {
+			break
+		}
+		out.Commits = append(out.Commits, c)
+		cur = c.ParentSHA
+	}
+	return out, nil
 }
 
 // Compile-time assertion.

@@ -48,6 +48,27 @@ type Store interface {
 	// git_remote matches. Used by the push-webhook receiver to find the
 	// tracked repo before signature verification. Story_21d22880.
 	LookupByRemote(ctx context.Context, gitRemote string) ([]Repo, error)
+
+	// UpsertCommit writes a per-commit row keyed by (RepoID, SHA).
+	// Idempotent on retry: re-writing the same (RepoID, SHA) replaces
+	// the existing row in place. Used by the webhook commit-receiver.
+	// Story_c2a2f073.
+	UpsertCommit(ctx context.Context, c Commit) (Commit, error)
+
+	// GetCommit returns the persisted commit row for (repoID, sha) or
+	// ErrNotFound. Used by the Diff parent-walk and the MCP layer.
+	GetCommit(ctx context.Context, repoID, sha string, memberships []string) (Commit, error)
+
+	// ListCommits returns commits for (repoID) ordered DESC by
+	// CommittedAt. Branch is currently advisory — the persisted commits
+	// table does not carry a branch column, so non-empty branch is a
+	// no-op filter. Limit caps the result; <=0 uses 50.
+	ListCommits(ctx context.Context, repoID, branch string, limit int, memberships []string) ([]Commit, error)
+
+	// Diff walks the persisted parent-chain from toRef back to fromRef
+	// (or until the chain ends) and returns the Diff shape. Unified +
+	// SymbolChanges remain empty in v1 — see Diff.DiffSource.
+	Diff(ctx context.Context, repoID, fromRef, toRef string, memberships []string) (Diff, error)
 }
 
 // validateStatus rejects writes that supply a status outside the
@@ -78,13 +99,19 @@ func inMemberships(wsID string, memberships []string) bool {
 // one-per-project invariant and status-enum validator live in this
 // shared type so the surreal impl can defer to the same checks.
 type MemoryStore struct {
-	mu   sync.Mutex
-	rows map[string]Repo
+	mu      sync.Mutex
+	rows    map[string]Repo
+	commits map[string]Commit // key = repoID + "|" + sha
 }
 
 // NewMemoryStore returns an empty MemoryStore.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{rows: make(map[string]Repo)}
+	return &MemoryStore{rows: make(map[string]Repo), commits: make(map[string]Commit)}
+}
+
+// commitKey is the in-memory composite-key for the commits map.
+func commitKey(repoID, sha string) string {
+	return repoID + "|" + sha
 }
 
 // Create implements Store for MemoryStore.
@@ -228,6 +255,93 @@ func (m *MemoryStore) LookupByRemote(ctx context.Context, gitRemote string) ([]R
 		if r.GitRemote == gitRemote {
 			out = append(out, r)
 		}
+	}
+	return out, nil
+}
+
+// UpsertCommit implements Store for MemoryStore.
+func (m *MemoryStore) UpsertCommit(ctx context.Context, c Commit) (Commit, error) {
+	if c.RepoID == "" || c.SHA == "" {
+		return Commit{}, fmt.Errorf("repo: commit requires repo_id and sha")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.commits[commitKey(c.RepoID, c.SHA)] = c
+	return c, nil
+}
+
+// GetCommit implements Store for MemoryStore.
+func (m *MemoryStore) GetCommit(ctx context.Context, repoID, sha string, memberships []string) (Commit, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[repoID]
+	if !ok || !inMemberships(r.WorkspaceID, memberships) {
+		return Commit{}, ErrNotFound
+	}
+	c, ok := m.commits[commitKey(repoID, sha)]
+	if !ok {
+		return Commit{}, ErrNotFound
+	}
+	return c, nil
+}
+
+const defaultCommitListLimit = 50
+
+// ListCommits implements Store for MemoryStore. Branch is currently a
+// no-op filter — see Store.ListCommits docs.
+func (m *MemoryStore) ListCommits(ctx context.Context, repoID, branch string, limit int, memberships []string) ([]Commit, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[repoID]
+	if !ok || !inMemberships(r.WorkspaceID, memberships) {
+		return nil, ErrNotFound
+	}
+	out := make([]Commit, 0)
+	for _, c := range m.commits {
+		if c.RepoID != repoID {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CommittedAt.After(out[j].CommittedAt) })
+	if limit <= 0 {
+		limit = defaultCommitListLimit
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// Diff implements Store for MemoryStore. Walks the parent chain from
+// toRef back to fromRef using persisted ParentSHA. Unified +
+// SymbolChanges remain empty in v1; DiffSource carries the constraint
+// marker.
+func (m *MemoryStore) Diff(ctx context.Context, repoID, fromRef, toRef string, memberships []string) (Diff, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[repoID]
+	if !ok || !inMemberships(r.WorkspaceID, memberships) {
+		return Diff{}, ErrNotFound
+	}
+	out := Diff{
+		RepoID:           repoID,
+		FromRef:          fromRef,
+		ToRef:            toRef,
+		Commits:          []Commit{},
+		Unified:          "",
+		SymbolChanges:    []SymbolChange{},
+		DiffSource:       DiffSourceUnavailable,
+		DiffSourceReason: "satellites does not clone repos and webhook payloads do not carry file diffs; follow-up story will integrate the GitHub Compare API",
+	}
+	cur := toRef
+	for steps := 0; cur != "" && cur != fromRef && steps < 1000; steps++ {
+		c, ok := m.commits[commitKey(repoID, cur)]
+		if !ok {
+			break
+		}
+		out.Commits = append(out.Commits, c)
+		cur = c.ParentSHA
 	}
 	return out, nil
 }

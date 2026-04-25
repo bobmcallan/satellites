@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -200,6 +201,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /repo", p.handleRepoView)
 	mux.HandleFunc("GET /api/repos/{id}/symbols", p.handleRepoSymbols)
 	mux.HandleFunc("GET /api/repos/{id}/symbols/{symbol_id}", p.handleRepoSymbolSource)
+	mux.HandleFunc("GET /api/repos/{id}/diff", p.handleRepoDiff)
 	mux.HandleFunc("GET /roles", p.handleRoles)
 	mux.HandleFunc("GET /agents", p.handleAgents)
 	mux.HandleFunc("GET /grants", p.handleGrants)
@@ -1061,6 +1063,39 @@ func (p *Portal) handleRepoSymbolSource(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)
+}
+
+// handleRepoDiff returns the branch-diff JSON for the repo at /api/repos/{id}/diff.
+// Query params: from, to. Reads the diff via repo.Store.Diff which
+// walks the persisted commit chain.
+func (p *Portal) handleRepoDiff(w http.ResponseWriter, r *http.Request) {
+	user, ok := p.resolveUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if p.repos == nil {
+		http.NotFound(w, r)
+		return
+	}
+	repoID := r.PathValue("id")
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	_, _, memberships := p.activeWorkspace(r, user)
+	if _, err := p.repos.GetByID(r.Context(), repoID, memberships); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	d, err := p.repos.Diff(r.Context(), repoID, from, to, memberships)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(d); err != nil {
+		p.logger.Error().Str("error", err.Error()).Msg("repo diff encode failed")
+	}
 }
 
 type rolesPageData struct {

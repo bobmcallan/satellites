@@ -137,3 +137,36 @@ func shortSHA(sha string) string {
 	}
 	return sha[:7]
 }
+
+// pushCommitTimestamper extracts a commit's commit-time from the
+// payload. GitHub push events embed `timestamp` (ISO-8601) on each
+// commit; pushPayload doesn't carry the field today, so this helper
+// lets callers pass an explicit `now` override (the webhook receiver's
+// now-clock) when no per-commit timestamp is available. If the commit
+// embeds a Timestamp field in future, parse that here.
+
+// persistCommits writes one row per pushed commit into the repo
+// store's commits table. Idempotent on retry: UpsertCommit replaces by
+// (RepoID, SHA). Failures are non-fatal — the webhook continues to the
+// reindex enqueue regardless.
+func persistCommits(ctx context.Context, store Store, r Repo, commits []pushCommit, now time.Time) {
+	if store == nil || len(commits) == 0 {
+		return
+	}
+	for _, c := range commits {
+		sha := strings.TrimSpace(c.ID)
+		if sha == "" {
+			continue
+		}
+		row := Commit{
+			RepoID:      r.ID,
+			SHA:         sha,
+			Subject:     commitSubject(c.Message),
+			Author:      c.Author.Name,
+			URL:         c.URL,
+			CommittedAt: now,
+			StoryIDs:    extractStoryRefs(c.Message),
+		}
+		_, _ = store.UpsertCommit(ctx, row)
+	}
+}

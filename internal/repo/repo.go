@@ -51,3 +51,52 @@ func NewID() string {
 func IsKnownStatus(s string) bool {
 	return s == StatusActive || s == StatusArchived
 }
+
+// Commit is a per-commit row keyed by (RepoID, SHA). Story_c2a2f073
+// added this primitive so the portal repo view's recent-commits panel
+// renders without hitting the ledger; per-story extraction lives on
+// the StoryIDs slice.
+type Commit struct {
+	RepoID      string    `json:"repo_id"`
+	SHA         string    `json:"sha"`
+	Subject     string    `json:"subject"`
+	Author      string    `json:"author,omitempty"`
+	URL         string    `json:"url,omitempty"`
+	CommittedAt time.Time `json:"committed_at"`
+	ParentSHA   string    `json:"parent_sha,omitempty"`
+	StoryIDs    []string  `json:"story_ids,omitempty"`
+}
+
+// SymbolChange annotates one symbol-level delta between two refs.
+// Status is one of "added" / "removed" / "modified". Empty in v1 of
+// Diff because the diff-content backend (GitHub Compare API) is a
+// follow-up; the type ships now so the portal/MCP shape is stable.
+type SymbolChange struct {
+	SymbolID string `json:"symbol_id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	Status   string `json:"status"`
+	File     string `json:"file,omitempty"`
+}
+
+// DiffSourceUnavailable marks a Diff that does not carry real
+// file-diff content because satellites cannot derive it inside the
+// substrate (per pr_c52ba6e8 — no cloning; webhook payloads do not
+// carry diffs). The commits-between-refs walk is still authoritative.
+const DiffSourceUnavailable = "unavailable"
+
+// Diff is the result of branch-comparison between FromRef and ToRef
+// on a tracked repo. Commits is the parent-walk from ToRef back to
+// FromRef (or until the chain ends). Unified + SymbolChanges remain
+// empty in v1 with DiffSource=DiffSourceUnavailable until a follow-up
+// story integrates the GitHub Compare API.
+type Diff struct {
+	RepoID           string         `json:"repo_id"`
+	FromRef          string         `json:"from_ref"`
+	ToRef            string         `json:"to_ref"`
+	Commits          []Commit       `json:"commits"`
+	Unified          string         `json:"unified"`
+	SymbolChanges    []SymbolChange `json:"symbol_changes"`
+	DiffSource       string         `json:"diff_source"`
+	DiffSourceReason string         `json:"diff_source_reason,omitempty"`
+}

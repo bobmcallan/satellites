@@ -1,0 +1,248 @@
+package portal
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/repo"
+)
+
+func renderRepo(t *testing.T, p *Portal, sessionCookie string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	p.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/repo", nil)
+	if sessionCookie != "" {
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessionCookie})
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestRepoView_EmptyState(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, _, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+	rec := renderRepo(t, p, sess.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `data-testid="repo-empty"`) {
+		t.Errorf("expected repo-empty marker for no-project + no-repo state")
+	}
+}
+
+func TestRepoView_HeaderRendersWhenRepoExists(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, projects, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	proj, _ := projects.Create(ctx, user.ID, "", "alpha", now)
+
+	// Seed a repo via the portal's exposed `repos` field by reaching
+	// into the helper. Since newTestPortal creates the repo store
+	// internally, we use the `repos` MemoryStore.
+	if _, err := p.repos.Create(ctx, repo.Repo{
+		ProjectID:     proj.ID,
+		GitRemote:     "git@example.com:alpha/main.git",
+		DefaultBranch: "main",
+		HeadSHA:       "abcdef0123",
+		Status:        repo.StatusActive,
+		SymbolCount:   42,
+		FileCount:     7,
+		IndexVersion:  3,
+	}, now); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+
+	rec := renderRepo(t, p, sess.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-testid="repo-header"`,
+		`data-testid="symbol-search-panel"`,
+		`data-testid="recent-commits-panel"`,
+		`data-testid="branch-diff-panel"`,
+		"git@example.com:alpha/main.git",
+		"abcdef0123",
+		`>42<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("repo body missing %q", want)
+		}
+	}
+	if strings.Contains(body, `data-testid="repo-empty"`) {
+		t.Errorf("repo body should not show empty state when repo exists")
+	}
+}
+
+func TestRepoSymbols_IndexerStubReturns503(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, projects, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	proj, _ := projects.Create(ctx, user.ID, "", "alpha", now)
+	repoRow, _ := p.repos.Create(ctx, repo.Repo{
+		ProjectID:     proj.ID,
+		GitRemote:     "git@example.com:alpha/main.git",
+		DefaultBranch: "main",
+		Status:        repo.StatusActive,
+	}, now)
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/repos/"+repoRow.ID+"/symbols?q=foo", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (stub indexer)", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "index_unavailable") {
+		t.Errorf("body missing index_unavailable error code: %s", body)
+	}
+}
+
+func TestRepoView_CommitsRendered(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, projects, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	proj, _ := projects.Create(ctx, user.ID, "", "alpha", now)
+	repoRow, _ := p.repos.Create(ctx, repo.Repo{
+		ProjectID:     proj.ID,
+		GitRemote:     "git@example.com:alpha/main.git",
+		DefaultBranch: "main",
+		Status:        repo.StatusActive,
+	}, now)
+	for i, sha := range []string{"sha_old", "sha_mid", "sha_new"} {
+		_, _ = p.repos.UpsertCommit(ctx, repo.Commit{
+			RepoID: repoRow.ID, SHA: sha,
+			Subject:     "msg-" + sha,
+			Author:      "Alice",
+			CommittedAt: now.Add(time.Duration(i) * time.Minute),
+		})
+	}
+	rec := renderRepo(t, p, sess.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `data-testid="commits-empty"`) {
+		t.Errorf("commits-empty marker present despite persisted commits")
+	}
+	if !strings.Contains(body, `data-testid="commit-list"`) {
+		t.Errorf("commit-list marker missing from rendered repo view")
+	}
+	for _, sha := range []string{"sha_old", "sha_mid", "sha_new"} {
+		if !strings.Contains(body, sha) {
+			t.Errorf("commit list missing sha %s", sha)
+		}
+	}
+}
+
+func TestRepoDiffEndpoint_HappyPath(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, projects, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	proj, _ := projects.Create(ctx, user.ID, "", "alpha", now)
+	repoRow, _ := p.repos.Create(ctx, repo.Repo{
+		ProjectID:     proj.ID,
+		GitRemote:     "git@example.com:alpha/main.git",
+		DefaultBranch: "main",
+		Status:        repo.StatusActive,
+	}, now)
+	chain := []repo.Commit{
+		{RepoID: repoRow.ID, SHA: "c1", CommittedAt: now},
+		{RepoID: repoRow.ID, SHA: "c2", ParentSHA: "c1", CommittedAt: now.Add(time.Minute)},
+	}
+	for _, c := range chain {
+		_, _ = p.repos.UpsertCommit(ctx, c)
+	}
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/repos/"+repoRow.ID+"/diff?from=c1&to=c2", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"diff_source":"unavailable"`,
+		`"from_ref":"c1"`,
+		`"to_ref":"c2"`,
+		`"sha":"c2"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("diff response missing %q; body=%s", want, body)
+		}
+	}
+}
+
+func TestRepoDiffEndpoint_404OnUnknownRepo(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, _, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/repos/repo_missing/diff?from=a&to=b", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestRepoSymbols_404OnUnknownRepo(t *testing.T) {
+	t.Parallel()
+	p, users, sessions, _, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
+	user := auth.User{ID: "u_alice", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	mux := http.NewServeMux()
+	p.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/repos/repo_missing/symbols", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}

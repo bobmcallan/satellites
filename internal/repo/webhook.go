@@ -178,6 +178,7 @@ func (h *WebhookHandler) serve(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	h.recordDelivery(r.Context(), *tracked, deliveryID, payload.Ref, now)
 	emitCommitRows(r.Context(), h.deps.Ledger, *tracked, payload.Commits, now)
+	persistCommits(r.Context(), h.deps.Repos, *tracked, payload.Commits, now)
 
 	taskID := h.enqueueWebhookReindex(r.Context(), *tracked, deliveryID, now)
 	if taskID == "" {
