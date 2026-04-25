@@ -3,26 +3,154 @@ package document
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
 	surrealmodels "github.com/surrealdb/surrealdb.go/pkg/models"
+
+	"github.com/bobmcallan/satellites/internal/embeddings"
 )
+
+// sortChunkHits sorts hits by Score descending. Helper to keep the
+// SurrealChunkStore impl readable.
+func sortChunkHits(hits []ChunkHit) {
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+}
 
 // SurrealStore is a SurrealDB-backed Store. It assumes the caller has
 // already authenticated + selected ns/db on the supplied *surrealdb.DB.
 type SurrealStore struct {
-	db *surrealdb.DB
+	db       *surrealdb.DB
+	embedder embeddings.Embedder
+	chunks   ChunkStore
 }
 
-// NewSurrealStore wraps db as a Store. Defines the `documents` table
-// schemaless so first-time SELECTs don't error on a missing table — v3
-// SurrealDB rejects SELECT from undefined tables.
+// NewSurrealStore wraps db as a Store. Defines the `documents` and
+// `document_chunks` tables schemaless so first-time SELECTs don't error
+// on missing tables — v3 SurrealDB rejects SELECT from undefined tables.
+//
+// SearchSemantic returns ErrSemanticUnavailable until WithEmbeddings has
+// installed an Embedder + ChunkStore.
 func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	s := &SurrealStore{db: db}
 	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS documents SCHEMALESS", nil)
+	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS document_chunks SCHEMALESS", nil)
 	return s
+}
+
+// WithEmbeddings installs the Embedder + ChunkStore so SearchSemantic
+// runs the real cosine ranking instead of returning ErrSemanticUnavailable.
+// Returns the same store for chaining at boot.
+func (s *SurrealStore) WithEmbeddings(embedder embeddings.Embedder, chunks ChunkStore) *SurrealStore {
+	s.embedder = embedder
+	s.chunks = chunks
+	return s
+}
+
+// NewSurrealChunkStore returns a SurrealDB-backed ChunkStore writing to
+// the `document_chunks` table.
+func NewSurrealChunkStore(db *surrealdb.DB) *SurrealChunkStore {
+	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS document_chunks SCHEMALESS", nil)
+	return &SurrealChunkStore{db: db}
+}
+
+// SurrealChunkStore is the SurrealDB-backed ChunkStore.
+type SurrealChunkStore struct {
+	db *surrealdb.DB
+}
+
+// chunkSelectCols pins the column projection for the chunks table.
+const chunkSelectCols = "meta::id(id) AS id, document_id, workspace_id, chunk_idx, body, embedding, embedding_model, created_at"
+
+// Upsert implements ChunkStore for SurrealChunkStore.
+func (c *SurrealChunkStore) Upsert(ctx context.Context, documentID string, chunks []Chunk) error {
+	// Replace-the-set semantics: drop existing rows for this document
+	// then write the new batch.
+	if err := c.DeleteByDocumentID(ctx, documentID); err != nil {
+		return err
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+	for _, ch := range chunks {
+		if ch.ID == "" {
+			ch.ID = NewID()
+		}
+		if ch.DocumentID == "" {
+			ch.DocumentID = documentID
+		}
+		sql := "UPSERT $rid CONTENT $row"
+		vars := map[string]any{
+			"rid": surrealmodels.NewRecordID("document_chunks", ch.ID),
+			"row": ch,
+		}
+		if _, err := surrealdb.Query[any](ctx, c.db, sql, vars); err != nil {
+			return fmt.Errorf("document_chunks: upsert: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteByDocumentID implements ChunkStore for SurrealChunkStore.
+func (c *SurrealChunkStore) DeleteByDocumentID(ctx context.Context, documentID string) error {
+	sql := "DELETE FROM document_chunks WHERE document_id = $doc"
+	vars := map[string]any{"doc": documentID}
+	if _, err := surrealdb.Query[any](ctx, c.db, sql, vars); err != nil {
+		return fmt.Errorf("document_chunks: delete: %w", err)
+	}
+	return nil
+}
+
+// SearchByEmbedding implements ChunkStore for SurrealChunkStore. Brute-
+// force cosine over workspace-visible rows after structured-filter
+// pre-application. Linear scan; swap to a vector index when chunk count
+// crosses ~10k (limitation documented in docs/architecture.md §2).
+func (c *SurrealChunkStore) SearchByEmbedding(ctx context.Context, opts ChunkSearchOptions, memberships []string) ([]ChunkHit, error) {
+	if len(opts.Embedding) == 0 {
+		return nil, fmt.Errorf("document_chunks: SearchByEmbedding requires an Embedding")
+	}
+	conds := []string{}
+	vars := map[string]any{}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	if len(opts.RestrictDocumentIDs) > 0 {
+		conds = append(conds, "document_id IN $docs")
+		vars["docs"] = opts.RestrictDocumentIDs
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql := fmt.Sprintf("SELECT %s FROM document_chunks%s", chunkSelectCols, where)
+	results, err := surrealdb.Query[[]Chunk](ctx, c.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("document_chunks: search: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+	rows := (*results)[0].Result
+	hits := make([]ChunkHit, 0, len(rows))
+	for _, r := range rows {
+		score, err := embeddings.Cosine(opts.Embedding, r.Embedding)
+		if err != nil {
+			continue
+		}
+		hits = append(hits, ChunkHit{Chunk: r, Score: score})
+	}
+	sortChunkHits(hits)
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = defaultChunkTopK
+	}
+	if len(hits) > topK {
+		hits = hits[:topK]
+	}
+	return hits, nil
 }
 
 // selectCols preserves the string form of id. SurrealDB otherwise returns
@@ -299,13 +427,84 @@ func (s *SurrealStore) Search(ctx context.Context, opts SearchOptions, membershi
 	return (*results)[0].Result, nil
 }
 
-// SearchSemantic implements Store for SurrealStore. The Surreal-backed
-// chunk store + embedder wiring is added by C4 of story_5abfe61c — for
-// now this method returns ErrSemanticUnavailable so deploys without the
-// embedding pipeline boot cleanly. Memory-store callers exercise the
-// real SearchSemantic path; integration tests use the stub provider.
-func (s *SurrealStore) SearchSemantic(_ context.Context, _ string, _ SearchOptions, _ []string) ([]Document, error) {
-	return nil, ErrSemanticUnavailable
+// SearchSemantic implements Store for SurrealStore. Returns
+// ErrSemanticUnavailable when WithEmbeddings hasn't been called. Otherwise
+// delegates to the same algorithm as MemoryStore: pre-filter parents via
+// List → embed query → cosine via the chunk store → group hits by parent
+// → return parents in score order with BestChunkScore populated.
+func (s *SurrealStore) SearchSemantic(ctx context.Context, query string, opts SearchOptions, memberships []string) ([]Document, error) {
+	if s.embedder == nil || s.chunks == nil {
+		return nil, ErrSemanticUnavailable
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return s.Search(ctx, opts, memberships)
+	}
+	parents, err := s.List(ctx, opts.ListOptions, memberships)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) == 0 {
+		return nil, nil
+	}
+	parentIDs := make([]string, 0, len(parents))
+	parentByID := make(map[string]Document, len(parents))
+	for _, p := range parents {
+		parentIDs = append(parentIDs, p.ID)
+		parentByID[p.ID] = p
+	}
+	vecs, err := s.embedder.Embed(ctx, []string{q})
+	if err != nil {
+		return nil, fmt.Errorf("document: embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, nil
+	}
+	hits, err := s.chunks.SearchByEmbedding(ctx, ChunkSearchOptions{
+		Embedding:           vecs[0],
+		TopK:                opts.TopK * 4,
+		RestrictDocumentIDs: parentIDs,
+	}, memberships)
+	if err != nil {
+		return nil, err
+	}
+	bestPerDoc := make(map[string]float32, len(parentIDs))
+	for _, h := range hits {
+		if cur, ok := bestPerDoc[h.DocumentID]; !ok || h.Score > cur {
+			bestPerDoc[h.DocumentID] = h.Score
+		}
+	}
+	out := make([]Document, 0, len(bestPerDoc))
+	for id, score := range bestPerDoc {
+		d, ok := parentByID[id]
+		if !ok {
+			continue
+		}
+		ss := score
+		d.BestChunkScore = &ss
+		out = append(out, d)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := float32(0), float32(0)
+		if out[i].BestChunkScore != nil {
+			si = *out[i].BestChunkScore
+		}
+		if out[j].BestChunkScore != nil {
+			sj = *out[j].BestChunkScore
+		}
+		return si > sj
+	})
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out, nil
 }
 
 // validateBinding rejects a non-nil binding that does not resolve to an

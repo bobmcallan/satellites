@@ -88,6 +88,11 @@ func main() {
 		taskStore        task.Store
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
+
+		surrealDocChunks    document.ChunkStore
+		surrealLedgerChunks ledger.ChunkStore
+		surrealDocsTyped    *document.SurrealStore
+		surrealLedgerTyped  *ledger.SurrealStore
 	)
 	if cfg.DBDSN != "" {
 		dbCfg, err := db.ParseDSN(cfg.DBDSN)
@@ -102,8 +107,13 @@ func main() {
 		}
 		surrealDocs := document.NewSurrealStore(conn)
 		docStore = surrealDocs
+		surrealDocsTyped = surrealDocs
 		projStore = project.NewSurrealStore(conn)
-		ledgerStore = ledger.NewSurrealStore(conn)
+		surrealLed := ledger.NewSurrealStore(conn)
+		ledgerStore = surrealLed
+		surrealLedgerTyped = surrealLed
+		surrealDocChunks = document.NewSurrealChunkStore(conn)
+		surrealLedgerChunks = ledger.NewSurrealChunkStore(conn)
 		storyStore = story.NewSurrealStore(conn, ledgerStore)
 		wsStore = workspace.NewSurrealStore(conn)
 		contractStore = contract.NewSurrealStore(conn, docStore, storyStore)
@@ -296,33 +306,45 @@ func main() {
 	}
 
 	// Embedding ingestion worker (story_5abfe61c). Boots only when an
-	// embeddings provider is configured AND the task + chunk stores are
-	// wired. The Surreal-backed chunk store is a follow-up; until it
-	// ships, the worker no-ops on a deploy without DB_DSN+EMBEDDINGS_*.
+	// embeddings provider is configured AND DB_DSN is set so the Surreal
+	// chunk stores are available. EMBEDDINGS_PROVIDER=none / unset → the
+	// worker is not started; document_search and ledger_search fall
+	// back to filter-only Search via the verb-layer ErrSemanticUnavailable
+	// path.
 	embedCfg, err := embeddings.LoadFromEnv()
 	if err != nil {
 		logger.Warn().Str("error", err.Error()).Msg("embeddings config invalid; semantic search disabled")
-	} else if taskStore != nil {
+	} else if taskStore != nil && surrealDocChunks != nil && surrealLedgerChunks != nil {
 		embedder, err := embeddings.New(embedCfg)
 		if err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("embeddings provider construction failed; semantic search disabled")
 		} else if embedder != nil {
+			// Wire the chunk stores into the typed Surreal stores so
+			// SearchSemantic delegates instead of returning
+			// ErrSemanticUnavailable.
+			if surrealDocsTyped != nil {
+				surrealDocsTyped.WithEmbeddings(embedder, surrealDocChunks)
+			}
+			if surrealLedgerTyped != nil {
+				surrealLedgerTyped.WithEmbeddings(embedder, surrealLedgerChunks)
+			}
+
 			worker := embedworker.New(embedworker.Deps{
 				Tasks:        taskStore,
 				Embedder:     embedder,
 				Docs:         docStore,
-				DocChunks:    nil, // Surreal chunk store deferred; follow-up
+				DocChunks:    surrealDocChunks,
 				Ledger:       ledgerStore,
-				LedgerChunks: nil, // ditto
+				LedgerChunks: surrealLedgerChunks,
 				Logger:       logger,
 			})
 			if worker != nil {
-				logger.Info().Str("provider", embedCfg.Provider).Str("model", embedder.Model()).Msg("embedding worker disabled — Surreal chunk store wiring deferred (story_5abfe61c follow-up)")
-				// Worker.Start would race with a missing chunk store
-				// today; explicitly defer until the follow-up lands the
-				// Surreal-backed ChunkStore. Memory-store tests still
-				// exercise the worker path end-to-end.
-				_ = worker
+				if err := worker.Start(ctx); err != nil {
+					logger.Warn().Str("error", err.Error()).Msg("embedworker start failed")
+				} else {
+					defer worker.Stop()
+					logger.Info().Str("provider", embedCfg.Provider).Str("model", embedder.Model()).Msg("embedding worker started")
+				}
 			}
 		}
 	}

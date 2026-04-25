@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
 	surrealmodels "github.com/surrealdb/surrealdb.go/pkg/models"
 
+	"github.com/bobmcallan/satellites/internal/embeddings"
 	"github.com/bobmcallan/satellites/internal/hubemit"
 )
 
@@ -18,6 +20,16 @@ import (
 type SurrealStore struct {
 	db        *surrealdb.DB
 	publisher hubemit.Publisher
+	embedder  embeddings.Embedder
+	chunks    ChunkStore
+}
+
+// WithEmbeddings installs the Embedder + ChunkStore so SearchSemantic
+// runs the real cosine ranking instead of returning ErrSemanticUnavailable.
+func (s *SurrealStore) WithEmbeddings(embedder embeddings.Embedder, chunks ChunkStore) *SurrealStore {
+	s.embedder = embedder
+	s.chunks = chunks
+	return s
 }
 
 // SetPublisher installs the hub emit sink for subsequent mutations.
@@ -34,7 +46,107 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_story_created ON ledger FIELDS workspace_id, story_id, created_at", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_contract ON ledger FIELDS workspace_id, contract_id", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_tags ON ledger FIELDS workspace_id, tags", nil)
+	_, _ = surrealdb.Query[any](ctx, db, "DEFINE TABLE IF NOT EXISTS ledger_chunks SCHEMALESS", nil)
 	return s
+}
+
+// NewSurrealChunkStore returns a SurrealDB-backed ChunkStore writing to
+// the `ledger_chunks` table.
+func NewSurrealChunkStore(db *surrealdb.DB) *SurrealChunkStore {
+	_, _ = surrealdb.Query[any](context.Background(), db, "DEFINE TABLE IF NOT EXISTS ledger_chunks SCHEMALESS", nil)
+	return &SurrealChunkStore{db: db}
+}
+
+// SurrealChunkStore is the SurrealDB-backed ChunkStore for ledger rows.
+type SurrealChunkStore struct {
+	db *surrealdb.DB
+}
+
+const chunkSelectCols = "meta::id(id) AS id, ledger_id, workspace_id, chunk_idx, body, embedding, embedding_model, created_at"
+
+// Upsert implements ChunkStore for SurrealChunkStore.
+func (c *SurrealChunkStore) Upsert(ctx context.Context, ledgerID string, chunks []Chunk) error {
+	if err := c.DeleteByLedgerID(ctx, ledgerID); err != nil {
+		return err
+	}
+	if len(chunks) == 0 {
+		return nil
+	}
+	for _, ch := range chunks {
+		if ch.ID == "" {
+			ch.ID = NewID()
+		}
+		if ch.LedgerID == "" {
+			ch.LedgerID = ledgerID
+		}
+		sql := "UPSERT $rid CONTENT $row"
+		vars := map[string]any{
+			"rid": surrealmodels.NewRecordID("ledger_chunks", ch.ID),
+			"row": ch,
+		}
+		if _, err := surrealdb.Query[any](ctx, c.db, sql, vars); err != nil {
+			return fmt.Errorf("ledger_chunks: upsert: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteByLedgerID implements ChunkStore for SurrealChunkStore.
+func (c *SurrealChunkStore) DeleteByLedgerID(ctx context.Context, ledgerID string) error {
+	sql := "DELETE FROM ledger_chunks WHERE ledger_id = $lid"
+	vars := map[string]any{"lid": ledgerID}
+	if _, err := surrealdb.Query[any](ctx, c.db, sql, vars); err != nil {
+		return fmt.Errorf("ledger_chunks: delete: %w", err)
+	}
+	return nil
+}
+
+// SearchByEmbedding implements ChunkStore for SurrealChunkStore. Brute-
+// force cosine over rows matching memberships + RestrictLedgerIDs.
+func (c *SurrealChunkStore) SearchByEmbedding(ctx context.Context, opts ChunkSearchOptions, memberships []string) ([]ChunkHit, error) {
+	if len(opts.Embedding) == 0 {
+		return nil, fmt.Errorf("ledger_chunks: SearchByEmbedding requires an Embedding")
+	}
+	conds := []string{}
+	vars := map[string]any{}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	if len(opts.RestrictLedgerIDs) > 0 {
+		conds = append(conds, "ledger_id IN $ids")
+		vars["ids"] = opts.RestrictLedgerIDs
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+	sql := fmt.Sprintf("SELECT %s FROM ledger_chunks%s", chunkSelectCols, where)
+	results, err := surrealdb.Query[[]Chunk](ctx, c.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("ledger_chunks: search: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return nil, nil
+	}
+	rows := (*results)[0].Result
+	hits := make([]ChunkHit, 0, len(rows))
+	for _, r := range rows {
+		score, err := embeddings.Cosine(opts.Embedding, r.Embedding)
+		if err != nil {
+			continue
+		}
+		hits = append(hits, ChunkHit{Chunk: r, Score: score})
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = defaultChunkTopK
+	}
+	if len(hits) > topK {
+		hits = hits[:topK]
+	}
+	return hits, nil
 }
 
 // selectCols preserves the string form of id (see internal/project/surreal.go).
@@ -160,13 +272,88 @@ func (s *SurrealStore) Search(ctx context.Context, projectID string, opts Search
 	return (*results)[0].Result, nil
 }
 
-// SearchSemantic implements Store for SurrealStore. The Surreal-backed
-// chunk store + embedder wiring is added by C4 of story_5abfe61c — for
-// now this method returns ErrSemanticUnavailable so deploys without the
-// embedding pipeline boot cleanly. Memory-store callers exercise the
-// real SearchSemantic path; integration tests use the stub provider.
-func (s *SurrealStore) SearchSemantic(_ context.Context, _ string, _ string, _ SearchOptions, _ []string) ([]LedgerEntry, error) {
-	return nil, ErrSemanticUnavailable
+// SearchSemantic implements Store for SurrealStore. Returns
+// ErrSemanticUnavailable when WithEmbeddings hasn't been called. Otherwise
+// runs the same algorithm as MemoryStore.
+func (s *SurrealStore) SearchSemantic(ctx context.Context, projectID, query string, opts SearchOptions, memberships []string) ([]LedgerEntry, error) {
+	if s.embedder == nil || s.chunks == nil {
+		return nil, ErrSemanticUnavailable
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return s.Search(ctx, projectID, opts, memberships)
+	}
+	parents, err := s.List(ctx, projectID, opts.ListOptions, memberships)
+	if err != nil {
+		return nil, err
+	}
+	if len(parents) == 0 {
+		return nil, nil
+	}
+	parentIDs := make([]string, 0, len(parents))
+	parentByID := make(map[string]LedgerEntry, len(parents))
+	for _, p := range parents {
+		if p.Status == StatusDereferenced {
+			continue
+		}
+		parentIDs = append(parentIDs, p.ID)
+		parentByID[p.ID] = p
+	}
+	if len(parentIDs) == 0 {
+		return nil, nil
+	}
+	vecs, err := s.embedder.Embed(ctx, []string{q})
+	if err != nil {
+		return nil, fmt.Errorf("ledger: embed query: %w", err)
+	}
+	if len(vecs) == 0 {
+		return nil, nil
+	}
+	hits, err := s.chunks.SearchByEmbedding(ctx, ChunkSearchOptions{
+		Embedding:         vecs[0],
+		TopK:              opts.TopK * 4,
+		RestrictLedgerIDs: parentIDs,
+	}, memberships)
+	if err != nil {
+		return nil, err
+	}
+	bestPerRow := make(map[string]float32, len(parentIDs))
+	for _, h := range hits {
+		if cur, ok := bestPerRow[h.LedgerID]; !ok || h.Score > cur {
+			bestPerRow[h.LedgerID] = h.Score
+		}
+	}
+	out := make([]LedgerEntry, 0, len(bestPerRow))
+	for id, score := range bestPerRow {
+		row, ok := parentByID[id]
+		if !ok {
+			continue
+		}
+		ss := score
+		row.BestChunkScore = &ss
+		out = append(out, row)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := float32(0), float32(0)
+		if out[i].BestChunkScore != nil {
+			si = *out[i].BestChunkScore
+		}
+		if out[j].BestChunkScore != nil {
+			sj = *out[j].BestChunkScore
+		}
+		return si > sj
+	})
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+	if topK > 100 {
+		topK = 100
+	}
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out, nil
 }
 
 // Recall implements Store for SurrealStore. Returns the chain of rows
@@ -242,6 +429,12 @@ func (s *SurrealStore) Dereference(ctx context.Context, id, reason, actor string
 	updateVars := map[string]any{"rid": surrealmodels.NewRecordID("ledger", id)}
 	if _, err := surrealdb.Query[any](ctx, s.db, updateSQL, updateVars); err != nil {
 		return LedgerEntry{}, fmt.Errorf("ledger: dereference target: %w", err)
+	}
+	// Cascade chunks (story_5abfe61c). Best-effort — failure to drop
+	// chunks is logged at the caller layer; SearchSemantic also filters
+	// dereferenced parents as defence-in-depth.
+	if s.chunks != nil {
+		_ = s.chunks.DeleteByLedgerID(ctx, id)
 	}
 	emitDereferenced(ctx, s.publisher, target.WorkspaceID, id, reason)
 	return written, nil
