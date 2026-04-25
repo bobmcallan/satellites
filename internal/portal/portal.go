@@ -208,6 +208,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /grants", p.handleGrants)
 	mux.HandleFunc("POST /api/grants/{id}/release", p.handleGrantRelease)
 	mux.HandleFunc("GET /workspaces/select", p.handleWorkspaceSelect)
+	mux.HandleFunc("POST /theme", p.handleThemeSet)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -227,14 +228,16 @@ type landingData struct {
 }
 
 type loginData struct {
-	Title          string
-	Version        string
-	Commit         string
-	Next           string
-	GoogleEnabled  bool
-	GithubEnabled  bool
-	DevModeEnabled bool
-	WSConfig       WSConfig
+	Title           string
+	Version         string
+	Commit          string
+	Next            string
+	GoogleEnabled   bool
+	GithubEnabled   bool
+	DevModeEnabled  bool
+	ThemeMode       string
+	ThemePickerNext string
+	WSConfig        WSConfig
 }
 
 type projectsListData struct {
@@ -302,13 +305,15 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 // handleLogin renders /login with provider buttons derived from cfg.
 func (p *Portal) handleLogin(w http.ResponseWriter, r *http.Request) {
 	data := loginData{
-		Title:          "sign in",
-		Version:        config.Version,
-		Commit:         config.GitCommit,
-		Next:           r.URL.Query().Get("next"),
-		GoogleEnabled:  p.cfg.GoogleClientID != "" && p.cfg.GoogleClientSecret != "",
-		GithubEnabled:  p.cfg.GithubClientID != "" && p.cfg.GithubClientSecret != "",
-		DevModeEnabled: p.cfg.Env != "prod" && p.cfg.DevMode,
+		Title:           "sign in",
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		Next:            r.URL.Query().Get("next"),
+		GoogleEnabled:   p.cfg.GoogleClientID != "" && p.cfg.GoogleClientSecret != "",
+		GithubEnabled:   p.cfg.GithubClientID != "" && p.cfg.GithubClientSecret != "",
+		DevModeEnabled:  p.cfg.Env != "prod" && p.cfg.DevMode,
+		ThemeMode:       themeFromRequest(r),
+		ThemePickerNext: r.URL.RequestURI(),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
 		p.logger.Error().Str("template", "login.html").Str("error", err.Error()).Msg("template render failed")

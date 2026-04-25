@@ -7,14 +7,39 @@
 <title>{{.Title}} — Satellites</title>
 <script>
   // Resolve theme before body renders so there is no flash of the wrong
-  // palette. localStorage.theme is "dark" | "light"; absence defaults to dark.
+  // palette (story_5dd7167a). The picker writes a server-readable cookie
+  // `satellites_theme` (dark|light|system); this script handles the
+  // client-side path: cookie -> localStorage -> default-dark, with
+  // matchMedia resolution for the "system" mode + a media-query listener
+  // so an OS theme flip re-resolves without reload.
   (function () {
+    function readCookie(name) {
+      var parts = (document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i++) {
+        var p = parts[i].trim();
+        if (p.indexOf(name + '=') === 0) return p.substring(name.length + 1);
+      }
+      return '';
+    }
+    function resolve(mode) {
+      if (mode === 'light' || mode === 'dark') return mode;
+      if (mode === 'system' && window.matchMedia) {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      return 'dark';
+    }
+    function apply(stored) {
+      document.documentElement.setAttribute('data-theme-mode', stored || 'dark');
+      document.documentElement.setAttribute('data-theme', resolve(stored));
+    }
     try {
-      var t = localStorage.getItem('theme');
-      if (t === 'light') {
-        document.documentElement.setAttribute('data-theme', 'light');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'dark');
+      var stored = readCookie('satellites_theme') || localStorage.getItem('theme') || 'dark';
+      // Map legacy localStorage values: pre-story values were dark|light only;
+      // accept those as-is.
+      if (stored !== 'light' && stored !== 'dark' && stored !== 'system') stored = 'dark';
+      apply(stored);
+      if (stored === 'system' && window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { apply('system'); });
       }
     } catch (e) {
       document.documentElement.setAttribute('data-theme', 'dark');

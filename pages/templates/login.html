@@ -5,7 +5,7 @@
   {{template "head.html" .}}
 </head>
 <body>
-  <main class="login-screen">
+  <main class="portal-main login-screen">
     <section class="panel-headed login-panel">
       <header class="panel-header"><h1>sign in</h1></header>
       <div class="panel-body">
@@ -39,6 +39,7 @@
           </details>
           {{end}}
         </div>
+        {{template "theme_picker.html" .}}
       </div>
     </section>
   </main>
