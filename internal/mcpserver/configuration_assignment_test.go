@@ -287,6 +287,114 @@ func TestHandleDocumentDelete_ConfigurationReferencedByStory_Rejected(t *testing
 	}
 }
 
+// seedAgent creates an agent document in the fixture's workspace whose
+// Structured payload references defaultCfgID. Returns the agent id.
+func (f *contractFixture) seedAgent(t *testing.T, name, defaultCfgID string) string {
+	t.Helper()
+	settings := document.AgentSettings{}
+	if defaultCfgID != "" {
+		v := defaultCfgID
+		settings.DefaultConfigurationID = &v
+	}
+	payload, err := document.MarshalAgentSettings(settings)
+	if err != nil {
+		t.Fatalf("MarshalAgentSettings: %v", err)
+	}
+	doc, err := f.server.docs.Create(f.ctx, document.Document{
+		WorkspaceID: f.wsID,
+		ProjectID:   document.StringPtr(f.projectID),
+		Type:        document.TypeAgent,
+		Name:        name,
+		Body:        name + " agent",
+		Scope:       document.ScopeProject,
+		Structured:  payload,
+	}, f.now)
+	if err != nil {
+		t.Fatalf("Create agent %q: %v", name, err)
+	}
+	return doc.ID
+}
+
+func TestHandleStoryWorkflowClaim_AgentDefault_NoStoryConfig(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	cfgID := f.seedConfiguration(t, "alpha", []string{"preplan", "plan", "develop", "story_close"})
+	agentID := f.seedAgent(t, "agent-1", cfgID)
+
+	// Story has no configuration_id; agent_id supplied → CIs should
+	// match the Configuration's contract list.
+	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+		"story_id": f.storyID,
+		"agent_id": agentID,
+	}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("isError: %s", firstText(res))
+	}
+	var body struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	_ = json.Unmarshal([]byte(firstText(res)), &body)
+	if len(body.ContractInstances) != 4 {
+		t.Fatalf("CI count = %d, want 4 (matches agent's Configuration)", len(body.ContractInstances))
+	}
+}
+
+func TestHandleStoryWorkflowClaim_StoryConfigBeats_AgentDefault(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	storyCfg := f.seedConfiguration(t, "story-cfg", []string{"preplan", "plan", "develop", "story_close"})
+	agentCfg := f.seedConfiguration(t, "agent-cfg", []string{"preplan", "plan", "develop", "develop", "story_close"})
+	agentID := f.seedAgent(t, "agent-1", agentCfg)
+
+	// Assign story.configuration_id to story-cfg.
+	cid := storyCfg
+	if _, err := f.server.stories.Update(f.ctx, f.storyID, story.UpdateFields{ConfigurationID: &cid}, "test", f.now, nil); err != nil {
+		t.Fatalf("assign story cfg: %v", err)
+	}
+
+	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+		"story_id": f.storyID,
+		"agent_id": agentID,
+	}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("isError: %s", firstText(res))
+	}
+	var body struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	_ = json.Unmarshal([]byte(firstText(res)), &body)
+	if len(body.ContractInstances) != 4 {
+		t.Fatalf("CI count = %d, want 4 (story-cfg wins over agent-cfg)", len(body.ContractInstances))
+	}
+}
+
+func TestHandleDocumentDelete_ConfigurationReferencedByAgent_Rejected(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	cfgID := f.seedConfiguration(t, "alpha", []string{"preplan", "plan", "develop", "story_close"})
+	agentID := f.seedAgent(t, "agent-1", cfgID)
+
+	res, err := f.server.handleDocumentDelete(f.callerCtx(), newCallToolReq("document_delete", map[string]any{
+		"id": cfgID,
+	}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected delete to be blocked; got %s", firstText(res))
+	}
+	text := firstText(res)
+	if !strings.Contains(text, agentID) {
+		t.Errorf("error must list referencing agent id %q; got %q", agentID, text)
+	}
+}
+
 func TestHandleDocumentDelete_ConfigurationReferencedByDoneStory_Allowed(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)

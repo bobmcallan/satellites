@@ -185,6 +185,11 @@ func (s *SurrealStore) Upsert(ctx context.Context, in UpsertInput, now time.Time
 			return UpsertResult{}, err
 		}
 	}
+	if in.Type == TypeAgent {
+		if err := s.validateAgentSettings(ctx, in.Structured, in.WorkspaceID); err != nil {
+			return UpsertResult{}, err
+		}
+	}
 	projectID := ""
 	if in.ProjectID != nil {
 		projectID = *in.ProjectID
@@ -244,6 +249,11 @@ func (s *SurrealStore) Create(ctx context.Context, doc Document, now time.Time) 
 			return Document{}, err
 		}
 	}
+	if doc.Type == TypeAgent {
+		if err := s.validateAgentSettings(ctx, doc.Structured, doc.WorkspaceID); err != nil {
+			return Document{}, err
+		}
+	}
 	if doc.ID == "" {
 		doc.ID = NewID()
 	}
@@ -299,6 +309,11 @@ func (s *SurrealStore) Update(ctx context.Context, id string, fields UpdateField
 	}
 	if doc.Type == TypeConfiguration && fields.Structured != nil {
 		if err := s.validateConfigurationRefs(ctx, doc.Structured, doc.WorkspaceID); err != nil {
+			return Document{}, err
+		}
+	}
+	if doc.Type == TypeAgent && fields.Structured != nil {
+		if err := s.validateAgentSettings(ctx, doc.Structured, doc.WorkspaceID); err != nil {
 			return Document{}, err
 		}
 	}
@@ -553,6 +568,69 @@ func (s *SurrealStore) validateBinding(ctx context.Context, binding *string) err
 		return ErrDanglingBinding
 	}
 	return nil
+}
+
+// validateAgentSettings mirrors MemoryStore.validateAgentSettingsLocked
+// for the SurrealDB-backed store. story_fb600b97.
+func (s *SurrealStore) validateAgentSettings(ctx context.Context, structured []byte, workspaceID string) error {
+	if len(structured) == 0 {
+		return nil
+	}
+	settings, err := UnmarshalAgentSettings(structured)
+	if err != nil {
+		return err
+	}
+	if settings.DefaultConfigurationID == nil || *settings.DefaultConfigurationID == "" {
+		return nil
+	}
+	id := *settings.DefaultConfigurationID
+	target, err := s.GetByID(ctx, id, nil)
+	if err != nil {
+		return fmt.Errorf("%w: id %q not found", ErrDanglingAgentDefaultConfigurationID, id)
+	}
+	if target.Type != TypeConfiguration {
+		return fmt.Errorf("%w: id %q is type=%s, want type=%s", ErrDanglingAgentDefaultConfigurationID, id, target.Type, TypeConfiguration)
+	}
+	if target.Status != StatusActive {
+		return fmt.Errorf("%w: id %q is not active", ErrDanglingAgentDefaultConfigurationID, id)
+	}
+	if workspaceID != "" && target.WorkspaceID != "" && target.WorkspaceID != workspaceID {
+		return fmt.Errorf("%w: id %q is in a different workspace", ErrDanglingAgentDefaultConfigurationID, id)
+	}
+	return nil
+}
+
+// ListAgentsByDefaultConfigurationID implements Store for SurrealStore.
+// story_fb600b97. The Structured payload is stored as opaque JSON bytes
+// in SurrealDB and isn't directly queryable as nested fields, so this
+// loads every active agent in the visible workspaces and filters by
+// decoding each AgentSettings client-side. The agent count per project
+// is small enough that this scan is acceptable; if it grows, projecting
+// default_configuration_id to a top-level column in a future story
+// would let an indexed query take over.
+func (s *SurrealStore) ListAgentsByDefaultConfigurationID(ctx context.Context, configurationID string, memberships []string) ([]Document, error) {
+	if configurationID == "" {
+		return nil, nil
+	}
+	agents, err := s.List(ctx, ListOptions{Type: TypeAgent}, memberships)
+	if err != nil {
+		return nil, fmt.Errorf("document: list agents by default_configuration_id: %w", err)
+	}
+	out := make([]Document, 0, len(agents))
+	for _, d := range agents {
+		if d.Status != StatusActive {
+			continue
+		}
+		settings, err := UnmarshalAgentSettings(d.Structured)
+		if err != nil {
+			continue
+		}
+		if settings.DefaultConfigurationID == nil || *settings.DefaultConfigurationID != configurationID {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // validateConfigurationRefs mirrors MemoryStore.validateConfigurationRefsLocked

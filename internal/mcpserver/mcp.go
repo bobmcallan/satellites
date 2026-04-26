@@ -388,11 +388,12 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(specSetTool, s.handleProjectWorkflowSpecSet)
 
 		workflowClaimTool := mcpgo.NewTool("story_workflow_claim",
-			mcpgo.WithDescription("Lock a workflow shape for a story. Validates proposed_contracts against the project's workflow_spec, resolves each contract_name to a document{type=contract}, creates one contract_instance per slot (all status=ready), and writes a kind:workflow-claim ledger row. Idempotent: re-calling with an existing workflow returns the existing CIs."),
+			mcpgo.WithDescription("Lock a workflow shape for a story. Validates proposed_contracts against the project's workflow_spec, resolves each contract_name to a document{type=contract}, creates one contract_instance per slot (all status=ready), and writes a kind:workflow-claim ledger row. Resolution precedence when proposed_contracts is omitted: story.configuration_id (story_4ca6cb1b) → agent.default_configuration_id when agent_id is supplied (story_fb600b97) → project workflow_spec default. Idempotent: re-calling with an existing workflow returns the existing CIs."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
-			mcpgo.WithArray("proposed_contracts", mcpgo.Description("Ordered list of contract_name slots. When omitted, the project's workflow_spec is expanded using each required slot's min_count."),
+			mcpgo.WithArray("proposed_contracts", mcpgo.Description("Ordered list of contract_name slots. When omitted, the resolution precedence above selects the workflow shape."),
 				mcpgo.Items(map[string]any{"type": "string"})),
 			mcpgo.WithString("claim_markdown", mcpgo.Description("Agent's workflow-shape rationale.")),
+			mcpgo.WithString("agent_id", mcpgo.Description("Optional document id of an active type=agent in the same workspace. When supplied AND the story has no configuration_id AND no proposed_contracts are passed, the agent's default_configuration_id (when set) sources the workflow shape.")),
 		)
 		s.mcp.AddTool(workflowClaimTool, s.handleStoryWorkflowClaim)
 
@@ -857,7 +858,7 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 		if err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
-		body, _ := json.Marshal(doc)
+		body, _ := json.Marshal(s.augmentDocumentForType(ctx, doc, memberships))
 		s.logger.Info().
 			Str("method", "tools/call").
 			Str("tool", "document_get").
@@ -879,7 +880,7 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(doc)
+	body, _ := json.Marshal(s.augmentDocumentForType(ctx, doc, memberships))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "document_get").
@@ -888,6 +889,37 @@ func (s *Server) handleDocumentGet(ctx context.Context, req mcpgo.CallToolReques
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// agentWithDefaultConfigurationName extends the on-the-wire agent
+// document shape with a resolved default_configuration_name field.
+// Embeds document.Document so JSON marshalling preserves every existing
+// field. story_fb600b97.
+type agentWithDefaultConfigurationName struct {
+	document.Document
+	DefaultConfigurationName string `json:"default_configuration_name,omitempty"`
+}
+
+// augmentDocumentForType applies type-specific response augmentation.
+// Today only type=agent gets surface treatment (resolved
+// default_configuration_name when the agent's settings reference one).
+// Other types pass through unmodified — caller marshals the same
+// document.Document shape it would have before. Lookup failure leaves
+// the augmented field empty rather than failing the response.
+func (s *Server) augmentDocumentForType(ctx context.Context, doc document.Document, memberships []string) any {
+	if doc.Type != document.TypeAgent {
+		return doc
+	}
+	settings, err := document.UnmarshalAgentSettings(doc.Structured)
+	if err != nil || settings.DefaultConfigurationID == nil || *settings.DefaultConfigurationID == "" {
+		return agentWithDefaultConfigurationName{Document: doc}
+	}
+	cfgDoc, err := s.docs.GetByID(ctx, *settings.DefaultConfigurationID, memberships)
+	out := agentWithDefaultConfigurationName{Document: doc}
+	if err == nil {
+		out.DefaultConfigurationName = cfgDoc.Name
+	}
+	return out
 }
 
 // immutableUpdateFields are the document keys that document_update must
@@ -1054,7 +1086,11 @@ func (s *Server) handleDocumentList(ctx context.Context, req mcpgo.CallToolReque
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(rows)
+	augmented := make([]any, 0, len(rows))
+	for _, d := range rows {
+		augmented = append(augmented, s.augmentDocumentForType(ctx, d, memberships))
+	}
+	body, _ := json.Marshal(augmented)
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "document_list").
@@ -1121,32 +1157,44 @@ func (s *Server) handleDocumentDelete(ctx context.Context, req mcpgo.CallToolReq
 	mode := document.DeleteMode(req.GetString("mode", string(document.DeleteArchive)))
 	memberships := s.resolveCallerMemberships(ctx, caller)
 
-	// story_4ca6cb1b reverse-FK gate: when the target is a Configuration
-	// document, refuse to delete it while any open story references its
-	// id. The error names the referencing story ids so the caller can
-	// resolve them (or close those stories first). Read failures here
-	// fail open — the gate is best-effort, not a hard barrier.
-	if s.stories != nil {
-		if doc, err := s.docs.GetByID(ctx, id, memberships); err == nil && doc.Type == document.TypeConfiguration {
-			refs, err := s.stories.ListByConfigurationID(ctx, id, memberships)
+	// Reverse-FK gate (story_4ca6cb1b + story_fb600b97): when the
+	// target is a Configuration document, refuse to delete it while any
+	// open story OR active agent references its id. Stories closed
+	// (done/cancelled) don't block; agents always do (an agent
+	// referencing the deleted Configuration would silently lose its
+	// default). Read failures fail open — the gate is best-effort, not
+	// a hard barrier.
+	if doc, err := s.docs.GetByID(ctx, id, memberships); err == nil && doc.Type == document.TypeConfiguration {
+		var blockingStories, blockingAgents []string
+		if s.stories != nil {
+			storyRefs, err := s.stories.ListByConfigurationID(ctx, id, memberships)
 			if err == nil {
-				blocking := make([]string, 0, len(refs))
-				for _, st := range refs {
+				for _, st := range storyRefs {
 					if st.Status == story.StatusDone || st.Status == story.StatusCancelled {
 						continue
 					}
-					blocking = append(blocking, st.ID)
-				}
-				if len(blocking) > 0 {
-					body, _ := json.Marshal(map[string]any{
-						"error":               "configuration_referenced",
-						"id":                  id,
-						"referencing_stories": blocking,
-						"message":             fmt.Sprintf("configuration %q cannot be deleted while %d open story/stories reference it: %v", id, len(blocking), blocking),
-					})
-					return mcpgo.NewToolResultError(string(body)), nil
+					blockingStories = append(blockingStories, st.ID)
 				}
 			}
+		}
+		agentRefs, err := s.docs.ListAgentsByDefaultConfigurationID(ctx, id, memberships)
+		if err == nil {
+			for _, ag := range agentRefs {
+				blockingAgents = append(blockingAgents, ag.ID)
+			}
+		}
+		if len(blockingStories) > 0 || len(blockingAgents) > 0 {
+			body, _ := json.Marshal(map[string]any{
+				"error":               "configuration_referenced",
+				"id":                  id,
+				"referencing_stories": blockingStories,
+				"referencing_agents":  blockingAgents,
+				"message": fmt.Sprintf(
+					"configuration %q cannot be deleted while %d open story/stories and %d agent(s) reference it: stories=%v agents=%v",
+					id, len(blockingStories), len(blockingAgents), blockingStories, blockingAgents,
+				),
+			})
+			return mcpgo.NewToolResultError(string(body)), nil
 		}
 	}
 

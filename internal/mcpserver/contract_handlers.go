@@ -119,6 +119,7 @@ func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToo
 	}
 	claimMarkdown := req.GetString("claim_markdown", "")
 	proposed := req.GetStringSlice("proposed_contracts", nil)
+	agentID := req.GetString("agent_id", "")
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	st, err := s.stories.GetByID(ctx, storyID, memberships)
@@ -132,13 +133,28 @@ func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToo
 	}
 
 	if len(proposed) == 0 {
-		// story_4ca6cb1b: when the story carries a configuration_id and
-		// the caller did NOT supply proposed_contracts, derive the
-		// workflow shape from the Configuration's ContractRefs. This
-		// makes "claim with no proposed list" honour a story-level
-		// preset instead of always falling back to the project default.
-		// When proposed IS supplied, it wins (per-call override).
-		if cfgProposed, err := s.resolveConfigurationProposed(ctx, st.ConfigurationID, memberships); err != nil {
+		// Resolution precedence (story_4ca6cb1b + story_fb600b97):
+		//   1. story.configuration_id (per-story override)
+		//   2. agent.default_configuration_id (per-agent default; only
+		//      consulted when agent_id is supplied + the agent carries
+		//      one)
+		//   3. project workflow_spec default
+		// Per-call proposed_contracts (handled in the surrounding
+		// branch) wins above all of these.
+		var cfgID *string
+		if st.ConfigurationID != nil && *st.ConfigurationID != "" {
+			cfgID = st.ConfigurationID
+		} else if agentID != "" {
+			agentCfg, err := s.resolveAgentDefaultConfigurationID(ctx, agentID, memberships)
+			if err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			if agentCfg != "" {
+				v := agentCfg
+				cfgID = &v
+			}
+		}
+		if cfgProposed, err := s.resolveConfigurationProposed(ctx, cfgID, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		} else if len(cfgProposed) > 0 {
 			proposed = cfgProposed
@@ -350,6 +366,34 @@ func (s *Server) resolveConfigurationProposed(ctx context.Context, configuration
 		out = append(out, doc.Name)
 	}
 	return out, nil
+}
+
+// resolveAgentDefaultConfigurationID looks up the agent document and
+// returns its default_configuration_id (empty string when the agent
+// doesn't have one set). Returns an error when the supplied agentID
+// doesn't resolve to an active type=agent document. story_fb600b97.
+func (s *Server) resolveAgentDefaultConfigurationID(ctx context.Context, agentID string, memberships []string) (string, error) {
+	if agentID == "" || s.docs == nil {
+		return "", nil
+	}
+	doc, err := s.docs.GetByID(ctx, agentID, memberships)
+	if err != nil {
+		return "", fmt.Errorf("agent_id %q does not resolve to an active document", agentID)
+	}
+	if doc.Type != document.TypeAgent {
+		return "", fmt.Errorf("agent_id %q is type=%s, want type=agent", agentID, doc.Type)
+	}
+	if doc.Status != document.StatusActive {
+		return "", fmt.Errorf("agent_id %q is not active", agentID)
+	}
+	settings, err := document.UnmarshalAgentSettings(doc.Structured)
+	if err != nil {
+		return "", fmt.Errorf("agent_id %q settings decode: %w", agentID, err)
+	}
+	if settings.DefaultConfigurationID == nil {
+		return "", nil
+	}
+	return *settings.DefaultConfigurationID, nil
 }
 
 // findContractDocByName resolves a contract_name to a document{type=contract}.
