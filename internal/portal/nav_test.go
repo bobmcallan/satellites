@@ -74,7 +74,6 @@ func TestNav_DOMOrder(t *testing.T) {
 		`href="/projects"`,
 		`href="/tasks"`,
 		`class="nav-spacer"`,
-		`class="version-chip"`,
 		`data-testid="nav-hamburger"`,
 	}
 	prev := -1
@@ -161,6 +160,31 @@ func TestNav_NoUnimplementedRoutes(t *testing.T) {
 		if strings.Contains(body, banned) {
 			t.Errorf("nav must NOT link to unimplemented route: %q", banned)
 		}
+	}
+}
+
+// TestNav_NoVersionChip asserts the legacy `class="version-chip"` span
+// is no longer rendered in the nav. story_1340913b moved version + commit
+// metadata into the footer partial.
+func TestNav_NoVersionChip(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, _, _, _ := newTestPortal(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_1", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if strings.Contains(body, `class="version-chip"`) {
+		t.Errorf("rendered nav still contains class=\"version-chip\" — should be removed (story_1340913b)")
 	}
 }
 

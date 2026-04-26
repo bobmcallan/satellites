@@ -1,0 +1,8 @@
+{{define "footer.html"}}
+<footer class="footer">
+  <div class="footer-inner">
+    <span class="footer-text">SATELLITES</span>
+    <span class="footer-text">v{{.Version}}{{if and .Commit (ne .Commit "unknown")}} &middot; {{.Commit}}{{end}}</span>
+  </div>
+</footer>
+{{end}}
