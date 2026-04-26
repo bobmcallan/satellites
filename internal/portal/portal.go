@@ -187,6 +187,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", p.handleLogin)
 	mux.HandleFunc("GET /projects", p.handleProjectsList)
 	mux.HandleFunc("GET /projects/{id}", p.handleProjectDetail)
+	mux.HandleFunc("GET /projects/{id}/configuration", p.handleProjectConfiguration)
 	mux.HandleFunc("GET /projects/{id}/ledger", p.handleProjectLedger)
 	mux.HandleFunc("GET /projects/{id}/stories", p.handleStoriesList)
 	mux.HandleFunc("GET /projects/{id}/stories/{story_id}", p.handleStoryDetail)
@@ -439,6 +440,64 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "project_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "project_detail.html").Str("error", err.Error()).Msg("template render failed")
+		http.Error(w, "render failed", http.StatusInternalServerError)
+	}
+}
+
+type projectConfigurationData struct {
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Project         projectRow
+	OwnerYou        bool
+	Composite       projectConfigurationComposite
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
+	DevMode         bool
+	ThemeMode       string
+	ThemePickerNext string
+	WSConfig        WSConfig
+}
+
+// handleProjectConfiguration renders the per-project Contracts + Skills
+// surface. Cross-owner access returns 404 to avoid leaking project
+// existence (mirrors handleProjectDetail).
+func (p *Portal) handleProjectConfiguration(w http.ResponseWriter, r *http.Request) {
+	user, ok := p.resolveUser(r)
+	if !ok {
+		p.redirectToLogin(w, r)
+		return
+	}
+	if p.projects == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("id")
+	active, chips, memberships := p.activeWorkspace(r, user)
+	pr, err := p.projects.GetByID(r.Context(), id, memberships)
+	if err != nil || pr.OwnerUserID != user.ID {
+		http.NotFound(w, r)
+		return
+	}
+	composite := buildProjectConfigurationComposite(r.Context(), p.documents, pr.ID, memberships)
+	data := projectConfigurationData{
+		Title:           pr.Name + " · configuration",
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Project:         viewRow(pr),
+		OwnerYou:        true,
+		Composite:       composite,
+		Workspaces:      chips,
+		ActiveWorkspace: active,
+		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
+		ThemeMode:       themeFromRequest(r),
+		ThemePickerNext: r.URL.RequestURI(),
+		WSConfig:        buildWSConfig(active, r),
+	}
+	if err := p.tmpl.ExecuteTemplate(w, "project_configuration.html", data); err != nil {
+		p.logger.Error().Str("template", "project_configuration.html").Str("error", err.Error()).Msg("template render failed")
 		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
 }

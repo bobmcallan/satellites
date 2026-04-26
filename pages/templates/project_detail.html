@@ -11,6 +11,9 @@
     <section class="panel-headed" data-testid="workspace-search">
       <header class="panel-header">
         <h1>{{.Project.Name}}</h1>
+        <span class="panel-header-meta">
+          <a href="/projects/{{.Project.ID}}/configuration" data-testid="workspace-configuration-link">configuration</a>
+        </span>
       </header>
       <div class="panel-body">
         <form method="get" action="" class="workspace-search-form" x-data

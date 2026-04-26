@@ -1,0 +1,83 @@
+{{define "project_configuration.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+
+    <section class="panel-headed" data-testid="configuration-header">
+      <header class="panel-header">
+        <h1>{{.Project.Name}} · configuration</h1>
+      </header>
+      <div class="panel-body">
+        <p class="muted">
+          <a href="/projects/{{.Project.ID}}">&larr; back to workspace</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="configuration-contracts-panel">
+      <header class="panel-header">
+        <h2>contracts</h2>
+        <span class="panel-header-meta">
+          <code data-testid="configuration-contracts-count">({{.Composite.ContractsTotal}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Contracts}}
+          <p class="muted" data-testid="configuration-contracts-empty">No contracts</p>
+        {{else}}
+          <ul class="document-cards" data-testid="configuration-contracts-list">
+            {{range .Composite.Contracts}}
+            <li data-testid="configuration-contract-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="configuration-skills-panel">
+      <header class="panel-header">
+        <h2>skills</h2>
+        <span class="panel-header-meta">
+          <code data-testid="configuration-skills-count">({{.Composite.SkillsTotal}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Skills}}
+          <p class="muted" data-testid="configuration-skills-empty">No skills</p>
+        {{else}}
+          <ul class="document-cards" data-testid="configuration-skills-list">
+            {{range .Composite.Skills}}
+            <li data-testid="configuration-skill-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}
