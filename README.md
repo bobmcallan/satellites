@@ -4,6 +4,29 @@ Developer-in-the-loop agentic engineering platform. A server (state + MCP + cron
 
 Module path: `github.com/bobmcallan/satellites`.
 
+## Positioning
+
+satellites-v4 is the substrate Claude (and other narrow MCP-driven agents) plug into for trustworthy software work. The platform exists so a small autonomous agent surface earns audit-grade evidence per step — every plan, decision, file change, and review verdict lives on an append-only ledger. Trust comes from the work, not the agent. See [docs/architecture.md](docs/architecture.md) for the design rationale and the five-primitive data model (workspace, project, document, story, task, ledger, repo).
+
+## Quickstart (local dev)
+
+```
+cp .env.example .env       # populate DEV_USERNAME / DEV_PASSWORD; OAuth + DB optional locally
+./scripts/deploy.sh up     # boot satellites + SurrealDB via docker compose
+open http://localhost:8080
+```
+
+## pprod
+
+The shared pre-production deployment runs on Fly: <https://satellites-pprod.fly.dev/>. The `pprod` smoke target (`go test -tags=pprod ./tests/integration/... -run Pprod`) re-validates `/healthz` + `/mcp` after every push to `main`.
+
+## Documentation
+
+- Architecture & primitives — [docs/architecture.md](docs/architecture.md)
+- UI design notes — [docs/ui-design.md](docs/ui-design.md)
+- Local development workflow — [docs/development.md](docs/development.md)
+- Release history — [CHANGELOG.md](CHANGELOG.md)
+
 ## Build
 
 Use `scripts/build.sh` for everyday build, lint, and maintenance tasks. It's a plain bash dispatcher — `scripts/build.sh <command>`, with `build` as the default.

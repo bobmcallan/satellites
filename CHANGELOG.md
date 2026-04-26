@@ -1,0 +1,200 @@
+# Changelog
+
+All notable changes to satellites are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning starting from the v4 walking-skeleton ship.
+
+The `[satellites]` and `[satellites-agent]` patches in `.version` are bumped per delivered story by the develop contract; `scripts/release-notes.sh` populates the matching section here from the commit log.
+
+## [Unreleased]
+
+(Add entries via `scripts/release-notes.sh`.)
+
+## [0.0.67] - 2026-04-26
+
+- feat(bootstrap): scaffold satellites-v4 repo, build.sh, per-binary versioning
+- docs: add v4 architecture document
+- docs: add v4 portal UI design document
+- test(integration): add boot smoke test harness + dev doc
+- Create .mcp.json
+- chore(rename): module path satellites-v4 → satellites
+- docs: scrub external v3 IDs from architecture + ui-design
+- feat(logging): port arbor + env config from v3
+- infra(docker): port Dockerfile, docker-compose, entrypoint from v3
+- feat(http): add healthz endpoint + graceful shutdown with arbor logging
+- feat(auth): session + devmode + basic username/password
+- feat(auth): google + github oauth providers
+- feat(mcp): add /mcp streamable http endpoint + satellites_info tool
+- feat(portal): ssr login + landing shell
+- feat(document): add primitive + ingest-by-path + boot seed
+- infra(ci): add release workflow — compile + ghcr + fly deploy
+- test(pprod): add opt-in smoke against live url
+- infra(scripts): rename script → scripts + add deploy.sh
+- fix(deploy): healthcheck-gated surrealdb + env_file passthrough + connect retry
+-   feat(v4): add project, ledger, story primitives + MCP verbs + portal   views
+- feat(v4): add project, ledger, story primitives + MCP verbs + portal views
+- feat(v4): add workspace primitive + membership + default-workspace bootstrap
+- feat(v4): add workspace_id to primitives + boot-time backfill across project/story/ledger/document
+- feat(v4): workspace-scoped query filtering across primitives + API-key → system workspace
+- feat(v4): workspace membership management verbs + admin/last-admin guards
+- feat(v4): portal workspace switcher + breadcrumb + session-sticky scope
+- fix(ci): hardcode fly-deploy concurrency group — env context not allowed there
+- fix(ci): gate fly deploy behind tags/dispatch — push-to-main builds image only
+- fix(ci): disable provenance/sbom on docker build — avoids GHCR 403 on first push
+- refactor(ci): drop fly deploy + cache, push image to ghcr.io/<repo> only
+- fix(ci): push image with plain docker push — buildx push hits GHCR 403 on HEAD
+- feat(documents): unified schema with type discriminator + scope + structured + tags (story_509f1111)
+- test(documents): use document_get name arg in project_mcp_test (story_509f1111)
+- feat(documents): generic CRUD verbs document_create/update/list/delete + id-keyed get (story_c286b5b1)
+- feat(documents): document_search verb with structured filters + substring query (story_2e598f53)
+- feat(documents): type-specific wrappers principle/contract/skill/reviewer × create/get/list/update/delete/search (story_bb273934)
+- feat(ledger): expand schema with type/durability/source_type/tags/structured/status + Actor→CreatedBy (story_368cd70f)
+- feat(ledger): verb layer — get/search/recall/dereference + filter args (story_1a037d03)
+- feat(ledger): derivations — kv projection, story-timeline, cost rollup (story_f1b3cc88)
+- feat(contract): ContractInstance primitive — schema + memory/surreal stores + FK validation (story_3242dfdb)
+- feat(contract): entry verbs — workflow_claim + contract_next + project workflow_spec (story_bc2ffbf8)
+- feat(contract): keystone claim verb + process-order gate + session registry (story_919908f0)
+- feat(contract): close + respond + resume verbs (story_fc7ea589)
+- feat(contract): reviewer hook integration — validation_mode=llm/check-based/agent (story_73b3d1c5)
+- feat(rolegrant): agent + role document types + role_grant primitive (story_045a613f)
+- feat(rolegrant): MCP verbs + grant middleware (story_1efbfc48)
+- test(rolegrant): container-backed integration test for MCP verbs (story_1efbfc48)
+- feat(rolegrant): orchestrator grant issuance at SessionStart (story_7d9c4b1b)
+- feat(contract): required_role gate on story_contract_claim (story_85675c33)
+- test(rolegrant): container-backed integration test for required_role (story_85675c33)
+- feat(mechanical): deterministic fallback tier for agent_role_claim (story_548ab5a5)
+- feat(task): primitive — struct + enums + store with atomic Claim (story_33d90aa0)
+- feat(task): MCP verbs task_enqueue/get/list/claim/close + stage hand-off (story_a8fee0cc)
+- feat(dispatcher): priority-aware claim + reclaim watchdog (story_b4513c8c)
+- fix(task): stage hand-off inherits parent story priority (story_b4513c8c)
+- feat(worker): satellites-agent worker loop (story_daa867ae)
+- refactor(contract): drop claimed_by_session_id, ClaimedViaGrantID authoritative (story_4608a82c)
+- feat(hub): in-process fan-out primitive (story_fe07e6bb)
+- feat(ws): /ws endpoint + workspace-scoped auth hub (story_06b09d78)
+- feat(hub): store-layer emit hooks for ledger/task/contract/story (story_7ed84379)
+- feat(portal): websocket connection indicator + /ws client (story_ac3e4057)
+- feat(repo): schema + store for repo primitive (story_85047a2c)
+- feat(repo): MCP query surface + jcodemunch proxy interface (story_970ddfa1)
+- feat(repo): reindex task handler + ws emit hooks (story_96db34d0)
+- feat(repo): stale-check sweep + push-webhook receiver (story_21d22880)
+- fix(mcpserver): inject clock into session staleness path (story_3ae6621b)
+- feat(repo): native code indexer; delete internal/jcodemunch (story_75a371c7)
+- feat(tests): chromedp E2E suite for WS indicator (story_0e5328cd)
+- feat(embeddings): Gemini embedder + chunker + stub (story_5abfe61c C1)
+- feat(document): chunk store + SearchSemantic (story_5abfe61c C2)
+- feat(ledger): chunk store + SearchSemantic + dereference cascade (story_5abfe61c C3)
+- feat(embeddings): worker + verb wiring + docs (story_5abfe61c C4)
+- feat(embeddings): Surreal chunk stores + production worker.Start (story_5abfe61c C5)
+- feat(repo): emit kind:commit ledger rows from webhook (story_51aee7cd)
+- feat(documents): version-history retention + portal version-detail route (story_ebaf2157)
+- feat(repo): persist commits + Diff API skeleton + portal recent-commits + diff endpoint (story_c2a2f073)
+- feat(repo): portal reindex affordance + admin gate + ws progress chip (story_17b53435)
+- feat(portal): add ledger/roles/story/tasks views + grants/agents/documents pages
+- feat(config): defaults sweep + Describe() + zero-env-var dev startup (story_833541c5)
+- feat(portal): theme picker (dark/system/light) + centered .portal-main (story_5dd7167a)
+- feat(portal): landing page (v3 wordmark + 01/02/03 grid, dark default) (story_92210e4a)
+- feat(portal): dev-mode quick-signin button + DEV nav chip (story_7105204f)
+- test(auth): OAuth start + GitHub callback + portalui E2E (story_e96f6022)
+- feat(auth,mcp): OAuth bearer + token exchange for /mcp (story_512cc5cd)
+- feat(portal): nav replicates v3 shape with hamburger dropdown (story_e7e8b455)
+- fix(portal): restore .nav-inner flex wrapper so dashboard nav renders horizontally (story_31d43312)
+- fix(httpserver): preserve http.Hijacker through accessLog so /ws upgrade returns 101 (story_fb6ac2d8)
+- feat(portal): footer partial replaces nav version-chip; commit suffix omitted when unknown (story_1340913b)
+- feat(portal): workspace switcher dedupe; dropdown is position:absolute (story_4d1ef14f)
+- fix(portal): workspace menu omits the active workspace + chromedp height test (story_4d1ef14f)
+- refactor(portal): typography tokens for control fonts (story_2469358b)
+- fix(document): restore substring-on-Query in Search fallback (story_0954a1dc)
+- fix(portal): workspace menu placeholder when only active workspace (story_690b8f5c)
+- docs(env): document Fly OAuth secrets recipe + add empty-creds test (story_d59705e2)
+- fix(projects): seed per-user default project on first login (story_0f415ab3)
+- feat(security): CSP/HSTS/XFO headers + per-IP login rate limit (story_d5652302)
+- feat(auth): Surreal-backed session store + sweep (story_0ab83f82)
+- feat(auth): Surreal-backed user store + UserStore interface (story_7512783a)
+
+## [0.0.66] - 2026-04-26 — pprod-cutover sweep
+
+### Added
+- **Auth durability** — `auth.SurrealUserStore` + `UserStore` interface so OAuth-minted users persist across satellites restarts (story_7512783a).
+- **Auth durability** — `auth.SurrealSessionStore` + `Sweep` so cookie sessions survive Fly rolling deploys (story_0ab83f82).
+- **HTTP security** — `securityHeaders` middleware (CSP, HSTS prod-only, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) + `internal/ratelimit` token-bucket + per-IP login throttle (story_d5652302).
+- **Portal** — per-user default project seeded on first login so `/projects` is non-empty out of the box (story_0f415ab3).
+- **Portal** — `nav-workspace-empty` placeholder when the user has only their active workspace (story_690b8f5c).
+- **Process** — `merge_to_main` project-scope contract + `merge-to-main` skill; workflow_spec now requires preplan → plan → develop → push → merge_to_main → story_close (story_b6925036).
+
+### Fixed
+- **Document search** — restore the substring-on-Query branch in `Document.Search` so `document_search` honours its query argument when SearchSemantic is unavailable (story_0954a1dc).
+
+### Documented
+- **OAuth setup** — `.env.example` carries a Fly secrets recipe + per-provider callback URLs (story_d59705e2).
+- **WS UX audit** — story_ac3e4057's ACs traced to ship locations; no gap (story_47d367b5).
+
+## [0.0.59] - 2026-04-25 — typography sweep
+
+- Typography tokens for control fonts (story_2469358b).
+
+## [0.0.58] - 2026-04-25 — workspace switcher polish
+
+- Workspace switcher omits the active workspace and the dropdown is position:absolute, eliminating nav reflow (story_4d1ef14f).
+- Footer partial replaces the nav version chip; commit suffix omitted when unknown (story_1340913b).
+- `accessLog` middleware preserves `http.Hijacker` so `/ws` upgrade returns 101 (story_fb6ac2d8).
+
+## [0.0.55] - 2026-04-24 — portal nav v4 shape
+
+- `.nav-inner` flex wrapper restored (story_31d43312).
+- Hamburger-dropdown nav shape replicates v3 (story_e7e8b455).
+
+## [0.0.50] - 2026-04-24 — auth + landing
+
+- OAuth bearer + token exchange for `/mcp` (story_512cc5cd).
+- OAuth start + GitHub callback + portalui E2E (story_e96f6022).
+- Dev-mode quick-signin button + DEV nav chip (story_7105204f).
+- Landing page (v3 wordmark + 01/02/03 grid, dark default) (story_92210e4a).
+- Theme picker (story_5dd7167a).
+- Config defaults sweep + Describe() + zero-env-var dev startup (story_833541c5).
+
+## [0.0.40] - 2026-04-22 — portal CRUD breadth
+
+- Add ledger/roles/story/tasks views + grants/agents/documents pages.
+
+## [0.0.30] - 2026-04-20 — repo + ledger primitives
+
+- Repo reindex affordance + admin gate + ws progress chip (story_17b53435).
+- Persist commits + diff API skeleton + portal recent-commits + diff endpoint (story_c2a2f073).
+- Document version-history retention + portal version-detail route (story_ebaf2157).
+- Webhook receiver writes `kind:commit` ledger rows (story_51aee7cd).
+
+## [0.0.25] - 2026-04-19 — embeddings worker
+
+- Surreal chunk stores + production worker.Start (story_5abfe61c).
+- Worker + verb wiring + docs.
+- Ledger chunk store + SearchSemantic + dereference cascade.
+- Document chunk store + SearchSemantic.
+- Gemini embedder + chunker + stub.
+
+## [0.0.20] - 2026-04-18 — repo indexer
+
+- chromedp E2E suite for WS indicator (story_0e5328cd).
+- Native code indexer; deleted `internal/jcodemunch` (story_75a371c7).
+- Stale-check sweep + push-webhook receiver (story_21d22880).
+- Reindex task handler + ws emit hooks (story_96db34d0).
+- MCP query surface + jcodemunch proxy interface (story_970ddfa1).
+- Schema + store for repo primitive (story_85047a2c).
+
+## [0.0.10] - 2026-04-15 — websocket primitive
+
+- Portal websocket connection indicator + `/ws` client (story_ac3e4057).
+- Store-layer emit hooks for ledger/task/contract/story (story_7ed84379).
+- `/ws` endpoint + workspace-scoped auth hub (story_06b09d78).
+- In-process fan-out hub primitive (story_fe07e6bb).
+
+## [0.0.05] - 2026-04-12 — task + agent primitives
+
+- Satellites-agent worker loop (story_daa867ae).
+- Priority-aware claim + reclaim watchdog (story_b4513c8c).
+- MCP verbs task_enqueue/get/list/claim/close + stage hand-off (story_a8fee0cc).
+- Task primitive — struct + enums + store with atomic Claim (story_33d90aa0).
+
+## [0.0.01] - 2026-04-01 — v4 walking skeleton
+
+- Repo skeleton + .version + cmd/satellites + cmd/satellites-agent stubs.
+- HTTP server + healthz + access log + request id middleware.
+- Document, project, workspace, story, contract, ledger, rolegrant, session primitives.
+- Initial integration test harness with testcontainers + SurrealDB.
