@@ -1,6 +1,9 @@
 package httpserver
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -52,4 +55,18 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack delegates to the underlying ResponseWriter when it implements
+// http.Hijacker so middleware composition does not break protocol-upgrade
+// paths (e.g. the gorilla/websocket /ws upgrade). Without this passthrough
+// gorilla/websocket fails the upgrade with "response does not implement
+// http.Hijacker" and the client receives a 500, leaving the nav indicator
+// stuck in reconnecting → disconnected.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("httpserver: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }

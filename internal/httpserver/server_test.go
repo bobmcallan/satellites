@@ -1,11 +1,16 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
@@ -71,4 +76,52 @@ func TestRequestIDMiddlewarePreservesInbound(t *testing.T) {
 	if seen != "req_supplied" {
 		t.Errorf("seen = %q, want req_supplied", seen)
 	}
+}
+
+// TestAccessLogPreservesHijacker is the regression for story_fb6ac2d8
+// (WS indicator orange→red on /). The accessLog middleware wraps the
+// ResponseWriter in *statusRecorder; before the fix the wrapper shadowed
+// http.Hijacker, which caused gorilla/websocket's Upgrade to reject the
+// connection with a 500 ("response does not implement http.Hijacker") and
+// left the nav indicator stuck in reconnecting → disconnected.
+func TestAccessLogPreservesHijacker(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	wsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/ws", wsHandler)
+	wrapped := requestID(accessLog(satarbor.New("info"), mux))
+
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	wsURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	wsURL.Scheme = "ws"
+	wsURL.Path = "/ws"
+
+	dialer := websocket.Dialer{
+		NetDialContext:   (&net.Dialer{}).DialContext,
+		HandshakeTimeout: 2 * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, resp, err := dialer.DialContext(ctx, wsURL.String(), nil)
+	if err != nil {
+		got := 0
+		if resp != nil {
+			got = resp.StatusCode
+		}
+		t.Fatalf("websocket dial through accessLog middleware failed: status=%d err=%v", got, err)
+	}
+	defer conn.Close()
 }
