@@ -13,14 +13,23 @@ import (
 )
 
 // Type enum values per docs/architecture.md §2 Documents sub-section.
+//
+// TypeConfiguration is a project-scoped bundle of refs to one ordered
+// contract list (which defines the workflow shape) plus skill and
+// principle ref sets. story_d371f155 introduced it so stories and agents
+// can pick a named preset instead of accepting the project-default
+// implicit union of every contract/skill/principle. Distinct from the
+// read-only `/projects/{id}/configuration` viewer page (story_433d0661);
+// see CHANGELOG for the disambiguation note.
 const (
-	TypeArtifact  = "artifact"
-	TypeContract  = "contract"
-	TypeSkill     = "skill"
-	TypePrinciple = "principle"
-	TypeReviewer  = "reviewer"
-	TypeAgent     = "agent"
-	TypeRole      = "role"
+	TypeArtifact      = "artifact"
+	TypeContract      = "contract"
+	TypeSkill         = "skill"
+	TypePrinciple     = "principle"
+	TypeReviewer      = "reviewer"
+	TypeAgent         = "agent"
+	TypeRole          = "role"
+	TypeConfiguration = "configuration"
 )
 
 // Scope enum values per docs/architecture.md §2.
@@ -37,13 +46,14 @@ const (
 )
 
 var validTypes = map[string]struct{}{
-	TypeArtifact:  {},
-	TypeContract:  {},
-	TypeSkill:     {},
-	TypePrinciple: {},
-	TypeReviewer:  {},
-	TypeAgent:     {},
-	TypeRole:      {},
+	TypeArtifact:      {},
+	TypeContract:      {},
+	TypeSkill:         {},
+	TypePrinciple:     {},
+	TypeReviewer:      {},
+	TypeAgent:         {},
+	TypeRole:          {},
+	TypeConfiguration: {},
 }
 
 var validScopes = map[string]struct{}{
@@ -121,6 +131,19 @@ func (d Document) Validate() error {
 	case TypeAgent:
 		// agent documents may optionally pin to a contract via contract_binding
 		// (mirrors reviewer); the field is permitted but not required.
+	case TypeConfiguration:
+		// Configurations are project-scoped bundles whose ref payload lives
+		// in Structured. ContractBinding is meaningless (a Configuration
+		// references many contracts via its payload, not a single one).
+		if d.Scope != ScopeProject {
+			return fmt.Errorf("document: type=%s requires scope=project, got scope=%s", TypeConfiguration, d.Scope)
+		}
+		if len(d.Structured) == 0 {
+			return errors.New("document: type=configuration requires non-empty structured payload")
+		}
+		if d.ContractBinding != nil && *d.ContractBinding != "" {
+			return errors.New("document: contract_binding allowed only for type=skill, type=reviewer, or type=agent")
+		}
 	default:
 		if d.ContractBinding != nil && *d.ContractBinding != "" {
 			return errors.New("document: contract_binding allowed only for type=skill, type=reviewer, or type=agent")

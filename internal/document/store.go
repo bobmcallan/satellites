@@ -26,6 +26,12 @@ var ErrImmutableField = errors.New("document: field is immutable")
 // inside the same workspace visibility.
 var ErrDanglingBinding = errors.New("document: contract_binding does not resolve to an active type=contract document")
 
+// ErrDanglingConfigurationRef is returned when a type=configuration write
+// references a contract/skill/principle id that does not resolve to an
+// active document of the expected type within the same workspace
+// visibility. story_d371f155.
+var ErrDanglingConfigurationRef = errors.New("document: configuration references an id that does not resolve to an active document of the expected type")
+
 // UpsertResult is the outcome of Upsert. Changed==false means the body
 // matched the existing hash, so version and body were left untouched.
 type UpsertResult struct {
@@ -233,6 +239,53 @@ func (m *MemoryStore) validateBindingLocked(binding *string) error {
 	return nil
 }
 
+// validateConfigurationRefsLocked enforces FK integrity for a
+// type=configuration write — every id in the payload's contract_refs /
+// skill_refs / principle_refs must resolve to an active document of the
+// matching type inside the candidate's workspace. workspaceID is the
+// candidate document's WorkspaceID (refs cannot cross workspaces per
+// pr_0779e5af). Caller must hold m.mu. Returns a wrapped
+// ErrDanglingConfigurationRef whose message names the first failing id +
+// the expected type so the caller can surface a precise reason.
+// story_d371f155.
+func (m *MemoryStore) validateConfigurationRefsLocked(structured []byte, workspaceID string) error {
+	cfg, err := UnmarshalConfiguration(structured)
+	if err != nil {
+		return err
+	}
+	check := func(refs []string, wantType string) error {
+		for _, id := range refs {
+			if id == "" {
+				return fmt.Errorf("%w: empty %s ref", ErrDanglingConfigurationRef, wantType)
+			}
+			target, ok := m.rows[id]
+			if !ok {
+				return fmt.Errorf("%w: %s id %q not found", ErrDanglingConfigurationRef, wantType, id)
+			}
+			if target.Type != wantType {
+				return fmt.Errorf("%w: id %q is type=%s, want type=%s", ErrDanglingConfigurationRef, id, target.Type, wantType)
+			}
+			if target.Status != StatusActive {
+				return fmt.Errorf("%w: %s id %q is not active", ErrDanglingConfigurationRef, wantType, id)
+			}
+			if workspaceID != "" && target.WorkspaceID != "" && target.WorkspaceID != workspaceID {
+				return fmt.Errorf("%w: %s id %q is in a different workspace", ErrDanglingConfigurationRef, wantType, id)
+			}
+		}
+		return nil
+	}
+	if err := check(cfg.ContractRefs, TypeContract); err != nil {
+		return err
+	}
+	if err := check(cfg.SkillRefs, TypeSkill); err != nil {
+		return err
+	}
+	if err := check(cfg.PrincipleRefs, TypePrinciple); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Upsert implements Store for MemoryStore.
 func (m *MemoryStore) Upsert(ctx context.Context, in UpsertInput, now time.Time) (UpsertResult, error) {
 	m.mu.Lock()
@@ -260,6 +313,11 @@ func (m *MemoryStore) Upsert(ctx context.Context, in UpsertInput, now time.Time)
 	}
 	if err := m.validateBindingLocked(in.ContractBinding); err != nil {
 		return UpsertResult{}, err
+	}
+	if in.Type == TypeConfiguration {
+		if err := m.validateConfigurationRefsLocked(in.Structured, in.WorkspaceID); err != nil {
+			return UpsertResult{}, err
+		}
 	}
 	if existing, ok := m.findByName(projectID, in.Name); ok {
 		if existing.BodyHash == hash {
@@ -305,6 +363,11 @@ func (m *MemoryStore) Create(ctx context.Context, doc Document, now time.Time) (
 	}
 	if err := m.validateBindingLocked(doc.ContractBinding); err != nil {
 		return Document{}, err
+	}
+	if doc.Type == TypeConfiguration {
+		if err := m.validateConfigurationRefsLocked(doc.Structured, doc.WorkspaceID); err != nil {
+			return Document{}, err
+		}
 	}
 	if doc.ID == "" {
 		doc.ID = NewID()
@@ -359,6 +422,11 @@ func (m *MemoryStore) Update(ctx context.Context, id string, fields UpdateFields
 	}
 	if err := doc.Validate(); err != nil {
 		return Document{}, err
+	}
+	if doc.Type == TypeConfiguration && fields.Structured != nil {
+		if err := m.validateConfigurationRefsLocked(doc.Structured, doc.WorkspaceID); err != nil {
+			return Document{}, err
+		}
 	}
 	doc.UpdatedAt = now
 	doc.UpdatedBy = actor

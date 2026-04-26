@@ -8,6 +8,12 @@ The `[satellites]` and `[satellites-agent]` patches in `.version` are bumped per
 
 (Add entries via `scripts/release-notes.sh`.)
 
+### Added
+
+- **Configuration typed-document** (story_d371f155, `epic:configuration-bundles`) — new `type=configuration` document bundling refs to one ordered contract list (workflow shape) plus skill and principle ref sets. Project-scoped, CRUD via existing `satellites_document_*` MCP verbs, FK-validated at the store layer (refs must resolve to active documents of the matching type in the same workspace). `internal/document/configuration.go` carries the `Configuration` Go struct + Marshal/Unmarshal helpers; `internal/document/store.go` adds `ErrDanglingConfigurationRef` + `validateConfigurationRefsLocked`; `internal/document/surreal.go` mirrors the validator for the SurrealDB-backed store. Stories and agents will pick a Configuration in follow-up stories of the same epic.
+
+  **Disambiguation**: this Configuration *entity* is distinct from the read-only `/projects/{id}/configuration` viewer page that shipped in story_433d0661 (commit 60bf060) — that page lists existing contract + skill documents per project; the entity is a named bundle of refs that overrides the implicit project default. Two surfaces share the word "configuration" by accident; a future story may rename the viewer page to clarify.
+
 ## [0.0.67] - 2026-04-26
 
 - feat(bootstrap): scaffold satellites-v4 repo, build.sh, per-binary versioning

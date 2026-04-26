@@ -1,5 +1,5 @@
 [satellites]
-version = 0.0.78
+version = 0.0.79
 
 [satellites-agent]
 version = 0.0.3

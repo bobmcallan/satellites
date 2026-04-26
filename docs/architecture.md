@@ -88,6 +88,7 @@ One schema, `type` discriminator. Types:
 | `skill` | reusable process definition bound to a contract category | `contract_binding` (optional), markdown body |
 | `principle` | operating rule | scope (`system` / `project`), tags |
 | `reviewer` | LLM-reviewer configuration | `contract_binding`, rubric body |
+| `configuration` | named project-scoped bundle of refs to one ordered contract list (workflow shape) plus skill and principle ref sets — stories and agents pick a Configuration to override the implicit project default (story_d371f155). Distinct from the `/projects/{id}/configuration` viewer page (story_433d0661), which is a read-only list of contract+skill documents. | `structured` JSON: `{contract_refs[], skill_refs[], principle_refs[]}`; refs validated against active documents of the matching type in the same workspace |
 
 Schema shape (one table):
 

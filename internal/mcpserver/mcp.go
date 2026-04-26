@@ -171,9 +171,9 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(getTool, s.handleDocumentGet)
 
 		createTool := mcpgo.NewTool("document_create",
-			mcpgo.WithDescription("Create a new document. Workspace is resolved from the caller; project_id is required when scope=project and forbidden when scope=system."),
-			mcpgo.WithString("type", mcpgo.Required(), mcpgo.Description("artifact | contract | skill | principle | reviewer")),
-			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("system | project")),
+			mcpgo.WithDescription("Create a new document. Workspace is resolved from the caller; project_id is required when scope=project and forbidden when scope=system. type=configuration (story_d371f155) requires scope=project and a structured payload of shape {\"contract_refs\":[...],\"skill_refs\":[...],\"principle_refs\":[...]} whose ids must resolve to active documents of the matching type in the same workspace."),
+			mcpgo.WithString("type", mcpgo.Required(), mcpgo.Description("artifact | contract | skill | principle | reviewer | agent | role | configuration")),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("system | project | workspace (workspace only valid for type=role)")),
 			mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Document name.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Project scope. Required when scope=project; rejected when scope=system.")),
 			mcpgo.WithString("body", mcpgo.Description("Markdown body.")),
