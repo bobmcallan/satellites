@@ -7,9 +7,86 @@
 <body>
   {{template "nav.html" .}}
   <main class="portal-main">
-    <section class="panel-headed">
+
+    <section class="panel-headed" data-testid="workspace-search">
       <header class="panel-header">
         <h1>{{.Project.Name}}</h1>
+      </header>
+      <div class="panel-body">
+        <form method="get" action="" class="workspace-search-form" x-data
+              data-testid="workspace-search-form">
+          <input type="text" name="q" value="{{.Composite.Filters.Query}}"
+                 class="workspace-search-input"
+                 placeholder="search stories + documents…"
+                 autocomplete="off"
+                 data-testid="workspace-search-input"
+                 @input.debounce.300ms="$el.form.requestSubmit()">
+          <noscript><button type="submit" class="btn-secondary">search</button></noscript>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="workspace-stories-panel">
+      <header class="panel-header">
+        <h2>stories</h2>
+        <span class="panel-header-meta">
+          <code data-testid="workspace-stories-count">({{.Composite.StoryTotal}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Stories}}
+          <p class="muted" data-testid="workspace-stories-empty">No matches</p>
+        {{else}}
+          <ul class="document-cards" data-testid="workspace-stories-list">
+            {{range .Composite.Stories}}
+            <li data-testid="workspace-story-{{.ID}}">
+              <a href="/projects/{{.ProjectID}}/stories/{{.ID}}" class="document-card-link">
+                <code class="type-pill">story</code>
+                <code class="scope-pill">{{.Status}}</code>
+                <span class="document-name">{{.Title}}</span>
+                {{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="workspace-documents-panel">
+      <header class="panel-header">
+        <h2>documents</h2>
+        <span class="panel-header-meta">
+          <code data-testid="workspace-documents-count">({{.Composite.DocTotal}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Documents}}
+          <p class="muted" data-testid="workspace-documents-empty">No matches</p>
+        {{else}}
+          <ul class="document-cards" data-testid="workspace-documents-list">
+            {{range .Composite.Documents}}
+            <li data-testid="workspace-document-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="workspace-project-meta">
+      <header class="panel-header">
+        <h2>project</h2>
       </header>
       <div class="panel-body">
         <dl class="kv-list">

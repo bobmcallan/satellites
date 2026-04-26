@@ -269,6 +269,7 @@ type projectDetailData struct {
 	User            auth.User
 	Project         projectRow
 	OwnerYou        bool
+	Composite       projectWorkspaceComposite
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
 	DevMode         bool
@@ -419,6 +420,8 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	filters := parseProjectWorkspaceFilters(r)
+	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, pr.ID, filters, memberships)
 	data := projectDetailData{
 		Title:           pr.Name,
 		Version:         config.Version,
@@ -426,6 +429,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		User:            user,
 		Project:         viewRow(pr),
 		OwnerYou:        true,
+		Composite:       composite,
 		Workspaces:      chips,
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
