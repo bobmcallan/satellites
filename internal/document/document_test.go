@@ -586,6 +586,52 @@ func TestMemoryStore_Search_EmptyQueryFilterOnly(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_Search_QuerySubstringFilter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now()
+
+	if _, err := store.Create(ctx, Document{
+		Type: TypeContract, Scope: ScopeSystem,
+		Name: "test-contract", Body: "contract body",
+	}, t0); err != nil {
+		t.Fatalf("Create contract: %v", err)
+	}
+	if _, err := store.Create(ctx, Document{
+		Type: TypePrinciple, Scope: ScopeSystem,
+		Name: "principle-a", Body: "# Test\n",
+	}, t0.Add(time.Hour)); err != nil {
+		t.Fatalf("Create principle: %v", err)
+	}
+	if _, err := store.Create(ctx, Document{
+		Type: TypeRole, Scope: ScopeSystem,
+		Name: "role_orchestrator",
+		Body: "Holds every orchestrator-surface MCP verb (contract_*, ...).",
+	}, t0.Add(2*time.Hour)); err != nil {
+		t.Fatalf("Create role: %v", err)
+	}
+
+	got, err := store.Search(ctx, SearchOptions{Query: "contract body"}, nil)
+	if err != nil {
+		t.Fatalf("Search query=contract body: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "test-contract" {
+		t.Fatalf("Search query=contract body = %d rows (%v), want 1 row test-contract", len(got), got)
+	}
+
+	combined, err := store.Search(ctx, SearchOptions{
+		ListOptions: ListOptions{Type: TypePrinciple},
+		Query:       "contract body",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Search query+type filter: %v", err)
+	}
+	if len(combined) != 0 {
+		t.Errorf("Search query=contract body + type=principle = %d rows, want 0 (AND)", len(combined))
+	}
+}
+
 func TestMemoryStore_Search_UnknownEnumRejected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

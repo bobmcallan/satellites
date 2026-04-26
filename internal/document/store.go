@@ -423,15 +423,28 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 	return out, nil
 }
 
-// Search implements Store for MemoryStore. The previous substring-on-Query
-// branch (slice 6.3 stand-in) was removed when the semantic-search path
-// landed (story_5abfe61c) per pr_no_unrequested_compat. Search is now a
-// structured-filter list capped at TopK, ordered by updated_at DESC; the
-// query path lives on SearchSemantic.
+// Search implements Store for MemoryStore. When opts.Query is non-empty,
+// applies a case-insensitive substring filter on name + body after the
+// structured filter — matching the behaviour advertised by the
+// document_search MCP tool description. Used as the fallback path when
+// SearchSemantic returns ErrSemanticUnavailable (deployments without an
+// embedder configured) so callers still get a query-narrowed result rather
+// than a full unfiltered list. Capped at TopK, ordered by updated_at DESC.
 func (m *MemoryStore) Search(_ context.Context, opts SearchOptions, memberships []string) ([]Document, error) {
 	rows, err := m.List(context.Background(), opts.ListOptions, memberships)
 	if err != nil {
 		return nil, err
+	}
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		needle := strings.ToLower(q)
+		filtered := rows[:0]
+		for _, r := range rows {
+			if strings.Contains(strings.ToLower(r.Name), needle) ||
+				strings.Contains(strings.ToLower(r.Body), needle) {
+				filtered = append(filtered, r)
+			}
+		}
+		rows = filtered
 	}
 	topK := opts.TopK
 	if topK <= 0 {

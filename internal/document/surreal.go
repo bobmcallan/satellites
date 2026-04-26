@@ -412,9 +412,16 @@ func (s *SurrealStore) Search(ctx context.Context, opts SearchOptions, membershi
 		conds = append(conds, "workspace_id IN $memberships")
 		vars["memberships"] = memberships
 	}
-	// The substring-on-Query branch (slice 6.3 stand-in) was removed when
-	// the semantic path landed (story_5abfe61c). SearchSemantic is the
-	// query path now.
+	// When opts.Query is non-empty, apply a case-insensitive substring
+	// match on name + body. SearchSemantic is the preferred query path,
+	// but the handler falls back here when no embedder is configured —
+	// dropping the query silently would widen the result set and
+	// contradict the document_search tool description.
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		conds = append(conds,
+			"(string::lowercase(name) CONTAINS $q OR string::lowercase(body) CONTAINS $q)")
+		vars["q"] = strings.ToLower(q)
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = " WHERE " + strings.Join(conds, " AND ")
