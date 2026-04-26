@@ -71,6 +71,8 @@ func TestSecurityHeaders_AllPresent(t *testing.T) {
 		{"Content-Security-Policy", "'unsafe-inline'"},
 		// Alpine v3 standard build needs unsafe-eval (story_a7297367).
 		{"Content-Security-Policy", "'unsafe-eval'"},
+		// Inline SVG caret arrows for <select> elements (story_cffd92d4).
+		{"Content-Security-Policy", "img-src 'self' data:"},
 	} {
 		v := got.Get(want.key)
 		if v == "" {

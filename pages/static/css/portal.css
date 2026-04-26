@@ -318,7 +318,14 @@ a:hover {
     font-size: 1rem;
     cursor: pointer;
 }
-.nav-hamburger:hover { background: var(--color-fg); color: var(--color-bg); }
+/* Non-inverting hover: keep the button transparent, lift the border to the
+   primary fg so the change is legible on dark theme without flashing white
+   (story_cffd92d4). */
+.nav-hamburger:hover {
+    background: transparent;
+    color: var(--color-fg);
+    border-color: var(--color-fg);
+}
 .nav-dropdown {
     position: absolute;
     right: 0;
