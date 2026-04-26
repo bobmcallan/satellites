@@ -506,6 +506,14 @@ a:hover {
 .nav-workspace-menu a:hover { background: #f5f5f5; }
 .nav-workspace-menu a[aria-current="true"] { font-weight: 700; }
 
+.nav-workspace-empty {
+    padding: var(--control-padding-y) var(--control-padding-x);
+    color: #888;
+    font-size: var(--font-size-control);
+    letter-spacing: 0.05em;
+    font-style: italic;
+}
+
 
 /* ============================================================
    FOOTER
@@ -1431,6 +1439,7 @@ code {
 }
 [data-theme="dark"] .nav-workspace-menu a { color: #e0e0e0; }
 [data-theme="dark"] .nav-workspace-menu a:hover { background: #2a2a2a; }
+[data-theme="dark"] .nav-workspace-empty { color: #888; }
 
 /* Hamburger */
 [data-theme="dark"] .nav-hamburger-icon,

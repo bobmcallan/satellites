@@ -29,6 +29,7 @@ func TestWorkspaceSwitcher_DropdownDoesNotReflowNav(t *testing.T) {
 
 	var heightBefore, heightAfter float64
 	var menuVisible bool
+	var menuChildren int
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(h.BaseURL+"/"),
 		chromedp.WaitVisible(`.nav-workspace .btn-link`, chromedp.ByQuery),
@@ -36,6 +37,7 @@ func TestWorkspaceSwitcher_DropdownDoesNotReflowNav(t *testing.T) {
 		chromedp.Click(`.nav-workspace .btn-link`, chromedp.ByQuery),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(`(() => { const el = document.querySelector('[data-testid="nav-workspace-menu"]'); return !!el && el.offsetParent !== null; })()`, &menuVisible),
+		chromedp.Evaluate(`document.querySelectorAll('[data-testid="nav-workspace-menu"] > li').length`, &menuChildren),
 		chromedp.Evaluate(`document.querySelector('.nav-inner').getBoundingClientRect().height`, &heightAfter),
 	); err != nil {
 		t.Fatalf("chromedp run: %v", err)
@@ -43,6 +45,9 @@ func TestWorkspaceSwitcher_DropdownDoesNotReflowNav(t *testing.T) {
 
 	if !menuVisible {
 		t.Errorf("workspace menu not visible after click")
+	}
+	if menuChildren < 1 {
+		t.Errorf("nav-workspace-menu rendered with %d child <li> rows; expected at least 1 (a switch target or the empty-state placeholder) — story_690b8f5c", menuChildren)
 	}
 	if heightBefore != heightAfter {
 		t.Errorf("nav-inner height changed when menu opened: before=%v after=%v (menu must be position:absolute so layout cannot shift)", heightBefore, heightAfter)

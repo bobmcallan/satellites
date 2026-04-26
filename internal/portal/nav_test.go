@@ -238,6 +238,79 @@ func TestNav_WorkspaceNameSingle(t *testing.T) {
 	}
 }
 
+// TestNav_WorkspaceMenuEmptyStatePlaceholder covers AC1+AC2 of
+// story_690b8f5c: when the user has only their active workspace, the
+// switcher menu must render a placeholder li so the bordered <ul> is
+// not empty. Regression guard for the story_4d1ef14f follow-up.
+func TestNav_WorkspaceMenuEmptyStatePlaceholder(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, ws := newPortalWithWorkspace(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_solo", Email: "solo@local"}
+	users.Add(user)
+	active, err := ws.Create(testCtx(), user.ID, "OnlyWorkspace", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create active workspace: %v", err)
+	}
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+	if err := sessions.SetActiveWorkspace(sess.ID, active.ID); err != nil {
+		t.Fatalf("set active workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `data-testid="nav-workspace-empty"`) {
+		t.Errorf("single-workspace nav must render the empty-state placeholder li; body=%s", body)
+	}
+	if !strings.Contains(body, "no other workspaces") {
+		t.Errorf("placeholder li must carry the 'no other workspaces' label; body=%s", body)
+	}
+}
+
+// TestNav_WorkspaceMenuHasOther covers AC4: when there is a switchable
+// workspace, the placeholder must NOT render.
+func TestNav_WorkspaceMenuHasOther(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, ws := newPortalWithWorkspace(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_dual", Email: "dual@local"}
+	users.Add(user)
+	active, err := ws.Create(testCtx(), user.ID, "ActiveWS", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create active workspace: %v", err)
+	}
+	if _, err := ws.Create(testCtx(), user.ID, "OtherWS", time.Now().UTC()); err != nil {
+		t.Fatalf("create other workspace: %v", err)
+	}
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+	if err := sessions.SetActiveWorkspace(sess.ID, active.ID); err != nil {
+		t.Fatalf("set active workspace: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if strings.Contains(body, `data-testid="nav-workspace-empty"`) {
+		t.Errorf("two-workspace nav must NOT render the empty-state placeholder; body=%s", body)
+	}
+	if !strings.Contains(body, "OtherWS") {
+		t.Errorf("two-workspace menu must list the OTHER workspace; body=%s", body)
+	}
+}
+
 // TestNav_WorkspaceMenuAbsolute asserts the .nav-workspace-menu CSS rule
 // is `position: absolute` so opening the dropdown cannot push the nav
 // row taller. Reads the shipped portal.css directly. story_4d1ef14f.

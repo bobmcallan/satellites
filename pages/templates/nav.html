@@ -9,20 +9,26 @@
       <a href="/tasks">tasks</a>
     </nav>
     {{if .Workspaces}}
+    {{$activeID := .ActiveWorkspace.ID}}
+    {{$hasOther := false}}
+    {{range .Workspaces}}{{if ne .ID $activeID}}{{$hasOther = true}}{{end}}{{end}}
     <div class="nav-workspace" x-data="{wsOpen: false}">
       <button type="button" class="btn-link" @click="wsOpen = !wsOpen" @keydown.escape.window="wsOpen = false">
-        WORKSPACE / {{if .ActiveWorkspace.ID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
+        WORKSPACE / {{if $activeID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
         <span aria-hidden="true">▾</span>
       </button>
       <ul class="nav-workspace-menu" x-show="wsOpen" x-cloak @click.outside="wsOpen = false" data-testid="nav-workspace-menu">
         {{range .Workspaces}}
-        {{if ne .ID $.ActiveWorkspace.ID}}
+        {{if ne .ID $activeID}}
         <li>
           <a href="/workspaces/select?id={{.ID}}&amp;next=/projects">
             {{.Name}}
           </a>
         </li>
         {{end}}
+        {{end}}
+        {{if not $hasOther}}
+        <li class="nav-workspace-empty" data-testid="nav-workspace-empty">no other workspaces</li>
         {{end}}
       </ul>
     </div>
