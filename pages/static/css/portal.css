@@ -1527,7 +1527,12 @@ code {
 [data-theme="dark"] input,
 [data-theme="dark"] select,
 [data-theme="dark"] textarea {
-    background: #111;
+    /* longhand background-color so the inherited background-image,
+       background-repeat, and background-position from the base
+       `select { ... }` rule survive (story_e5efcb6d). The shorthand
+       `background:` would reset background-repeat to the default
+       `repeat`, tiling the select's caret SVG across the control. */
+    background-color: #111;
     color: #e0e0e0;
     border-color: #e0e0e0;
 }
@@ -1548,7 +1553,9 @@ code {
 [data-theme="dark"] .form-input,
 [data-theme="dark"] .form-select,
 [data-theme="dark"] .form-textarea {
-    background: #111;
+    /* See story_e5efcb6d — longhand to keep cascaded background-image,
+       background-repeat, and background-position intact. */
+    background-color: #111;
     color: #e0e0e0;
     border-color: #e0e0e0;
 }
