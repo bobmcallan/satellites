@@ -39,7 +39,7 @@ func NewSurrealStore(db *surrealdb.DB, led ledger.Store) *SurrealStore {
 }
 
 // selectCols preserves the string id (see project/surreal.go note).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, title, description, acceptance_criteria, status, priority, category, tags, created_by, created_at, updated_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, title, description, acceptance_criteria, status, priority, category, tags, configuration_id, created_by, created_at, updated_at"
 
 func (s *SurrealStore) Create(ctx context.Context, st Story, now time.Time) (Story, error) {
 	if st.Status == "" {
@@ -165,6 +165,56 @@ func (s *SurrealStore) UpdateStatus(ctx context.Context, id, newStatus, actor st
 	}
 	emitStatus(ctx, s.publisher, current)
 	return current, nil
+}
+
+// Update implements Store for SurrealStore. story_4ca6cb1b.
+func (s *SurrealStore) Update(ctx context.Context, id string, fields UpdateFields, actor string, now time.Time, memberships []string) (Story, error) {
+	current, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return Story{}, err
+	}
+	if fields.ConfigurationID != nil {
+		if *fields.ConfigurationID == "" {
+			current.ConfigurationID = nil
+		} else {
+			v := *fields.ConfigurationID
+			current.ConfigurationID = &v
+		}
+	}
+	current.UpdatedAt = now
+	if err := s.write(ctx, current); err != nil {
+		return Story{}, err
+	}
+	return current, nil
+}
+
+// ListByConfigurationID implements Store for SurrealStore. story_4ca6cb1b.
+func (s *SurrealStore) ListByConfigurationID(ctx context.Context, id string, memberships []string) ([]Story, error) {
+	if id == "" {
+		return nil, nil
+	}
+	if memberships != nil && len(memberships) == 0 {
+		return []Story{}, nil
+	}
+	conds := []string{"configuration_id = $cfg"}
+	vars := map[string]any{"cfg": id}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	where := "WHERE " + conds[0]
+	for i := 1; i < len(conds); i++ {
+		where += " AND " + conds[i]
+	}
+	sql := fmt.Sprintf("SELECT %s FROM stories %s ORDER BY created_at DESC", selectCols, where)
+	results, err := surrealdb.Query[[]Story](ctx, s.db, sql, vars)
+	if err != nil {
+		return nil, fmt.Errorf("story: list by configuration_id: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return []Story{}, nil
+	}
+	return (*results)[0].Result, nil
 }
 
 func (s *SurrealStore) write(ctx context.Context, st Story) error {

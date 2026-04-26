@@ -132,7 +132,19 @@ func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToo
 	}
 
 	if len(proposed) == 0 {
-		proposed = expandDefaultProposed(spec)
+		// story_4ca6cb1b: when the story carries a configuration_id and
+		// the caller did NOT supply proposed_contracts, derive the
+		// workflow shape from the Configuration's ContractRefs. This
+		// makes "claim with no proposed list" honour a story-level
+		// preset instead of always falling back to the project default.
+		// When proposed IS supplied, it wins (per-call override).
+		if cfgProposed, err := s.resolveConfigurationProposed(ctx, st.ConfigurationID, memberships); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		} else if len(cfgProposed) > 0 {
+			proposed = cfgProposed
+		} else {
+			proposed = expandDefaultProposed(spec)
+		}
 	}
 	if err := spec.Validate(proposed); err != nil {
 		return mcpgo.NewToolResultText(marshalSpecError(err)), nil
@@ -288,6 +300,56 @@ func (s *Server) loadWorkflowSpec(ctx context.Context, projectID string, members
 		return contract.DefaultWorkflowSpec(), nil
 	}
 	return spec, nil
+}
+
+// resolveConfigurationProposed derives the proposed_contracts list from
+// a story's referenced Configuration. Returns (nil, nil) when the
+// configurationID pointer is nil/empty or the doc store is unavailable
+// — caller falls back to the project default. Returns an error when the
+// id is set but cannot be resolved or any of its ContractRefs cannot be
+// turned into an active contract name. story_4ca6cb1b.
+func (s *Server) resolveConfigurationProposed(ctx context.Context, configurationID *string, memberships []string) ([]string, error) {
+	if configurationID == nil || *configurationID == "" || s.docs == nil {
+		return nil, nil
+	}
+	id := *configurationID
+	cfgDoc, err := s.docs.GetByID(ctx, id, memberships)
+	if err != nil {
+		return nil, fmt.Errorf("configuration_id %q does not resolve to an active document", id)
+	}
+	if cfgDoc.Type != document.TypeConfiguration {
+		return nil, fmt.Errorf("configuration_id %q is type=%s, want type=%s", id, cfgDoc.Type, document.TypeConfiguration)
+	}
+	if cfgDoc.Status != document.StatusActive {
+		return nil, fmt.Errorf("configuration_id %q is not active (status=%s)", id, cfgDoc.Status)
+	}
+	cfg, err := document.UnmarshalConfiguration(cfgDoc.Structured)
+	if err != nil {
+		return nil, fmt.Errorf("configuration_id %q payload decode: %w", id, err)
+	}
+	if len(cfg.ContractRefs) == 0 {
+		return nil, nil
+	}
+	// Contract documents may be system-scope (empty workspace_id), which
+	// the membership filter would reject. Resolution of contract refs
+	// must look across scopes — the Configuration doc itself was already
+	// access-checked above. Mirrors the nil-memberships pattern in
+	// findContractDocByName.
+	out := make([]string, 0, len(cfg.ContractRefs))
+	for _, ref := range cfg.ContractRefs {
+		doc, err := s.docs.GetByID(ctx, ref, nil)
+		if err != nil {
+			return nil, fmt.Errorf("configuration_id %q: contract_ref %q not found", id, ref)
+		}
+		if doc.Type != document.TypeContract {
+			return nil, fmt.Errorf("configuration_id %q: contract_ref %q is type=%s, want type=contract", id, ref, doc.Type)
+		}
+		if doc.Status != document.StatusActive {
+			return nil, fmt.Errorf("configuration_id %q: contract_ref %q is not active", id, ref)
+		}
+		out = append(out, doc.Name)
+	}
+	return out, nil
 }
 
 // findContractDocByName resolves a contract_name to a document{type=contract}.

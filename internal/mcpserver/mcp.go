@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -328,7 +329,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.stories != nil {
 		createStoryTool := mcpgo.NewTool("story_create",
-			mcpgo.WithDescription("Create a new story in a project the caller owns."),
+			mcpgo.WithDescription("Create a new story in a project the caller owns. Optional configuration_id (story_4ca6cb1b) names a type=configuration document whose ContractRefs override the project workflow default at workflow_claim time."),
 			mcpgo.WithString("project_id", mcpgo.Required(), mcpgo.Description("Project scope.")),
 			mcpgo.WithString("title", mcpgo.Required(), mcpgo.Description("Short story title.")),
 			mcpgo.WithString("description", mcpgo.Description("Full description.")),
@@ -337,8 +338,16 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("category", mcpgo.Description("feature | bug | improvement | infrastructure | documentation")),
 			mcpgo.WithArray("tags", mcpgo.Description("Free-form tags (e.g. epic:v4-stories)."),
 				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithString("configuration_id", mcpgo.Description("Optional document id of an active type=configuration row in the same workspace. When set, story_workflow_claim with no proposed_contracts derives the workflow from this Configuration's ContractRefs.")),
 		)
 		s.mcp.AddTool(createStoryTool, s.handleStoryCreate)
+
+		updateStoryTool := mcpgo.NewTool("story_update",
+			mcpgo.WithDescription("Update a story's mutable non-status fields. story_4ca6cb1b: only configuration_id is settable today (pass empty string to clear). Status transitions go through story_update_status."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Story id (sty_<8hex>).")),
+			mcpgo.WithString("configuration_id", mcpgo.Description("Document id of an active type=configuration row in the same workspace. Empty string clears the assignment.")),
+		)
+		s.mcp.AddTool(updateStoryTool, s.handleStoryUpdate)
 
 		getStoryTool := mcpgo.NewTool("story_get",
 			mcpgo.WithDescription("Return a story by id. Cross-project access returns not-found."),
@@ -1111,6 +1120,36 @@ func (s *Server) handleDocumentDelete(ctx context.Context, req mcpgo.CallToolReq
 	}
 	mode := document.DeleteMode(req.GetString("mode", string(document.DeleteArchive)))
 	memberships := s.resolveCallerMemberships(ctx, caller)
+
+	// story_4ca6cb1b reverse-FK gate: when the target is a Configuration
+	// document, refuse to delete it while any open story references its
+	// id. The error names the referencing story ids so the caller can
+	// resolve them (or close those stories first). Read failures here
+	// fail open — the gate is best-effort, not a hard barrier.
+	if s.stories != nil {
+		if doc, err := s.docs.GetByID(ctx, id, memberships); err == nil && doc.Type == document.TypeConfiguration {
+			refs, err := s.stories.ListByConfigurationID(ctx, id, memberships)
+			if err == nil {
+				blocking := make([]string, 0, len(refs))
+				for _, st := range refs {
+					if st.Status == story.StatusDone || st.Status == story.StatusCancelled {
+						continue
+					}
+					blocking = append(blocking, st.ID)
+				}
+				if len(blocking) > 0 {
+					body, _ := json.Marshal(map[string]any{
+						"error":               "configuration_referenced",
+						"id":                  id,
+						"referencing_stories": blocking,
+						"message":             fmt.Sprintf("configuration %q cannot be deleted while %d open story/stories reference it: %v", id, len(blocking), blocking),
+					})
+					return mcpgo.NewToolResultError(string(body)), nil
+				}
+			}
+		}
+	}
+
 	if err := s.docs.Delete(ctx, id, mode, memberships); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -1392,7 +1431,8 @@ func (s *Server) handleStoryCreate(ctx context.Context, req mcpgo.CallToolReques
 	}
 	tagsRaw := req.GetStringSlice("tags", nil)
 	wsID := s.resolveProjectWorkspaceID(ctx, resolvedID)
-	st, err := s.stories.Create(ctx, story.Story{
+
+	candidate := story.Story{
 		WorkspaceID:        wsID,
 		ProjectID:          resolvedID,
 		Title:              title,
@@ -1402,11 +1442,20 @@ func (s *Server) handleStoryCreate(ctx context.Context, req mcpgo.CallToolReques
 		Category:           req.GetString("category", "feature"),
 		Tags:               tagsRaw,
 		CreatedBy:          caller.UserID,
-	}, time.Now().UTC())
+	}
+	if cfgID := req.GetString("configuration_id", ""); cfgID != "" {
+		if err := s.validateConfigurationRef(ctx, cfgID, wsID, memberships); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+		v := cfgID
+		candidate.ConfigurationID = &v
+	}
+
+	st, err := s.stories.Create(ctx, candidate, time.Now().UTC())
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(st)
+	body, _ := json.Marshal(s.augmentStoryWithConfigurationName(ctx, st, memberships))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "story_create").
@@ -1415,6 +1464,99 @@ func (s *Server) handleStoryCreate(ctx context.Context, req mcpgo.CallToolReques
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// handleStoryUpdate updates a story's mutable non-status fields. As of
+// story_4ca6cb1b only `configuration_id` is settable; pass empty string
+// to clear. Status transitions remain on story_update_status.
+func (s *Server) handleStoryUpdate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	current, err := s.stories.GetByID(ctx, id, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError("story not found"), nil
+	}
+	if _, err := s.resolveProjectID(ctx, current.ProjectID, caller, memberships); err != nil {
+		return mcpgo.NewToolResultError("story not found"), nil
+	}
+
+	args := req.GetArguments()
+	fields := story.UpdateFields{}
+	if v, ok := args["configuration_id"]; ok {
+		raw, _ := v.(string)
+		if raw != "" {
+			if err := s.validateConfigurationRef(ctx, raw, current.WorkspaceID, memberships); err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+		}
+		val := raw
+		fields.ConfigurationID = &val
+	}
+
+	updated, err := s.stories.Update(ctx, id, fields, caller.UserID, time.Now().UTC(), memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(s.augmentStoryWithConfigurationName(ctx, updated, memberships))
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "story_update").
+		Str("story_id", id).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// validateConfigurationRef checks that the supplied id resolves to an
+// active type=configuration document inside the supplied workspace.
+// Returns a descriptive error naming the id when validation fails.
+func (s *Server) validateConfigurationRef(ctx context.Context, id, workspaceID string, memberships []string) error {
+	if s.docs == nil {
+		return fmt.Errorf("configuration_id %q cannot be validated: document store unavailable", id)
+	}
+	doc, err := s.docs.GetByID(ctx, id, memberships)
+	if err != nil {
+		return fmt.Errorf("configuration_id %q does not resolve to an active document", id)
+	}
+	if doc.Type != document.TypeConfiguration {
+		return fmt.Errorf("configuration_id %q is type=%s, want type=%s", id, doc.Type, document.TypeConfiguration)
+	}
+	if doc.Status != document.StatusActive {
+		return fmt.Errorf("configuration_id %q is not active (status=%s)", id, doc.Status)
+	}
+	if workspaceID != "" && doc.WorkspaceID != "" && doc.WorkspaceID != workspaceID {
+		return fmt.Errorf("configuration_id %q is in a different workspace", id)
+	}
+	return nil
+}
+
+// storyWithConfigurationName extends the on-the-wire story shape with a
+// resolved configuration_name field. Embeds story.Story so JSON
+// marshalling preserves every existing field.
+type storyWithConfigurationName struct {
+	story.Story
+	ConfigurationName string `json:"configuration_name,omitempty"`
+}
+
+// augmentStoryWithConfigurationName returns a wire-shape that includes
+// the resolved Configuration document name when ConfigurationID is set.
+// Lookup failure (deleted Configuration etc.) leaves ConfigurationName
+// empty rather than failing the whole response.
+func (s *Server) augmentStoryWithConfigurationName(ctx context.Context, st story.Story, memberships []string) storyWithConfigurationName {
+	out := storyWithConfigurationName{Story: st}
+	if st.ConfigurationID == nil || *st.ConfigurationID == "" || s.docs == nil {
+		return out
+	}
+	doc, err := s.docs.GetByID(ctx, *st.ConfigurationID, memberships)
+	if err == nil {
+		out.ConfigurationName = doc.Name
+	}
+	return out
 }
 
 func (s *Server) handleStoryGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -1433,7 +1575,7 @@ func (s *Server) handleStoryGet(ctx context.Context, req mcpgo.CallToolRequest) 
 	if _, err := s.resolveProjectID(ctx, st.ProjectID, caller, memberships); err != nil {
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
-	body, _ := json.Marshal(st)
+	body, _ := json.Marshal(s.augmentStoryWithConfigurationName(ctx, st, memberships))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "story_get").
@@ -1465,7 +1607,11 @@ func (s *Server) handleStoryList(ctx context.Context, req mcpgo.CallToolRequest)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(list)
+	augmented := make([]storyWithConfigurationName, 0, len(list))
+	for _, st := range list {
+		augmented = append(augmented, s.augmentStoryWithConfigurationName(ctx, st, memberships))
+	}
+	body, _ := json.Marshal(augmented)
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "story_list").
