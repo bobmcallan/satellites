@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/ternarybob/arbor"
 )
 
 func TestNewID_Format(t *testing.T) {
@@ -154,5 +156,57 @@ func TestMemoryStore_OwnerIsolation(t *testing.T) {
 	}
 	if len(b) != 1 {
 		t.Errorf("user_b list size = %d, want 1", len(b))
+	}
+}
+
+// TestEnsureDefault_Idempotent covers AC5 of story_0f415ab3: a second
+// EnsureDefault call for the same (owner, workspace) returns the same
+// project id and does not create a duplicate row.
+func TestEnsureDefault_Idempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	logger := arbor.GetLogger().WithLevelFromString("warn")
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+
+	first, err := EnsureDefault(ctx, store, logger, "user_alice", "wksp_alice", now)
+	if err != nil {
+		t.Fatalf("first EnsureDefault: %v", err)
+	}
+	second, err := EnsureDefault(ctx, store, logger, "user_alice", "wksp_alice", now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("second EnsureDefault: %v", err)
+	}
+	if first != second {
+		t.Errorf("EnsureDefault not idempotent: first=%q second=%q", first, second)
+	}
+	rows, _ := store.ListByOwner(ctx, "user_alice", nil)
+	if len(rows) != 1 {
+		t.Errorf("EnsureDefault created %d rows, want 1", len(rows))
+	}
+}
+
+// TestEnsureDefault_PerUser confirms two users get distinct projects in
+// their own workspaces — covers the per-user shape that the OnUserCreated
+// hook relies on.
+func TestEnsureDefault_PerUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	logger := arbor.GetLogger().WithLevelFromString("warn")
+	now := time.Now().UTC()
+
+	a, _ := EnsureDefault(ctx, store, logger, "user_a", "wksp_a", now)
+	b, _ := EnsureDefault(ctx, store, logger, "user_b", "wksp_b", now)
+	if a == b {
+		t.Errorf("per-user projects collided: %q == %q", a, b)
+	}
+	pa, _ := store.GetByID(ctx, a, []string{"wksp_a"})
+	if pa.OwnerUserID != "user_a" || pa.WorkspaceID != "wksp_a" {
+		t.Errorf("user_a project mis-stamped: %+v", pa)
+	}
+	hidden, err := store.GetByID(ctx, b, []string{"wksp_a"})
+	if err == nil {
+		t.Errorf("cross-workspace lookup returned %+v, want ErrNotFound (membership filter)", hidden)
 	}
 }

@@ -221,11 +221,18 @@ func main() {
 		}
 
 		// Wire user-creation → EnsureDefault once the workspace store is up.
-		// New DevMode / OAuth users will get a personal workspace on first
-		// login. Idempotent per user.
+		// New DevMode / OAuth users will get a personal workspace AND a
+		// default project on first login so /projects renders a non-empty
+		// panel out of the box (story_0f415ab3). Idempotent per user.
 		authHandlers.OnUserCreated = func(hookCtx context.Context, userID string) {
-			if _, err := workspace.EnsureDefault(hookCtx, wsStore, logger, userID, time.Now().UTC()); err != nil {
+			now := time.Now().UTC()
+			wsID, err := workspace.EnsureDefault(hookCtx, wsStore, logger, userID, now)
+			if err != nil {
 				logger.Warn().Str("user_id", userID).Str("error", err.Error()).Msg("default workspace seed for user failed")
+				return
+			}
+			if _, err := project.EnsureDefault(hookCtx, projStore, logger, userID, wsID, now); err != nil {
+				logger.Warn().Str("user_id", userID).Str("workspace_id", wsID).Str("error", err.Error()).Msg("default project seed for user failed")
 			}
 		}
 	}

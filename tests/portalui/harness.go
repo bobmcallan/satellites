@@ -134,6 +134,11 @@ func StartHarness(t *testing.T) *Harness {
 	ledgerStore := ledger.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledgerStore)
 	projectStore := project.NewMemoryStore()
+	// Mirror the production OnUserCreated hook so the dev-user lands on a
+	// non-empty /projects panel without driving the full login flow.
+	if _, err := project.EnsureDefault(context.Background(), projectStore, logger, user.ID, ws.ID, now); err != nil {
+		t.Fatalf("seed default project: %v", err)
+	}
 	docStore := document.NewMemoryStore()
 	contractStore := contract.NewMemoryStore(docStore, storyStore)
 	taskStore := task.NewMemoryStore()
