@@ -61,7 +61,7 @@
     {{if .User.Email}}
     <div class="nav-hamburger-wrap" x-data="{open: false}" @keydown.escape.window="open = false">
       <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="open = !open" aria-label="open menu">
-        <span class="nav-hamburger-icon" aria-hidden="true">≡</span>
+        <span class="nav-hamburger-icon" aria-hidden="true"></span>
       </button>
       <div x-show="open" x-cloak class="nav-dropdown" data-testid="nav-dropdown" @click.outside="open = false">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
