@@ -226,6 +226,40 @@ func TestLanding_ShowsOAuthWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestLanding_HidesOAuthWhenEmptyCreds covers the empty-secrets branch
+// of the OAuth gate (story_d59705e2). Operators ship .env without
+// populating GOOGLE_CLIENT_* / GITHUB_CLIENT_* — the renderer must
+// suppress the entire landing-providers block so the page does not show
+// orphan "Sign in with …" buttons that would 404 on click.
+func TestLanding_HidesOAuthWhenEmptyCreds(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, _, _, _, _, _ := newTestPortal(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, banned := range []string{
+		`landing-providers`,
+		`Sign in with Google`,
+		`Sign in with GitHub`,
+		`/auth/google/start`,
+		`/auth/github/start`,
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("empty-creds landing must not contain %q (operator would see a button that 404s)", banned)
+		}
+	}
+	// AC4 — dev-mode signin must remain visible regardless of OAuth state.
+	if !strings.Contains(body, `data-testid="dev-signin"`) {
+		t.Errorf("dev-mode signin form missing — empty OAuth creds must not suppress dev-mode")
+	}
+}
+
 func TestLanding_HidesDevModeInProd(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "prod", DevMode: true, DBDSN: "x"}
