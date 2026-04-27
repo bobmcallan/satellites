@@ -1,6 +1,11 @@
 /* SATELLITES Portal
- * Font: IBM Plex Mono
- * No border-radius, no box-shadow
+ * Font stack: 'IBM Plex Mono', ui-monospace, monospace
+ * Web font: https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap
+ *   (loaded from pages/templates/head.html)
+ * Aligned with satellites-v3 portal.css and satellites-v3/pages/partials/head.html
+ * for v3 typography parity (story_797fbb95).
+ *
+ * No border-radius, no box-shadow.
  *
  * Theme tokens (story_5dd7167a). The body rule reads from the variables
  * below; [data-theme="dark"] overrides flip every chrome rule that uses
