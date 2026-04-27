@@ -148,6 +148,7 @@ func HandleReindex(ctx context.Context, deps Deps, t task.Task) (Outcome, error)
 	}
 
 	completedAt := time.Now().UTC()
+	persistedCommits := persistIndexerCommits(ctx, deps.Repos, r.ID, result.Commits)
 	updated, err := deps.Repos.UpdateIndexState(ctx, r.ID, result.HeadSHA, completedAt, result.SymbolCount, result.FileCount)
 	if err != nil {
 		appendReindexRow(ctx, deps.Ledger, tagReindexFailed, r, t.ID, map[string]any{
@@ -168,13 +169,14 @@ func HandleReindex(ctx context.Context, deps Deps, t task.Task) (Outcome, error)
 	}
 
 	appendReindexRow(ctx, deps.Ledger, tagReindexComplete, updated, t.ID, map[string]any{
-		"prev_head_sha": prevHead,
-		"new_head_sha":  updated.HeadSHA,
-		"symbol_count":  updated.SymbolCount,
-		"file_count":    updated.FileCount,
-		"index_version": updated.IndexVersion,
-		"trigger":       payload.Trigger,
-		"duration_ms":   completedAt.Sub(startedAt).Milliseconds(),
+		"prev_head_sha":     prevHead,
+		"new_head_sha":      updated.HeadSHA,
+		"symbol_count":      updated.SymbolCount,
+		"file_count":        updated.FileCount,
+		"persisted_commits": persistedCommits,
+		"index_version":     updated.IndexVersion,
+		"trigger":           payload.Trigger,
+		"duration_ms":       completedAt.Sub(startedAt).Milliseconds(),
 	})
 	emitReindex(ctx, deps.Publisher, "complete", updated, map[string]any{
 		"task_id":      t.ID,
@@ -184,6 +186,32 @@ func HandleReindex(ctx context.Context, deps Deps, t task.Task) (Outcome, error)
 		"duration_ms":  completedAt.Sub(startedAt).Milliseconds(),
 	})
 	return OutcomeSuccess, nil
+}
+
+// persistIndexerCommits writes the indexer's recent-commits walk into
+// the repo store's commits table. Idempotent via UpsertCommit (replace
+// by (repo_id, sha)). Returns the count of rows successfully written
+// for audit; failure on any single row is logged-via-skip rather than
+// fatal so the reindex still ships symbol/file counts.
+func persistIndexerCommits(ctx context.Context, store Store, repoID string, commits []codeindex.CommitRecord) int {
+	if store == nil || len(commits) == 0 {
+		return 0
+	}
+	written := 0
+	for _, c := range commits {
+		row := Commit{
+			RepoID:      repoID,
+			SHA:         c.SHA,
+			Subject:     c.Subject,
+			Author:      c.Author,
+			CommittedAt: c.CommittedAt,
+			ParentSHA:   c.ParentSHA,
+		}
+		if _, err := store.UpsertCommit(ctx, row); err == nil {
+			written++
+		}
+	}
+	return written
 }
 
 // decodeReindexPayload validates the envelope on task.Payload. Empty

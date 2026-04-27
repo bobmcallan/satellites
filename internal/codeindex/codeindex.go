@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Symbol is one indexed top-level declaration (function, type,
@@ -35,9 +36,23 @@ type Symbol struct {
 // IndexResult is the structured outcome the reindex worker writes onto
 // the repo row via UpdateIndexState.
 type IndexResult struct {
-	HeadSHA     string `json:"head_sha"`
-	SymbolCount int    `json:"symbol_count"`
-	FileCount   int    `json:"file_count"`
+	HeadSHA     string         `json:"head_sha"`
+	SymbolCount int            `json:"symbol_count"`
+	FileCount   int            `json:"file_count"`
+	Commits     []CommitRecord `json:"commits,omitempty"`
+}
+
+// CommitRecord is the per-commit summary the indexer captures from
+// `git log` after a successful clone. The reindex worker persists
+// these into the repo store's commits table so the portal /repo view
+// and downstream consumers don't depend on webhook delivery for the
+// recent-history surface.
+type CommitRecord struct {
+	SHA         string    `json:"sha"`
+	Subject     string    `json:"subject"`
+	Author      string    `json:"author,omitempty"`
+	CommittedAt time.Time `json:"committed_at"`
+	ParentSHA   string    `json:"parent_sha,omitempty"`
 }
 
 // IndexedRepo is the per-repo summary returned by ListRepos.

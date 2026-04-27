@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // LocalIndexer is the production Indexer implementation. It clones
@@ -68,6 +69,11 @@ func (l *LocalIndexer) IndexRepo(ctx context.Context, gitRemote, defaultBranch s
 		return IndexResult{}, &UnavailableError{Op: "index_repo", Err: err}
 	}
 
+	// Bounded recent-commits walk so the worker can persist the commits
+	// table without webhook delivery. Failure here is non-fatal — the
+	// index still ships symbol/file counts.
+	commits, _ := gitLogRecent(ctx, cloneDir, 50)
+
 	files, err := walkRepo(cloneDir)
 	if err != nil {
 		return IndexResult{}, &UnavailableError{Op: "index_repo", Err: err}
@@ -108,7 +114,64 @@ func (l *LocalIndexer) IndexRepo(ctx context.Context, gitRemote, defaultBranch s
 		HeadSHA:     headSHA,
 		SymbolCount: len(symbols),
 		FileCount:   len(files),
+		Commits:     commits,
 	}, nil
+}
+
+// gitLogRecent runs `git log` against cloneDir and parses up to limit
+// recent commits into CommitRecord rows. Uses a unit-separator (US,
+// 0x1F) field delimiter to keep subjects with commas intact, and a
+// record-separator (RS, 0x1E) line delimiter to keep multi-line
+// subjects from splitting rows. Failure returns (nil, err) so the
+// caller can degrade to symbol/file counts only.
+func gitLogRecent(ctx context.Context, cloneDir string, limit int) ([]CommitRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	const fieldSep = "\x1f"
+	const recordSep = "\x1e"
+	pretty := fmt.Sprintf("--pretty=format:%%H%s%%P%s%%cI%s%%an%s%%s%s",
+		fieldSep, fieldSep, fieldSep, fieldSep, recordSep)
+	cmd := exec.CommandContext(ctx, "git", "-C", cloneDir, "log",
+		fmt.Sprintf("--max-count=%d", limit), pretty)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, &UnavailableError{Op: "git_log", Err: err}
+	}
+	raw := strings.TrimRight(string(out), recordSep+"\n ")
+	if raw == "" {
+		return nil, nil
+	}
+	records := strings.Split(raw, recordSep)
+	commits := make([]CommitRecord, 0, len(records))
+	for _, rec := range records {
+		rec = strings.TrimLeft(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		parts := strings.SplitN(rec, fieldSep, 5)
+		if len(parts) != 5 {
+			continue
+		}
+		ts, terr := time.Parse(time.RFC3339, parts[2])
+		if terr != nil {
+			continue
+		}
+		parentSHA := parts[1]
+		// `git log` emits multiple parents space-separated for merge
+		// commits; keep the first parent as the linear history pointer.
+		if i := strings.IndexByte(parentSHA, ' '); i > 0 {
+			parentSHA = parentSHA[:i]
+		}
+		commits = append(commits, CommitRecord{
+			SHA:         parts[0],
+			ParentSHA:   parentSHA,
+			CommittedAt: ts,
+			Author:      parts[3],
+			Subject:     parts[4],
+		})
+	}
+	return commits, nil
 }
 
 // ListRepos implements Indexer.
@@ -268,14 +331,14 @@ func (l *LocalIndexer) lookupRepo(repoKey, op string) (*indexedRepo, error) {
 func cloneOrFetch(ctx context.Context, gitRemote, branch, cloneDir string) error {
 	gitDir := filepath.Join(cloneDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, gitRemote, cloneDir)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "100", "--branch", branch, gitRemote, cloneDir)
 		out, runErr := cmd.CombinedOutput()
 		if runErr != nil {
 			return fmt.Errorf("git clone: %w (%s)", runErr, strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	fetchCmd := exec.CommandContext(ctx, "git", "-C", cloneDir, "fetch", "--depth", "1", "origin", branch)
+	fetchCmd := exec.CommandContext(ctx, "git", "-C", cloneDir, "fetch", "--depth", "100", "origin", branch)
 	if out, ferr := fetchCmd.CombinedOutput(); ferr != nil {
 		return fmt.Errorf("git fetch: %w (%s)", ferr, strings.TrimSpace(string(out)))
 	}
