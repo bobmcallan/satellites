@@ -120,7 +120,7 @@ func (p *Portal) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, _ := p.activeWorkspace(r, user)
 	data := settingsData{
-		Title:           "settings",
+		Title:           buildPageTitle(active, "", "settings"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,

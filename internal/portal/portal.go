@@ -95,6 +95,26 @@ type wsChip struct {
 	Name string
 }
 
+// buildPageTitle composes the SSR <title> per story_f7152e83. Pattern:
+//
+//	SATELLITES — <project|workspace>[ — <page>]
+//
+// projectName takes precedence over the active workspace name when both
+// are provided. Either may be empty (e.g. unauthenticated landing). The
+// separator is the em-dash U+2014.
+func buildPageTitle(active wsChip, projectName, pageName string) string {
+	parts := []string{"SATELLITES"}
+	if projectName != "" {
+		parts = append(parts, projectName)
+	} else if active.Name != "" {
+		parts = append(parts, active.Name)
+	}
+	if pageName != "" {
+		parts = append(parts, pageName)
+	}
+	return strings.Join(parts, " — ")
+}
+
 // WSConfig is the websocket bootstrap payload emitted in the page head.
 // WorkspaceID is empty on unauthenticated pages (login), causing the
 // script bootstrap + connection-indicator widget to render as no-ops.
@@ -303,7 +323,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, _ := p.activeWorkspace(r, user)
 	data := landingData{
-		Title:           "home",
+		Title:           buildPageTitle(active, "", ""),
 		Version:         config.Version,
 		Build:           config.Build,
 		Commit:          config.GitCommit,
@@ -329,7 +349,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 func (p *Portal) renderLanding(w http.ResponseWriter, r *http.Request) {
 	devEnabled := p.cfg.Env != "prod" && p.cfg.DevMode
 	data := loginData{
-		Title:           "SATELLITES",
+		Title:           buildPageTitle(wsChip{}, "", ""),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		Next:            r.URL.Query().Get("next"),
@@ -370,7 +390,7 @@ func (p *Portal) handleProjectsList(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := projectsListData{
-		Title:           "projects",
+		Title:           buildPageTitle(active, "", "projects"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -424,7 +444,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	filters := parseProjectWorkspaceFilters(r)
 	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, pr.ID, filters, memberships)
 	data := projectDetailData{
-		Title:           pr.Name,
+		Title:           buildPageTitle(active, pr.Name, ""),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -482,7 +502,7 @@ func (p *Portal) handleProjectConfiguration(w http.ResponseWriter, r *http.Reque
 	}
 	composite := buildProjectConfigurationComposite(r.Context(), p.documents, pr.ID, memberships)
 	data := projectConfigurationData{
-		Title:           pr.Name + " · configuration",
+		Title:           buildPageTitle(active, pr.Name, "configuration"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -541,7 +561,7 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 	}
 	filters := parseLedgerFilters(r)
 	data := projectLedgerData{
-		Title:           proj.Name + " · ledger",
+		Title:           buildPageTitle(active, proj.Name, "ledger"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -696,7 +716,7 @@ func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := storiesListData{
-		Title:           proj.Name + " · stories",
+		Title:           buildPageTitle(active, proj.Name, "stories"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -776,7 +796,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := storyDetailData{
-		Title:           s.Title,
+		Title:           buildPageTitle(active, proj.Name, s.Title),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -863,7 +883,7 @@ func (p *Portal) handleTasks(w http.ResponseWriter, r *http.Request) {
 	active, chips, memberships := p.activeWorkspace(r, user)
 	composite := buildTasksComposite(r.Context(), p.tasks, memberships)
 	data := tasksPageData{
-		Title:           "tasks",
+		Title:           buildPageTitle(active, "", "tasks"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -948,7 +968,7 @@ func (p *Portal) handleDocumentsList(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := documentsListData{
-		Title:           "documents",
+		Title:           buildPageTitle(active, "", "documents"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1004,7 +1024,7 @@ func (p *Portal) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := documentDetailData{
-		Title:           detail.Document.Name,
+		Title:           buildPageTitle(active, projRow.Name, detail.Document.Name),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1088,7 +1108,7 @@ func (p *Portal) handleDocumentVersionDetail(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	data := documentVersionDetailData{
-		Title:           doc.Name,
+		Title:           buildPageTitle(active, projRow.Name, doc.Name+" · v"+versionStr),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1141,7 +1161,7 @@ func (p *Portal) handleRepoView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	data := repoViewData{
-		Title:           "repo",
+		Title:           buildPageTitle(active, "", "repo"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1349,7 +1369,7 @@ func (p *Portal) handleRoles(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := rolesPageData{
-		Title:           "roles",
+		Title:           buildPageTitle(active, "", "roles"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1376,7 +1396,7 @@ func (p *Portal) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := agentsPageData{
-		Title:           "agents",
+		Title:           buildPageTitle(active, "", "agents"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
@@ -1404,7 +1424,7 @@ func (p *Portal) handleGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := grantsPageData{
-		Title:           "grants",
+		Title:           buildPageTitle(active, "", "grants"),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
