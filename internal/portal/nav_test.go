@@ -48,10 +48,11 @@ func TestNav_HasFlexContainer(t *testing.T) {
 	}
 }
 
-// TestNav_DOMOrder asserts the v3 nav layout: brand → optional DEV chip
-// → optional active-WS chip → primary links → spacer → indicators →
-// version chip → hamburger. Renders an authed page for a user with one
-// workspace and DevMode on, then asserts substring-position ordering.
+// TestNav_DOMOrder asserts the v3-parity nav layout per story_c1e0f92a:
+// brand → workspace dropdown (after brand) → primary links → spacer →
+// indicators → user-role/DEV chip (right side) → hamburger. Renders an
+// authed page for a user with DevMode on, then asserts substring-
+// position ordering.
 func TestNav_DOMOrder(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
@@ -71,11 +72,11 @@ func TestNav_DOMOrder(t *testing.T) {
 
 	order := []string{
 		`class="nav-brand"`,
-		`data-testid="dev-chip"`,
 		`<nav class="nav-links">`,
 		`href="/projects"`,
 		`href="/tasks"`,
 		`class="nav-spacer"`,
+		`data-testid="dev-chip"`,
 		`data-testid="nav-hamburger"`,
 	}
 	prev := -1

@@ -2,12 +2,7 @@
 <header class="portal-nav nav">
   <div class="nav-inner">
     <div class="nav-brand"><a href="/">SATELLITES</a></div>
-    {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
-    <nav class="nav-links">
-      <a href="/projects">projects</a>
-      <a href="/tasks">tasks</a>
-    </nav>
     {{if .Workspaces}}
     {{$activeID := .ActiveWorkspace.ID}}
     {{$hasOther := false}}
@@ -33,6 +28,10 @@
       </ul>
     </div>
     {{end}}
+    <nav class="nav-links">
+      <a href="/projects">projects</a>
+      <a href="/tasks">tasks</a>
+    </nav>
     {{end}}
     <div class="nav-spacer"></div>
     {{if .WSConfig.WorkspaceID}}
@@ -58,6 +57,7 @@
       </div>
     </div>
     {{end}}
+    {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
     <div class="nav-hamburger-wrap" x-data="{open: false}" @keydown.escape.window="open = false">
       <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="open = !open" aria-label="open menu">
