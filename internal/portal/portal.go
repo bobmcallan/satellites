@@ -329,7 +329,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 func (p *Portal) renderLanding(w http.ResponseWriter, r *http.Request) {
 	devEnabled := p.cfg.Env != "prod" && p.cfg.DevMode
 	data := loginData{
-		Title:           "satellites",
+		Title:           "SATELLITES",
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		Next:            r.URL.Query().Get("next"),
