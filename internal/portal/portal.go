@@ -231,6 +231,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/select", p.handleWorkspaceSelect)
 	mux.HandleFunc("POST /theme", p.handleThemeSet)
 	mux.HandleFunc("GET /settings", p.handleSettings)
+	mux.HandleFunc("GET /config", p.handleConfigPage)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -1438,6 +1439,52 @@ func (p *Portal) handleGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "grants.html", data); err != nil {
 		p.logger.Error().Str("template", "grants.html").Str("error", err.Error()).Msg("template render failed")
+		http.Error(w, "render failed", http.StatusInternalServerError)
+	}
+}
+
+type configPageData struct {
+	Title           string
+	Version         string
+	Commit          string
+	User            auth.User
+	Composite       configComposite
+	Workspaces      []wsChip
+	ActiveWorkspace wsChip
+	DevMode         bool
+	ThemeMode       string
+	ThemePickerNext string
+	WSConfig        WSConfig
+}
+
+// handleConfigPage renders the top-menu /config page (story_644a2eb1).
+// Lists every visible Configuration document, lets the operator select
+// one via the dropdown, and renders the resolved workflow / contracts /
+// skills / principles sections for the selected Configuration. The
+// selection is carried in `?id=<configID>` so the SSR page is bookmarkable.
+func (p *Portal) handleConfigPage(w http.ResponseWriter, r *http.Request) {
+	user, ok := p.resolveUser(r)
+	if !ok {
+		p.redirectToLogin(w, r)
+		return
+	}
+	active, chips, memberships := p.activeWorkspace(r, user)
+	composite := buildConfigComposite(r.Context(), p.documents, memberships, r.URL.Query().Get("id"))
+	data := configPageData{
+		Title:           buildPageTitle(active, "", "config"),
+		Version:         config.Version,
+		Commit:          config.GitCommit,
+		User:            user,
+		Composite:       composite,
+		Workspaces:      chips,
+		ActiveWorkspace: active,
+		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
+		ThemeMode:       themeFromRequest(r),
+		ThemePickerNext: r.URL.RequestURI(),
+		WSConfig:        buildWSConfig(active, r),
+	}
+	if err := p.tmpl.ExecuteTemplate(w, "configuration.html", data); err != nil {
+		p.logger.Error().Str("template", "configuration.html").Str("error", err.Error()).Msg("template render failed")
 		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
 }

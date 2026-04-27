@@ -1,0 +1,163 @@
+{{define "configuration.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+
+    <section class="panel-headed" data-testid="config-page-header">
+      <header class="panel-header">
+        <h1>configuration</h1>
+      </header>
+      <div class="panel-body">
+        {{if .Composite.Configurations}}
+        <form method="get" action="/config" class="config-selector-form">
+          <label>
+            <span>configuration</span>
+            <select name="id" data-testid="config-selector"
+                    onchange="this.form.submit()">
+              {{range .Composite.Configurations}}
+              <option value="{{.ID}}"{{if eq .ID $.Composite.SelectedID}} selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+          </label>
+          <noscript><button type="submit" class="btn-secondary">apply</button></noscript>
+        </form>
+        <p class="muted">
+          New Configurations are authored as <code>type=configuration</code>
+          documents — open the <a href="/documents" data-testid="config-new">documents browser</a>
+          to create one, or visit a project's
+          <a href="/projects">configuration page</a>.
+        </p>
+        {{else}}
+        <p class="muted" data-testid="config-empty">
+          No Configurations yet.
+        </p>
+        <p>
+          <a href="/documents" class="btn-secondary" data-testid="config-empty-cta">Create your first Configuration</a>
+        </p>
+        {{end}}
+      </div>
+    </section>
+
+    {{if .Composite.SelectedID}}
+    <section class="panel-headed" data-testid="config-workflow-panel">
+      <header class="panel-header">
+        <h2>workflow</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-workflow-count">({{len .Composite.Workflow}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Workflow}}
+          <p class="muted" data-testid="config-workflow-empty">No phases</p>
+        {{else}}
+          <ol class="document-cards" data-testid="config-workflow-list">
+            {{range .Composite.Workflow}}
+            <li data-testid="config-workflow-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ol>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="config-contracts-panel">
+      <header class="panel-header">
+        <h2>contracts</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-contracts-count">({{len .Composite.Contracts}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Contracts}}
+          <p class="muted" data-testid="config-contracts-empty">No contracts</p>
+        {{else}}
+          <ul class="document-cards" data-testid="config-contracts-list">
+            {{range .Composite.Contracts}}
+            <li data-testid="config-contract-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="config-skills-panel">
+      <header class="panel-header">
+        <h2>skills</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-skills-count">({{len .Composite.Skills}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Skills}}
+          <p class="muted" data-testid="config-skills-empty">No skills</p>
+        {{else}}
+          <ul class="document-cards" data-testid="config-skills-list">
+            {{range .Composite.Skills}}
+            <li data-testid="config-skill-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="config-principles-panel">
+      <header class="panel-header">
+        <h2>principles</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-principles-count">({{len .Composite.Principles}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Principles}}
+          <p class="muted" data-testid="config-principles-empty">No principles</p>
+        {{else}}
+          <ul class="document-cards" data-testid="config-principles-list">
+            {{range .Composite.Principles}}
+            <li data-testid="config-principle-{{.ID}}">
+              <a href="/documents/{{.ID}}" class="document-card-link">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+                <span class="muted">{{.UpdatedAt}}</span>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}
