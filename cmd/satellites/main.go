@@ -26,6 +26,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/hub"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
+	"github.com/bobmcallan/satellites/internal/permhook"
 	"github.com/bobmcallan/satellites/internal/portal"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/ratelimit"
@@ -301,6 +302,21 @@ func main() {
 	registrars := []httpserver.RouteRegistrar{authHandlers, portalHandlers, tokenExchange}
 	if wsHandlers != nil {
 		registrars = append(registrars, wsHandlers)
+	}
+	// story_c08856b2: /hooks/enforce HTTP handler resolves a tool
+	// call's allow/deny via the active CI's allocated agent (or the
+	// session-default-install row when no CI is claimed).
+	if sessionStore != nil && ledgerStore != nil && contractStore != nil && docStore != nil {
+		permHandler := &permhook.Handler{
+			Resolver: &permhook.Resolver{
+				Sessions:  sessionStore,
+				Ledger:    ledgerStore,
+				Contracts: contractStore,
+				Docs:      docStore,
+			},
+			Logger: logger,
+		}
+		registrars = append(registrars, permHandler)
 	}
 	srv := httpserver.New(cfg, logger, startedAt, registrars...)
 	if dbPing != nil {
