@@ -31,7 +31,7 @@ RUN apk add --no-cache git && \
 
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata curl bash
+RUN apk add --no-cache ca-certificates tzdata curl bash git
 
 WORKDIR /app
 

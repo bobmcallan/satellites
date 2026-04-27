@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/db"
@@ -30,6 +32,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/portal"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/ratelimit"
+	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
@@ -89,6 +92,8 @@ func main() {
 		sessionStore     session.Store
 		grantStore       rolegrant.Store
 		taskStore        task.Store
+		repoStore        repo.Store
+		repoIndexer      codeindex.Indexer
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
 
@@ -133,6 +138,8 @@ func main() {
 		authHandlers.Users = users
 		grantStore = rolegrant.NewSurrealStore(conn, docStore)
 		taskStore = task.NewSurrealStore(conn)
+		repoStore = repo.NewSurrealStore(conn)
+		repoIndexer = codeindex.NewLocalIndexer(filepath.Join(os.TempDir(), "satellites-repos"))
 		dbPing = func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) }
 
 		// Seed the system user's default workspace so bootstrap writes
@@ -258,7 +265,7 @@ func main() {
 		}
 	}
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, nil, nil, grantStore, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, repoIndexer, grantStore, wsStore, startedAt)
 	if err != nil {
 		logger.Error().Str("error", err.Error()).Msg("portal init failed")
 		os.Exit(1)
@@ -335,6 +342,8 @@ func main() {
 		SessionStore:     sessionStore,
 		RoleGrantStore:   grantStore,
 		TaskStore:        taskStore,
+		RepoStore:        repoStore,
+		Indexer:          repoIndexer,
 	})
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions:       sessions,
@@ -354,6 +363,21 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("dispatcher watchdog start failed")
 		} else {
 			defer disp.Stop()
+		}
+	}
+
+	// In-process repo reindex worker (story_c99995c8). Drains
+	// reindex_repo tasks the MCP repo_add / repo_scan handlers enqueue,
+	// runs HandleReindex inline, and closes the task. Lives in the
+	// satellites binary so the repo collection pipeline is self-contained
+	// — operators don't need a separate worker process for the repo
+	// reference primitive to populate SurrealDB.
+	if taskStore != nil && repoStore != nil && repoIndexer != nil {
+		repoWorker := repo.NewWorker(repoStore, taskStore, ledgerStore, repoIndexer, nil, logger, repo.WorkerOptions{})
+		if err := repoWorker.Start(ctx); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("repo reindex worker start failed")
+		} else {
+			defer repoWorker.Stop()
 		}
 	}
 
