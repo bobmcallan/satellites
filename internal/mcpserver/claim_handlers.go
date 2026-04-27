@@ -258,9 +258,72 @@ func (s *Server) handleSessionWhoami(ctx context.Context, req mcpgo.CallToolRequ
 		if verbs := s.resolveGrantEffectiveVerbs(ctx, sess.OrchestratorGrantID); len(verbs) > 0 {
 			payload["effective_verbs"] = verbs
 		}
+		// story_488b8223: write a kind:session-default-install ledger
+		// row when this whoami is the first observation of the session
+		// inside the staleness window. The audit trail records which
+		// orchestrator agent the session inherited so the eventual
+		// enforce-hook resolution path has a verifiable source.
+		if rowID := s.installSessionDefaultIfNeeded(ctx, sess, caller.UserID); rowID != "" {
+			payload["session_default_install_ledger_id"] = rowID
+		}
 	}
 	body, _ := json.Marshal(payload)
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// installSessionDefaultIfNeeded writes a kind:session-default-install
+// ledger row tying the session to the orchestrator agent's
+// permission_patterns when no row from the current staleness window
+// exists yet. Returns the new row's id, or "" when the install was
+// skipped (no agent resolvable, idempotent skip, or write failure).
+// story_488b8223.
+func (s *Server) installSessionDefaultIfNeeded(ctx context.Context, sess session.Session, userID string) string {
+	if s.ledger == nil || s.docs == nil || s.grants == nil {
+		return ""
+	}
+	grant, err := s.grants.GetByID(ctx, sess.OrchestratorGrantID, nil)
+	if err != nil || grant.AgentID == "" {
+		return ""
+	}
+	agentDoc, err := s.docs.GetByID(ctx, grant.AgentID, nil)
+	if err != nil {
+		return ""
+	}
+	settings, _ := document.UnmarshalAgentSettings(agentDoc.Structured)
+	now := s.nowUTC()
+	staleness := resolveSessionStaleness()
+	cutoff := now.Add(-staleness)
+	rows, _ := s.ledger.List(ctx, "", ledger.ListOptions{
+		Type: ledger.TypeDecision,
+		Tags: []string{"kind:session-default-install", "session:" + sess.SessionID},
+	}, nil)
+	for _, r := range rows {
+		if r.Status != ledger.StatusActive {
+			continue
+		}
+		if r.CreatedAt.After(cutoff) {
+			return ""
+		}
+	}
+	structured, _ := json.Marshal(map[string]any{
+		"session_id":          sess.SessionID,
+		"agent_id":            agentDoc.ID,
+		"agent_name":          agentDoc.Name,
+		"permission_patterns": settings.PermissionPatterns,
+		"installed_at":        now.UTC().Format(time.RFC3339),
+	})
+	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: agentDoc.WorkspaceID,
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:session-default-install", "session:" + sess.SessionID},
+		Content:     "session default action_claim installed from orchestrator agent",
+		Structured:  structured,
+		CreatedBy:   userID,
+	}, now)
+	if err != nil {
+		return ""
+	}
+	return row.ID
 }
 
 // handleSessionRegister lets the SessionStart hook and API-key flows

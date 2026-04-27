@@ -184,6 +184,14 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("orchestrator docs seed failed")
 		}
 
+		// Seed the system-scope lifecycle agent documents that
+		// story_b39b393f's strict-required follow-up will allocate to
+		// each contract instance at workflow_claim time. Idempotent.
+		// Story_488b8223.
+		if err := seedLifecycleAgents(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("lifecycle agents seed failed")
+		}
+
 		// Backfill required_role on pre-existing contract documents.
 		// Contracts without a required_role field in their structured
 		// payload receive role_orchestrator so the process-order gate's
@@ -431,6 +439,120 @@ func seedOrchestratorDocs(ctx context.Context, docStore document.Store, workspac
 		CreatedBy:   "system",
 	}, now); err != nil {
 		return fmt.Errorf("seed agent_claude_orchestrator: %w", err)
+	}
+	return nil
+}
+
+// lifecycleAgentSpec captures one seed agent — its document name and
+// the permission_patterns the agent grants when allocated to a CI.
+// Story_488b8223.
+type lifecycleAgentSpec struct {
+	Name     string
+	Body     string
+	Patterns []string
+}
+
+// seedLifecycleAgents creates one system-scope `type=agent` document
+// per lifecycle phase (preplan/plan/develop/push/merge_to_main/
+// story_close). Each agent's `permission_patterns` mirrors the
+// patterns the matching contract document carried as
+// `permitted_actions` (today's coverage) so the agents-own-permissions
+// follow-up (story_cc55e093) can flip CI claims to source patterns
+// from these docs without re-deriving the lists. Idempotent — agents
+// already present by name are skipped. story_488b8223.
+func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
+	if docStore == nil {
+		return nil
+	}
+	specs := []lifecycleAgentSpec{
+		{
+			Name: "preplan_agent",
+			Body: "Lifecycle preplan agent — read-only investigation surface for the preplan contract. Permitted to read code + git history + MCP server state; not permitted to write.",
+			Patterns: []string{
+				"Read:**", "Grep:**", "Glob:**",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
+				"Bash:ls", "Bash:pwd",
+				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
+			},
+		},
+		{
+			Name: "plan_agent",
+			Body: "Lifecycle plan agent — read-only + ledger-write surface for authoring plan.md and review-criteria.md artefacts.",
+			Patterns: []string{
+				"Read:**", "Grep:**", "Glob:**",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
+				"Bash:ls", "Bash:pwd",
+				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
+			},
+		},
+		{
+			Name: "develop_agent",
+			Body: "Lifecycle develop agent — full code-edit + test + commit surface. Permitted to edit/write files, build/test/vet/fmt, run go tooling, and stage + commit changes. Not permitted to push (push_agent's job).",
+			Patterns: []string{
+				"Read:**", "Edit:**", "Write:**", "MultiEdit:**", "Grep:**", "Glob:**",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
+				"Bash:git_add", "Bash:git_commit",
+				"Bash:go_build", "Bash:go_test", "Bash:go_vet", "Bash:go_mod", "Bash:go_run",
+				"Bash:gofmt", "Bash:goimports", "Bash:golangci_lint",
+				"Bash:ls", "Bash:pwd", "Bash:cat", "Bash:echo", "Bash:mkdir",
+				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
+			},
+		},
+		{
+			Name: "push_agent",
+			Body: "Lifecycle push agent — minimal surface to push the develop commit upstream. Permitted to git_fetch + git_push + read-only inspection. Not permitted to edit code or amend commits.",
+			Patterns: []string{
+				"Read:**",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
+				"Bash:git_fetch", "Bash:git_push",
+				"Bash:ls", "Bash:pwd",
+				"mcp__satellites__satellites_*",
+			},
+		},
+		{
+			Name: "merge_agent",
+			Body: "Lifecycle merge agent — fast-forward merges develop → main locally. Permitted to checkout/branch/merge with --ff-only; no force operations.",
+			Patterns: []string{
+				"Read:**",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
+				"Bash:git_fetch", "Bash:git_checkout", "Bash:git_branch", "Bash:git_merge",
+				"Bash:ls", "Bash:pwd",
+				"mcp__satellites__satellites_*",
+			},
+		},
+		{
+			Name: "story_close_agent",
+			Body: "Lifecycle story_close agent — reads evidence + calls satellites_story_close to transition the story. Read-only across the codebase plus MCP write to the close verb.",
+			Patterns: []string{
+				"Read:**",
+				"mcp__satellites__satellites_*",
+			},
+		},
+	}
+	for _, spec := range specs {
+		if _, err := docStore.GetByName(ctx, "", spec.Name, nil); err == nil {
+			continue
+		}
+		structured, err := document.MarshalAgentSettings(document.AgentSettings{
+			PermissionPatterns: spec.Patterns,
+		})
+		if err != nil {
+			return fmt.Errorf("seed %s: marshal: %w", spec.Name, err)
+		}
+		if _, err := docStore.Create(ctx, document.Document{
+			WorkspaceID: workspaceID,
+			ProjectID:   nil,
+			Type:        document.TypeAgent,
+			Name:        spec.Name,
+			Scope:       document.ScopeSystem,
+			Status:      document.StatusActive,
+			Body:        spec.Body,
+			Structured:  structured,
+			Tags:        []string{"v4", "agents-roles", "seed", "lifecycle"},
+			CreatedBy:   "system",
+		}, now); err != nil {
+			return fmt.Errorf("seed %s: %w", spec.Name, err)
+		}
 	}
 	return nil
 }
