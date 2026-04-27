@@ -24,6 +24,7 @@ const (
 	TypeCloseRequest  = "close-request"
 	TypeVerdict       = "verdict"
 	TypeWorkflowClaim = "workflow-claim"
+	TypePlanAmend     = "plan-amend" // story_d5d88a64: dynamic plan tree
 	TypeKV            = "kv"
 )
 
@@ -54,7 +55,7 @@ const (
 var validTypes = map[string]struct{}{
 	TypePlan: {}, TypeActionClaim: {}, TypeArtifact: {}, TypeEvidence: {},
 	TypeDecision: {}, TypeCloseRequest: {}, TypeVerdict: {}, TypeWorkflowClaim: {},
-	TypeKV: {},
+	TypePlanAmend: {}, TypeKV: {},
 }
 
 var validDurabilities = map[string]struct{}{

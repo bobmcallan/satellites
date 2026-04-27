@@ -293,6 +293,215 @@ func (s *Server) handleStoryContractNext(ctx context.Context, req mcpgo.CallTool
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
+// planAmendInvocation is the per-add payload accepted by handlePlanAmend.
+// Mirrors ContractInstance fields exposed to plan-amend callers.
+type planAmendInvocation struct {
+	ContractName       string `json:"contract_name"`
+	ACScope            []int  `json:"ac_scope,omitempty"`
+	ParentInvocationID string `json:"parent_invocation_id,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+}
+
+// handlePlanAmend appends new CIs to an existing story's plan tree
+// (story_d5d88a64). Each add carries an optional ac_scope and an optional
+// parent_invocation_id so the orchestrator can express "rerun develop
+// scoped to AC 2" without re-claiming the original CI.
+//
+// The handler enforces three gates before creating the rows:
+//  1. Workflow_spec re-validation — the resulting list of contract_names
+//     across existing + amended CIs must satisfy the project's spec.
+//  2. Per-AC iteration cap (SATELLITES_MAX_AC_ITERATIONS, default 5) —
+//     re-scoping the same AC past the cap returns ErrACIterationCap.
+//  3. Parent linkage — when parent_invocation_id is set it must resolve
+//     to an existing CI on the same story.
+//
+// On success a kind:plan-amend ledger row is written carrying
+// {reason, added_cis, slot_validation_result} in Structured.
+func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	storyID, err := req.RequireString("story_id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	reason := req.GetString("reason", "")
+	rawAdds := req.GetString("add_invocations", "")
+	if rawAdds == "" {
+		return mcpgo.NewToolResultError("add_invocations is required (JSON array)"), nil
+	}
+	var adds []planAmendInvocation
+	if err := json.Unmarshal([]byte(rawAdds), &adds); err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("add_invocations parse error: %v", err)), nil
+	}
+	if len(adds) == 0 {
+		return mcpgo.NewToolResultError("add_invocations must contain at least one entry"), nil
+	}
+
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	st, err := s.stories.GetByID(ctx, storyID, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError("story not found"), nil
+	}
+
+	existing, err := s.contracts.List(ctx, storyID, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if len(existing) == 0 {
+		return mcpgo.NewToolResultError("plan_amend requires an initial workflow — call story_workflow_claim first"), nil
+	}
+
+	spec, err := s.loadWorkflowSpec(ctx, st.ProjectID, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+
+	// Validate parent_invocation_id linkage against the existing CI set.
+	existingByID := make(map[string]contract.ContractInstance, len(existing))
+	for _, ci := range existing {
+		existingByID[ci.ID] = ci
+	}
+	for i, add := range adds {
+		if add.ContractName == "" {
+			return mcpgo.NewToolResultError(fmt.Sprintf("add_invocations[%d]: contract_name is required", i)), nil
+		}
+		if add.ParentInvocationID != "" {
+			if _, ok := existingByID[add.ParentInvocationID]; !ok {
+				errBody, _ := json.Marshal(map[string]any{
+					"error":                "unknown_parent_invocation",
+					"index":                i,
+					"parent_invocation_id": add.ParentInvocationID,
+				})
+				return mcpgo.NewToolResultError(string(errBody)), nil
+			}
+		}
+	}
+
+	// Build the proposed list (existing names + amended names) and
+	// validate against the spec before any writes.
+	proposed := make([]string, 0, len(existing)+len(adds))
+	for _, ci := range existing {
+		proposed = append(proposed, ci.ContractName)
+	}
+	for _, add := range adds {
+		proposed = append(proposed, add.ContractName)
+	}
+	if err := spec.Validate(proposed); err != nil {
+		return mcpgo.NewToolResultText(marshalSpecError(err)), nil
+	}
+
+	// AC iteration cap: predict what the post-amend ContractInstance
+	// shape looks like to compute the next AC counts.
+	predicted := make([]contract.ContractInstance, 0, len(adds))
+	for _, add := range adds {
+		predicted = append(predicted, contract.ContractInstance{
+			ACScope: append([]int(nil), add.ACScope...),
+		})
+	}
+	cap := contract.MaxACIterations()
+	if err := contract.ValidateACScope(existing, predicted, cap); err != nil {
+		errBody, _ := json.Marshal(map[string]any{
+			"error":   "ac_iteration_cap_exceeded",
+			"cap":     cap,
+			"message": err.Error(),
+		})
+		return mcpgo.NewToolResultError(string(errBody)), nil
+	}
+
+	// Resolve each amended contract_name → document id. Reject early so
+	// no ledger row gets written for an invalid amend.
+	resolved := make([]resolvedSlot, 0, len(adds))
+	for i, add := range adds {
+		doc, err := s.findContractDocByName(ctx, add.ContractName, st.WorkspaceID)
+		if err != nil {
+			errBody, _ := json.Marshal(map[string]any{
+				"error":         "unknown_contract",
+				"index":         i,
+				"contract_name": add.ContractName,
+			})
+			return mcpgo.NewToolResultError(string(errBody)), nil
+		}
+		resolved = append(resolved, resolvedSlot{name: add.ContractName, docID: doc.ID, required: specSlotRequired(spec, add.ContractName)})
+	}
+
+	// Determine the starting sequence — append after the highest existing.
+	maxSeq := 0
+	for _, ci := range existing {
+		if ci.Sequence > maxSeq {
+			maxSeq = ci.Sequence
+		}
+	}
+
+	now := time.Now().UTC()
+
+	// Create the new CIs and accumulate them for the ledger payload.
+	created := make([]contract.ContractInstance, 0, len(adds))
+	for i, slot := range resolved {
+		add := adds[i]
+		ci := contract.ContractInstance{
+			StoryID:            storyID,
+			ContractID:         slot.docID,
+			ContractName:       slot.name,
+			Phase:              slot.name,
+			Sequence:           maxSeq + 1 + i,
+			RequiredForClose:   slot.required,
+			Status:             contract.StatusReady,
+			ACScope:            append([]int(nil), add.ACScope...),
+			ParentInvocationID: add.ParentInvocationID,
+		}
+		out, err := s.contracts.Create(ctx, ci, now)
+		if err != nil {
+			return mcpgo.NewToolResultError(fmt.Sprintf("create CI %q: %v", slot.name, err)), nil
+		}
+		created = append(created, out)
+	}
+
+	// Write the kind:plan-amend ledger row capturing the rationale.
+	addedSummaries := make([]map[string]any, 0, len(created))
+	for _, ci := range created {
+		addedSummaries = append(addedSummaries, map[string]any{
+			"id":                   ci.ID,
+			"contract_name":        ci.ContractName,
+			"sequence":             ci.Sequence,
+			"ac_scope":             ci.ACScope,
+			"parent_invocation_id": ci.ParentInvocationID,
+		})
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"reason":                 reason,
+		"added_cis":              addedSummaries,
+		"slot_validation_result": "ok",
+		"ac_iteration_cap":       cap,
+	})
+	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: st.WorkspaceID,
+		ProjectID:   st.ProjectID,
+		StoryID:     ledger.StringPtr(storyID),
+		Type:        ledger.TypePlanAmend,
+		Tags:        []string{"kind:plan-amend", "phase:plan", "story:" + storyID},
+		Content:     reason,
+		Structured:  payload,
+		CreatedBy:   caller.UserID,
+	}, now)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"story_id":             storyID,
+		"plan_amend_ledger_id": row.ID,
+		"contract_instances":   created,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "plan_amend").
+		Str("story_id", storyID).
+		Int("added_ci_count", len(created)).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
 // loadWorkflowSpec reads the project's latest kv row tagged
 // key:workflow_spec and decodes its Structured payload. Falls back to
 // DefaultWorkflowSpec when no row exists or decode fails.

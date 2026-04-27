@@ -165,7 +165,10 @@ func (m *MemoryStore) GetByID(ctx context.Context, id string, memberships []stri
 	return ci, nil
 }
 
-// List implements Store for MemoryStore.
+// List implements Store for MemoryStore. The result is sorted by
+// sequence then tree-walked so children of an amended parent (story_d5d88a64)
+// follow their parent in the slice — a portal renderer can iterate
+// in order and indent on ParentInvocationID without an extra pass.
 func (m *MemoryStore) List(ctx context.Context, storyID string, memberships []string) ([]ContractInstance, error) {
 	if storyID == "" {
 		return nil, fmt.Errorf("contract: story_id is required")
@@ -186,7 +189,7 @@ func (m *MemoryStore) List(ctx context.Context, storyID string, memberships []st
 		out = append(out, ci)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
-	return out, nil
+	return TreeWalk(out), nil
 }
 
 // UpdateStatus implements Store for MemoryStore.

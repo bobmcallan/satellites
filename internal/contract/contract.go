@@ -25,22 +25,24 @@ import (
 // the auth check (enforce hook) and the amend path (same-grant
 // re-claim).
 type ContractInstance struct {
-	ID                string    `json:"id"`
-	WorkspaceID       string    `json:"workspace_id"`
-	ProjectID         string    `json:"project_id"`
-	StoryID           string    `json:"story_id"`
-	ContractID        string    `json:"contract_id"`
-	ContractName      string    `json:"contract_name"`
-	Phase             string    `json:"phase"`
-	Sequence          int       `json:"sequence"`
-	Status            string    `json:"status"`
-	ClaimedViaGrantID string    `json:"claimed_via_grant_id,omitempty"`
-	ClaimedAt         time.Time `json:"claimed_at,omitempty"`
-	PlanLedgerID      string    `json:"plan_ledger_id,omitempty"`
-	CloseLedgerID     string    `json:"close_ledger_id,omitempty"`
-	RequiredForClose  bool      `json:"required_for_close"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	WorkspaceID        string    `json:"workspace_id"`
+	ProjectID          string    `json:"project_id"`
+	StoryID            string    `json:"story_id"`
+	ContractID         string    `json:"contract_id"`
+	ContractName       string    `json:"contract_name"`
+	Phase              string    `json:"phase"`
+	Sequence           int       `json:"sequence"`
+	Status             string    `json:"status"`
+	ClaimedViaGrantID  string    `json:"claimed_via_grant_id,omitempty"`
+	ClaimedAt          time.Time `json:"claimed_at,omitempty"`
+	PlanLedgerID       string    `json:"plan_ledger_id,omitempty"`
+	CloseLedgerID      string    `json:"close_ledger_id,omitempty"`
+	RequiredForClose   bool      `json:"required_for_close"`
+	ACScope            []int     `json:"ac_scope,omitempty"`
+	ParentInvocationID string    `json:"parent_invocation_id,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // NewID returns a fresh contract_instance id in the canonical

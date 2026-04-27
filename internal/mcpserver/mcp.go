@@ -397,6 +397,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(workflowClaimTool, s.handleStoryWorkflowClaim)
 
+		planAmendTool := mcpgo.NewTool("plan_amend",
+			mcpgo.WithDescription("Append new contract_instances to a story's existing plan tree (story_d5d88a64). Each entry in add_invocations carries an optional ac_scope (1-based AC indices the new CI covers) and an optional parent_invocation_id (the CI whose close triggered this amend). Validates: workflow_spec slot constraints across existing+amended names; per-AC iteration cap (SATELLITES_MAX_AC_ITERATIONS, default 5). On success writes a kind:plan-amend ledger row carrying {reason, added_cis, slot_validation_result}."),
+			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id whose plan is being amended.")),
+			mcpgo.WithString("add_invocations", mcpgo.Required(), mcpgo.Description("JSON array of {contract_name, ac_scope?, parent_invocation_id?, agent_id?} entries.")),
+			mcpgo.WithString("reason", mcpgo.Description("Orchestrator's rationale; written verbatim to the kind:plan-amend ledger row.")),
+		)
+		s.mcp.AddTool(planAmendTool, s.handlePlanAmend)
+
 		contractNextTool := mcpgo.NewTool("story_contract_next",
 			mcpgo.WithDescription("Return the lowest-sequence contract_instance with status=ready for a story, plus any document{type=skill} rows whose contract_binding matches the contract's id. Read-only — does NOT claim."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),

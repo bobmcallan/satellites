@@ -46,7 +46,7 @@ func NewSurrealStore(db *surrealdb.DB, docs document.Store, stories story.Store)
 }
 
 // selectCols preserves the string form of id (see document/surreal.go).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, contract_name, phase, sequence, status, claimed_via_grant_id, claimed_at, plan_ledger_id, close_ledger_id, required_for_close, created_at, updated_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, contract_name, phase, sequence, status, claimed_via_grant_id, claimed_at, plan_ledger_id, close_ledger_id, required_for_close, ac_scope, parent_invocation_id, created_at, updated_at"
 
 // Create implements Store for SurrealStore.
 func (s *SurrealStore) Create(ctx context.Context, ci ContractInstance, now time.Time) (ContractInstance, error) {
@@ -105,7 +105,9 @@ func (s *SurrealStore) GetByID(ctx context.Context, id string, memberships []str
 	return (*results)[0].Result[0], nil
 }
 
-// List implements Store for SurrealStore.
+// List implements Store for SurrealStore. Sorted by sequence ASC and
+// then tree-walked so amended children (story_d5d88a64) follow their
+// parent in the slice.
 func (s *SurrealStore) List(ctx context.Context, storyID string, memberships []string) ([]ContractInstance, error) {
 	if storyID == "" {
 		return nil, fmt.Errorf("contract: story_id is required")
@@ -127,7 +129,7 @@ func (s *SurrealStore) List(ctx context.Context, storyID string, memberships []s
 	if results == nil || len(*results) == 0 {
 		return []ContractInstance{}, nil
 	}
-	return (*results)[0].Result, nil
+	return TreeWalk((*results)[0].Result), nil
 }
 
 // UpdateStatus implements Store for SurrealStore.
