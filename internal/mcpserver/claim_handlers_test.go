@@ -36,7 +36,26 @@ type claimFixture struct {
 	grantID      string
 	cis          []contract.ContractInstance
 	contractDocs map[string]string
-	now          time.Time
+	// agents maps lifecycle phase names ("preplan","plan","develop",
+	// "story_close") to the seeded agent doc id. Tests pass
+	// `agent_id: f.agents[phase]` on contract_claim calls (story_cc55e093).
+	agents map[string]string
+	now    time.Time
+}
+
+// agentFor returns the lifecycle agent id matching the CI at ciIdx in
+// f.cis. Story_cc55e093 strict-required: every contract_claim test
+// passes an allocated agent.
+func (f *claimFixture) agentFor(ciIdx int) string {
+	f.t.Helper()
+	if ciIdx < 0 || ciIdx >= len(f.cis) {
+		f.t.Fatalf("agentFor: ciIdx %d out of range", ciIdx)
+	}
+	id, ok := f.agents[f.cis[ciIdx].ContractName]
+	if !ok {
+		f.t.Fatalf("agentFor: no lifecycle agent seeded for phase %q", f.cis[ciIdx].ContractName)
+	}
+	return id
 }
 
 func newClaimFixture(t *testing.T) *claimFixture {
@@ -129,6 +148,29 @@ func newClaimFixture(t *testing.T) *claimFixture {
 		cis = append(cis, ci)
 	}
 
+	// Seed one lifecycle agent per phase (story_cc55e093). Each agent
+	// carries a non-empty permission_patterns set so the action_claim
+	// row's Structured payload has stable content.
+	agents := map[string]string{}
+	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+		structured, _ := document.MarshalAgentSettings(document.AgentSettings{
+			PermissionPatterns: []string{"Read:**", "Bash:go_test"},
+		})
+		d, err := docStore.Create(ctx, document.Document{
+			WorkspaceID: ws.ID,
+			Type:        document.TypeAgent,
+			Scope:       document.ScopeSystem,
+			Status:      document.StatusActive,
+			Name:        name + "_agent",
+			Body:        "lifecycle agent for " + name,
+			Structured:  structured,
+		}, now)
+		if err != nil {
+			t.Fatalf("seed %s_agent: %v", name, err)
+		}
+		agents[name] = d.ID
+	}
+
 	server := New(cfg, satarbor.New("info"), now, Deps{
 		DocStore:         docStore,
 		ProjectStore:     projStore,
@@ -172,6 +214,7 @@ func newClaimFixture(t *testing.T) *claimFixture {
 		grantID:      grant.ID,
 		cis:          cis,
 		contractDocs: contractDocs,
+		agents:       agents,
 		now:          now,
 	}
 }
@@ -219,7 +262,7 @@ func TestClaim_HappyPath(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
-		"permissions_claim":    []string{"Bash:go_test"},
+		"agent_id":             f.agentFor(0),
 		"plan_markdown":        "first plan",
 	}))
 	if err != nil {
@@ -258,6 +301,7 @@ func TestClaim_PredecessorNotTerminal(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[2].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(2),
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -277,6 +321,7 @@ func TestClaim_SessionNotRegistered(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           "ghost-session",
+		"agent_id":             f.agentFor(0),
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -304,6 +349,7 @@ func TestClaim_SessionStale(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -321,6 +367,7 @@ func TestClaim_CINotReady(t *testing.T) {
 	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	})); err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -332,6 +379,7 @@ func TestClaim_CINotReady(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -355,6 +403,7 @@ func TestClaim_GrantMismatch(t *testing.T) {
 	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	})); err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -363,6 +412,7 @@ func TestClaim_GrantMismatch(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           otherSession,
+		"agent_id":             f.agentFor(0),
 	}))
 	if err != nil {
 		t.Fatalf("second: %v", err)
@@ -379,6 +429,7 @@ func TestClaim_Amend(t *testing.T) {
 	first, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 		"plan_markdown":        "initial plan",
 	}))
 	if err != nil {
@@ -395,6 +446,7 @@ func TestClaim_Amend(t *testing.T) {
 	second, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 		"plan_markdown":        "amended plan",
 	}))
 	if err != nil {
@@ -428,7 +480,7 @@ func TestClaim_LedgerShapes(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
-		"permissions_claim":    []string{"Bash:go_test", "Write:**"},
+		"agent_id":             f.agentFor(0),
 		"skills_used":          []string{"golang-testing"},
 		"plan_markdown":        "the plan body",
 	}))
@@ -483,6 +535,7 @@ func TestClaim_CINotFound(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": "ci_ghost",
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -500,6 +553,7 @@ func TestClaim_HappyChain(t *testing.T) {
 		res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 			"contract_instance_id": ci.ID,
 			"session_id":           f.sessionID,
+			"agent_id":             f.agentFor(i),
 		}))
 		if err != nil {
 			t.Fatalf("claim[%d]: %v", i, err)
@@ -521,6 +575,7 @@ func TestResume_HappyPath(t *testing.T) {
 	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	})); err != nil {
 		t.Fatalf("claim: %v", err)
 	}

@@ -11,32 +11,30 @@ import (
 )
 
 // TestClaim_AgentIDSourcesPatternsFromAgentDoc verifies story_b39b393f
-// AC1+AC2+AC4: when contract_claim is called with agent_id, the
+// + story_cc55e093: when contract_claim is called with agent_id, the
 // action_claim ledger row's permission_patterns are sourced from the
-// agent document, the CI is stamped with the agent_id, and any
-// caller-submitted permissions_claim is overridden.
+// agent document and the CI is stamped with the agent_id.
 func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 
-	developAgent, err := f.server.docs.Create(f.ctx, document.Document{
-		WorkspaceID: f.wsID,
-		Type:        document.TypeAgent,
-		Scope:       document.ScopeSystem,
-		Status:      document.StatusActive,
-		Name:        "develop_agent",
-		Body:        "develop agent",
-		Structured:  []byte(`{"permission_patterns":["Edit:internal/**","Bash:go_test"],"skill_refs":[]}`),
-	}, f.now)
+	// Use the fixture's seeded preplan_agent for the cis[0] (preplan)
+	// claim. The fixture seeds each lifecycle agent with a known
+	// PermissionPatterns slice; we read them back to compare.
+	preplanAgentID := f.agentFor(0)
+	agentDoc, err := f.server.docs.GetByID(f.ctx, preplanAgentID, nil)
 	if err != nil {
-		t.Fatalf("seed develop_agent: %v", err)
+		t.Fatalf("lookup seeded preplan_agent: %v", err)
+	}
+	settings, err := document.UnmarshalAgentSettings(agentDoc.Structured)
+	if err != nil {
+		t.Fatalf("decode agent settings: %v", err)
 	}
 
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
-		"agent_id":             developAgent.ID,
-		"permissions_claim":    []string{"Bash:rm_rf"}, // ignored when agent_id set
+		"agent_id":             preplanAgentID,
 		"plan_markdown":        "claim with agent",
 	}))
 	if err != nil {
@@ -57,8 +55,8 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ci lookup: %v", err)
 	}
-	if ci.AgentID != developAgent.ID {
-		t.Errorf("CI.AgentID = %q, want %q", ci.AgentID, developAgent.ID)
+	if ci.AgentID != preplanAgentID {
+		t.Errorf("CI.AgentID = %q, want %q", ci.AgentID, preplanAgentID)
 	}
 
 	rows, err := f.server.ledger.List(f.ctx, f.projectID, ledger.ListOptions{StoryID: f.storyID, Type: ledger.TypeActionClaim}, nil)
@@ -84,12 +82,11 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	if err := json.Unmarshal(acRow.Structured, &payload); err != nil {
 		t.Fatalf("parse action_claim structured: %v", err)
 	}
-	want := []string{"Edit:internal/**", "Bash:go_test"}
-	if !reflect.DeepEqual(payload.PermissionsClaim, want) {
-		t.Errorf("permissions_claim = %v, want %v (must be sourced from agent doc, not caller)", payload.PermissionsClaim, want)
+	if !reflect.DeepEqual(payload.PermissionsClaim, settings.PermissionPatterns) {
+		t.Errorf("permissions_claim = %v, want %v (must be sourced from agent doc)", payload.PermissionsClaim, settings.PermissionPatterns)
 	}
-	if payload.AgentID != developAgent.ID {
-		t.Errorf("action_claim.agent_id = %q, want %q", payload.AgentID, developAgent.ID)
+	if payload.AgentID != preplanAgentID {
+		t.Errorf("action_claim.agent_id = %q, want %q", payload.AgentID, preplanAgentID)
 	}
 	if payload.Source != "agent_document" {
 		t.Errorf("action_claim.source = %q, want \"agent_document\"", payload.Source)
@@ -118,6 +115,50 @@ func TestClaim_AgentIDNotFound(t *testing.T) {
 	}
 	if payload.Error != "agent_not_found" {
 		t.Errorf("error = %q, want \"agent_not_found\"", payload.Error)
+	}
+}
+
+// TestClaim_RejectsMissingAgentID verifies story_cc55e093 AC1: claim
+// without agent_id returns a structured agent_required error.
+func TestClaim_RejectsMissingAgentID(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	res, _ := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           f.sessionID,
+	}))
+	if !res.IsError {
+		t.Fatalf("expected error; got %s", firstText(res))
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal([]byte(firstText(res)), &payload)
+	if payload.Error != "agent_required" {
+		t.Errorf("error = %q, want \"agent_required\"", payload.Error)
+	}
+}
+
+// TestClaim_RejectsPermissionsClaim verifies story_cc55e093 AC2: claim
+// with non-empty permissions_claim arg returns permissions_claim_retired.
+func TestClaim_RejectsPermissionsClaim(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	res, _ := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
+		"permissions_claim":    []string{"Bash:rm_rf"},
+	}))
+	if !res.IsError {
+		t.Fatalf("expected error; got %s", firstText(res))
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal([]byte(firstText(res)), &payload)
+	if payload.Error != "permissions_claim_retired" {
+		t.Errorf("error = %q, want \"permissions_claim_retired\"", payload.Error)
 	}
 }
 

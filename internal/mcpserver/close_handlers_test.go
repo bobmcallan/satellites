@@ -22,12 +22,14 @@ func newCloseFixture(t *testing.T) *closeFixture {
 }
 
 // claim advances a CI from ready → claimed via the handler so the
-// subsequent close path has a realistic input.
+// subsequent close path has a realistic input. story_cc55e093: claim
+// allocates the matching lifecycle agent for the CI's phase.
 func (f *closeFixture) claim(t *testing.T, idx int, plan string) {
 	t.Helper()
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[idx].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(idx),
 		"plan_markdown":        plan,
 	}))
 	if err != nil || res.IsError {
@@ -196,6 +198,7 @@ func TestClose_PlanDeferred(t *testing.T) {
 	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(0),
 	})); err != nil {
 		t.Fatalf("claim: %v", err)
 	}

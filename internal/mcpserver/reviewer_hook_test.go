@@ -44,7 +44,21 @@ type reviewerFixture struct {
 	projectID string
 	sessionID string
 	cis       []contract.ContractInstance
-	now       time.Time
+	// agents maps phase name → agent doc id. Tests pass agent_id on
+	// contract_claim per story_cc55e093.
+	agents map[string]string
+	t      *testing.T
+	now    time.Time
+}
+
+// agentFor returns the lifecycle agent id for the CI at ciIdx.
+func (f *reviewerFixture) agentFor(ciIdx int) string {
+	f.t.Helper()
+	id, ok := f.agents[f.cis[ciIdx].ContractName]
+	if !ok {
+		f.t.Fatalf("agentFor: no lifecycle agent seeded for phase %q", f.cis[ciIdx].ContractName)
+	}
+	return id
 }
 
 func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub *stubReviewer) *reviewerFixture {
@@ -115,6 +129,27 @@ func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub
 		cis = append(cis, ci)
 	}
 
+	// Seed lifecycle agents (story_cc55e093 strict-required).
+	agents := map[string]string{}
+	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+		agentStructured, _ := document.MarshalAgentSettings(document.AgentSettings{
+			PermissionPatterns: []string{"Read:**"},
+		})
+		d, err := docStore.Create(ctx, document.Document{
+			WorkspaceID: ws.ID,
+			Type:        document.TypeAgent,
+			Scope:       document.ScopeSystem,
+			Status:      document.StatusActive,
+			Name:        name + "_agent",
+			Body:        "lifecycle agent for " + name,
+			Structured:  agentStructured,
+		}, now)
+		if err != nil {
+			t.Fatalf("seed %s_agent: %v", name, err)
+		}
+		agents[name] = d.ID
+	}
+
 	var rev reviewer.Reviewer = stub
 	if stub == nil {
 		rev = reviewer.AcceptAll{}
@@ -145,6 +180,8 @@ func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub
 		projectID: proj.ID,
 		sessionID: sessionID,
 		cis:       cis,
+		agents:    agents,
+		t:         t,
 		now:       now,
 	}
 }
@@ -154,11 +191,13 @@ func (f *reviewerFixture) callerCtx() context.Context {
 }
 
 // claim drives a CI into claimed state via the MCP handler.
+// story_cc55e093: passes the lifecycle agent matching the CI's phase.
 func (f *reviewerFixture) claim(t *testing.T, idx int) {
 	t.Helper()
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[idx].ID,
 		"session_id":           f.sessionID,
+		"agent_id":             f.agentFor(idx),
 	}))
 	if err != nil || res.IsError {
 		t.Fatalf("claim[%d]: err=%v text=%s", idx, err, firstText(res))

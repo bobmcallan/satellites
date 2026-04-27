@@ -153,11 +153,17 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	}
 	require.Len(t, ciIDs, 4)
 
+	// Look up the lifecycle agents seeded by seedLifecycleAgents (the
+	// boot-time seed in cmd/satellites/main.go). story_cc55e093 made
+	// agent_id REQUIRED on contract_claim.
+	preplanAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "preplan_agent")
+	planAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "plan_agent")
+
 	// Step 2: session A claims the preplan CI — succeeds under grant A.
 	claim1 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[0],
 		"session_id":           sessionA,
-		"permissions_claim":    []any{"Read:**"},
+		"agent_id":             preplanAgent,
 	})
 	assert.Equal(t, "claimed", claim1["status"])
 
@@ -184,6 +190,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	rejectResp := callToolRaw(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[1],
 		"session_id":           sessionA,
+		"agent_id":             planAgent,
 	})
 	require.True(t, isToolError(rejectResp), "claim should fail after grant release")
 	rejectText := extractToolText(t, rejectResp)
@@ -204,7 +211,29 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	claim2 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[1],
 		"session_id":           sessionA,
-		"permissions_claim":    []any{"Read:**"},
+		"agent_id":             planAgent,
 	})
 	assert.Equal(t, "claimed", claim2["status"])
+}
+
+// lookupSystemAgentID resolves a system-scope type=agent document by
+// name via the document_list MCP verb. Used by tests that need to pass
+// agent_id to contract_claim (story_cc55e093).
+func lookupSystemAgentID(t *testing.T, ctx context.Context, mcpURL, apiKey, name string) string {
+	t.Helper()
+	res := callTool(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
+		"type":  "agent",
+		"scope": "system",
+	})
+	docs, _ := res["documents"].([]any)
+	for _, raw := range docs {
+		m, _ := raw.(map[string]any)
+		if n, _ := m["name"].(string); n == name {
+			id, _ := m["id"].(string)
+			require.NotEmpty(t, id, "agent %q has empty id", name)
+			return id
+		}
+	}
+	t.Fatalf("system-scope agent %q not found in document_list", name)
+	return ""
 }

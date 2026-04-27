@@ -44,17 +44,29 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	permissionsClaim := req.GetStringSlice("permissions_claim", nil)
 	skillsUsed := req.GetStringSlice("skills_used", nil)
 	planMarkdown := req.GetString("plan_markdown", "")
-	// story_b39b393f: when the orchestrator supplies an agent_id, the
-	// CI is allocated to that type=agent document and the action_claim
-	// row's permission_patterns are sourced from the agent's
-	// Structured payload — caller-submitted permissions_claim is
-	// ignored. This is the additive substrate slice; the strict
-	// agent_id-required + permissions_claim-rejection switchover is a
-	// sequenced follow-up after orchestrator agent-allocation lands.
+	// story_cc55e093: agent_id is REQUIRED and the permissions_claim
+	// arg is REJECTED. The orchestrator allocates a type=agent document
+	// to each CI before claim; the action_claim row's
+	// permission_patterns are sourced exclusively from the agent doc.
+	// Callers passing the legacy permissions_claim arg get a structured
+	// rejection so the deprecation is visible at the boundary.
 	agentID := req.GetString("agent_id", "")
+	if agentID == "" {
+		body, _ := json.Marshal(map[string]any{
+			"error":   "agent_required",
+			"message": "contract_claim requires agent_id; allocate a type=agent document to the CI before claiming",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+	if legacy := req.GetStringSlice("permissions_claim", nil); len(legacy) > 0 {
+		body, _ := json.Marshal(map[string]any{
+			"error":   "permissions_claim_retired",
+			"message": "permissions_claim is no longer accepted; allocate a type=agent doc and pass agent_id (story_cc55e093)",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
@@ -63,34 +75,37 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
 
-	// Resolve agent-doc-sourced permission patterns when an agent_id
-	// is supplied. Falls back to the caller-submitted permissions_claim
-	// when agent_id is empty (legacy path).
-	var agentSourced bool
-	if agentID != "" && s.docs != nil {
-		agentDoc, derr := s.docs.GetByID(ctx, agentID, memberships)
-		if derr != nil {
-			body, _ := json.Marshal(map[string]any{
-				"error":    "agent_not_found",
-				"agent_id": agentID,
-			})
-			return mcpgo.NewToolResultError(string(body)), nil
-		}
-		if agentDoc.Type != document.TypeAgent {
-			body, _ := json.Marshal(map[string]any{
-				"error":    "agent_id_wrong_type",
-				"agent_id": agentID,
-				"type":     agentDoc.Type,
-			})
-			return mcpgo.NewToolResultError(string(body)), nil
-		}
-		settings, serr := document.UnmarshalAgentSettings(agentDoc.Structured)
-		if serr != nil {
-			return mcpgo.NewToolResultError(serr.Error()), nil
-		}
-		permissionsClaim = settings.PermissionPatterns
-		agentSourced = true
+	// Resolve permission_patterns from the allocated agent doc. The
+	// docs store is required for the strict path — return a structured
+	// error rather than silently degrading.
+	if s.docs == nil {
+		body, _ := json.Marshal(map[string]any{
+			"error":   "doc_store_unavailable",
+			"message": "contract_claim requires the document store to resolve agent_id",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
 	}
+	agentDoc, derr := s.docs.GetByID(ctx, agentID, memberships)
+	if derr != nil {
+		body, _ := json.Marshal(map[string]any{
+			"error":    "agent_not_found",
+			"agent_id": agentID,
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+	if agentDoc.Type != document.TypeAgent {
+		body, _ := json.Marshal(map[string]any{
+			"error":    "agent_id_wrong_type",
+			"agent_id": agentID,
+			"type":     agentDoc.Type,
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+	settings, serr := document.UnmarshalAgentSettings(agentDoc.Structured)
+	if serr != nil {
+		return mcpgo.NewToolResultError(serr.Error()), nil
+	}
+	permissionsClaim := settings.PermissionPatterns
 
 	// Session registry: must be registered + not stale. Gate runs
 	// before grant resolution so a stale/missing session short-circuits
@@ -152,15 +167,12 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	now := s.nowUTC()
-	acPayload := map[string]any{
+	acStructured, _ := json.Marshal(map[string]any{
 		"permissions_claim": permissionsClaim,
 		"skills_used":       skillsUsed,
-	}
-	if agentSourced {
-		acPayload["agent_id"] = agentID
-		acPayload["source"] = "agent_document"
-	}
-	acStructured, _ := json.Marshal(acPayload)
+		"agent_id":          agentID,
+		"source":            "agent_document",
+	})
 	acRow, err := s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: ci.WorkspaceID,
 		ProjectID:   ci.ProjectID,
