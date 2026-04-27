@@ -4,6 +4,9 @@
 # Local .env (use .env.example as the committed template)
 .env
 
+# Local TOML config (use satellites.example.toml as the committed template)
+satellites.toml
+
 # Go build output
 /satellites
 /satellites-agent

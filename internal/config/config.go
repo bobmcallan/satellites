@@ -1,11 +1,18 @@
-// Package config exposes the env-backed runtime configuration for satellites-v4
-// binaries. Load() reads the environment, falls back to defaults, validates
-// required fields for the selected environment, and returns a typed Config.
+// Package config exposes the runtime configuration for satellites-v4
+// binaries. Load() resolves config from three layered sources — code
+// defaults, an optional TOML file, and process env vars — validates the
+// resulting Config for the selected environment, and returns it.
 //
-// Env var precedence is flat — there is no TOML file in v4. Every exported
-// field on Config has a default assigned in Load() (so the binary boots in dev
-// with zero env vars set) or an explicit prod-required validation in
-// validate(). The single source of truth for the env-var → field mapping is
+// Resolution order (highest to lowest precedence):
+//
+//  1. Process env var.
+//  2. TOML file (path resolved via SATELLITES_CONFIG, else ./satellites.toml).
+//  3. Code default (set in defaults()).
+//
+// Every exported field on Config has a default assigned in defaults() (so
+// the binary boots in dev with zero env vars and no TOML file) or an
+// explicit prod-required validation in validate(). The single source of
+// truth for the (field, env override, default, prod-required) mapping is
 // the slice returned by Describe().
 package config
 
@@ -15,95 +22,99 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 // Config is the validated runtime configuration for a satellites binary.
 //
-// Every exported field maps to exactly one env var and has either a sensible
-// default (set in Load) or a prod-required validation (in validate). Run
-// Describe() for the canonical (field, env, default, prod_required) table.
+// Every exported field maps to one TOML key (via the `toml` struct tag)
+// and one env var override. Run Describe() for the canonical (field, env,
+// default, prod_required) table.
 type Config struct {
-	// Port is the HTTP listen port. Default 8080. Env: PORT or SATELLITES_PORT.
-	Port int
+	// Port is the HTTP listen port. Default 8080.
+	// Env override: PORT (also SATELLITES_PORT).
+	Port int `toml:"port"`
 
 	// Env is the deployment environment. Canonical values: "dev" or "prod".
-	// Env: ENV. Default "dev".
-	Env string
+	// Env override: ENV. Default "dev".
+	Env string `toml:"env"`
 
 	// LogLevel is the arbor log level ("trace", "debug", "info", "warn",
-	// "error"). Env: LOG_LEVEL. Default "info".
-	LogLevel string
+	// "error"). Env override: LOG_LEVEL. Default "info".
+	LogLevel string `toml:"log_level"`
 
 	// DevMode relaxes production-only gates (required secrets, strict CORS)
 	// and turns on the dev-mode quick-signin and DEV portal affordances.
-	// Defaults true when Env=="dev". Env: DEV_MODE.
-	DevMode bool
+	// Defaults true when Env=="dev". Env override: DEV_MODE.
+	DevMode bool `toml:"dev_mode"`
 
 	// DBDSN is the SurrealDB connection string. Required when Env=="prod"; in
 	// dev an empty value boots the server without DB-backed verbs.
-	// Env: DB_DSN.
-	DBDSN string
+	// Env override: DB_DSN.
+	DBDSN string `toml:"db_dsn"`
 
 	// FlyMachineID is injected by Fly.io at container start. Empty off-Fly.
-	// Env: FLY_MACHINE_ID.
-	FlyMachineID string
+	// Env override: FLY_MACHINE_ID.
+	FlyMachineID string `toml:"fly_machine_id"`
 
 	// DevUsername is the fixed credential allowed when DevMode is active. In
 	// dev defaults to "dev@satellites.local" so the dev-mode quick-signin
-	// works without any env vars. Empty in prod. Env: DEV_USERNAME.
-	DevUsername string
+	// works without any env vars. Empty in prod. Env override: DEV_USERNAME.
+	DevUsername string `toml:"dev_username"`
 
 	// DevPassword is the fixed DevMode password. In dev defaults to "dev123".
-	// Never logged. Empty in prod. Env: DEV_PASSWORD.
-	DevPassword string
+	// Never logged. Empty in prod. Env override: DEV_PASSWORD.
+	DevPassword string `toml:"dev_password"`
 
-	// GoogleClientID is the OAuth 2.0 client id. Env: GOOGLE_CLIENT_ID. Empty
-	// disables the provider. Must be paired with GoogleClientSecret — half a
-	// credential is rejected by validate().
-	GoogleClientID string
+	// GoogleClientID is the OAuth 2.0 client id. Env override: GOOGLE_CLIENT_ID.
+	// Empty disables the provider. Must be paired with GoogleClientSecret —
+	// half a credential is rejected by validate().
+	GoogleClientID string `toml:"google_client_id"`
 
 	// GoogleClientSecret is the OAuth 2.0 client secret. Never logged.
-	// Env: GOOGLE_CLIENT_SECRET.
-	GoogleClientSecret string
+	// Env override: GOOGLE_CLIENT_SECRET.
+	GoogleClientSecret string `toml:"google_client_secret"`
 
 	// GithubClientID is the OAuth 2.0 client id for the GitHub provider.
-	// Env: GITHUB_CLIENT_ID. Empty disables the provider; must be paired with
-	// GithubClientSecret.
-	GithubClientID string
+	// Env override: GITHUB_CLIENT_ID. Empty disables the provider; must be
+	// paired with GithubClientSecret.
+	GithubClientID string `toml:"github_client_id"`
 
 	// GithubClientSecret is the GitHub OAuth client secret. Never logged.
-	// Env: GITHUB_CLIENT_SECRET.
-	GithubClientSecret string
+	// Env override: GITHUB_CLIENT_SECRET.
+	GithubClientSecret string `toml:"github_client_secret"`
 
 	// OAuthRedirectBaseURL is the absolute base URL the auth handlers append
 	// the per-provider callback path to. In dev defaults to
 	// "http://localhost:<Port>" so OAuth works on `go run` with zero env
 	// vars. Required (non-empty) in prod when any provider is configured.
-	// Env: OAUTH_REDIRECT_BASE_URL.
-	OAuthRedirectBaseURL string
+	// Env override: OAUTH_REDIRECT_BASE_URL.
+	OAuthRedirectBaseURL string `toml:"oauth_redirect_base_url"`
 
 	// OAuthTokenCacheTTL is how long the MCP-side OAuth token validator
-	// caches a successful provider lookup. Default 5m. Range 1s..1h. Env:
-	// OAUTH_TOKEN_CACHE_TTL (Go duration: "5m", "30s", "1h").
-	OAuthTokenCacheTTL time.Duration
+	// caches a successful provider lookup. Default 5m. Range 1s..1h.
+	// Env override: OAUTH_TOKEN_CACHE_TTL (Go duration: "5m", "30s", "1h").
+	OAuthTokenCacheTTL time.Duration `toml:"oauth_token_cache_ttl"`
 
 	// APIKeys are Bearer tokens accepted on /mcp when a session cookie is
-	// absent. Typical use: CI agents + the local Claude harness. Loaded from
-	// SATELLITES_API_KEYS (comma-separated). Empty disables Bearer-API-key
-	// auth.
-	APIKeys []string
+	// absent. Typical use: CI agents + the local Claude harness. In TOML use
+	// a native array (api_keys = ["k1","k2"]); in env use the comma-separated
+	// form. Empty disables Bearer-API-key auth.
+	// Env override: SATELLITES_API_KEYS (comma-separated).
+	APIKeys []string `toml:"api_keys"`
 
 	// DocsDir is the container-side path containing the mounted docs
 	// volume that document_ingest_file reads from. Defaults to /app/docs.
-	// Env: DOCS_DIR.
-	DocsDir string
+	// Env override: DOCS_DIR.
+	DocsDir string `toml:"docs_dir"`
 
 	// GrantsEnforced toggles the mcpserver grant middleware's enforcement
 	// mode. When false (the current default), the middleware is a
 	// pass-through. When true, MCP verbs outside the bootstrap allowlist
 	// are rejected unless the caller holds a role-grant whose effective
-	// verb allowlist covers the tool. Env: SATELLITES_GRANTS_ENFORCED.
-	GrantsEnforced bool
+	// verb allowlist covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
+	GrantsEnforced bool `toml:"grants_enforced"`
 }
 
 // FieldDoc is one entry in the Describe() table — the single source of truth
@@ -111,7 +122,8 @@ type Config struct {
 type FieldDoc struct {
 	// Field is the exported Go field name on Config.
 	Field string
-	// Env is the env var name read by Load().
+	// Env is the env var name read by Load() as an override on top of TOML
+	// values and code defaults.
 	Env string
 	// Default is a human-readable rendering of the dev-mode default.
 	Default string
@@ -139,7 +151,7 @@ var describeTable = []FieldDoc{
 	{Field: "GithubClientSecret", Env: "GITHUB_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for GitHub. Never logged."},
 	{Field: "OAuthRedirectBaseURL", Env: "OAUTH_REDIRECT_BASE_URL", Default: "http://localhost:<Port> (dev) / (empty) (prod)", Description: "Base URL for OAuth callback redirects. Required in prod when any provider is configured."},
 	{Field: "OAuthTokenCacheTTL", Env: "OAUTH_TOKEN_CACHE_TTL", Default: "5m", Description: "How long the MCP-side OAuth token validator caches a successful provider lookup."},
-	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", Description: "Comma-separated Bearer tokens accepted on /mcp when a session cookie is absent."},
+	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", Description: "Bearer tokens accepted on /mcp. TOML: native array. Env: comma-separated."},
 	{Field: "DocsDir", Env: "DOCS_DIR", Default: "/app/docs", Description: "Container-side docs volume path read by document_ingest_file."},
 	{Field: "GrantsEnforced", Env: "SATELLITES_GRANTS_ENFORCED", Default: "false", Description: "When true, MCP verbs outside the bootstrap allowlist require a covering role-grant."},
 }
@@ -158,11 +170,197 @@ var validLogLevels = map[string]struct{}{
 	"trace": {}, "debug": {}, "info": {}, "warn": {}, "error": {},
 }
 
-// Load reads the environment and returns a validated Config. Missing required
-// fields (e.g. DB_DSN in prod) return a structured error; callers should log
-// via arbor and exit non-zero.
+// configPathEnv names the env var operators set to point at an explicit
+// TOML file. When set and unreadable, Load() fails — explicit asks must
+// resolve. Unset falls back to ./satellites.toml (silent if absent).
+const configPathEnv = "SATELLITES_CONFIG"
+
+// defaultConfigFile is the file the loader checks when SATELLITES_CONFIG
+// is unset. Absence is silent — operators can run on env+defaults alone.
+const defaultConfigFile = "satellites.toml"
+
+// Load resolves Config from defaults → TOML → env, validates, and returns.
+// Missing required fields (e.g. DB_DSN in prod) return a structured error;
+// callers should log via arbor and exit non-zero.
 func Load() (*Config, error) {
-	cfg := &Config{
+	cfg := defaults()
+
+	overlay, err := readTOMLOverlay()
+	if err != nil {
+		return nil, err
+	}
+	envSetDevMode := overlay.applyTo(cfg)
+
+	// Env / DevMode resolution must settle before the dev-mode default
+	// block so the right shape applies.
+	if v := os.Getenv("ENV"); v != "" {
+		cfg.Env = normaliseEnv(v)
+	}
+	if v := os.Getenv("DEV_MODE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DEV_MODE %q: %w", v, err)
+		}
+		cfg.DevMode = b
+		envSetDevMode = true
+	}
+	if !envSetDevMode {
+		cfg.DevMode = cfg.Env == "dev"
+	}
+
+	// Dev-mode-only quick-signin defaults: only apply when DevMode is
+	// active AND neither TOML nor env supplied a value. Production sets
+	// neither default to keep secrets out of binaries.
+	if cfg.DevMode {
+		if cfg.DevUsername == "" {
+			cfg.DevUsername = "dev@satellites.local"
+		}
+		if cfg.DevPassword == "" {
+			cfg.DevPassword = "dev123"
+		}
+		if cfg.OAuthRedirectBaseURL == "" {
+			cfg.OAuthRedirectBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
+		}
+	}
+
+	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// duration wraps time.Duration with a TextUnmarshaler so go-toml/v2 can
+// decode Go-duration strings ("5m", "30s", "1h") into the OAuth TTL field.
+type duration time.Duration
+
+// UnmarshalText parses a Go duration string into the wrapper.
+func (d *duration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	*d = duration(parsed)
+	return nil
+}
+
+// tomlOverlay is the TOML-decoding shadow of Config. Pointer fields let
+// the loader distinguish "TOML set this" (non-nil) from "TOML didn't
+// mention it" (nil), so the overlay can override defaults selectively
+// without overwriting unrelated fields. Duration is wrapped to satisfy
+// go-toml/v2, which lacks built-in time.Duration support.
+type tomlOverlay struct {
+	Port                 *int      `toml:"port"`
+	Env                  *string   `toml:"env"`
+	LogLevel             *string   `toml:"log_level"`
+	DevMode              *bool     `toml:"dev_mode"`
+	DBDSN                *string   `toml:"db_dsn"`
+	FlyMachineID         *string   `toml:"fly_machine_id"`
+	DevUsername          *string   `toml:"dev_username"`
+	DevPassword          *string   `toml:"dev_password"`
+	GoogleClientID       *string   `toml:"google_client_id"`
+	GoogleClientSecret   *string   `toml:"google_client_secret"`
+	GithubClientID       *string   `toml:"github_client_id"`
+	GithubClientSecret   *string   `toml:"github_client_secret"`
+	OAuthRedirectBaseURL *string   `toml:"oauth_redirect_base_url"`
+	OAuthTokenCacheTTL   *duration `toml:"oauth_token_cache_ttl"`
+	APIKeys              []string  `toml:"api_keys"`
+	DocsDir              *string   `toml:"docs_dir"`
+	GrantsEnforced       *bool     `toml:"grants_enforced"`
+}
+
+// applyTo copies overlay values into cfg for every non-nil field. Returns
+// true when the overlay supplied a DevMode value so the caller can skip
+// the env-derived default.
+func (o tomlOverlay) applyTo(cfg *Config) bool {
+	if o.Port != nil {
+		cfg.Port = *o.Port
+	}
+	if o.Env != nil {
+		cfg.Env = normaliseEnv(*o.Env)
+	}
+	if o.LogLevel != nil {
+		cfg.LogLevel = strings.ToLower(*o.LogLevel)
+	}
+	devModeSet := false
+	if o.DevMode != nil {
+		cfg.DevMode = *o.DevMode
+		devModeSet = true
+	}
+	if o.DBDSN != nil {
+		cfg.DBDSN = *o.DBDSN
+	}
+	if o.FlyMachineID != nil {
+		cfg.FlyMachineID = *o.FlyMachineID
+	}
+	if o.DevUsername != nil {
+		cfg.DevUsername = *o.DevUsername
+	}
+	if o.DevPassword != nil {
+		cfg.DevPassword = *o.DevPassword
+	}
+	if o.GoogleClientID != nil {
+		cfg.GoogleClientID = *o.GoogleClientID
+	}
+	if o.GoogleClientSecret != nil {
+		cfg.GoogleClientSecret = *o.GoogleClientSecret
+	}
+	if o.GithubClientID != nil {
+		cfg.GithubClientID = *o.GithubClientID
+	}
+	if o.GithubClientSecret != nil {
+		cfg.GithubClientSecret = *o.GithubClientSecret
+	}
+	if o.OAuthRedirectBaseURL != nil {
+		cfg.OAuthRedirectBaseURL = *o.OAuthRedirectBaseURL
+	}
+	if o.OAuthTokenCacheTTL != nil {
+		cfg.OAuthTokenCacheTTL = time.Duration(*o.OAuthTokenCacheTTL)
+	}
+	if o.APIKeys != nil {
+		cfg.APIKeys = append([]string(nil), o.APIKeys...)
+	}
+	if o.DocsDir != nil {
+		cfg.DocsDir = *o.DocsDir
+	}
+	if o.GrantsEnforced != nil {
+		cfg.GrantsEnforced = *o.GrantsEnforced
+	}
+	return devModeSet
+}
+
+// readTOMLOverlay resolves the TOML path, parses the file if present, and
+// returns the overlay. An empty overlay (zero pointers) means no file was
+// loaded.
+func readTOMLOverlay() (tomlOverlay, error) {
+	var overlay tomlOverlay
+	path, explicit, err := resolveConfigPath()
+	if err != nil {
+		return overlay, err
+	}
+	if path == "" {
+		return overlay, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if !explicit && os.IsNotExist(err) {
+			return overlay, nil
+		}
+		return overlay, fmt.Errorf("read config %s: %w", path, err)
+	}
+	if err := toml.Unmarshal(raw, &overlay); err != nil {
+		return overlay, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	return overlay, nil
+}
+
+// defaults builds the in-code default Config. This is the lowest-precedence
+// layer; TOML and env vars override it.
+func defaults() *Config {
+	return &Config{
 		Port:               8080,
 		Env:                "dev",
 		LogLevel:           "info",
@@ -172,39 +370,36 @@ func Load() (*Config, error) {
 		DocsDir:            "/app/docs",
 		OAuthTokenCacheTTL: 5 * time.Minute,
 	}
+}
 
+// resolveConfigPath returns (path, explicit, err). When SATELLITES_CONFIG
+// is set, the path is explicit and a missing file is an error. Otherwise
+// the loader looks for ./satellites.toml; an absent default file returns
+// path="" with no error.
+func resolveConfigPath() (string, bool, error) {
+	if p := strings.TrimSpace(os.Getenv(configPathEnv)); p != "" {
+		return p, true, nil
+	}
+	if _, err := os.Stat(defaultConfigFile); err == nil {
+		return defaultConfigFile, false, nil
+	}
+	return "", false, nil
+}
+
+// applyEnvOverrides mutates cfg in place with values from the process env.
+// Each override is gated on a non-empty env var; empty (or unset) leaves
+// the prior value intact.
+func applyEnvOverrides(cfg *Config) error {
 	if v := firstNonEmpty(os.Getenv("PORT"), os.Getenv("SATELLITES_PORT")); v != "" {
 		p, err := strconv.Atoi(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid PORT %q: %w", v, err)
+			return fmt.Errorf("invalid PORT %q: %w", v, err)
 		}
 		cfg.Port = p
-	}
-	if v := os.Getenv("ENV"); v != "" {
-		cfg.Env = normaliseEnv(v)
 	}
 	if v := os.Getenv("LOG_LEVEL"); v != "" {
 		cfg.LogLevel = strings.ToLower(v)
 	}
-	if v := os.Getenv("DEV_MODE"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid DEV_MODE %q: %w", v, err)
-		}
-		cfg.DevMode = b
-	} else {
-		cfg.DevMode = cfg.Env == "dev"
-	}
-
-	// Dev-mode-only quick-signin defaults: only apply when DevMode is
-	// active AND the env vars are absent. Production sets neither default
-	// to keep secrets out of binaries.
-	if cfg.DevMode {
-		cfg.DevUsername = "dev@satellites.local"
-		cfg.DevPassword = "dev123"
-		cfg.OAuthRedirectBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
-	}
-
 	if v := os.Getenv("DB_DSN"); v != "" {
 		cfg.DBDSN = v
 	}
@@ -235,16 +430,18 @@ func Load() (*Config, error) {
 	if v := os.Getenv("OAUTH_TOKEN_CACHE_TTL"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid OAUTH_TOKEN_CACHE_TTL %q: %w", v, err)
+			return fmt.Errorf("invalid OAUTH_TOKEN_CACHE_TTL %q: %w", v, err)
 		}
 		cfg.OAuthTokenCacheTTL = d
 	}
 	if v := os.Getenv("SATELLITES_API_KEYS"); v != "" {
+		var keys []string
 		for _, part := range strings.Split(v, ",") {
 			if k := strings.TrimSpace(part); k != "" {
-				cfg.APIKeys = append(cfg.APIKeys, k)
+				keys = append(keys, k)
 			}
 		}
+		cfg.APIKeys = keys
 	}
 	if v := os.Getenv("DOCS_DIR"); v != "" {
 		cfg.DocsDir = v
@@ -252,15 +449,11 @@ func Load() (*Config, error) {
 	if v := os.Getenv("SATELLITES_GRANTS_ENFORCED"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid SATELLITES_GRANTS_ENFORCED %q: %w", v, err)
+			return fmt.Errorf("invalid SATELLITES_GRANTS_ENFORCED %q: %w", v, err)
 		}
 		cfg.GrantsEnforced = b
 	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+	return nil
 }
 
 func (c *Config) validate() error {

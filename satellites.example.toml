@@ -1,0 +1,78 @@
+# satellites.toml — copy to ./satellites.toml (gitignored) and customise.
+#
+# Resolution order (highest precedence first):
+#   1. Process env var
+#   2. This TOML file
+#   3. In-code default (internal/config/config.go::defaults)
+#
+# Every key here is the in-code default. Uncomment and edit to override.
+# An explicit SATELLITES_CONFIG=/path/to/file env var overrides the
+# default ./satellites.toml lookup; missing-explicit-file is an error.
+
+# HTTP listen port (1..65535). Env override: PORT (or SATELLITES_PORT).
+# port = 8080
+
+# Deployment environment: "dev" or "prod". Env override: ENV.
+# env = "dev"
+
+# Arbor log level: trace, debug, info, warn, error. Env override: LOG_LEVEL.
+# log_level = "info"
+
+# Enables dev-mode quick-signin and DEV portal affordances.
+# Defaults to true when env="dev", false when env="prod".
+# Env override: DEV_MODE.
+# dev_mode = true
+
+# SurrealDB connection string. Required when env="prod"; in dev an empty
+# value boots the server without DB-backed verbs. Env override: DB_DSN.
+# db_dsn = ""
+
+# Fly.io machine identifier. Injected by Fly at container start; empty
+# off-Fly. Env override: FLY_MACHINE_ID.
+# fly_machine_id = ""
+
+# Fixed credential username for DevMode signin. Defaults to
+# "dev@satellites.local" in dev, empty in prod. Env override: DEV_USERNAME.
+# dev_username = "dev@satellites.local"
+
+# Fixed credential password for DevMode signin. Never logged. Defaults to
+# "dev123" in dev, empty in prod. Env override: DEV_PASSWORD.
+# dev_password = "dev123"
+
+# Google OAuth client id. Pair with google_client_secret. Empty disables
+# the provider. Env override: GOOGLE_CLIENT_ID.
+# google_client_id = ""
+
+# Google OAuth client secret. Never logged. Env override: GOOGLE_CLIENT_SECRET.
+# google_client_secret = ""
+
+# GitHub OAuth client id. Pair with github_client_secret. Empty disables
+# the provider. Env override: GITHUB_CLIENT_ID.
+# github_client_id = ""
+
+# GitHub OAuth client secret. Never logged. Env override: GITHUB_CLIENT_SECRET.
+# github_client_secret = ""
+
+# Absolute base URL the auth handlers append the per-provider callback
+# path to. Defaults to http://localhost:<port> in dev, empty in prod.
+# Required (non-empty) in prod when any provider is configured.
+# Env override: OAUTH_REDIRECT_BASE_URL.
+# oauth_redirect_base_url = "http://localhost:8080"
+
+# How long the MCP-side OAuth token validator caches a successful provider
+# lookup. Range 1s..1h. Env override: OAUTH_TOKEN_CACHE_TTL.
+# oauth_token_cache_ttl = "5m"
+
+# Bearer tokens accepted on /mcp when a session cookie is absent. TOML
+# uses a native array; env (SATELLITES_API_KEYS) uses a comma-separated
+# string. Empty disables Bearer-API-key auth.
+# api_keys = ["key-one", "key-two"]
+
+# Container-side path containing the mounted docs volume read by
+# document_ingest_file. Env override: DOCS_DIR.
+# docs_dir = "/app/docs"
+
+# When true, MCP verbs outside the bootstrap allowlist are rejected
+# unless the caller holds a role-grant whose effective verb allowlist
+# covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
+# grants_enforced = false

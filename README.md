@@ -59,7 +59,7 @@ cp .env.example .env       # copy template and edit DEV_USERNAME / DEV_PASSWORD 
 
 `.env.example` enumerates every env var the server reads (server, auth, OAuth, MCP, documents). `.env` is gitignored — treat it as machine-local.
 
-v4 is env-only — there is no `config.toml`. Every variable has an in-code default in `internal/config/config.go::Load` (so the binary boots with no env vars in dev) or an explicit prod-required validation in `validate()` that names the missing var. OAuth providers are gated on `GOOGLE_CLIENT_ID`/`SECRET` and `GITHUB_CLIENT_ID`/`SECRET`; absent vars hide the corresponding landing button.
+Config is layered: TOML is the canonical source, env vars are overrides, and every key has an in-code default. Resolution order (highest first) is **process env var → TOML file → code default**. The loader looks for `./satellites.toml` by default, or an explicit path via `SATELLITES_CONFIG=/path/to/file` (missing-explicit-file is an error). `satellites.example.toml` at the repo root lists every key with its default — copy to `satellites.toml` (gitignored) and customise. Defaults live in `internal/config/config.go::defaults`; prod-required gaps are named by `validate()`. OAuth providers are gated on `google_client_id` / `google_client_secret` (env override: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and the GitHub equivalents; absent values hide the corresponding landing button and surface the no-auth diagnostic banner.
 
 ## Run
 

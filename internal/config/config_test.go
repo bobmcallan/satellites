@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -236,7 +238,194 @@ func clearEnv(t *testing.T) {
 		"GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET",
 		"OAUTH_REDIRECT_BASE_URL", "OAUTH_TOKEN_CACHE_TTL",
 		"SATELLITES_API_KEYS", "DOCS_DIR", "SATELLITES_GRANTS_ENFORCED",
+		"SATELLITES_CONFIG",
 	} {
 		t.Setenv(k, "")
+	}
+}
+
+// chdirTo cd's the test process into dir for the duration of the test so
+// the loader's ./satellites.toml lookup is scoped to a tmpdir, not the
+// repo root.
+func chdirTo(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+// writeTOML drops the body at <dir>/satellites.toml and returns the path.
+func writeTOML(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "satellites.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
+}
+
+// TestLoad_NoTOMLNoEnvBootsDefaults asserts AC3 — with no env vars and no
+// TOML file, Load() returns a fully-populated Config that passes validate().
+func TestLoad_NoTOMLNoEnvBootsDefaults(t *testing.T) {
+	clearEnv(t)
+	chdirTo(t, t.TempDir())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.Port != 8080 {
+		t.Errorf("Port = %d, want 8080", cfg.Port)
+	}
+	if cfg.Env != "dev" {
+		t.Errorf("Env = %q, want dev", cfg.Env)
+	}
+	if !cfg.DevMode {
+		t.Errorf("DevMode = false, want true (no env, no TOML, dev default)")
+	}
+	if cfg.DocsDir != "/app/docs" {
+		t.Errorf("DocsDir = %q, want /app/docs", cfg.DocsDir)
+	}
+	if cfg.OAuthTokenCacheTTL != 5*time.Minute {
+		t.Errorf("OAuthTokenCacheTTL = %s, want 5m", cfg.OAuthTokenCacheTTL)
+	}
+}
+
+// TestLoad_TOML_File asserts AC1 — Load() reads a TOML file when one is
+// present in the cwd and surfaces its values into the returned Config.
+func TestLoad_TOML_File(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	chdirTo(t, dir)
+	writeTOML(t, dir, `
+port = 9091
+log_level = "debug"
+docs_dir = "/var/satellites/docs"
+api_keys = ["alpha", "beta"]
+oauth_token_cache_ttl = "10m"
+grants_enforced = true
+`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.Port != 9091 {
+		t.Errorf("Port = %d, want 9091 (from TOML)", cfg.Port)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want debug (from TOML)", cfg.LogLevel)
+	}
+	if cfg.DocsDir != "/var/satellites/docs" {
+		t.Errorf("DocsDir = %q, want /var/satellites/docs (from TOML)", cfg.DocsDir)
+	}
+	if !cfg.GrantsEnforced {
+		t.Errorf("GrantsEnforced = false, want true (from TOML)")
+	}
+	if cfg.OAuthTokenCacheTTL != 10*time.Minute {
+		t.Errorf("OAuthTokenCacheTTL = %s, want 10m (from TOML)", cfg.OAuthTokenCacheTTL)
+	}
+	if got, want := cfg.APIKeys, []string{"alpha", "beta"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("APIKeys = %v, want %v", got, want)
+	}
+}
+
+// TestLoad_PrecedenceTOMLOverridesDefault asserts AC2 — when TOML sets a
+// field and no env override exists, the TOML value beats the code default.
+func TestLoad_PrecedenceTOMLOverridesDefault(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	chdirTo(t, dir)
+	writeTOML(t, dir, `port = 7000
+docs_dir = "/etc/satellites/docs"
+`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.Port != 7000 {
+		t.Errorf("Port = %d, want 7000 (TOML overrides default 8080)", cfg.Port)
+	}
+	if cfg.DocsDir != "/etc/satellites/docs" {
+		t.Errorf("DocsDir = %q, want /etc/satellites/docs (TOML overrides /app/docs)", cfg.DocsDir)
+	}
+}
+
+// TestLoad_PrecedenceEnvOverridesTOML asserts AC2 — when both env var and
+// TOML set the same field, env wins. Covers one int (PORT), one string
+// (LOG_LEVEL), one bool (SATELLITES_GRANTS_ENFORCED), and one duration
+// (OAUTH_TOKEN_CACHE_TTL).
+func TestLoad_PrecedenceEnvOverridesTOML(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	chdirTo(t, dir)
+	writeTOML(t, dir, `port = 7000
+log_level = "debug"
+grants_enforced = false
+oauth_token_cache_ttl = "10m"
+`)
+	t.Setenv("PORT", "9999")
+	t.Setenv("LOG_LEVEL", "warn")
+	t.Setenv("SATELLITES_GRANTS_ENFORCED", "true")
+	t.Setenv("OAUTH_TOKEN_CACHE_TTL", "30s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("Port = %d, want 9999 (env beats TOML 7000)", cfg.Port)
+	}
+	if cfg.LogLevel != "warn" {
+		t.Errorf("LogLevel = %q, want warn (env beats TOML debug)", cfg.LogLevel)
+	}
+	if !cfg.GrantsEnforced {
+		t.Errorf("GrantsEnforced = false, want true (env beats TOML false)")
+	}
+	if cfg.OAuthTokenCacheTTL != 30*time.Second {
+		t.Errorf("OAuthTokenCacheTTL = %s, want 30s (env beats TOML 10m)", cfg.OAuthTokenCacheTTL)
+	}
+}
+
+// TestLoad_SATELLITES_CONFIG_MissingFile asserts that an explicit
+// SATELLITES_CONFIG path that doesn't exist returns an error — operators
+// who name the file want it loaded; silent fallback would mask typos.
+func TestLoad_SATELLITES_CONFIG_MissingFile(t *testing.T) {
+	clearEnv(t)
+	chdirTo(t, t.TempDir())
+	t.Setenv("SATELLITES_CONFIG", "/nonexistent/satellites.toml")
+
+	if _, err := Load(); err == nil {
+		t.Fatalf("Load() = nil, want error on missing SATELLITES_CONFIG path")
+	}
+}
+
+// TestLoad_SATELLITES_CONFIG_ExplicitPath asserts that an explicit
+// SATELLITES_CONFIG path overrides the default ./satellites.toml lookup.
+func TestLoad_SATELLITES_CONFIG_ExplicitPath(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	chdirTo(t, dir)
+	// Drop a misleading file at the cwd to prove the explicit path wins.
+	writeTOML(t, dir, `port = 1111`)
+	otherDir := t.TempDir()
+	otherPath := filepath.Join(otherDir, "satellites.toml")
+	if err := os.WriteFile(otherPath, []byte(`port = 2222`), 0o600); err != nil {
+		t.Fatalf("write other toml: %v", err)
+	}
+	t.Setenv("SATELLITES_CONFIG", otherPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	if cfg.Port != 2222 {
+		t.Errorf("Port = %d, want 2222 (SATELLITES_CONFIG path), got cwd value instead", cfg.Port)
 	}
 }
