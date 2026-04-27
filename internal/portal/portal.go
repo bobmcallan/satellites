@@ -124,134 +124,6 @@ type WSConfig struct {
 	Debug       bool
 }
 
-// roleChip is the dynamic nav role chip view-model (story_7b77ffb0
-// AC10). Default state is `ORCHESTRATOR` when no CI is claimed by the
-// session; once a CI claim is present, Name flips to the allocated
-// agent's display name (uppercased so it reads as a chip badge).
-type roleChip struct {
-	Name      string
-	AgentID   string
-	AgentHref string
-	Active    bool
-}
-
-// defaultRoleChip is the empty-session render: no CI claim yet.
-func defaultRoleChip() roleChip {
-	return roleChip{Name: "ORCHESTRATOR"}
-}
-
-// resolveRoleChip computes the role chip for the current session.
-// Precedence: (1) the session's most-recent kind:action-claim ledger
-// row (a CI claim) — the chip flips to the allocated agent's name, (2)
-// the most-recent kind:session-default-install ledger row's agent
-// name, (3) the static default `ORCHESTRATOR`. Each lookup is cheap
-// (bounded ledger + document reads) and gracefully degrades to the
-// default on error.
-func (p *Portal) resolveRoleChip(r *http.Request, memberships []string) roleChip {
-	chip := defaultRoleChip()
-	sess, ok := p.currentSession(r)
-	if !ok {
-		return chip
-	}
-	if p.ledger != nil {
-		if name, agentID, ok := p.sessionActionClaimChip(r.Context(), sess.ID, memberships); ok {
-			chip.Name = roleChipLabel(name)
-			chip.AgentID = agentID
-			if agentID != "" {
-				chip.AgentHref = "/documents/" + agentID
-			}
-			chip.Active = true
-			return chip
-		}
-		if name, agentID, ok := p.sessionDefaultRoleChip(r.Context(), sess.ID, memberships); ok {
-			chip.Name = roleChipLabel(name)
-			chip.AgentID = agentID
-			if agentID != "" {
-				chip.AgentHref = "/documents/" + agentID
-			}
-			return chip
-		}
-	}
-	return chip
-}
-
-// sessionActionClaimChip returns the agent name for the session's
-// most-recent kind:action-claim ledger row (story_7b77ffb0 AC10). The
-// row carries the allocated agent_id in its Structured payload (or as
-// a `agent:<id>` tag); the agent's display name is resolved via the
-// document store.
-func (p *Portal) sessionActionClaimChip(ctx context.Context, sessionID string, memberships []string) (string, string, bool) {
-	rows, err := p.ledger.List(ctx, "", ledger.ListOptions{
-		Tags:  []string{"kind:action-claim", "session:" + sessionID},
-		Limit: 1,
-	}, memberships)
-	if err != nil || len(rows) == 0 {
-		return "", "", false
-	}
-	var payload struct {
-		AgentID   string `json:"agent_id"`
-		AgentName string `json:"agent_name"`
-	}
-	if len(rows[0].Structured) > 0 {
-		_ = json.Unmarshal(rows[0].Structured, &payload)
-	}
-	agentID := payload.AgentID
-	if agentID == "" {
-		for _, t := range rows[0].Tags {
-			if strings.HasPrefix(t, "agent:") {
-				agentID = strings.TrimPrefix(t, "agent:")
-				break
-			}
-		}
-	}
-	if agentID == "" {
-		return "", "", false
-	}
-	name := payload.AgentName
-	if name == "" && p.documents != nil {
-		if d, err := p.documents.GetByID(ctx, agentID, memberships); err == nil {
-			name = d.Name
-		}
-	}
-	if name == "" {
-		name = agentID
-	}
-	return name, agentID, true
-}
-
-// sessionDefaultRoleChip returns the agent name for the most-recent
-// kind:session-default-install ledger row tagged to sessionID. Empty
-// ok=false when no row exists in the active staleness window.
-func (p *Portal) sessionDefaultRoleChip(ctx context.Context, sessionID string, memberships []string) (string, string, bool) {
-	rows, err := p.ledger.List(ctx, "", ledger.ListOptions{
-		Tags:  []string{"kind:session-default-install", "session:" + sessionID},
-		Limit: 1,
-	}, memberships)
-	if err != nil || len(rows) == 0 {
-		return "", "", false
-	}
-	var payload struct {
-		AgentID   string `json:"agent_id"`
-		AgentName string `json:"agent_name"`
-	}
-	if len(rows[0].Structured) > 0 {
-		_ = json.Unmarshal(rows[0].Structured, &payload)
-	}
-	if payload.AgentID == "" && payload.AgentName == "" {
-		return "", "", false
-	}
-	name := payload.AgentName
-	if name == "" {
-		name = payload.AgentID
-	}
-	return name, payload.AgentID, true
-}
-
-// roleChipLabel formats a name as an upper-snake chip badge.
-func roleChipLabel(name string) string {
-	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), " ", "_"))
-}
-
 // buildWSConfig resolves the websocket bootstrap payload from the
 // active workspace and the `?debug=true` query param.
 func buildWSConfig(active wsChip, r *http.Request) WSConfig {
@@ -379,7 +251,6 @@ type landingData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type loginData struct {
@@ -397,7 +268,6 @@ type loginData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type projectsListData struct {
@@ -413,7 +283,6 @@ type projectsListData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type projectDetailData struct {
@@ -430,7 +299,6 @@ type projectDetailData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // projectRow is the view-model for a project — formats the timestamps to
@@ -455,7 +323,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 		p.renderLanding(w, r)
 		return
 	}
-	active, chips, memberships := p.activeWorkspace(r, user)
+	active, chips, _ := p.activeWorkspace(r, user)
 	data := landingData{
 		Title:           buildPageTitle(active, "", ""),
 		Version:         config.Version,
@@ -469,7 +337,6 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		p.logger.Error().Str("template", "index.html").Str("error", err.Error()).Msg("template render failed")
@@ -538,7 +405,6 @@ func (p *Portal) handleProjectsList(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if p.projects == nil {
 		data.Disabled = true
@@ -596,7 +462,6 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "project_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "project_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -618,7 +483,6 @@ type projectConfigurationData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleProjectConfiguration renders the per-project Contracts + Skills
@@ -656,7 +520,6 @@ func (p *Portal) handleProjectConfiguration(w http.ResponseWriter, r *http.Reque
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "project_configuration.html", data); err != nil {
 		p.logger.Error().Str("template", "project_configuration.html").Str("error", err.Error()).Msg("template render failed")
@@ -678,7 +541,6 @@ type projectLedgerData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleProjectLedger renders the upgraded ledger inspection view per
@@ -715,7 +577,6 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if p.ledger == nil {
 		data.Disabled = true
@@ -792,7 +653,6 @@ type storiesListData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type storyDetailData struct {
@@ -810,7 +670,6 @@ type storyDetailData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type storyRow struct {
@@ -873,7 +732,6 @@ func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if p.stories == nil {
 		data.Disabled = true
@@ -956,7 +814,6 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "story_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "story_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -1016,7 +873,6 @@ type tasksPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleTasks renders the workspace-scoped task queue per ui-design
@@ -1043,7 +899,6 @@ func (p *Portal) handleTasks(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "tasks.html", data); err != nil {
 		p.logger.Error().Str("template", "tasks.html").Str("error", err.Error()).Msg("template render failed")
@@ -1090,7 +945,6 @@ type documentsListData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type documentDetailData struct {
@@ -1106,7 +960,6 @@ type documentDetailData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleDocumentsList renders the documents browser at /documents per
@@ -1131,7 +984,6 @@ func (p *Portal) handleDocumentsList(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "documents_list.html", data); err != nil {
 		p.logger.Error().Str("template", "documents_list.html").Str("error", err.Error()).Msg("template render failed")
@@ -1189,7 +1041,6 @@ func (p *Portal) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "document_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "document_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -1211,7 +1062,6 @@ type documentVersionDetailData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleDocumentVersionDetail renders a single historical body of a
@@ -1276,7 +1126,6 @@ func (p *Portal) handleDocumentVersionDetail(w http.ResponseWriter, r *http.Requ
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "document_version_detail.html", data); err != nil {
 		p.logger.Error().Str("template", "document_version_detail.html").Str("error", err.Error()).Msg("template render failed")
@@ -1296,7 +1145,6 @@ type repoViewData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleRepoView renders the /repo page per ui-design §2.6
@@ -1329,7 +1177,6 @@ func (p *Portal) handleRepoView(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "repo.html", data); err != nil {
 		p.logger.Error().Str("template", "repo.html").Str("error", err.Error()).Msg("template render failed")
@@ -1487,7 +1334,6 @@ type rolesPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type agentsPageData struct {
@@ -1502,7 +1348,6 @@ type agentsPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 type grantsPageData struct {
@@ -1517,7 +1362,6 @@ type grantsPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleRoles renders the /roles page per ui-design#roles
@@ -1541,7 +1385,6 @@ func (p *Portal) handleRoles(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "roles.html", data); err != nil {
 		p.logger.Error().Str("template", "roles.html").Str("error", err.Error()).Msg("template render failed")
@@ -1569,7 +1412,6 @@ func (p *Portal) handleAgents(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "agents.html", data); err != nil {
 		p.logger.Error().Str("template", "agents.html").Str("error", err.Error()).Msg("template render failed")
@@ -1598,7 +1440,6 @@ func (p *Portal) handleGrants(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "grants.html", data); err != nil {
 		p.logger.Error().Str("template", "grants.html").Str("error", err.Error()).Msg("template render failed")
@@ -1618,7 +1459,6 @@ type configPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-	RoleChip        roleChip
 }
 
 // handleConfigPage renders the top-menu /config page (story_644a2eb1).
@@ -1646,7 +1486,6 @@ func (p *Portal) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
-		RoleChip:        p.resolveRoleChip(r, memberships),
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "configuration.html", data); err != nil {
 		p.logger.Error().Str("template", "configuration.html").Str("error", err.Error()).Msg("template render failed")

@@ -58,13 +58,6 @@
       </div>
     </div>
     {{end}}
-    {{if .User.Email}}
-    {{if .RoleChip.AgentHref}}
-      <a href="{{.RoleChip.AgentHref}}" class="nav-role-chip{{if .RoleChip.Active}} nav-role-chip-active{{end}}" data-testid="nav-role-chip" data-active="{{.RoleChip.Active}}">{{.RoleChip.Name}}</a>
-    {{else}}
-      <span class="nav-role-chip{{if .RoleChip.Active}} nav-role-chip-active{{end}}" data-testid="nav-role-chip" data-active="{{.RoleChip.Active}}">{{.RoleChip.Name}}</span>
-    {{end}}
-    {{end}}
     {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
     <div class="nav-hamburger-wrap" x-data="{open: false}" @keydown.escape.window="open = false">

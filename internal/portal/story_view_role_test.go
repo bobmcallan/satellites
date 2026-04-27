@@ -8,7 +8,6 @@ package portal
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -282,71 +281,6 @@ func TestStoryView_AgentLink(t *testing.T) {
 	}
 	_ = allocated
 	_ = unallocated
-}
-
-// TestRoleChip_DefaultOrchestrator verifies AC10 — when no
-// session-default-install row exists, the chip falls back to
-// `ORCHESTRATOR`.
-func TestRoleChip_DefaultOrchestrator(t *testing.T) {
-	t.Parallel()
-	p, users, sessions, _, _, _ := newTestPortal(t, &config.Config{Env: "dev"})
-	user := auth.User{ID: "u_alice", Email: "alice@local"}
-	users.Add(user)
-	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
-	rec := renderPath(t, p, "/", sess.ID)
-	body := rec.Body.String()
-	if !strings.Contains(body, `data-testid="nav-role-chip"`) {
-		t.Fatalf("nav-role-chip missing; body=%s", body)
-	}
-	if !strings.Contains(body, ">ORCHESTRATOR<") {
-		t.Errorf("default chip must read ORCHESTRATOR; body=%s", body)
-	}
-}
-
-// TestRoleChip_AfterClaim verifies AC10 — when the session has a
-// recent kind:action-claim row tagged session:<id>, the chip flips
-// to the allocated agent's name.
-func TestRoleChip_AfterClaim(t *testing.T) {
-	t.Parallel()
-	p, users, sessions, _, ledgerStore, _ := newTestPortal(t, &config.Config{Env: "dev"})
-	user := auth.User{ID: "u_alice", Email: "alice@local"}
-	users.Add(user)
-	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
-	now := time.Now().UTC()
-
-	docs := p.documents.(*document.MemoryStore)
-	agent := seedAgent(t, docs, "develop_agent", document.AgentSettings{
-		PermissionPatterns: []string{"Edit:**"},
-	}, "", now)
-
-	payload, _ := json.Marshal(map[string]any{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-	})
-	if _, err := ledgerStore.Append(ctx(t), ledger.LedgerEntry{
-		Type:       ledger.TypeActionClaim,
-		Tags:       []string{"kind:action-claim", "session:" + sess.ID},
-		Content:    "claimed",
-		Structured: payload,
-		Durability: ledger.DurabilityPipeline,
-		SourceType: ledger.SourceSystem,
-		Status:     ledger.StatusActive,
-		CreatedBy:  "system",
-	}, now); err != nil {
-		t.Fatalf("seed action-claim row: %v", err)
-	}
-
-	rec := renderPath(t, p, "/", sess.ID)
-	body := rec.Body.String()
-	if !strings.Contains(body, `data-testid="nav-role-chip"`) {
-		t.Fatalf("nav-role-chip missing; body=%s", body)
-	}
-	if !strings.Contains(body, `>DEVELOP_AGENT<`) {
-		t.Errorf("chip must render the allocated agent name; body=%s", body)
-	}
-	if !strings.Contains(body, `data-active="true"`) {
-		t.Errorf("chip must mark itself active when a CI claim exists; body=%s", body)
-	}
 }
 
 // ctx is a tiny context.TODO helper kept local to this file so the

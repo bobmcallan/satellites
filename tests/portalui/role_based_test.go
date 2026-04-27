@@ -4,7 +4,6 @@ package portalui
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
-	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 )
 
@@ -201,77 +199,5 @@ func TestStoryDetail_PlanTreeWithLoop(t *testing.T) {
 	}
 	if !strings.Contains(body, "ci-depth-1") {
 		t.Errorf("child CI must render with ci-depth-1 class")
-	}
-}
-
-// TestNav_RoleChip (story_7b77ffb0 AC13) — confirms the chip default
-// is ORCHESTRATOR and flips to the allocated agent's name when a
-// kind:action-claim row tagged for the session is present.
-func TestNav_RoleChip(t *testing.T) {
-	h := StartHarness(t)
-	parentCtx, cancel := withTimeout(context.Background(), browserDeadline)
-	defer cancel()
-	browserCtx, cancelBrowser := newChromedpContext(t, parentCtx)
-	defer cancelBrowser()
-	if err := installSessionCookie(browserCtx, h); err != nil {
-		t.Fatalf("install cookie: %v", err)
-	}
-
-	// Default state: ORCHESTRATOR.
-	var defaultChip string
-	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(h.BaseURL+"/"),
-		chromedp.WaitVisible(`[data-testid="nav-role-chip"]`, chromedp.ByQuery),
-		chromedp.Text(`[data-testid="nav-role-chip"]`, &defaultChip, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("default chip: %v", err)
-	}
-	if !strings.Contains(strings.ToUpper(defaultChip), "ORCHESTRATOR") {
-		t.Errorf("default chip text = %q, want ORCHESTRATOR", defaultChip)
-	}
-
-	// Seed a type=agent doc + a kind:action-claim ledger row tagged
-	// session:<sid>.
-	now := time.Now().UTC()
-	settings, _ := document.MarshalAgentSettings(document.AgentSettings{
-		PermissionPatterns: []string{"Edit:**"},
-	})
-	agent, err := h.Documents.Create(context.Background(), document.Document{
-		WorkspaceID: h.WorkspaceID,
-		Type:        document.TypeAgent, Scope: document.ScopeSystem, Status: "active",
-		Name: "develop_agent", Body: "develop agent", Structured: settings,
-	}, now)
-	if err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"agent_id":   agent.ID,
-		"agent_name": agent.Name,
-	})
-	if _, err := h.Ledger.Append(context.Background(), ledger.LedgerEntry{
-		WorkspaceID: h.WorkspaceID,
-		Type:        ledger.TypeActionClaim,
-		Tags:        []string{"kind:action-claim", "session:" + h.SessionCookieValue},
-		Content:     "claimed",
-		Structured:  payload,
-		Durability:  ledger.DurabilityPipeline,
-		SourceType:  ledger.SourceSystem,
-		Status:      ledger.StatusActive,
-		CreatedBy:   "system",
-	}, now); err != nil {
-		t.Fatalf("seed action-claim row: %v", err)
-	}
-
-	// After claim: chip flips to DEVELOP_AGENT.
-	var afterChip string
-	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(h.BaseURL+"/"),
-		chromedp.WaitVisible(`[data-testid="nav-role-chip"]`, chromedp.ByQuery),
-		chromedp.Text(`[data-testid="nav-role-chip"]`, &afterChip, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("after claim chip: %v", err)
-	}
-	if !strings.Contains(strings.ToUpper(afterChip), "DEVELOP_AGENT") {
-		t.Errorf("after-claim chip text = %q, want DEVELOP_AGENT", afterChip)
 	}
 }
