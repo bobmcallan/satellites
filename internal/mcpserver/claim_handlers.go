@@ -12,6 +12,7 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/session"
 )
@@ -46,12 +47,49 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	permissionsClaim := req.GetStringSlice("permissions_claim", nil)
 	skillsUsed := req.GetStringSlice("skills_used", nil)
 	planMarkdown := req.GetString("plan_markdown", "")
+	// story_b39b393f: when the orchestrator supplies an agent_id, the
+	// CI is allocated to that type=agent document and the action_claim
+	// row's permission_patterns are sourced from the agent's
+	// Structured payload — caller-submitted permissions_claim is
+	// ignored. This is the additive substrate slice; the strict
+	// agent_id-required + permissions_claim-rejection switchover is a
+	// sequenced follow-up after orchestrator agent-allocation lands.
+	agentID := req.GetString("agent_id", "")
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
 	if err != nil {
 		body, _ := json.Marshal(map[string]any{"error": "ci_not_found", "contract_instance_id": ciID})
 		return mcpgo.NewToolResultError(string(body)), nil
+	}
+
+	// Resolve agent-doc-sourced permission patterns when an agent_id
+	// is supplied. Falls back to the caller-submitted permissions_claim
+	// when agent_id is empty (legacy path).
+	var agentSourced bool
+	if agentID != "" && s.docs != nil {
+		agentDoc, derr := s.docs.GetByID(ctx, agentID, memberships)
+		if derr != nil {
+			body, _ := json.Marshal(map[string]any{
+				"error":    "agent_not_found",
+				"agent_id": agentID,
+			})
+			return mcpgo.NewToolResultError(string(body)), nil
+		}
+		if agentDoc.Type != document.TypeAgent {
+			body, _ := json.Marshal(map[string]any{
+				"error":    "agent_id_wrong_type",
+				"agent_id": agentID,
+				"type":     agentDoc.Type,
+			})
+			return mcpgo.NewToolResultError(string(body)), nil
+		}
+		settings, serr := document.UnmarshalAgentSettings(agentDoc.Structured)
+		if serr != nil {
+			return mcpgo.NewToolResultError(serr.Error()), nil
+		}
+		permissionsClaim = settings.PermissionPatterns
+		agentSourced = true
 	}
 
 	// Session registry: must be registered + not stale. Gate runs
@@ -114,10 +152,15 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	now := s.nowUTC()
-	acStructured, _ := json.Marshal(map[string]any{
+	acPayload := map[string]any{
 		"permissions_claim": permissionsClaim,
 		"skills_used":       skillsUsed,
-	})
+	}
+	if agentSourced {
+		acPayload["agent_id"] = agentID
+		acPayload["source"] = "agent_document"
+	}
+	acStructured, _ := json.Marshal(acPayload)
 	acRow, err := s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: ci.WorkspaceID,
 		ProjectID:   ci.ProjectID,
@@ -153,6 +196,11 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 
 	if !amend {
 		if _, err := s.contracts.Claim(ctx, ci.ID, grantID, now, memberships); err != nil {
+			return mcpgo.NewToolResultError(err.Error()), nil
+		}
+	}
+	if agentID != "" {
+		if _, err := s.contracts.SetAgent(ctx, ci.ID, agentID, now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 	}

@@ -41,8 +41,15 @@ type ContractInstance struct {
 	RequiredForClose   bool      `json:"required_for_close"`
 	ACScope            []int     `json:"ac_scope,omitempty"`
 	ParentInvocationID string    `json:"parent_invocation_id,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	// AgentID names the type=agent document allocated to this CI
+	// (story_b39b393f). When non-empty, the claim handler reads the
+	// agent's permission_patterns and writes them into the
+	// action_claim ledger row instead of trusting the caller-submitted
+	// patterns. Empty in the legacy claim path; populated once the
+	// orchestrator role (story_488b8223) lands.
+	AgentID   string    `json:"agent_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // NewID returns a fresh contract_instance id in the canonical

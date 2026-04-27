@@ -80,6 +80,13 @@ type Store interface {
 	// BackfillWorkspaceID stamps workspace_id on rows matching projectID
 	// whose workspace_id is empty. Idempotent boot-time migration.
 	BackfillWorkspaceID(ctx context.Context, projectID, workspaceID string, now time.Time) (int, error)
+
+	// SetAgent stamps the type=agent document allocated to this CI
+	// (story_b39b393f). Caller-supplied agentID is persisted verbatim;
+	// FK validation against the document store is the caller's
+	// responsibility (the claim handler resolves the agent doc before
+	// this call to read its permission_patterns).
+	SetAgent(ctx context.Context, id, agentID string, now time.Time, memberships []string) (ContractInstance, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -288,6 +295,20 @@ func (m *MemoryStore) UpdateLedgerRefs(ctx context.Context, id string, plan, clo
 	if closeRef != nil {
 		ci.CloseLedgerID = *closeRef
 	}
+	ci.UpdatedAt = now
+	m.rows[id] = ci
+	return ci, nil
+}
+
+// SetAgent implements Store for MemoryStore.
+func (m *MemoryStore) SetAgent(ctx context.Context, id, agentID string, now time.Time, memberships []string) (ContractInstance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ci, ok := m.rows[id]
+	if !ok || !inMemberships(ci.WorkspaceID, memberships) {
+		return ContractInstance{}, ErrNotFound
+	}
+	ci.AgentID = agentID
 	ci.UpdatedAt = now
 	m.rows[id] = ci
 	return ci, nil

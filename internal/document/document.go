@@ -131,6 +131,12 @@ func (d Document) Validate() error {
 	case TypeAgent:
 		// agent documents may optionally pin to a contract via contract_binding
 		// (mirrors reviewer); the field is permitted but not required.
+		// story_b39b393f: Validate the AgentSettings shape so
+		// permission_patterns / skill_refs are typed and unknown
+		// fields surface as errors at write time.
+		if err := validateAgentStructured(d.Structured); err != nil {
+			return err
+		}
 	case TypeConfiguration:
 		// Configurations are project-scoped bundles whose ref payload lives
 		// in Structured. ContractBinding is meaningless (a Configuration

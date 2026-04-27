@@ -433,10 +433,11 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 		if s.sessions != nil {
 			claimTool := mcpgo.NewTool("contract_claim",
-				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true)."),
+				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true). story_b39b393f: when agent_id is supplied, the action_claim row's permission_patterns are sourced from the agent document and the CI is stamped with the agent_id."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Claude Code harness chat UUID — must be registered in the session registry.")),
-				mcpgo.WithArray("permissions_claim", mcpgo.Description("Tool:pattern strings the agent needs during this claim."),
+				mcpgo.WithString("agent_id", mcpgo.Description("Optional document id of an active type=agent the orchestrator allocated to this CI (story_b39b393f). When supplied, the action_claim ledger row's permission_patterns are sourced from the agent doc and the CI's AgentID column is stamped. Caller-submitted permissions_claim is ignored when agent_id is set.")),
+				mcpgo.WithArray("permissions_claim", mcpgo.Description("Tool:pattern strings the agent needs during this claim. Ignored when agent_id is set (the agent doc owns permissions in that path)."),
 					mcpgo.Items(map[string]any{"type": "string"})),
 				mcpgo.WithArray("skills_used", mcpgo.Description("Skill IDs / names the agent is applying (informational)."),
 					mcpgo.Items(map[string]any{"type": "string"})),

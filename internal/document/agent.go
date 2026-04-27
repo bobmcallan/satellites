@@ -1,6 +1,7 @@
 package document
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -58,4 +59,24 @@ func UnmarshalAgentSettings(payload []byte) (AgentSettings, error) {
 		return AgentSettings{}, fmt.Errorf("agent: decode structured payload: %w", err)
 	}
 	return s, nil
+}
+
+// validateAgentStructured enforces the AgentSettings shape on a
+// type=agent document's Structured payload. Empty payload is
+// accepted. Mistyped values for known AgentSettings fields fail —
+// e.g. permission_patterns:"oops" returns an error. Unknown fields
+// pass through to allow legacy orchestrator-agent payloads
+// (provider_chain / tier / permitted_roles / tool_ceiling) to coexist
+// alongside the typed v4 fields without a coordinated migration.
+// Story_b39b393f.
+func validateAgentStructured(payload []byte) error {
+	if len(payload) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	var s AgentSettings
+	if err := dec.Decode(&s); err != nil {
+		return fmt.Errorf("document: type=agent structured payload invalid: %w", err)
+	}
+	return nil
 }
