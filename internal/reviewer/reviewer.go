@@ -34,6 +34,12 @@ const (
 // from the close-time context: contract agent_instruction, reviewer
 // rubric body, the evidence markdown the agent submitted, and the
 // recent ledger rows on the CI (already filtered by memberships).
+//
+// ACScope (story_d5d88a64) is the 1-based subset of the parent story's
+// ACs the closing CI covers. When non-empty the reviewer prompt should
+// limit AC-coverage checks to those indices — a develop CI scoped to
+// AC=[2] doesn't need evidence for AC 1. Empty/nil = full-AC review
+// (backwards-compatible default).
 type Request struct {
 	ContractID       string
 	ContractName     string
@@ -41,7 +47,16 @@ type Request struct {
 	ReviewerRubric   string
 	EvidenceMarkdown string
 	EvidenceRefs     []string
+	ACScope          []int
 	RecentLedger     []LedgerSnippet
+}
+
+// HasScopedACs reports whether the Request narrows the AC-coverage
+// check to a subset. Production reviewer implementations should switch
+// on this — the default AcceptAll already accepts everything so the
+// flag is a no-op there.
+func (r Request) HasScopedACs() bool {
+	return len(r.ACScope) > 0
 }
 
 // LedgerSnippet is a trimmed ledger row for reviewer context. Full

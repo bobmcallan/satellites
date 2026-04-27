@@ -67,3 +67,27 @@ func TestRunChecks_UnknownTypePasses(t *testing.T) {
 		t.Fatalf("expected unknown=passed")
 	}
 }
+
+// TestRequest_HasScopedACs (story_d5d88a64) — the predicate distinguishes
+// full-AC review from a CI scoped to a subset.
+func TestRequest_HasScopedACs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		req  Request
+		want bool
+	}{
+		{"empty scope", Request{}, false},
+		{"nil scope", Request{ACScope: nil}, false},
+		{"single ac", Request{ACScope: []int{2}}, true},
+		{"many acs", Request{ACScope: []int{1, 2, 3}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.req.HasScopedACs(); got != tc.want {
+				t.Errorf("HasScopedACs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

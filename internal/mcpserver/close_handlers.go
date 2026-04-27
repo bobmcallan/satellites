@@ -555,6 +555,7 @@ func (s *Server) runReviewer(
 			ReviewerRubric:   s.lookupReviewerRubric(ctx, ci.ContractID, memberships),
 			EvidenceMarkdown: evidenceMarkdown,
 			EvidenceRefs:     evidenceLedgerIDs,
+			ACScope:          ci.ACScope,
 		}
 		verdict, usage, err := s.reviewer.Review(ctx, req)
 		if err != nil {
