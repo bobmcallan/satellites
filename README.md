@@ -59,6 +59,8 @@ cp .env.example .env       # copy template and edit DEV_USERNAME / DEV_PASSWORD 
 
 `.env.example` enumerates every env var the server reads (server, auth, OAuth, MCP, documents). `.env` is gitignored — treat it as machine-local.
 
+v4 is env-only — there is no `config.toml`. Every variable has an in-code default in `internal/config/config.go::Load` (so the binary boots with no env vars in dev) or an explicit prod-required validation in `validate()` that names the missing var. OAuth providers are gated on `GOOGLE_CLIENT_ID`/`SECRET` and `GITHUB_CLIENT_ID`/`SECRET`; absent vars hide the corresponding landing button.
+
 ## Run
 
 ```
