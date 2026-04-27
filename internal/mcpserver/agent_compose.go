@@ -238,6 +238,73 @@ func (s *Server) handleAgentCompose(ctx context.Context, req mcpgo.CallToolReque
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
+// handleAgentEphemeralSummary returns the per-project count of active
+// ephemeral agents — the substrate hint that satellites_project_status
+// surfaces (story_b19260d8 AC #7). Optional skill_set tag in the
+// response groups agents by their sorted skill_refs slice so callers
+// can spot promotion candidates ("3 agents with skills X+Y → promote
+// to canonical?"). projectID may be empty for an all-projects summary.
+func (s *Server) handleAgentEphemeralSummary(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	projectID := req.GetString("project_id", "")
+	memberships := s.resolveCallerMemberships(ctx, caller)
+
+	rows, err := s.docs.List(ctx, document.ListOptions{Type: document.TypeAgent, Limit: 1000}, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("list agents: %v", err)), nil
+	}
+
+	type group struct {
+		SkillSet []string `json:"skill_set"`
+		Count    int      `json:"count"`
+	}
+	groups := make(map[string]*group)
+	total := 0
+	for _, d := range rows {
+		if d.Status != document.StatusActive {
+			continue
+		}
+		if projectID != "" {
+			if d.ProjectID == nil || *d.ProjectID != projectID {
+				continue
+			}
+		}
+		settings, err := document.UnmarshalAgentSettings(d.Structured)
+		if err != nil || !settings.Ephemeral {
+			continue
+		}
+		total++
+		key := strings.Join(settings.SkillRefs, ",")
+		if g, ok := groups[key]; ok {
+			g.Count++
+		} else {
+			cp := append([]string(nil), settings.SkillRefs...)
+			groups[key] = &group{SkillSet: cp, Count: 1}
+		}
+	}
+
+	bySkillSet := make([]group, 0, len(groups))
+	for _, g := range groups {
+		bySkillSet = append(bySkillSet, *g)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"project_id":                     projectID,
+		"ephemeral_agent_count":          total,
+		"by_skill_set":                   bySkillSet,
+		"promote_to_canonical_threshold": 3,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "agent_ephemeral_summary").
+		Str("project_id", projectID).
+		Int("total", total).
+		Int("groups", len(groups)).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
 // archiveEphemeralAgentsForStory archives ephemeral type=agent documents
 // whose StoryID equals storyID and whose owning story has been in a
 // terminal state for at least the configured retention window. Returns

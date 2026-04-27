@@ -252,6 +252,53 @@ func TestArchiveEphemeralAgentsForStory(t *testing.T) {
 	}
 }
 
+// TestAgentEphemeralSummary verifies AC 7 — the substrate hint surface
+// reports the count of active ephemeral agents and groups them by
+// sorted skill_refs so promotion candidates are visible.
+func TestAgentEphemeralSummary(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	developID := firstContractDocID(t, f, "develop")
+	skillA := seedSkill(t, f, "golang-testing", developID)
+	skillB := seedSkill(t, f, "golang-style", developID)
+
+	// Compose three ephemerals, two with the same skill set + one different.
+	for _, refs := range [][]string{{skillA, skillB}, {skillA, skillB}, {skillA}} {
+		_, err := f.server.handleAgentCompose(f.callerCtx(), newCallToolReq("agent_compose", map[string]any{
+			"name":       "ephemeral_" + refs[0],
+			"ephemeral":  true,
+			"story_id":   f.storyID,
+			"skill_refs": refs,
+		}))
+		if err != nil {
+			t.Fatalf("compose: %v", err)
+		}
+	}
+
+	res, err := f.server.handleAgentEphemeralSummary(f.callerCtx(), newCallToolReq("agent_ephemeral_summary", map[string]any{
+		"project_id": f.projectID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("summary: err=%v isError=%v body=%s", err, res.IsError, firstText(res))
+	}
+	var body struct {
+		EphemeralAgentCount int `json:"ephemeral_agent_count"`
+		BySkillSet          []struct {
+			SkillSet []string `json:"skill_set"`
+			Count    int      `json:"count"`
+		} `json:"by_skill_set"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.EphemeralAgentCount != 3 {
+		t.Errorf("ephemeral_agent_count = %d, want 3", body.EphemeralAgentCount)
+	}
+	if len(body.BySkillSet) != 2 {
+		t.Errorf("by_skill_set groups = %d, want 2", len(body.BySkillSet))
+	}
+}
+
 // TestArchiveEphemeralAgentsForStory_RetainsWithinWindow leaves ephemeral
 // agents alone when the terminal time is recent.
 func TestArchiveEphemeralAgentsForStory_RetainsWithinWindow(t *testing.T) {

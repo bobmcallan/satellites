@@ -411,6 +411,12 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(agentComposeTool, s.handleAgentCompose)
 
+		agentSummaryTool := mcpgo.NewTool("agent_ephemeral_summary",
+			mcpgo.WithDescription("Per-project hint surface (story_b19260d8 AC #7) — returns the count of active ephemeral type=agent documents and groups them by their sorted skill_refs so operators can spot promotion candidates: 'N agents created with skills X+Y → promote to canonical?'. Optional project_id; omit for an all-projects summary."),
+			mcpgo.WithString("project_id", mcpgo.Description("Project to scope the summary to. Omit for all visible projects.")),
+		)
+		s.mcp.AddTool(agentSummaryTool, s.handleAgentEphemeralSummary)
+
 		planAmendTool := mcpgo.NewTool("plan_amend",
 			mcpgo.WithDescription("Append new contract_instances to a story's existing plan tree (story_d5d88a64). Each entry in add_invocations carries an optional ac_scope (1-based AC indices the new CI covers) and an optional parent_invocation_id (the CI whose close triggered this amend). Validates: workflow_spec slot constraints across existing+amended names; per-AC iteration cap (SATELLITES_MAX_AC_ITERATIONS, default 5). On success writes a kind:plan-amend ledger row carrying {reason, added_cis, slot_validation_result}."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id whose plan is being amended.")),
