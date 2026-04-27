@@ -397,6 +397,20 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(workflowClaimTool, s.handleStoryWorkflowClaim)
 
+		agentComposeTool := mcpgo.NewTool("agent_compose",
+			mcpgo.WithDescription("Create a type=agent document carrying explicit skill_refs + permission_patterns. When ephemeral=true the agent is scoped to story_id and the project_status sweeper archives it after SATELLITES_EPHEMERAL_AGENT_RETENTION_HOURS once the story reaches a terminal state. Writes a kind:agent-compose ledger row capturing {agent_id, name, skill_refs, permission_patterns, story_id, ephemeral, reason} in Structured. story_b19260d8."),
+			mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Agent document name. Must be unique within scope.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Project for the agent. Defaults to the owning story's project when story_id is supplied; otherwise scope=system.")),
+			mcpgo.WithArray("skill_refs", mcpgo.Description("Document ids of active type=skill rows the agent pulls."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithArray("permission_patterns", mcpgo.Description("Action_claim patterns this agent grants when allocated to a CI (e.g. Edit:internal/portal/**)."),
+				mcpgo.Items(map[string]any{"type": "string"})),
+			mcpgo.WithBoolean("ephemeral", mcpgo.Description("When true, the agent is story-scoped and the sweeper archives it on story completion. Requires story_id.")),
+			mcpgo.WithString("story_id", mcpgo.Description("Owning story id. Required when ephemeral=true.")),
+			mcpgo.WithString("reason", mcpgo.Description("Orchestrator's rationale; recorded on the kind:agent-compose ledger row + agent body.")),
+		)
+		s.mcp.AddTool(agentComposeTool, s.handleAgentCompose)
+
 		planAmendTool := mcpgo.NewTool("plan_amend",
 			mcpgo.WithDescription("Append new contract_instances to a story's existing plan tree (story_d5d88a64). Each entry in add_invocations carries an optional ac_scope (1-based AC indices the new CI covers) and an optional parent_invocation_id (the CI whose close triggered this amend). Validates: workflow_spec slot constraints across existing+amended names; per-AC iteration cap (SATELLITES_MAX_AC_ITERATIONS, default 5). On success writes a kind:plan-amend ledger row carrying {reason, added_cis, slot_validation_result}."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id whose plan is being amended.")),

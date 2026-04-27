@@ -6,18 +6,35 @@ import (
 )
 
 // AgentSettings is the JSON payload stored in a type=agent document's
-// Structured field when the agent has Configuration-related defaults.
-// The struct is intentionally narrow — additional agent settings join
-// here as the substrate grows. story_fb600b97.
+// Structured field. The struct is intentionally narrow — additional
+// agent settings join here as the substrate grows.
 //
-// DefaultConfigurationID, when non-nil, names a type=configuration
-// document whose ContractRefs override the project default at
-// workflow_claim time when a story has no configuration_id of its own
-// AND the caller supplies the agent_id arg. Resolution precedence:
-// per-call proposed_contracts → story.configuration_id →
+// DefaultConfigurationID (story_fb600b97): when non-nil, names a
+// type=configuration document whose ContractRefs override the project
+// default at workflow_claim time when a story has no configuration_id
+// of its own AND the caller supplies the agent_id arg. Resolution
+// precedence: per-call proposed_contracts → story.configuration_id →
 // agent.default_configuration_id → project default.
+//
+// PermissionPatterns (story_b19260d8): the action_claim patterns this
+// agent grants when allocated to a contract instance — e.g.
+// `["Edit:internal/portal/**", "Bash:go_test"]`. The hook resolves
+// permitted tool calls against this list once the role-based-execution
+// shift lands (story_b39b393f); today the field is informational +
+// foreshadows the migration.
+//
+// SkillRefs (story_b19260d8): the document IDs of type=skill rows the
+// agent should pull when invoked.
+//
+// Ephemeral + StoryID (story_b19260d8): mark an agent as story-scoped.
+// The sweeper archives ephemeral agents whose owning story is done /
+// cancelled past `SATELLITES_EPHEMERAL_AGENT_RETENTION_HOURS`.
 type AgentSettings struct {
-	DefaultConfigurationID *string `json:"default_configuration_id,omitempty"`
+	DefaultConfigurationID *string  `json:"default_configuration_id,omitempty"`
+	PermissionPatterns     []string `json:"permission_patterns,omitempty"`
+	SkillRefs              []string `json:"skill_refs,omitempty"`
+	Ephemeral              bool     `json:"ephemeral,omitempty"`
+	StoryID                *string  `json:"story_id,omitempty"`
 }
 
 // MarshalAgentSettings encodes s as the JSON payload suitable for an

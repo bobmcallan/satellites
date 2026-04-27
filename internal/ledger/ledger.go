@@ -24,7 +24,9 @@ const (
 	TypeCloseRequest  = "close-request"
 	TypeVerdict       = "verdict"
 	TypeWorkflowClaim = "workflow-claim"
-	TypePlanAmend     = "plan-amend" // story_d5d88a64: dynamic plan tree
+	TypePlanAmend     = "plan-amend"    // story_d5d88a64: dynamic plan tree
+	TypeAgentCompose  = "agent-compose" // story_b19260d8: orchestrator-driven agent composition
+	TypeAgentArchive  = "agent-archive" // story_b19260d8: ephemeral agent sweeper
 	TypeKV            = "kv"
 )
 
@@ -55,7 +57,7 @@ const (
 var validTypes = map[string]struct{}{
 	TypePlan: {}, TypeActionClaim: {}, TypeArtifact: {}, TypeEvidence: {},
 	TypeDecision: {}, TypeCloseRequest: {}, TypeVerdict: {}, TypeWorkflowClaim: {},
-	TypePlanAmend: {}, TypeKV: {},
+	TypePlanAmend: {}, TypeAgentCompose: {}, TypeAgentArchive: {}, TypeKV: {},
 }
 
 var validDurabilities = map[string]struct{}{
