@@ -844,6 +844,70 @@ input:disabled, select:disabled, textarea:disabled {
     letter-spacing: 0.1em;
 }
 
+/* story_25695308 — every panel-headed section gains a click-target
+   header that toggles its body. The body uses x-show/Alpine; the
+   .section-collapsed class is also toggled on the section element so
+   the absence of a body-frame doesn't leave a stray bottom border. */
+.panel-header.section-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.panel-header.section-toggle .section-toggle-caret {
+    margin-left: 0.4rem;
+    font-size: 0.7rem;
+}
+
+.section-collapsed > .panel-body {
+    display: none !important;
+}
+
+/* Borderless full-width search row (story_25695308 AC1+AC2). The
+   search input sits on the page with no visible border so it reads as
+   the primary interaction surface. The clear button overlays the
+   right edge of the input. */
+.workspace-search {
+    margin-bottom: 1.5rem;
+}
+
+.workspace-search-form {
+    position: relative;
+    width: 100%;
+}
+
+.workspace-search-input.workspace-search-borderless {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--color-fg);
+    padding: 0.75rem 2.5rem 0.75rem 0;
+    font-family: inherit;
+    font-size: 1rem;
+    outline: none;
+    border-bottom: 1px solid transparent;
+}
+
+.workspace-search-input.workspace-search-borderless:focus {
+    border-bottom-color: var(--color-fg);
+}
+
+.workspace-search-clear {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: 0;
+    color: var(--color-fg);
+    font-size: 1.25rem;
+    line-height: 1;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+}
+
 .panel-content {
     padding: 1rem;
 }

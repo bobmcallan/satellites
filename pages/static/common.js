@@ -26,3 +26,25 @@ function toasts() {
         }
     };
 }
+
+// sectionToggle (story_25695308) — collapsible panel-headed section.
+// `key` is a stable per-page identifier (e.g. "proj-{id}-stories"); the
+// open/closed state is persisted in sessionStorage so navigation within
+// the same browser tab restores the user's choice.
+function sectionToggle(key) {
+    return {
+        open: true,
+        init() {
+            try {
+                const stored = sessionStorage.getItem('section-toggle:' + key);
+                if (stored === 'closed') { this.open = false; }
+            } catch (e) { /* sessionStorage unavailable */ }
+        },
+        toggle() {
+            this.open = !this.open;
+            try {
+                sessionStorage.setItem('section-toggle:' + key, this.open ? 'open' : 'closed');
+            } catch (e) { /* sessionStorage unavailable */ }
+        },
+    };
+}
