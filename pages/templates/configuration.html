@@ -156,6 +156,97 @@
       </div>
     </section>
     {{end}}
+
+    <section class="panel-headed" data-testid="config-agents-panel">
+      <header class="panel-header">
+        <h2>agents</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-agents-count">({{len .Composite.Agents}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if not .Composite.Agents}}
+          <p class="muted" data-testid="config-agents-empty">No agents.</p>
+        {{else}}
+          <table class="data-table" data-testid="config-agents-list">
+            <thead>
+              <tr>
+                <th>name</th>
+                <th>scope</th>
+                <th>kind</th>
+                <th>permission patterns</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Composite.Agents}}
+              <tr data-testid="config-agent-{{.ID}}">
+                <td><a href="/documents/{{.ID}}"><code>{{.Name}}</code></a></td>
+                <td><code class="scope-pill">{{.Scope}}</code></td>
+                <td>
+                  {{if .Ephemeral}}
+                    <code class="status-pill agent-ephemeral-pill">ephemeral</code>
+                  {{else}}
+                    <code class="status-pill agent-canonical-pill">canonical</code>
+                  {{end}}
+                </td>
+                <td>
+                  {{if .PermissionPatterns}}
+                    {{range .PermissionPatterns}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
+                  {{else}}
+                    <span class="muted">—</span>
+                  {{end}}
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{end}}
+      </div>
+    </section>
+
+    {{if .Composite.SelectedID}}
+    {{if .Composite.PerPhaseAllocation}}
+    <section class="panel-headed" data-testid="config-allocation-panel">
+      <header class="panel-header">
+        <h2>per-phase allocation</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-allocation-count">({{len .Composite.PerPhaseAllocation}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">
+          Agent allocation for stories that use the selected Configuration's workflow.
+        </p>
+        <table class="data-table" data-testid="config-allocation-list">
+          <thead>
+            <tr><th>contract</th><th>agent</th><th>story</th></tr>
+          </thead>
+          <tbody>
+            {{range .Composite.PerPhaseAllocation}}
+            <tr data-testid="config-allocation-{{.ContractID}}">
+              <td><code>{{.ContractName}}</code></td>
+              <td>
+                {{if .AgentID}}
+                  <a href="{{.AgentHref}}" data-testid="config-allocation-agent"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
+                {{else}}
+                  <span class="muted">unallocated</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .StoryID}}
+                  <a href="{{.StoryHref}}"><code>{{.StoryID}}</code></a>
+                {{else}}
+                  <span class="muted">—</span>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {{end}}
+    {{end}}
   </main>
   {{template "footer.html" .}}
 </body>

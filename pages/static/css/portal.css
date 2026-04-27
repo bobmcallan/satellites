@@ -1896,3 +1896,97 @@ code {
 [data-theme="dark"] .ws-debug { background: #181818; border-color: #333; color: #e8e8e8; }
 
 ::selection { background: var(--color-fg); color: var(--color-bg); }
+
+/* ============================================================
+   ROLE-BASED EXECUTION UI — story_7b77ffb0
+   Role chip in nav, AC scope chip + iteration counter in story
+   timeline, ledger-kind classes for distinct lifecycle rows, agent
+   detail panel, /agents promote-to-canonical CTA.
+   ============================================================ */
+
+.nav-role-chip {
+    display: inline-block;
+    padding: 0.1em 0.6em;
+    margin-left: 0.5em;
+    border: 1px solid var(--color-fg);
+    border-radius: 0.2em;
+    font-family: var(--font-mono);
+    font-size: 0.78em;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    color: var(--color-fg);
+    background: transparent;
+}
+.nav-role-chip-active {
+    background: var(--color-fg);
+    color: var(--color-bg);
+}
+.nav-role-chip:hover { text-decoration: underline; }
+
+.ac-scope-chip {
+    display: inline-block;
+    padding: 0 0.4em;
+    margin-left: 0.4em;
+    border: 1px dashed var(--color-fg);
+    border-radius: 0.15em;
+    font-size: 0.85em;
+}
+.iteration-chip {
+    display: inline-block;
+    padding: 0 0.4em;
+    margin-left: 0.4em;
+    border: 1px solid var(--color-fg);
+    border-radius: 0.15em;
+    font-size: 0.78em;
+}
+.iteration-warn {
+    border-color: #d4922a;
+    color: #d4922a;
+    font-weight: 600;
+}
+
+.ci-row { padding: 0.2em 0; }
+.ci-depth-1 { padding-left: 1.5em; border-left: 2px solid var(--color-fg); }
+.ci-depth-2 { padding-left: 3em; border-left: 2px solid var(--color-fg); }
+.ci-depth-3 { padding-left: 4.5em; border-left: 2px solid var(--color-fg); }
+.ci-child { font-style: italic; }
+.ci-agent-link { margin-left: 0.4em; }
+.ci-agent-empty { margin-left: 0.4em; }
+
+.excerpt-row.ledger-kind-plan-amend td:first-child { border-left: 3px solid #6b8cf2; }
+.excerpt-row.ledger-kind-agent-compose td:first-child { border-left: 3px solid #4ca97a; }
+.excerpt-row.ledger-kind-agent-archive td:first-child { border-left: 3px solid #a35a5a; }
+.excerpt-row.ledger-kind-session-default-install td:first-child { border-left: 3px solid #b88a3e; }
+
+.agent-ephemeral-pill { background: #fff5e3; color: #774400; border: 1px solid #d4922a; }
+.agent-canonical-pill { background: #eaf5ec; color: #2d5b3a; border: 1px solid #4ca97a; }
+
+.agent-promote-hints { list-style: none; padding: 0; margin: 0 0 1em 0; }
+.agent-promote-hints li { margin-bottom: 0.6em; }
+.agent-promote-cta {
+    display: inline-block;
+    padding: 0.2em 0.7em;
+    border: 1px solid var(--color-fg);
+    border-radius: 0.15em;
+    text-decoration: none;
+    font-weight: 600;
+    margin-right: 0.6em;
+}
+.agent-promote-cta:hover { background: var(--color-fg); color: var(--color-bg); }
+.agent-promote-skill-list { display: inline; padding: 0; }
+.agent-promote-skill-list li { display: inline; margin-right: 0.3em; }
+
+.agent-skill-links { padding: 0; margin: 0; list-style: none; }
+.agent-skill-links li { display: inline; margin-right: 0.3em; }
+
+.pattern-chip { white-space: nowrap; }
+
+.document-agent-panel .document-agent-permissions,
+.document-agent-panel .document-agent-skills { padding-left: 1.2em; }
+
+.agents-filter-form { margin-bottom: 1em; }
+
+[data-theme="dark"] .nav-role-chip { color: #e8e8e8; border-color: #e8e8e8; }
+[data-theme="dark"] .nav-role-chip-active { background: #e8e8e8; color: #0d0d0d; }
+[data-theme="dark"] .agent-ephemeral-pill { background: #2a1f0d; color: #e0c898; border-color: #d4922a; }
+[data-theme="dark"] .agent-canonical-pill { background: #142013; color: #b8d8c0; border-color: #4ca97a; }

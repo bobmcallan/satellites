@@ -3,16 +3,25 @@
 // docs / contract-instance timeline / reviewer verdicts / repo
 // provenance — into one struct so the SSR template and the JSON
 // composite endpoint render from the same shape.
+//
+// Story_7b77ffb0 (portal UI for role-based execution) extends ciCard
+// with parent_invocation_id depth, ac_scope label, allocated agent_id +
+// resolved name, per-AC iteration counter, and tags ledger excerpts
+// with kind classes so the timeline can style plan-amend /
+// agent-compose / agent-archive / session-default-install rows
+// distinctly.
 package portal
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 )
@@ -29,6 +38,17 @@ const commitTagKind = "kind:commit"
 // verdictTagKind identifies reviewer-verdict ledger rows written by
 // internal/mcpserver/close_handlers.go writeVerdictRow.
 const verdictTagKind = "kind:verdict"
+
+// distinctLedgerKinds names the kind:* tag values that the
+// story-detail timeline styles distinctly. Story_7b77ffb0 AC8: the
+// timeline must visually separate these rows from generic
+// kind:close-request / kind:action-claim / kind:plan rows.
+var distinctLedgerKinds = map[string]string{
+	"kind:plan-amend":              "plan-amend",
+	"kind:agent-compose":           "agent-compose",
+	"kind:agent-archive":           "agent-archive",
+	"kind:session-default-install": "session-default-install",
+}
 
 // storyComposite is the view-model for the upgraded story view. The
 // SSR template renders it directly; the JSON composite endpoint marshals
@@ -55,14 +75,24 @@ type sourceDocLink struct {
 
 // ciCard is one row in the contract-instance timeline panel.
 type ciCard struct {
-	ID            string `json:"id"`
-	ContractName  string `json:"contract_name"`
-	Sequence      int    `json:"sequence"`
-	Status        string `json:"status"`
-	ClaimedAt     string `json:"claimed_at,omitempty"`
-	ClosedAt      string `json:"closed_at,omitempty"`
-	PlanLedgerID  string `json:"plan_ledger_id,omitempty"`
-	CloseLedgerID string `json:"close_ledger_id,omitempty"`
+	ID                 string `json:"id"`
+	ContractName       string `json:"contract_name"`
+	Sequence           int    `json:"sequence"`
+	Status             string `json:"status"`
+	ClaimedAt          string `json:"claimed_at,omitempty"`
+	ClosedAt           string `json:"closed_at,omitempty"`
+	PlanLedgerID       string `json:"plan_ledger_id,omitempty"`
+	CloseLedgerID      string `json:"close_ledger_id,omitempty"`
+	ParentInvocationID string `json:"parent_invocation_id,omitempty"`
+	Depth              int    `json:"depth"`
+	ACScope            []int  `json:"ac_scope,omitempty"`
+	ACScopeLabel       string `json:"ac_scope_label,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+	AgentName          string `json:"agent_name,omitempty"`
+	AgentHref          string `json:"agent_href,omitempty"`
+	Iteration          int    `json:"iteration,omitempty"`
+	IterationCap       int    `json:"iteration_cap,omitempty"`
+	IterationWarn      bool   `json:"iteration_warn,omitempty"`
 }
 
 // verdictCard is one reviewer-verdict row scoped to this story.
@@ -94,6 +124,7 @@ type ledgerExcerpt struct {
 	Tags      []string `json:"tags,omitempty"`
 	Content   string   `json:"content,omitempty"`
 	CreatedAt string   `json:"created_at"`
+	KindClass string   `json:"kind_class,omitempty"`
 }
 
 // deliveryStrip is the banner at the top of the page. Resolution is
@@ -115,6 +146,7 @@ func buildStoryComposite(
 	ctx context.Context,
 	stories story.Store,
 	contracts contract.Store,
+	docs document.Store,
 	ledgerStore ledger.Store,
 	storyID string,
 	memberships []string,
@@ -132,7 +164,7 @@ func buildStoryComposite(
 	if contracts != nil {
 		cis, err := contracts.List(ctx, storyID, memberships)
 		if err == nil {
-			c.CIs = ciCardsFor(cis)
+			c.CIs = ciCardsFor(ctx, cis, docs, memberships)
 		}
 	}
 
@@ -179,17 +211,51 @@ func sourceDocsForStory(s story.Story) []sourceDocLink {
 }
 
 // ciCardsFor projects contract.ContractInstance rows into the timeline
-// view-model. Sequence is preserved from the store ordering.
-func ciCardsFor(cis []contract.ContractInstance) []ciCard {
-	out := make([]ciCard, 0, len(cis))
-	for _, ci := range cis {
+// view-model. CIs are reordered so that children render directly after
+// their parent (story_d5d88a64 tree walk); each row carries a Depth
+// computed from the parent chain. Story_7b77ffb0 also stamps the
+// ac_scope chip label, the allocated agent_id + name, and the per-AC
+// iteration counter.
+func ciCardsFor(ctx context.Context, cis []contract.ContractInstance, docs document.Store, memberships []string) []ciCard {
+	if len(cis) == 0 {
+		return []ciCard{}
+	}
+	ordered := contract.TreeWalk(cis)
+	depthByID := computeCIDepths(ordered)
+	cap := contract.MaxACIterations()
+
+	// Resolve agent docs once per unique AgentID — the timeline render
+	// links each CI to its allocated agent's name.
+	agentNames := make(map[string]string)
+	for _, ci := range ordered {
+		if ci.AgentID == "" || docs == nil {
+			continue
+		}
+		if _, ok := agentNames[ci.AgentID]; ok {
+			continue
+		}
+		d, err := docs.GetByID(ctx, ci.AgentID, memberships)
+		if err == nil {
+			agentNames[ci.AgentID] = d.Name
+		} else {
+			agentNames[ci.AgentID] = ""
+		}
+	}
+
+	out := make([]ciCard, 0, len(ordered))
+	for _, ci := range ordered {
 		card := ciCard{
-			ID:            ci.ID,
-			ContractName:  ci.ContractName,
-			Sequence:      ci.Sequence,
-			Status:        ci.Status,
-			PlanLedgerID:  ci.PlanLedgerID,
-			CloseLedgerID: ci.CloseLedgerID,
+			ID:                 ci.ID,
+			ContractName:       ci.ContractName,
+			Sequence:           ci.Sequence,
+			Status:             ci.Status,
+			PlanLedgerID:       ci.PlanLedgerID,
+			CloseLedgerID:      ci.CloseLedgerID,
+			ParentInvocationID: ci.ParentInvocationID,
+			Depth:              depthByID[ci.ID],
+			ACScope:            append([]int(nil), ci.ACScope...),
+			ACScopeLabel:       acScopeLabel(ci.ACScope),
+			AgentID:            ci.AgentID,
 		}
 		if !ci.ClaimedAt.IsZero() {
 			card.ClaimedAt = ci.ClaimedAt.UTC().Format(time.RFC3339)
@@ -200,9 +266,114 @@ func ciCardsFor(cis []contract.ContractInstance) []ciCard {
 		if ci.Status == contract.StatusPassed && !ci.UpdatedAt.IsZero() {
 			card.ClosedAt = ci.UpdatedAt.UTC().Format(time.RFC3339)
 		}
+		if card.AgentID != "" {
+			card.AgentName = agentNames[card.AgentID]
+			card.AgentHref = "/documents/" + card.AgentID
+		}
+		// Per-AC iteration: use the highest iteration index across this
+		// CI's ACScope so a multi-AC CI surfaces its riskiest counter.
+		if iter, _, warn := iterationFor(ci, cis, cap); iter > 0 {
+			card.Iteration = iter
+			card.IterationCap = cap
+			card.IterationWarn = warn
+		}
 		out = append(out, card)
 	}
 	return out
+}
+
+// computeCIDepths walks the tree-walked CI slice and returns the depth
+// of each CI relative to its root. CIs without ParentInvocationID, or
+// whose parent isn't in the slice, are roots (depth 0).
+func computeCIDepths(ordered []contract.ContractInstance) map[string]int {
+	idx := make(map[string]int, len(ordered))
+	for i, c := range ordered {
+		idx[c.ID] = i
+	}
+	depth := make(map[string]int, len(ordered))
+	for _, c := range ordered {
+		if c.ParentInvocationID == "" {
+			depth[c.ID] = 0
+			continue
+		}
+		if _, ok := idx[c.ParentInvocationID]; !ok {
+			depth[c.ID] = 0
+			continue
+		}
+		depth[c.ID] = depth[c.ParentInvocationID] + 1
+	}
+	return depth
+}
+
+// acScopeLabel formats an ACScope slice for the CI chip. Empty scope
+// renders "AC 1..N" elsewhere; the helper itself returns "" for empty
+// so the template can decide. A contiguous range "AC 1..5" is preferred
+// when the indices form a contiguous run; otherwise a comma list "AC
+// 2, 4".
+func acScopeLabel(scope []int) string {
+	if len(scope) == 0 {
+		return ""
+	}
+	sorted := append([]int(nil), scope...)
+	sort.Ints(sorted)
+	if len(sorted) == 1 {
+		return fmt.Sprintf("AC %d", sorted[0])
+	}
+	contiguous := true
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i] != sorted[i-1]+1 {
+			contiguous = false
+			break
+		}
+	}
+	if contiguous {
+		return fmt.Sprintf("AC %d..%d", sorted[0], sorted[len(sorted)-1])
+	}
+	parts := make([]string, len(sorted))
+	for i, v := range sorted {
+		parts[i] = fmt.Sprint(v)
+	}
+	return "AC " + strings.Join(parts, ", ")
+}
+
+// iterationFor computes the per-AC iteration counter for ci. When ci's
+// ACScope is empty the iteration is 0 (no per-AC re-scope happened).
+// Otherwise it returns the maximum iteration count across ci's ACs,
+// computed against all CIs on the story. Returns warn=true when the
+// iteration count exceeds cap/2 — the early-warning threshold per
+// AC7.
+func iterationFor(ci contract.ContractInstance, all []contract.ContractInstance, cap int) (int, int, bool) {
+	if len(ci.ACScope) == 0 {
+		return 0, cap, false
+	}
+	maxIter := 0
+	for _, ac := range ci.ACScope {
+		// Count CIs created on or before ci that include this ac index;
+		// the iteration number of ci itself is its position in that
+		// stream. The substrate uses created_at ordering so a stable
+		// "third re-scope of AC 2" surfaces here.
+		seen := 0
+		for _, other := range all {
+			if other.CreatedAt.After(ci.CreatedAt) {
+				continue
+			}
+			for _, oa := range other.ACScope {
+				if oa == ac {
+					seen++
+					break
+				}
+			}
+		}
+		if seen > maxIter {
+			maxIter = seen
+		}
+	}
+	if cap <= 0 {
+		cap = contract.DefaultMaxACIterations
+	}
+	half := cap / 2
+	warn := maxIter > half
+	return maxIter, cap, warn
 }
 
 // verdictsForStory pulls the kind:verdict ledger rows for the story,
@@ -295,6 +466,10 @@ func commitsForStory(ctx context.Context, store ledger.Store, projectID, storyID
 
 // excerptsForStory pulls a bounded window of all ledger rows scoped to
 // the story (any tag). Used for the live-updating excerpts panel.
+// Story_7b77ffb0 stamps a KindClass on each row when its tags match
+// one of the distinct lifecycle kinds (plan-amend / agent-compose /
+// agent-archive / session-default-install) so the template can style
+// those rows distinctly.
 func excerptsForStory(ctx context.Context, store ledger.Store, projectID, storyID string, memberships []string) []ledgerExcerpt {
 	rows, err := store.List(ctx, projectID, ledger.ListOptions{
 		StoryID: storyID,
@@ -311,10 +486,23 @@ func excerptsForStory(ctx context.Context, store ledger.Store, projectID, storyI
 			Tags:      r.Tags,
 			Content:   truncate(r.Content, 240),
 			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+			KindClass: ledgerKindClass(r.Tags),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out
+}
+
+// ledgerKindClass returns the CSS suffix for the distinct lifecycle
+// kinds (story_7b77ffb0 AC8). Empty string when no recognised tag is
+// present — the template falls back to its default styling.
+func ledgerKindClass(tags []string) string {
+	for _, t := range tags {
+		if cls, ok := distinctLedgerKinds[t]; ok {
+			return cls
+		}
+	}
+	return ""
 }
 
 // applyDeliveryVerdict folds the most recent story_close verdict into

@@ -25,12 +25,29 @@ type documentsComposite struct {
 }
 
 // documentDetailComposite is the view-model for the detail page.
+//
+// Story_7b77ffb0 surfaces the type=agent v4 fields (permission_patterns,
+// skill_refs, ephemeral, owning story) directly on the detail page so
+// operators don't have to read the structured payload by hand.
 type documentDetailComposite struct {
 	Document       documentCard   `json:"document"`
 	Body           string         `json:"body"`
 	Structured     string         `json:"structured,omitempty"`
 	LinkedStories  []linkedStory  `json:"linked_stories"`
 	VersionHistory []versionEntry `json:"version_history"`
+	Agent          *agentDetail   `json:"agent,omitempty"`
+}
+
+// agentDetail is the view-model for the type=agent panel on the
+// document detail page (story_7b77ffb0 AC11). Only populated for
+// type=agent docs.
+type agentDetail struct {
+	PermissionPatterns []string `json:"permission_patterns,omitempty"`
+	SkillRefs          []string `json:"skill_refs,omitempty"`
+	Ephemeral          bool     `json:"ephemeral"`
+	Canonical          bool     `json:"canonical"`
+	OwningStoryID      string   `json:"owning_story_id,omitempty"`
+	OwningStoryHref    string   `json:"owning_story_href,omitempty"`
 }
 
 type documentCard struct {
@@ -150,7 +167,34 @@ func buildDocumentDetail(ctx context.Context, store document.Store, stories stor
 		out.Structured = string(d.Structured)
 	}
 	out.VersionHistory = versionHistoryFor(ctx, store, d.ID, memberships)
+	if d.Type == document.TypeAgent {
+		out.Agent = agentDetailFor(d)
+	}
 	return out, nil
+}
+
+// agentDetailFor projects a type=agent document's Structured payload
+// into the agentDetail view-model. Returns nil when the payload is
+// empty or unparseable so the template renders the fallback structured
+// pre-block instead.
+func agentDetailFor(d document.Document) *agentDetail {
+	settings, err := document.UnmarshalAgentSettings(d.Structured)
+	if err != nil {
+		return nil
+	}
+	out := &agentDetail{
+		PermissionPatterns: settings.PermissionPatterns,
+		SkillRefs:          settings.SkillRefs,
+		Ephemeral:          settings.Ephemeral,
+		Canonical:          !settings.Ephemeral,
+	}
+	if settings.StoryID != nil {
+		out.OwningStoryID = *settings.StoryID
+		if d.ProjectID != nil && *d.ProjectID != "" {
+			out.OwningStoryHref = "/projects/" + *d.ProjectID + "/stories/" + *settings.StoryID
+		}
+	}
+	return out
 }
 
 // versionHistoryFor calls Store.ListVersions and shapes the rows for

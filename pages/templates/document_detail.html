@@ -36,6 +36,51 @@
         </div>
       </section>
 
+      {{if .Detail.Agent}}
+      <section class="panel-headed document-agent-panel" data-testid="document-agent-panel">
+        <header class="panel-header">
+          <h2>agent</h2>
+          <span class="panel-header-meta">
+            {{if .Detail.Agent.Ephemeral}}
+              <code class="status-pill agent-ephemeral-pill" data-testid="document-agent-kind">ephemeral</code>
+            {{else}}
+              <code class="status-pill agent-canonical-pill" data-testid="document-agent-kind">canonical</code>
+            {{end}}
+          </span>
+        </header>
+        <div class="panel-body">
+          <h3>permission patterns</h3>
+          {{if .Detail.Agent.PermissionPatterns}}
+            <ul class="document-agent-permissions" data-testid="document-agent-permissions">
+              {{range .Detail.Agent.PermissionPatterns}}<li><code class="tag-chip pattern-chip">{{.}}</code></li>{{end}}
+            </ul>
+          {{else}}
+            <p class="muted" data-testid="document-agent-permissions-empty">No permission patterns.</p>
+          {{end}}
+
+          <h3>skill refs</h3>
+          {{if .Detail.Agent.SkillRefs}}
+            <ul class="document-agent-skills" data-testid="document-agent-skills">
+              {{range .Detail.Agent.SkillRefs}}<li><a href="/documents/{{.}}"><code>{{.}}</code></a></li>{{end}}
+            </ul>
+          {{else}}
+            <p class="muted" data-testid="document-agent-skills-empty">No skill refs.</p>
+          {{end}}
+
+          {{if .Detail.Agent.OwningStoryID}}
+          <h3>owning story</h3>
+          <p>
+            {{if .Detail.Agent.OwningStoryHref}}
+              <a href="{{.Detail.Agent.OwningStoryHref}}" data-testid="document-agent-story"><code>{{.Detail.Agent.OwningStoryID}}</code></a>
+            {{else}}
+              <code data-testid="document-agent-story">{{.Detail.Agent.OwningStoryID}}</code>
+            {{end}}
+          </p>
+          {{end}}
+        </div>
+      </section>
+      {{end}}
+
       <aside class="panel-headed document-sidebar" data-testid="document-sidebar">
         <header class="panel-header"><h2>structured</h2></header>
         <div class="panel-body">

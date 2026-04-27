@@ -6,24 +6,91 @@
   {{template "nav.html" .}}
   <main class="portal-main">
     <section class="panel-headed" data-testid="agents-page">
-      <header class="panel-header"><h1>agents</h1></header>
+      <header class="panel-header">
+        <h1>agents</h1>
+        <span class="panel-header-meta">
+          <code data-testid="agents-count">({{len .Composite.Rows}})</code>
+        </span>
+      </header>
       <div class="panel-body">
+        <form method="get" action="/agents" class="agents-filter-form" data-testid="agents-filter-form">
+          <label>
+            <span>show</span>
+            <select name="canonical" onchange="this.form.submit()" data-testid="agents-canonical-filter">
+              <option value=""{{if eq .Composite.Filter.Canonical ""}} selected{{end}}>all</option>
+              <option value="true"{{if eq .Composite.Filter.Canonical "true"}} selected{{end}}>canonical</option>
+              <option value="false"{{if eq .Composite.Filter.Canonical "false"}} selected{{end}}>ephemeral</option>
+            </select>
+          </label>
+          <noscript><button type="submit" class="btn-secondary">apply</button></noscript>
+        </form>
+
+        {{if .Composite.PromoteHints}}
+        <ul class="agent-promote-hints" data-testid="agent-promote-hints">
+          {{range .Composite.PromoteHints}}
+          <li>
+            <a href="{{.Href}}" class="agent-promote-cta" data-testid="agent-promote-cta">
+              promote to canonical
+            </a>
+            <span class="muted">{{.Count}} ephemeral agents share these skills</span>
+            <ul class="agent-promote-skill-list">
+              {{range .SkillRefs}}<li><code class="tag-chip">{{.}}</code></li>{{end}}
+            </ul>
+          </li>
+          {{end}}
+        </ul>
+        {{end}}
+
         {{if not .Composite.Rows}}
-          <p class="muted" data-testid="agents-empty">No agents defined yet.</p>
+          <p class="muted" data-testid="agents-empty">No agents to show.</p>
         {{else}}
           <table class="data-table">
             <thead>
-              <tr><th>name</th><th>scope</th><th>provider chain</th><th>tier</th><th>permitted roles</th><th>contract binding</th></tr>
+              <tr>
+                <th>name</th>
+                <th>scope</th>
+                <th>permission patterns</th>
+                <th>skills</th>
+                <th>kind</th>
+                <th>contract binding</th>
+              </tr>
             </thead>
             <tbody>
               {{range .Composite.Rows}}
-              <tr data-testid="agent-row-{{.ID}}">
-                <td><code>{{.Name}}</code></td>
+              <tr data-testid="agent-row-{{.ID}}" data-canonical="{{.Canonical}}">
+                <td><a href="/documents/{{.ID}}"><code>{{.Name}}</code></a></td>
                 <td><code class="scope-pill">{{.Scope}}</code></td>
-                <td>{{range .ProviderChain}}<code class="tag-chip">{{.}}</code> {{end}}</td>
-                <td><code>{{.Tier}}</code></td>
-                <td>{{range .PermittedRoles}}<code class="tag-chip">{{.}}</code> {{end}}</td>
-                <td><code>{{.ContractBinding}}</code></td>
+                <td data-testid="agent-permissions">
+                  {{if .PermissionPatterns}}
+                    {{range .PermissionPatterns}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
+                  {{else}}
+                    <span class="muted">—</span>
+                  {{end}}
+                </td>
+                <td data-testid="agent-skills">
+                  {{if .SkillRefs}}
+                    <ul class="agent-skill-links">
+                      {{range .SkillRefs}}<li><a href="/documents/{{.}}"><code>{{.}}</code></a></li>{{end}}
+                    </ul>
+                  {{else}}
+                    <span class="muted">—</span>
+                  {{end}}
+                </td>
+                <td data-testid="agent-ephemeral">
+                  {{if .Ephemeral}}
+                    <code class="status-pill agent-ephemeral-pill">ephemeral</code>
+                    {{if .OwningStoryID}}
+                      {{if .OwningStoryHref}}
+                        <a href="{{.OwningStoryHref}}"><code>{{.OwningStoryID}}</code></a>
+                      {{else}}
+                        <code>{{.OwningStoryID}}</code>
+                      {{end}}
+                    {{end}}
+                  {{else}}
+                    <code class="status-pill agent-canonical-pill">canonical</code>
+                  {{end}}
+                </td>
+                <td>{{if .ContractBinding}}<code>{{.ContractBinding}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
               </tr>
               {{end}}
             </tbody>

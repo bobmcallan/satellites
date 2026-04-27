@@ -105,10 +105,19 @@
           </template>
           {{range .Composite.CIs}}
           <noscript>
-            <li data-ci-id="{{.ID}}" data-status="{{.Status}}">
+            <li data-ci-id="{{.ID}}" data-status="{{.Status}}" data-depth="{{.Depth}}" class="ci-row ci-depth-{{.Depth}}{{if .ParentInvocationID}} ci-child{{end}}" {{if .ParentInvocationID}}data-parent="{{.ParentInvocationID}}"{{end}} data-testid="ci-row-{{.ID}}">
               <code class="ci-seq">#{{.Sequence}}</code>
               <code class="ci-name">{{.ContractName}}</code>
               <code class="status-pill status-{{.Status}}">{{.Status}}</code>
+              {{if .ACScopeLabel}}<code class="ac-scope-chip" data-testid="ci-ac-scope">{{.ACScopeLabel}}</code>{{end}}
+              {{if .Iteration}}
+                <code class="iteration-chip{{if .IterationWarn}} iteration-warn{{end}}" data-testid="ci-iteration-counter">{{if .ACScopeLabel}}{{.ACScopeLabel}}: {{end}}{{.Iteration}}/{{.IterationCap}} iterations</code>
+              {{end}}
+              {{if .AgentID}}
+                <a href="{{.AgentHref}}" class="ci-agent-link" data-testid="ci-agent" data-agent-id="{{.AgentID}}"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
+              {{else}}
+                <span class="muted ci-agent-empty" data-testid="ci-agent">—</span>
+              {{end}}
               <span class="ci-times">
                 {{if .ClaimedAt}}<code>claimed {{.ClaimedAt}}</code>{{end}}
                 {{if .ClosedAt}}<code>closed {{.ClosedAt}}</code>{{end}}
@@ -207,7 +216,7 @@
             </template>
             {{range .Composite.Excerpts}}
             <noscript>
-              <tr data-testid="excerpt-row-ssr-{{.ID}}">
+              <tr data-testid="excerpt-row-ssr-{{.ID}}" class="excerpt-row{{if .KindClass}} ledger-kind-{{.KindClass}}{{end}}"{{if .KindClass}} data-kind-class="{{.KindClass}}"{{end}}>
                 <td><code>{{.CreatedAt}}</code></td>
                 <td><code>{{.Type}}</code></td>
                 <td>{{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}</td>
