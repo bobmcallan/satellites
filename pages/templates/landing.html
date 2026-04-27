@@ -11,6 +11,15 @@
       <p class="landing-subhead">Agentic software engineering via MCP.</p>
     </div>
 
+    {{if .NoAuthBanner}}
+    <aside class="landing-no-auth-banner" role="alert" data-testid="no-auth-banner">
+      <strong>No sign-in providers configured.</strong>
+      Set <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> or
+      <code>GITHUB_CLIENT_ID</code> / <code>GITHUB_CLIENT_SECRET</code> in the
+      deployment environment, or enable <code>DEV_MODE</code> for local development.
+    </aside>
+    {{end}}
+
     {{if or .GoogleEnabled .GithubEnabled}}
     <div class="landing-providers">
       {{if .GoogleEnabled}}

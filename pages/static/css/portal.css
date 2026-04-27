@@ -1897,6 +1897,32 @@ code {
 
 ::selection { background: var(--color-fg); color: var(--color-bg); }
 
+.landing-no-auth-banner {
+    display: block;
+    padding: 0.6em 0.8em;
+    margin: 0 0 1em 0;
+    border: 1px solid #d4922a;
+    border-radius: 0.2em;
+    background: #fff5e3;
+    color: #774400;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+.landing-no-auth-banner code {
+    background: rgba(119, 68, 0, 0.08);
+    padding: 0 0.25em;
+    border-radius: 0.15em;
+}
+[data-theme="dark"] .landing-no-auth-banner {
+    background: #2a1f0d;
+    color: #e0c898;
+    border-color: #d4922a;
+}
+[data-theme="dark"] .landing-no-auth-banner code {
+    background: rgba(224, 200, 152, 0.12);
+}
+
 /* ============================================================
    ROLE-BASED EXECUTION UI — story_7b77ffb0
    Role chip in nav, AC scope chip + iteration counter in story

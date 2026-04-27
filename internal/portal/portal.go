@@ -393,6 +393,7 @@ type loginData struct {
 	DevUsername     string
 	DevPassword     string
 	DevMode         bool
+	NoAuthBanner    bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -482,17 +483,20 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 // handleLogin (redirects to /).
 func (p *Portal) renderLanding(w http.ResponseWriter, r *http.Request) {
 	devEnabled := p.cfg.Env != "prod" && p.cfg.DevMode
+	googleEnabled := p.cfg.GoogleClientID != "" && p.cfg.GoogleClientSecret != ""
+	githubEnabled := p.cfg.GithubClientID != "" && p.cfg.GithubClientSecret != ""
 	data := loginData{
 		Title:           buildPageTitle(wsChip{}, "", ""),
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		Next:            r.URL.Query().Get("next"),
-		GoogleEnabled:   p.cfg.GoogleClientID != "" && p.cfg.GoogleClientSecret != "",
-		GithubEnabled:   p.cfg.GithubClientID != "" && p.cfg.GithubClientSecret != "",
+		GoogleEnabled:   googleEnabled,
+		GithubEnabled:   githubEnabled,
 		DevModeEnabled:  devEnabled,
 		DevMode:         devEnabled,
 		DevUsername:     p.cfg.DevUsername,
 		DevPassword:     p.cfg.DevPassword,
+		NoAuthBanner:    !googleEnabled && !githubEnabled && !devEnabled,
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: "/",
 	}
