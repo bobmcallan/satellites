@@ -181,7 +181,7 @@ func TestHandleStoryWorkflowClaim_ConfigurationOverride_EmptyProposed(t *testing
 		t.Fatalf("assign cfg: %v", err)
 	}
 
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":       f.storyID,
 		"claim_markdown": "claim from configuration",
 		// proposed_contracts intentionally omitted
@@ -221,7 +221,7 @@ func TestHandleStoryWorkflowClaim_ProposedWinsOverConfiguration(t *testing.T) {
 	// Provide a proposed list explicitly — should win over Configuration.
 	// Includes plan because the project's default workflow_spec marks
 	// plan as required (min_count=1).
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "develop", "story_close"},
 	}))
@@ -245,7 +245,7 @@ func TestHandleStoryWorkflowClaim_NullConfiguration_FallsBackToProjectDefault(t 
 	f := newContractFixture(t)
 	// No configuration assigned; no proposed_contracts; should expand
 	// from project workflow_spec default (preplan/plan/develop/story_close).
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id": f.storyID,
 	}))
 	if err != nil {
@@ -323,7 +323,7 @@ func TestHandleStoryWorkflowClaim_AgentDefault_NoStoryConfig(t *testing.T) {
 
 	// Story has no configuration_id; agent_id supplied → CIs should
 	// match the Configuration's contract list.
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id": f.storyID,
 		"agent_id": agentID,
 	}))
@@ -355,7 +355,7 @@ func TestHandleStoryWorkflowClaim_StoryConfigBeats_AgentDefault(t *testing.T) {
 		t.Fatalf("assign story cfg: %v", err)
 	}
 
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id": f.storyID,
 		"agent_id": agentID,
 	}))

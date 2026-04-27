@@ -37,14 +37,14 @@ func intEnv(key string, fallback int) int {
 	return fallback
 }
 
-// handleStoryContractClose closes a CI. Always writes a phase:close
+// handleContractClose closes a CI. Always writes a phase:close
 // row; when evidence_markdown non-empty also writes a kind:evidence
 // row; optionally writes a plan row on preplan re-entry or deferred
 // plan; flips CI to passed; rolls story to done when all required
 // CIs are terminal. On preplan close with proposed_workflow, the
 // agent's new workflow shape is validated against the project spec
 // and recorded as a kind:workflow-claim row.
-func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
 	ciID, err := req.RequireString("contract_instance_id")
@@ -71,7 +71,7 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 	now := s.nowUTC()
 
 	// Preplan proposed_workflow validation — if supplied, must satisfy
-	// the project's workflow_spec. Mirrors story_workflow_claim.
+	// the project's workflow_spec. Mirrors workflow_claim.
 	if ci.ContractName == "preplan" && len(proposedWorkflow) > 0 {
 		spec, err := s.loadWorkflowSpec(ctx, ci.ProjectID, memberships)
 		if err != nil {
@@ -171,12 +171,12 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 	switch verdictOutcome {
 	case reviewer.VerdictNeedsMore:
 		// CI stays claimed; structured error names the unresolved
-		// review questions so the agent can call story_contract_respond
+		// review questions so the agent can call contract_respond
 		// + re-close.
 		body, _ := json.Marshal(map[string]any{
 			"error":             "needs_more",
 			"verdict_ledger_id": verdictRowID,
-			"message":           "reviewer needs more; call story_contract_respond then re-invoke close",
+			"message":           "reviewer needs more; call contract_respond then re-invoke close",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	case reviewer.VerdictRejected:
@@ -247,18 +247,18 @@ func (s *Server) handleStoryContractClose(ctx context.Context, req mcpgo.CallToo
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_contract_close").
+		Str("tool", "contract_close").
 		Str("ci_id", ci.ID).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryContractRespond writes a kind:review-response ledger row
+// handleContractRespond writes a kind:review-response ledger row
 // targeting the latest unresolved review-question (if any). The
 // reviewer re-invocation lives in slice 8.5; this verb only persists
 // the response.
-func (s *Server) handleStoryContractRespond(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleContractRespond(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	caller, _ := UserFrom(ctx)
 	ciID, err := req.RequireString("contract_instance_id")
 	if err != nil {
@@ -300,14 +300,14 @@ func (s *Server) handleStoryContractRespond(ctx context.Context, req mcpgo.CallT
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryContractResume is the extended resume verb:
+// handleContractResume is the extended resume verb:
 //   - verifies session is registered + fresh.
 //   - enforces per-CI + per-story resume caps via ledger kv counters.
 //   - reopens passed CIs: flips to claimed, dereferences prior plan +
 //     action-claim rows, flips downstream required CIs back to ready.
 //   - rebinds session on claimed CIs.
 //   - writes a kind:resume ledger row.
-func (s *Server) handleStoryContractResume(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleContractResume(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	caller, _ := UserFrom(ctx)
 	ciID, err := req.RequireString("contract_instance_id")
 	if err != nil {
@@ -574,7 +574,7 @@ func (s *Server) runReviewer(
 			return "", "", "", err
 		}
 		// On needs_more write one kind:review-question row per item so
-		// story_contract_respond can target them.
+		// contract_respond can target them.
 		if verdict.Outcome == reviewer.VerdictNeedsMore {
 			for _, q := range verdict.ReviewQuestions {
 				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{

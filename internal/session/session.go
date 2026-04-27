@@ -1,7 +1,7 @@
 // Package session is the satellites-v4 session registry — the record of
 // which Claude Code harness chat UUIDs the SessionStart hook has
 // registered for which users. The process-order gate in
-// `story_contract_claim` (slice 8.3) reads this registry to decide
+// `contract_claim` (slice 8.3) reads this registry to decide
 // whether an incoming claim's session_id is one the server knows about
 // and has seen recently enough to act on.
 package session

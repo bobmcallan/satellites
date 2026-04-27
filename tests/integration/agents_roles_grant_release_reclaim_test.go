@@ -137,7 +137,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	require.NotEmpty(t, storyID)
 
 	// Instantiate the workflow — the 4-slot shape the system contracts seed.
-	wf := callTool(t, ctx, mcpURL, "key_grc", "story_workflow_claim", map[string]any{
+	wf := callTool(t, ctx, mcpURL, "key_grc", "workflow_claim", map[string]any{
 		"story_id":           storyID,
 		"proposed_contracts": []any{"preplan", "plan", "develop", "story_close"},
 		"claim_markdown":     "standard shape",
@@ -154,7 +154,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	require.Len(t, ciIDs, 4)
 
 	// Step 2: session A claims the preplan CI — succeeds under grant A.
-	claim1 := callTool(t, ctx, mcpURL, "key_grc", "story_contract_claim", map[string]any{
+	claim1 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[0],
 		"session_id":           sessionA,
 		"permissions_claim":    []any{"Read:**"},
@@ -163,7 +163,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 
 	// Close the preplan so the predecessor gate lets us claim the next
 	// CI later.
-	_ = callTool(t, ctx, mcpURL, "key_grc", "story_contract_close", map[string]any{
+	_ = callTool(t, ctx, mcpURL, "key_grc", "contract_close", map[string]any{
 		"contract_instance_id": ciIDs[0],
 		"close_markdown":       "preplan done",
 		"evidence_markdown":    "baseline evidence",
@@ -181,7 +181,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	// The session's OrchestratorGrantID still points at grant A, but
 	// grant A is no longer active, so resolveRequiredRoleGrant returns
 	// grant_required.
-	rejectResp := callToolRaw(t, ctx, mcpURL, "key_grc", "story_contract_claim", map[string]any{
+	rejectResp := callToolRaw(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[1],
 		"session_id":           sessionA,
 	})
@@ -201,7 +201,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	assert.NotEqual(t, grantA, grantB, "fresh registration must mint a distinct grant")
 
 	// Step 6: session A claims the plan CI — succeeds under grant B.
-	claim2 := callTool(t, ctx, mcpURL, "key_grc", "story_contract_claim", map[string]any{
+	claim2 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[1],
 		"session_id":           sessionA,
 		"permissions_claim":    []any{"Read:**"},

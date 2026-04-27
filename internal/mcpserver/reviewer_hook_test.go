@@ -156,7 +156,7 @@ func (f *reviewerFixture) callerCtx() context.Context {
 // claim drives a CI into claimed state via the MCP handler.
 func (f *reviewerFixture) claim(t *testing.T, idx int) {
 	t.Helper()
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[idx].ID,
 		"session_id":           f.sessionID,
 	}))
@@ -173,7 +173,7 @@ func TestClose_LLMAccepted(t *testing.T) {
 	}
 	f := newReviewerFixture(t, reviewer.ModeLLM, nil, stub)
 	f.claim(t, 0)
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 		"evidence_markdown":    "all tests pass",
@@ -231,7 +231,7 @@ func TestClose_LLMRejected(t *testing.T) {
 	}
 	f := newReviewerFixture(t, reviewer.ModeLLM, nil, stub)
 	f.claim(t, 0)
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 		"evidence_markdown":    "thin",
@@ -267,7 +267,7 @@ func TestClose_LLMNeedsMore(t *testing.T) {
 	}
 	f := newReviewerFixture(t, reviewer.ModeLLM, nil, stub)
 	f.claim(t, 0)
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 		"evidence_markdown":    "partial",
@@ -300,13 +300,13 @@ func TestClose_LLMNeedsMore(t *testing.T) {
 
 	// After respond + reviewer flips to accepted, next close passes.
 	stub.verdict = reviewer.Verdict{Outcome: reviewer.VerdictAccepted, Rationale: "ok"}
-	if _, err := f.server.handleStoryContractRespond(f.callerCtx(), newCallToolReq("story_contract_respond", map[string]any{
+	if _, err := f.server.handleContractRespond(f.callerCtx(), newCallToolReq("contract_respond", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"response_markdown":    "here are the answers",
 	})); err != nil {
 		t.Fatalf("respond: %v", err)
 	}
-	res2, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res2, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "retry",
 		"evidence_markdown":    "now complete",
@@ -342,7 +342,7 @@ func TestClose_CheckBasedArtifactExistsPass(t *testing.T) {
 		t.Fatalf("seed artifact: %v", err)
 	}
 
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "checks-based pass",
 	}))
@@ -370,7 +370,7 @@ func TestClose_CheckBasedArtifactExistsFail(t *testing.T) {
 	f := newReviewerFixture(t, reviewer.ModeCheckBased, checks, nil)
 	f.claim(t, 0)
 
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "no artifact",
 	}))
@@ -397,7 +397,7 @@ func TestClose_AgentModeSkipsReviewer(t *testing.T) {
 	}
 	f := newReviewerFixture(t, reviewer.ModeAgent, nil, stub)
 	f.claim(t, 0)
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "agent mode",
 	}))

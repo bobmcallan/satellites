@@ -28,9 +28,9 @@ import (
 //     role_id resolves to the seeded role_orchestrator.
 //
 // The enforcement path (resolveRequiredRoleGrant inside
-// story_contract_claim) is covered by 7 unit tests in
+// contract_claim) is covered by 7 unit tests in
 // internal/mcpserver/required_role_test.go exercising the exact helper
-// the handler calls; integration coverage of story_contract_claim with
+// the handler calls; integration coverage of contract_claim with
 // required_role would require the test environment to seed the
 // preplan/plan/develop/story_close contract documents, which no
 // existing integration test provides. The wrapper-level container test

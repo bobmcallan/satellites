@@ -291,13 +291,13 @@ sequenceDiagram
     participant L as Ledger
 
     U->>C: "implement story X"
-    C->>S: story_contract_claim(ci_1, plan_markdown)
+    C->>S: contract_claim(ci_1, plan_markdown)
     S->>L: plan row (kind:plan)
-    C->>S: story_contract_close(ci_1, evidence)
+    C->>S: contract_close(ci_1, evidence)
     S->>L: close row + enqueue next CI's task
     S->>A: dispatch task (in_flight)
     A->>S: write evidence rows
-    A->>S: story_contract_close(ci_2, evidence)
+    A->>S: contract_close(ci_2, evidence)
     S->>L: close row (reviewer verdict)
     S-->>U: ws fan-out (live state)
 ```
@@ -345,7 +345,7 @@ Preplan answers one question: *should we do this story?* Evidence is four fields
 
 ### Process-order gate (server-side invariant, not a convention)
 
-The gate lives in the MCP handler for `story_contract_claim`. On each claim attempt:
+The gate lives in the MCP handler for `contract_claim`. On each claim attempt:
 
 1. Look up the CI by `id`. Fail if status ≠ `ready`.
 2. Look up all CIs on the same story with `sequence < claimed.sequence` and `required_for_close = true`.
@@ -555,7 +555,7 @@ Grouped by primitive. Every verb is workspace-scoped at the handler.
 
 - **Project:** `project_status`, `project_get`, `project_create`, `project_list`, `project_update`, `project_focus`, `project_settings_*`.
 - **Document:** `document_create`, `document_get`, `document_list`, `document_update`, `document_delete`, `document_search`. Type-specific thin wrappers (`principle_*`, `contract_*`, `skill_*`, `reviewer_*`) forward to the generic verbs.
-- **Story:** `story_create`, `story_get`, `story_list`, `story_update`, `story_close`, `story_workflow_claim`, `story_contract_next`, `story_contract_claim`, `story_contract_close`, `story_contract_respond`, `story_contract_resume`.
+- **Story:** `story_create`, `story_get`, `story_list`, `story_update`, `story_close`, `workflow_claim`, `contract_next`, `contract_claim`, `contract_close`, `contract_respond`, `contract_resume`.
 - **Task:** `task_enqueue`, `task_get`, `task_list`, `task_claim`, `task_close`.
 - **Ledger:** `ledger_add`, `ledger_get`, `ledger_list`, `ledger_search`, `ledger_recall`.
 - **Repo:** `repo_add`, `repo_get`, `repo_list`, `repo_scan`, `repo_search`, `repo_search_text`, `repo_get_symbol_source`, `repo_get_file`, `repo_get_outline`.

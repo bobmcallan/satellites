@@ -12,7 +12,7 @@ import (
 // preplan/plan/develop/story_close workflow on the fixture story.
 func claimDefaultWorkflow(t *testing.T, f *contractFixture) []contract.ContractInstance {
 	t.Helper()
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 		"claim_markdown":     "shape-approved",
@@ -210,7 +210,7 @@ func TestPlanAmend_RequiresInitialPlan(t *testing.T) {
 		"reason":          "amend before claim",
 	}))
 	text := firstText(res)
-	if !strings.Contains(text, "story_workflow_claim") {
-		t.Errorf("expected message directing to story_workflow_claim; got %s", text)
+	if !strings.Contains(text, "workflow_claim") {
+		t.Errorf("expected message directing to workflow_claim; got %s", text)
 	}
 }

@@ -19,7 +19,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
-// claimFixture wires the harness for story_contract_claim tests: a
+// claimFixture wires the harness for contract_claim tests: a
 // workspace + project + 4 active system-scope contract docs + a
 // parent story with a fully-laid-out 4-CI workflow + a registered
 // session for the caller with an orchestrator grant stamped so the
@@ -216,7 +216,7 @@ func (f *claimFixture) mintSessionGrant(t *testing.T, sessionID string) string {
 func TestClaim_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"permissions_claim":    []string{"Bash:go_test"},
@@ -255,7 +255,7 @@ func TestClaim_PredecessorNotTerminal(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 	// Try to claim CI[2] (develop) while CI[0] + CI[1] are still ready.
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[2].ID,
 		"session_id":           f.sessionID,
 	}))
@@ -274,7 +274,7 @@ func TestClaim_PredecessorNotTerminal(t *testing.T) {
 func TestClaim_SessionNotRegistered(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           "ghost-session",
 	}))
@@ -301,7 +301,7 @@ func TestClaim_SessionStale(t *testing.T) {
 		t.Fatalf("touch: %v", err)
 	}
 
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	}))
@@ -318,7 +318,7 @@ func TestClaim_CINotReady(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 	// Claim CI[0] first.
-	if _, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	})); err != nil {
@@ -329,7 +329,7 @@ func TestClaim_CINotReady(t *testing.T) {
 	if _, err := f.server.contracts.UpdateStatus(f.ctx, f.cis[0].ID, contract.StatusPassed, "user_alice", f.now, nil); err != nil {
 		t.Fatalf("force passed: %v", err)
 	}
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	}))
@@ -352,7 +352,7 @@ func TestClaim_GrantMismatch(t *testing.T) {
 	f.mintSessionGrant(t, otherSession)
 
 	// Session A claims.
-	if _, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	})); err != nil {
@@ -360,7 +360,7 @@ func TestClaim_GrantMismatch(t *testing.T) {
 	}
 
 	// Session B attempts.
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           otherSession,
 	}))
@@ -376,7 +376,7 @@ func TestClaim_GrantMismatch(t *testing.T) {
 func TestClaim_Amend(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
-	first, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	first, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"plan_markdown":        "initial plan",
@@ -392,7 +392,7 @@ func TestClaim_Amend(t *testing.T) {
 		t.Fatalf("first missing plan")
 	}
 
-	second, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	second, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"plan_markdown":        "amended plan",
@@ -425,7 +425,7 @@ func TestClaim_Amend(t *testing.T) {
 func TestClaim_LedgerShapes(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"permissions_claim":    []string{"Bash:go_test", "Write:**"},
@@ -480,7 +480,7 @@ func TestClaim_LedgerShapes(t *testing.T) {
 func TestClaim_CINotFound(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": "ci_ghost",
 		"session_id":           f.sessionID,
 	}))
@@ -497,7 +497,7 @@ func TestClaim_HappyChain(t *testing.T) {
 	f := newClaimFixture(t)
 	// Claim → pass → claim → pass chain of 4.
 	for i, ci := range f.cis {
-		res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+		res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 			"contract_instance_id": ci.ID,
 			"session_id":           f.sessionID,
 		}))
@@ -518,7 +518,7 @@ func TestResume_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 	// Claim first.
-	if _, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	})); err != nil {
@@ -528,7 +528,7 @@ func TestResume_HappyPath(t *testing.T) {
 	// rebind target.
 	newSess := "fresh-session"
 	newGrant := f.mintSessionGrant(t, newSess)
-	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
+	res, err := f.server.handleContractResume(f.callerCtx(), newCallToolReq("contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           newSess,
 		"reason":               "harness restart",

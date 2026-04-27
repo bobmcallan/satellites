@@ -105,12 +105,12 @@ func (s *Server) handleProjectWorkflowSpecSet(ctx context.Context, req mcpgo.Cal
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryWorkflowClaim validates proposed against the project's
+// handleWorkflowClaim validates proposed against the project's
 // spec, resolves each contract_name to its document, and creates one
 // ContractInstance per slot. Idempotent on re-claim — returns the
 // existing CIs if a kind:workflow-claim row already exists for the
 // story.
-func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
 	storyID, err := req.RequireString("story_id")
@@ -236,7 +236,7 @@ func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToo
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_workflow_claim").
+		Str("tool", "workflow_claim").
 		Str("story_id", storyID).
 		Int("ci_count", len(cis)).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
@@ -244,9 +244,9 @@ func (s *Server) handleStoryWorkflowClaim(ctx context.Context, req mcpgo.CallToo
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryContractNext is read-only: returns the lowest-sequence
+// handleContractNext is read-only: returns the lowest-sequence
 // ready CI plus skills bound to its contract document.
-func (s *Server) handleStoryContractNext(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleContractNext(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
 	storyID, err := req.RequireString("story_id")
@@ -285,7 +285,7 @@ func (s *Server) handleStoryContractNext(ctx context.Context, req mcpgo.CallTool
 	body, _ := json.Marshal(resp)
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_contract_next").
+		Str("tool", "contract_next").
 		Str("story_id", storyID).
 		Str("ci_id", next.ID).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
@@ -348,7 +348,7 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	if len(existing) == 0 {
-		return mcpgo.NewToolResultError("plan_amend requires an initial workflow — call story_workflow_claim first"), nil
+		return mcpgo.NewToolResultError("plan_amend requires an initial workflow — call workflow_claim first"), nil
 	}
 
 	spec, err := s.loadWorkflowSpec(ctx, st.ProjectID, memberships)

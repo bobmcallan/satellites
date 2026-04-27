@@ -60,7 +60,9 @@ func TestMCPInfoToolRespondsOverHTTP(t *testing.T) {
 		t.Fatalf("initialize error: %v", initResp["error"])
 	}
 
-	// 3. tools/list must include satellites_info.
+	// 3. tools/list must include satellites_info; the retired
+	// story_*-prefixed verb names from story_775a7b49 must be absent
+	// from whatever the server advertises.
 	listReq := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
@@ -72,14 +74,33 @@ func TestMCPInfoToolRespondsOverHTTP(t *testing.T) {
 	}
 	result, _ := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	var found bool
+	advertised := make(map[string]bool, len(tools))
 	for _, raw := range tools {
-		if tool, ok := raw.(map[string]any); ok && tool["name"] == "satellites_info" {
-			found = true
+		if tool, ok := raw.(map[string]any); ok {
+			if name, _ := tool["name"].(string); name != "" {
+				advertised[name] = true
+			}
 		}
 	}
-	if !found {
-		t.Fatalf("tools/list did not advertise satellites_info; got %+v", tools)
+	if !advertised["satellites_info"] {
+		t.Fatalf("tools/list did not advertise satellites_info; got %v", advertised)
+	}
+	// story_775a7b49: ensure none of the retired prefixed names leaked
+	// back into the registration. The bare DEV container does not wire
+	// a DB so the contract-family verbs are not advertised here; the
+	// new-names-present check lives in the contractFixture-backed unit
+	// test TestRegisteredToolNames in internal/mcpserver.
+	for _, gone := range []string{
+		"story_workflow_claim",
+		"story_contract_next",
+		"story_contract_claim",
+		"story_contract_close",
+		"story_contract_resume",
+		"story_contract_respond",
+	} {
+		if advertised[gone] {
+			t.Errorf("tools/list still advertises retired name %q (story_775a7b49 rename)", gone)
+		}
 	}
 
 	// 4. tools/call satellites_info returns the version payload.

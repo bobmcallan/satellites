@@ -338,7 +338,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("category", mcpgo.Description("feature | bug | improvement | infrastructure | documentation")),
 			mcpgo.WithArray("tags", mcpgo.Description("Free-form tags (e.g. epic:v4-stories)."),
 				mcpgo.Items(map[string]any{"type": "string"})),
-			mcpgo.WithString("configuration_id", mcpgo.Description("Optional document id of an active type=configuration row in the same workspace. When set, story_workflow_claim with no proposed_contracts derives the workflow from this Configuration's ContractRefs.")),
+			mcpgo.WithString("configuration_id", mcpgo.Description("Optional document id of an active type=configuration row in the same workspace. When set, workflow_claim with no proposed_contracts derives the workflow from this Configuration's ContractRefs.")),
 		)
 		s.mcp.AddTool(createStoryTool, s.handleStoryCreate)
 
@@ -387,7 +387,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(specSetTool, s.handleProjectWorkflowSpecSet)
 
-		workflowClaimTool := mcpgo.NewTool("story_workflow_claim",
+		workflowClaimTool := mcpgo.NewTool("workflow_claim",
 			mcpgo.WithDescription("Lock a workflow shape for a story. Validates proposed_contracts against the project's workflow_spec, resolves each contract_name to a document{type=contract}, creates one contract_instance per slot (all status=ready), and writes a kind:workflow-claim ledger row. Resolution precedence when proposed_contracts is omitted: story.configuration_id (story_4ca6cb1b) → agent.default_configuration_id when agent_id is supplied (story_fb600b97) → project workflow_spec default. Idempotent: re-calling with an existing workflow returns the existing CIs."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
 			mcpgo.WithArray("proposed_contracts", mcpgo.Description("Ordered list of contract_name slots. When omitted, the resolution precedence above selects the workflow shape."),
@@ -395,7 +395,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("claim_markdown", mcpgo.Description("Agent's workflow-shape rationale.")),
 			mcpgo.WithString("agent_id", mcpgo.Description("Optional document id of an active type=agent in the same workspace. When supplied AND the story has no configuration_id AND no proposed_contracts are passed, the agent's default_configuration_id (when set) sources the workflow shape.")),
 		)
-		s.mcp.AddTool(workflowClaimTool, s.handleStoryWorkflowClaim)
+		s.mcp.AddTool(workflowClaimTool, s.handleWorkflowClaim)
 
 		agentComposeTool := mcpgo.NewTool("agent_compose",
 			mcpgo.WithDescription("Create a type=agent document carrying explicit skill_refs + permission_patterns. When ephemeral=true the agent is scoped to story_id and the project_status sweeper archives it after SATELLITES_EPHEMERAL_AGENT_RETENTION_HOURS once the story reaches a terminal state. Writes a kind:agent-compose ledger row capturing {agent_id, name, skill_refs, permission_patterns, story_id, ephemeral, reason} in Structured. story_b19260d8."),
@@ -425,14 +425,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(planAmendTool, s.handlePlanAmend)
 
-		contractNextTool := mcpgo.NewTool("story_contract_next",
+		contractNextTool := mcpgo.NewTool("contract_next",
 			mcpgo.WithDescription("Return the lowest-sequence contract_instance with status=ready for a story, plus any document{type=skill} rows whose contract_binding matches the contract's id. Read-only — does NOT claim."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
 		)
-		s.mcp.AddTool(contractNextTool, s.handleStoryContractNext)
+		s.mcp.AddTool(contractNextTool, s.handleContractNext)
 
 		if s.sessions != nil {
-			claimTool := mcpgo.NewTool("story_contract_claim",
+			claimTool := mcpgo.NewTool("contract_claim",
 				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true)."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Claude Code harness chat UUID — must be registered in the session registry.")),
@@ -442,9 +442,9 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 					mcpgo.Items(map[string]any{"type": "string"})),
 				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown. Written as a kind:plan ledger row and stamped on the CI's PlanLedgerID.")),
 			)
-			s.mcp.AddTool(claimTool, s.handleStoryContractClaim)
+			s.mcp.AddTool(claimTool, s.handleContractClaim)
 
-			closeTool := mcpgo.NewTool("story_contract_close",
+			closeTool := mcpgo.NewTool("contract_close",
 				mcpgo.WithDescription("Close a contract instance: writes a phase:close kind:close-request row, optional kind:evidence row, flips CI to passed, rolls the story to done when every required CI is terminal. On preplan close, proposed_workflow is validated against the project spec and written as a kind:workflow-claim row."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("close_markdown", mcpgo.Description("Close summary markdown.")),
@@ -455,22 +455,22 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 				mcpgo.WithArray("proposed_workflow", mcpgo.Description("Preplan-only: list of contract_names forming the remainder of the workflow."),
 					mcpgo.Items(map[string]any{"type": "string"})),
 			)
-			s.mcp.AddTool(closeTool, s.handleStoryContractClose)
+			s.mcp.AddTool(closeTool, s.handleContractClose)
 
-			respondTool := mcpgo.NewTool("story_contract_respond",
+			respondTool := mcpgo.NewTool("contract_respond",
 				mcpgo.WithDescription("Write a kind:review-response ledger row addressing the latest unresolved review-question on a CI. Reviewer re-invocation happens on the next close."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("response_markdown", mcpgo.Required(), mcpgo.Description("Agent's response markdown.")),
 			)
-			s.mcp.AddTool(respondTool, s.handleStoryContractRespond)
+			s.mcp.AddTool(respondTool, s.handleContractRespond)
 
-			resumeTool := mcpgo.NewTool("story_contract_resume",
+			resumeTool := mcpgo.NewTool("contract_resume",
 				mcpgo.WithDescription("Resume a CI. When the CI is claimed, rebinds the session. When the CI is passed, reopens it: flips it back to claimed, dereferences its prior plan + action-claim rows, and flips downstream required CIs back to ready. Enforces per-CI + per-story resume caps (SATELLITES_MAX_RESUMES_PER_CI / _PER_STORY)."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session to bind onto the CI.")),
 				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Human-readable reason written to the resume row.")),
 			)
-			s.mcp.AddTool(resumeTool, s.handleStoryContractResume)
+			s.mcp.AddTool(resumeTool, s.handleContractResume)
 
 			whoamiTool := mcpgo.NewTool("session_whoami",
 				mcpgo.WithDescription("Return the caller's session registry row for the given session_id. Returns a structured session_not_registered error when the session is not in the registry."),

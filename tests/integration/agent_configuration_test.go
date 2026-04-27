@@ -163,7 +163,7 @@ func TestAgentConfiguration_PrecedenceAndReverseFK(t *testing.T) {
 		"title":      "story-no-cfg-with-agent",
 	})
 	story1ID, _ := story1["id"].(string)
-	claim1 := callTool(t, ctx, mcpURL, "key_agentcfg", "story_workflow_claim", map[string]any{
+	claim1 := callTool(t, ctx, mcpURL, "key_agentcfg", "workflow_claim", map[string]any{
 		"story_id": story1ID,
 		"agent_id": agentID,
 	})
@@ -180,7 +180,7 @@ func TestAgentConfiguration_PrecedenceAndReverseFK(t *testing.T) {
 		"configuration_id": cfgBID,
 	})
 	story2ID, _ := story2["id"].(string)
-	claim2 := callTool(t, ctx, mcpURL, "key_agentcfg", "story_workflow_claim", map[string]any{
+	claim2 := callTool(t, ctx, mcpURL, "key_agentcfg", "workflow_claim", map[string]any{
 		"story_id": story2ID,
 		"agent_id": agentID,
 	})
@@ -195,7 +195,7 @@ func TestAgentConfiguration_PrecedenceAndReverseFK(t *testing.T) {
 		"title":      "story-default",
 	})
 	story3ID, _ := story3["id"].(string)
-	claim3 := callTool(t, ctx, mcpURL, "key_agentcfg", "story_workflow_claim", map[string]any{
+	claim3 := callTool(t, ctx, mcpURL, "key_agentcfg", "workflow_claim", map[string]any{
 		"story_id": story3ID,
 	})
 	cis3, _ := claim3["contract_instances"].([]any)

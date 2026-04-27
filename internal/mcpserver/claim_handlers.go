@@ -27,12 +27,12 @@ func resolveSessionStaleness() time.Duration {
 	return session.StalenessDefault
 }
 
-// handleStoryContractClaim is the keystone claim verb: it runs the
+// handleContractClaim is the keystone claim verb: it runs the
 // process-order gate, verifies the session, writes action-claim and
 // optional plan ledger rows, and transitions the CI to claimed.
 // Same-session re-claim is an amend: prior plan + action_claim rows
 // are dereferenced and rewritten.
-func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
 	ciID, err := req.RequireString("contract_instance_id")
@@ -173,7 +173,7 @@ func (s *Server) handleStoryContractClaim(ctx context.Context, req mcpgo.CallToo
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_contract_claim").
+		Str("tool", "contract_claim").
 		Str("ci_id", ci.ID).
 		Bool("amended", amend).
 		Int64("duration_ms", time.Since(start).Milliseconds()).

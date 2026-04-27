@@ -25,7 +25,7 @@ func newCloseFixture(t *testing.T) *closeFixture {
 // subsequent close path has a realistic input.
 func (f *closeFixture) claim(t *testing.T, idx int, plan string) {
 	t.Helper()
-	res, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[idx].ID,
 		"session_id":           f.sessionID,
 		"plan_markdown":        plan,
@@ -40,7 +40,7 @@ func TestClose_HappyPath(t *testing.T) {
 	f := newCloseFixture(t)
 	f.claim(t, 0, "plan body")
 
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 		"evidence_markdown":    "evidence body",
@@ -78,7 +78,7 @@ func TestClose_EvidenceAndCloseRequestRows(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	f.claim(t, 0, "")
-	res, _ := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, _ := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 		"evidence_markdown":    "ev",
@@ -125,7 +125,7 @@ func TestClose_RollsStoryToDone(t *testing.T) {
 	// story_close slot.
 	for i := 0; i < 3; i++ {
 		f.claim(t, i, "")
-		res, _ := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+		res, _ := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 			"contract_instance_id": f.cis[i].ID,
 			"close_markdown":       fmt.Sprintf("close %d", i),
 		}))
@@ -147,7 +147,7 @@ func TestClose_PreplanReentryWorkflowClaim(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	f.claim(t, 0, "")
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "preplan done",
 		"proposed_workflow":    []string{"preplan", "plan", "develop", "story_close"},
@@ -175,7 +175,7 @@ func TestClose_PreplanWorkflowSpecInvalid(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	f.claim(t, 0, "")
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "invalid shape",
 		"proposed_workflow":    []string{"plan", "develop", "story_close"}, // missing preplan
@@ -193,14 +193,14 @@ func TestClose_PlanDeferred(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	// Claim without a plan (deferred).
-	if _, err := f.server.handleStoryContractClaim(f.callerCtx(), newCallToolReq("story_contract_claim", map[string]any{
+	if _, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 	})); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
-	res, err := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "plan deferred",
 		"plan_markdown":        "the deferred plan",
@@ -226,7 +226,7 @@ func TestRespond_WritesRow(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
 	f.claim(t, 0, "")
-	res, err := f.server.handleStoryContractRespond(f.callerCtx(), newCallToolReq("story_contract_respond", map[string]any{
+	res, err := f.server.handleContractRespond(f.callerCtx(), newCallToolReq("contract_respond", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"response_markdown":    "here is the answer",
 	}))
@@ -265,7 +265,7 @@ func TestResume_RebindSameSessionClaimed(t *testing.T) {
 	// Mint a fresh session + grant for the rebind target.
 	newSess := "resume-newsession"
 	newGrant := f.mintSessionGrant(t, newSess)
-	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
+	res, err := f.server.handleContractResume(f.callerCtx(), newCallToolReq("contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           newSess,
 		"reason":               "rebind",
@@ -287,7 +287,7 @@ func TestResume_ReopenPassedCI(t *testing.T) {
 	f := newCloseFixture(t)
 	f.claim(t, 0, "initial plan")
 	// Close CI[0] → passed.
-	if res, _ := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	if res, _ := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"close_markdown":       "done",
 	})); res.IsError {
@@ -296,7 +296,7 @@ func TestResume_ReopenPassedCI(t *testing.T) {
 	// Claim + close CI[1] → passed (so downstream rollback has
 	// something to flip).
 	f.claim(t, 1, "")
-	if res, _ := f.server.handleStoryContractClose(f.callerCtx(), newCallToolReq("story_contract_close", map[string]any{
+	if res, _ := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
 		"contract_instance_id": f.cis[1].ID,
 		"close_markdown":       "done",
 	})); res.IsError {
@@ -306,7 +306,7 @@ func TestResume_ReopenPassedCI(t *testing.T) {
 	before, _ := f.server.contracts.GetByID(f.ctx, f.cis[0].ID, nil)
 	priorPlan := before.PlanLedgerID
 
-	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
+	res, err := f.server.handleContractResume(f.callerCtx(), newCallToolReq("contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"reason":               "reopen to amend",
@@ -370,7 +370,7 @@ func TestResume_CapPerCI(t *testing.T) {
 		}
 	}
 
-	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
+	res, err := f.server.handleContractResume(f.callerCtx(), newCallToolReq("contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"reason":               "one too many",
@@ -404,7 +404,7 @@ func TestResume_CapPerStory(t *testing.T) {
 		}
 	}
 
-	res, err := f.server.handleStoryContractResume(f.callerCtx(), newCallToolReq("story_contract_resume", map[string]any{
+	res, err := f.server.handleContractResume(f.callerCtx(), newCallToolReq("contract_resume", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
 		"reason":               "story cap",

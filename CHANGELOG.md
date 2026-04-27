@@ -8,6 +8,10 @@ The `[satellites]` and `[satellites-agent]` patches in `.version` are bumped per
 
 (Add entries via `scripts/release-notes.sh`.)
 
+### Changed
+
+- **MCP verb namespace flatten** (story_775a7b49, `epic:role-based-execution`) — registered tool names drop the redundant `story_` prefix at the MCP registration site (`internal/mcpserver/mcp.go`): `story_workflow_claim` → `workflow_claim`, and `story_contract_{next,claim,close,resume,respond}` → `contract_{next,claim,close,resume,respond}`. Handler Go function names are renamed in lockstep (`handleStoryWorkflowClaim` → `handleWorkflowClaim`, etc.) for consistency. Pure rename — no functional changes; per `pr_no_unrequested_compat` no aliases or deprecated wrappers are kept. The five verbs the original AC referenced that do not exist in v4 source (`story_workflow_extend`, `story_acceptance_criteria_amend`, `internal_agent_get`/`_invoke`/`_list`) were struck through at preplan; `internal/seeds/` and the seed-loader test are also N/A in v4. The deps-wired registration is asserted by `TestRegisteredToolNames_RenameFlatten` (`internal/mcpserver/registered_tool_names_test.go`); the bare DEV container in `tests/integration/mcp_test.go` checks that no retired name leaks back into `tools/list`. Updates `docs/architecture.md` and `internal/session/session.go` doc-comments.
+
 ### Added
 
 - **Configuration typed-document** (story_d371f155, `epic:configuration-bundles`) — new `type=configuration` document bundling refs to one ordered contract list (workflow shape) plus skill and principle ref sets. Project-scoped, CRUD via existing `satellites_document_*` MCP verbs, FK-validated at the store layer (refs must resolve to active documents of the matching type in the same workspace). `internal/document/configuration.go` carries the `Configuration` Go struct + Marshal/Unmarshal helpers; `internal/document/store.go` adds `ErrDanglingConfigurationRef` + `validateConfigurationRefsLocked`; `internal/document/surreal.go` mirrors the validator for the SurrealDB-backed store. Stories and agents will pick a Configuration in follow-up stories of the same epic.

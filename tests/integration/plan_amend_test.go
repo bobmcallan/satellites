@@ -20,7 +20,7 @@ import (
 //  1. Boot Surreal + satellites server.
 //  2. Create a project + the default contract documents.
 //  3. Create a story with multi-AC acceptance criteria.
-//  4. story_workflow_claim → 4 initial CIs (preplan/plan/develop/story_close).
+//  4. workflow_claim → 4 initial CIs (preplan/plan/develop/story_close).
 //  5. plan_amend appends a develop CI scoped to AC=[2] under the original.
 //  6. Assert: new CI carries ac_scope=[2] + parent_invocation_id =
 //     original-develop-id; kind:plan-amend ledger row visible via
@@ -99,7 +99,7 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 	})
 	storyID, _ := storyResp["id"].(string)
 
-	claim := callTool(t, ctx, mcpURL, "key_planamend", "story_workflow_claim", map[string]any{
+	claim := callTool(t, ctx, mcpURL, "key_planamend", "workflow_claim", map[string]any{
 		"story_id":           storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 		"claim_markdown":     "initial workflow",

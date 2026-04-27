@@ -21,7 +21,7 @@ import (
 //  2. Create Configuration A with ContractRefs = [c1, c2, c3] (and the
 //     two required system slots — preplan, plan, develop, story_close).
 //  3. Create story with configuration_id = A.
-//  4. story_workflow_claim with no proposed_contracts → CIs match A's
+//  4. workflow_claim with no proposed_contracts → CIs match A's
 //     contract list (not project default).
 //  5. story_update clears configuration_id, then re-assigns → response
 //     reflects the change.
@@ -153,7 +153,7 @@ func TestStoryConfiguration_AssignmentAndResolution(t *testing.T) {
 	}
 
 	// 6. workflow_claim with no proposed_contracts → CIs derive from Configuration.
-	claim := callTool(t, ctx, mcpURL, "key_storycfg", "story_workflow_claim", map[string]any{
+	claim := callTool(t, ctx, mcpURL, "key_storycfg", "workflow_claim", map[string]any{
 		"story_id":       storyID,
 		"claim_markdown": "from configuration A",
 	})
@@ -205,7 +205,7 @@ func TestStoryConfiguration_AssignmentAndResolution(t *testing.T) {
 		"title":      "story-no-cfg",
 	})
 	storyNullID, _ := storyNull["id"].(string)
-	claimNull := callTool(t, ctx, mcpURL, "key_storycfg", "story_workflow_claim", map[string]any{
+	claimNull := callTool(t, ctx, mcpURL, "key_storycfg", "workflow_claim", map[string]any{
 		"story_id":       storyNullID,
 		"claim_markdown": "default fallback",
 	})

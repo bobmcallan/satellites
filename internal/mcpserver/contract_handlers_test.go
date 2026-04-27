@@ -174,7 +174,7 @@ func TestProjectWorkflowSpec_Roundtrip(t *testing.T) {
 func TestWorkflowClaim_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 		"claim_markdown":     "shape-approved",
@@ -211,7 +211,7 @@ func TestWorkflowClaim_HappyPath(t *testing.T) {
 func TestWorkflowClaim_MissingRequiredSlot(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
@@ -232,7 +232,7 @@ func TestWorkflowClaim_CountOutOfRange(t *testing.T) {
 		props = append(props, "develop")
 	}
 	props = append(props, "story_close")
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": props,
 	}))
@@ -248,7 +248,7 @@ func TestWorkflowClaim_CountOutOfRange(t *testing.T) {
 func TestWorkflowClaim_UnknownContract(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "bogus", "develop", "story_close"},
 	}))
@@ -265,7 +265,7 @@ func TestWorkflowClaim_Idempotent(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
 	proposed := []string{"preplan", "plan", "develop", "story_close"}
-	first, _ := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	first, _ := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": proposed,
 	}))
@@ -277,7 +277,7 @@ func TestWorkflowClaim_Idempotent(t *testing.T) {
 	}
 	_ = json.Unmarshal([]byte(firstText(first)), &firstBody)
 
-	second, _ := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	second, _ := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": proposed,
 	}))
@@ -315,14 +315,14 @@ func TestWorkflowClaim_Idempotent(t *testing.T) {
 func TestContractNext_OrderedBySequence(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	_, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	_, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 	}))
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	res, err := f.server.handleStoryContractNext(f.callerCtx(), newCallToolReq("story_contract_next", map[string]any{
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
 		"story_id": f.storyID,
 	}))
 	if err != nil {
@@ -351,7 +351,7 @@ func TestContractNext_OrderedBySequence(t *testing.T) {
 func TestContractNext_NoReadyReturnsNil(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryContractNext(f.callerCtx(), newCallToolReq("story_contract_next", map[string]any{
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
 		"story_id": f.storyID,
 	}))
 	if err != nil {
@@ -368,7 +368,7 @@ func TestContractNext_NoReadyReturnsNil(t *testing.T) {
 func TestContractNext_ReturnsSkills(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	claim, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 	}))
@@ -395,7 +395,7 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 		t.Fatalf("seed skill: %v", err)
 	}
 
-	res, err := f.server.handleStoryContractNext(f.callerCtx(), newCallToolReq("story_contract_next", map[string]any{
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
 		"story_id": f.storyID,
 	}))
 	if err != nil || res.IsError {
@@ -410,7 +410,7 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 func TestWorkflowClaim_StoryNotFound(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           "sty_ghost",
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
 	}))
@@ -428,7 +428,7 @@ func TestWorkflowClaim_StoryNotFound(t *testing.T) {
 func TestContractNext_StoryNotFound(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryContractNext(f.callerCtx(), newCallToolReq("story_contract_next", map[string]any{
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
 		"story_id": "sty_ghost",
 	}))
 	if err != nil {
@@ -445,7 +445,7 @@ func TestContractNext_StoryNotFound(t *testing.T) {
 func TestWorkflowClaim_DefaultsFromSpec(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	res, err := f.server.handleStoryWorkflowClaim(f.callerCtx(), newCallToolReq("story_workflow_claim", map[string]any{
+	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":       f.storyID,
 		"claim_markdown": "no-proposed — spec defaults",
 	}))
