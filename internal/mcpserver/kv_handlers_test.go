@@ -294,6 +294,73 @@ func TestKVHandlers_AuthMatrix(t *testing.T) {
 	}
 }
 
+// TestKVHandlers_GetResolved exercises the precedence chain end-to-end
+// through the MCP handler. story_405b7221.
+func TestKVHandlers_GetResolved(t *testing.T) {
+	t.Parallel()
+	s := newKVTestServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ws, _ := s.workspaces.Create(ctx, "u_alice", "alpha", now)
+	_ = s.workspaces.AddMember(ctx, ws.ID, "u_alice", workspace.RoleAdmin, "u_alice", now)
+	proj, _ := s.projects.Create(ctx, "u_alice", ws.ID, "alpha-1", now)
+
+	admin := CallerIdentity{UserID: "u_admin", GlobalAdmin: true}
+	alice := CallerIdentity{UserID: "u_alice"}
+
+	// Seed every tier with the same key.
+	_, _ = s.handleKVSet(withCaller(ctx, admin), newCallToolReq("kv_set", map[string]any{
+		"scope": "system", "key": "theme", "value": "system-value",
+	}))
+	_, _ = s.handleKVSet(withCaller(ctx, alice), newCallToolReq("kv_set", map[string]any{
+		"scope": "workspace", "workspace_id": ws.ID, "key": "theme", "value": "ws-value",
+	}))
+	_, _ = s.handleKVSet(withCaller(ctx, alice), newCallToolReq("kv_set", map[string]any{
+		"scope": "project", "project_id": proj.ID, "key": "theme", "value": "proj-value",
+	}))
+	_, _ = s.handleKVSet(withCaller(ctx, alice), newCallToolReq("kv_set", map[string]any{
+		"scope": "user", "workspace_id": ws.ID, "user_id": "u_alice", "key": "theme", "value": "user-value",
+	}))
+
+	// system wins
+	res, _ := s.handleKVGetResolved(withCaller(ctx, alice), newCallToolReq("kv_get_resolved", map[string]any{
+		"key":          "theme",
+		"workspace_id": ws.ID,
+		"project_id":   proj.ID,
+	}))
+	if res.IsError {
+		t.Fatalf("kv_get_resolved error: %s", firstText(res))
+	}
+	var got map[string]any
+	_ = json.Unmarshal([]byte(firstText(res)), &got)
+	if got["value"] != "system-value" {
+		t.Errorf("system-tier present but got %v, want system-value", got["value"])
+	}
+	if got["resolved_scope"] != "system" {
+		t.Errorf("resolved_scope = %v, want system", got["resolved_scope"])
+	}
+}
+
+// TestKVHandlers_GetResolved_NotFound — kv_get_resolved returns
+// not_found when no scope has the key.
+func TestKVHandlers_GetResolved_NotFound(t *testing.T) {
+	t.Parallel()
+	s := newKVTestServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ws, _ := s.workspaces.Create(ctx, "u_alice", "alpha", now)
+	_ = s.workspaces.AddMember(ctx, ws.ID, "u_alice", workspace.RoleAdmin, "u_alice", now)
+
+	res, _ := s.handleKVGetResolved(withCaller(ctx, CallerIdentity{UserID: "u_alice"}),
+		newCallToolReq("kv_get_resolved", map[string]any{
+			"key":          "nonexistent",
+			"workspace_id": ws.ID,
+		}))
+	if !res.IsError {
+		t.Fatal("expected not_found error")
+	}
+}
+
 // TestKVHandlers_DeleteHonoursAuth confirms kv_delete uses the same
 // gate as kv_set.
 func TestKVHandlers_DeleteHonoursAuth(t *testing.T) {

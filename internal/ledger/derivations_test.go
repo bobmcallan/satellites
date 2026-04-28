@@ -190,6 +190,153 @@ func TestKVProjectionScoped_TombstoneSuppressesKey(t *testing.T) {
 	}
 }
 
+func TestKVResolveScoped_SystemAlwaysWins(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	// Seed every tier with the same key.
+	_, _ = store.Append(ctx, LedgerEntry{Type: TypeKV, Tags: []string{"scope:system", "key:theme"}, Content: "system-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:workspace", "key:theme"}, Content: "ws-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:theme"}, Content: "proj-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:user", "user:alice", "key:theme"}, Content: "user-value"}, t0)
+
+	row, found, err := KVResolveScoped(ctx, store, "theme", KVResolveOptions{
+		WorkspaceID: "ws_1", ProjectID: "proj_a", UserID: "alice",
+	}, []string{"", "ws_1"})
+	if err != nil {
+		t.Fatalf("KVResolveScoped: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if row.Value != "system-value" {
+		t.Errorf("value = %q, want system-value (system wins over all)", row.Value)
+	}
+	if row.Scope != KVScopeSystem {
+		t.Errorf("Scope = %q, want %q", row.Scope, KVScopeSystem)
+	}
+}
+
+func TestKVResolveScoped_UserBeatsProjectAndWorkspace(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:workspace", "key:theme"}, Content: "ws-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:theme"}, Content: "proj-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:user", "user:alice", "key:theme"}, Content: "user-value"}, t0)
+
+	row, found, err := KVResolveScoped(ctx, store, "theme", KVResolveOptions{
+		WorkspaceID: "ws_1", ProjectID: "proj_a", UserID: "alice",
+	}, []string{"", "ws_1"})
+	if err != nil || !found {
+		t.Fatalf("expected found=true, err=nil; got %v / %v", found, err)
+	}
+	if row.Value != "user-value" {
+		t.Errorf("value = %q, want user-value", row.Value)
+	}
+	if row.Scope != KVScopeUser {
+		t.Errorf("Scope = %q, want %q", row.Scope, KVScopeUser)
+	}
+}
+
+func TestKVResolveScoped_ProjectBeatsWorkspace(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:workspace", "key:theme"}, Content: "ws-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:theme"}, Content: "proj-value"}, t0)
+
+	row, _, _ := KVResolveScoped(ctx, store, "theme", KVResolveOptions{
+		WorkspaceID: "ws_1", ProjectID: "proj_a",
+	}, []string{"", "ws_1"})
+	if row.Value != "proj-value" {
+		t.Errorf("value = %q, want proj-value", row.Value)
+	}
+	if row.Scope != KVScopeProject {
+		t.Errorf("Scope = %q, want %q", row.Scope, KVScopeProject)
+	}
+}
+
+func TestKVResolveScoped_WorkspaceFallback(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:workspace", "key:theme"}, Content: "ws-value"}, t0)
+
+	row, found, _ := KVResolveScoped(ctx, store, "theme", KVResolveOptions{
+		WorkspaceID: "ws_1",
+	}, []string{"", "ws_1"})
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if row.Scope != KVScopeWorkspace {
+		t.Errorf("Scope = %q, want %q", row.Scope, KVScopeWorkspace)
+	}
+}
+
+func TestKVResolveScoped_PartialContextSystemOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	_, _ = store.Append(ctx, LedgerEntry{Type: TypeKV, Tags: []string{"scope:system", "key:default_lang"}, Content: "en"}, t0)
+
+	row, found, err := KVResolveScoped(ctx, store, "default_lang", KVResolveOptions{}, []string{""})
+	if err != nil || !found {
+		t.Fatalf("expected found=true err=nil, got %v / %v", found, err)
+	}
+	if row.Value != "en" || row.Scope != KVScopeSystem {
+		t.Errorf("got %+v, want value=en scope=system", row)
+	}
+}
+
+func TestKVResolveScoped_NotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	_, found, err := KVResolveScoped(ctx, store, "nonexistent", KVResolveOptions{
+		WorkspaceID: "ws_1", ProjectID: "proj_a", UserID: "alice",
+	}, []string{"", "ws_1"})
+	if err != nil {
+		t.Fatalf("KVResolveScoped: %v", err)
+	}
+	if found {
+		t.Error("expected found=false")
+	}
+}
+
+func TestKVResolveScoped_TombstoneAtTierBlocks(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	// Workspace value, then a user-tier tombstone, plus a system value
+	// further down. System still wins (always-on top); without system,
+	// the user-tier tombstone would block the user value while not
+	// preventing the workspace fallback (the tier reports "no value").
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:workspace", "key:theme"}, Content: "ws-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:user", "user:alice", "key:theme"}, Content: "user-value"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", Type: TypeKV, Tags: []string{"scope:user", "user:alice", "key:theme", KVTombstoneTag}, Content: ""}, t0.Add(time.Hour))
+
+	row, found, _ := KVResolveScoped(ctx, store, "theme", KVResolveOptions{
+		WorkspaceID: "ws_1", UserID: "alice",
+	}, []string{"", "ws_1"})
+	if !found || row.Scope != KVScopeWorkspace {
+		t.Errorf("after user tombstone: got scope=%q value=%q, want fallback to workspace", row.Scope, row.Value)
+	}
+}
+
 func TestKVProjectionScoped_PostTombstoneSetReinstates(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -421,6 +421,15 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(kvDeleteTool, s.handleKVDelete)
 
+		kvGetResolvedTool := mcpgo.NewTool("kv_get_resolved",
+			mcpgo.WithDescription("Resolve a KV key by walking system → user → project → workspace and returning the first hit. system always wins; otherwise lowest-tier wins (user > project > workspace). Missing identifiers skip the corresponding tier — system-only callers may omit all FKs. Returns {key, value, resolved_scope, ...} on hit or not_found. Read path; no auth gate beyond workspace membership. story_405b7221."),
+			mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("KV key to resolve.")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Optional. Required to read workspace, project, or user tiers.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Optional. Required to read the project tier.")),
+			mcpgo.WithString("user_id", mcpgo.Description("Optional. Defaults to the authenticated caller. Required (or defaulted) to read the user tier.")),
+		)
+		s.mcp.AddTool(kvGetResolvedTool, s.handleKVGetResolved)
+
 		kvListTool := mcpgo.NewTool("kv_list",
 			mcpgo.WithDescription("List all KV values at the named scope. Returns {scope, count, items[]} sorted by key. Tombstoned keys are excluded."),
 			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("KV scope: system|workspace|project|user.")),

@@ -180,6 +180,55 @@ func containsTag(tags []string, want string) bool {
 	return false
 }
 
+// KVResolveOptions configures KVResolveScoped. Each FK enables the
+// corresponding tier in the resolution chain — missing FKs cause the
+// resolver to skip that tier rather than error. story_405b7221.
+type KVResolveOptions struct {
+	WorkspaceID string
+	ProjectID   string
+	UserID      string
+}
+
+// KVResolveScoped walks the precedence chain `system → user → project →
+// workspace` and returns the first matching KVRow plus a found flag.
+// System always wins when a system-tier value exists; otherwise the
+// lowest-tier value in the caller's context wins (lowest = user, since
+// user > project > workspace per the directive in the design doc).
+//
+// Missing identifiers skip the tier rather than error: a system-only
+// caller (no WorkspaceID/ProjectID/UserID) only checks the system tier.
+//
+// The found flag distinguishes "no value" from "empty-string value":
+// callers that need the absence/presence signal must inspect the flag.
+// story_405b7221.
+func KVResolveScoped(ctx context.Context, store Store, key string, opts KVResolveOptions, memberships []string) (KVRow, bool, error) {
+	if key == "" {
+		return KVRow{}, false, fmt.Errorf("ledger: kv resolve: key is required")
+	}
+	tiers := []KVProjectionOptions{
+		{Scope: KVScopeSystem},
+	}
+	if opts.UserID != "" && opts.WorkspaceID != "" {
+		tiers = append(tiers, KVProjectionOptions{Scope: KVScopeUser, WorkspaceID: opts.WorkspaceID, UserID: opts.UserID})
+	}
+	if opts.ProjectID != "" {
+		tiers = append(tiers, KVProjectionOptions{Scope: KVScopeProject, WorkspaceID: opts.WorkspaceID, ProjectID: opts.ProjectID})
+	}
+	if opts.WorkspaceID != "" {
+		tiers = append(tiers, KVProjectionOptions{Scope: KVScopeWorkspace, WorkspaceID: opts.WorkspaceID})
+	}
+	for _, tier := range tiers {
+		rows, err := KVProjectionScoped(ctx, store, tier, memberships)
+		if err != nil {
+			return KVRow{}, false, fmt.Errorf("ledger: kv resolve: %w", err)
+		}
+		if row, present := rows[key]; present {
+			return row, true, nil
+		}
+	}
+	return KVRow{}, false, nil
+}
+
 // matchesScope filters a row against KVProjectionOptions. Legacy rows
 // without a `scope:*` tag are treated as project-scope.
 func matchesScope(opts KVProjectionOptions, e LedgerEntry, rowScope KVScope, rowUser string) bool {

@@ -315,6 +315,59 @@ func (s *Server) handleKVDelete(ctx context.Context, req mcpgo.CallToolRequest) 
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
+// handleKVGetResolved is the satellites_kv_get_resolved verb (story_405b7221).
+// Walks system → user → project → workspace, returning the first
+// matching value. Missing identifiers skip the corresponding tier.
+//
+// Reads remain unrestricted within workspace boundaries (memberships
+// filter handles tenancy). The caller's user_id defaults to caller.UserID.
+func (s *Server) handleKVGetResolved(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	key, err := req.RequireString("key")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	// Include the system sentinel so system-tier rows are visible to
+	// resolved reads from any caller.
+	memberships = append([]string{""}, memberships...)
+	opts := ledger.KVResolveOptions{
+		WorkspaceID: req.GetString("workspace_id", ""),
+		ProjectID:   req.GetString("project_id", ""),
+		UserID:      req.GetString("user_id", caller.UserID),
+	}
+	if opts.ProjectID != "" && opts.WorkspaceID == "" {
+		// Resolve workspace from the project so the workspace-tier
+		// fallback can still run.
+		opts.WorkspaceID = s.resolveProjectWorkspaceID(ctx, opts.ProjectID)
+	}
+	row, found, err := ledger.KVResolveScoped(ctx, s.ledger, key, opts, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if !found {
+		body, _ := json.Marshal(map[string]any{"error": "not_found", "key": key})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+	body, _ := json.Marshal(map[string]any{
+		"key":            row.Key,
+		"value":          row.Value,
+		"resolved_scope": row.Scope,
+		"updated_at":     row.UpdatedAt,
+		"updated_by":     row.UpdatedBy,
+		"entry_id":       row.EntryID,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "kv_get_resolved").
+		Str("key", key).
+		Str("resolved_scope", string(row.Scope)).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
 // handleKVList is the satellites_kv_list verb. Returns the full
 // projection for a (scope, ids) tuple as a sorted array.
 func (s *Server) handleKVList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
