@@ -29,6 +29,17 @@ import (
 // expressions), which is tracked as a follow-up so the unsafe-eval
 // grant can be dropped later.
 //
+// Note (epic:portal-csp-strict): every per-view template was migrated
+// to the @alpinejs/csp-compatible factory pattern in stories
+// story_9f526a90, story_ac9b77c6, story_597a6b9c, story_f7d5529d,
+// story_384ef71e, story_ecce93ea. The stitch story (story_21b228b1)
+// found that @alpinejs/csp@3.14.9 has an x-show reactivity bug
+// (x-show bindings don't re-evaluate when the bound property changes);
+// the CSP grant cannot be dropped until each x-show binding is
+// rewritten as a :class binding driven by a precomputed
+// "hidden-class" getter and the supporting CSS class is added to
+// portal.css. Tracked as follow-up; the grant stays for now.
+//
 // Exported so test harnesses (tests/portalui) can apply the same policy
 // the production server emits, ensuring chromedp tests run under the
 // same CSP regime as pprod.
