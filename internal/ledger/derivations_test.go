@@ -170,6 +170,46 @@ func TestKVProjectionScoped_RequiresScope(t *testing.T) {
 	}
 }
 
+func TestKVProjectionScoped_TombstoneSuppressesKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	// Initial set, then a tombstone deletes it. The projection must NOT
+	// surface either the value or the previous version.
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:doomed"}, Content: "v1"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:doomed", KVTombstoneTag}, Content: ""}, t0.Add(time.Hour))
+
+	kv, err := KVProjectionScoped(ctx, store, KVProjectionOptions{Scope: KVScopeProject, ProjectID: "proj_a"}, []string{"ws_1"})
+	if err != nil {
+		t.Fatalf("KVProjectionScoped: %v", err)
+	}
+	if _, present := kv["doomed"]; present {
+		t.Errorf("tombstoned key surfaced in projection: %v", kv["doomed"])
+	}
+}
+
+func TestKVProjectionScoped_PostTombstoneSetReinstates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	t0 := time.Now().UTC()
+
+	// set → tombstone → set should leave the key at the third value.
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:revived"}, Content: "v1"}, t0)
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:revived", KVTombstoneTag}, Content: ""}, t0.Add(time.Hour))
+	_, _ = store.Append(ctx, LedgerEntry{WorkspaceID: "ws_1", ProjectID: "proj_a", Type: TypeKV, Tags: []string{"scope:project", "key:revived"}, Content: "v3"}, t0.Add(2*time.Hour))
+
+	kv, err := KVProjectionScoped(ctx, store, KVProjectionOptions{Scope: KVScopeProject, ProjectID: "proj_a"}, []string{"ws_1"})
+	if err != nil {
+		t.Fatalf("KVProjectionScoped: %v", err)
+	}
+	if v := kv["revived"].Value; v != "v3" {
+		t.Errorf("revived = %q, want %q", v, "v3")
+	}
+}
+
 func TestKVProjection_RederivedAfterMutation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

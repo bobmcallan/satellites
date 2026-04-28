@@ -61,6 +61,13 @@ const (
 	kvUserTagPrefix  = "user:"
 )
 
+// KVTombstoneTag is the tag a KV row carries when it represents a
+// delete. The append-only ledger has no Delete primitive, so KV deletes
+// append a new row whose tags include `kind:tombstone`. KVProjectionScoped
+// treats a key whose latest row is a tombstone as absent — the projection
+// does not surface the prior value. story_3d392258.
+const KVTombstoneTag = "kind:tombstone"
+
 // KVProjectionOptions configures KVProjectionScoped. story_61abf197.
 //
 // Scope is required. The other identifier fields are required for
@@ -114,7 +121,15 @@ func KVProjectionScoped(ctx context.Context, store Store, opts KVProjectionOptio
 	if err != nil {
 		return nil, fmt.Errorf("ledger: kv projection list: %w", err)
 	}
-	out := make(map[string]KVRow, len(rows))
+	// Two-pass scan: track the latest row per key (regardless of whether
+	// it's a tombstone), then exclude keys whose latest is a tombstone.
+	type latest struct {
+		row         LedgerEntry
+		isTombstone bool
+		scope       KVScope
+		userID      string
+	}
+	winners := make(map[string]latest, len(rows))
 	for _, e := range rows {
 		key := extractKey(e.Tags)
 		if key == "" {
@@ -125,20 +140,44 @@ func KVProjectionScoped(ctx context.Context, store Store, opts KVProjectionOptio
 		if !matchesScope(opts, e, rowScope, rowUser) {
 			continue
 		}
-		if existing, ok := out[key]; ok && existing.UpdatedAt.After(e.CreatedAt) {
+		if cur, ok := winners[key]; ok && cur.row.CreatedAt.After(e.CreatedAt) {
+			continue
+		}
+		winners[key] = latest{
+			row:         e,
+			isTombstone: containsTag(e.Tags, KVTombstoneTag),
+			scope:       rowScope,
+			userID:      rowUser,
+		}
+	}
+	out := make(map[string]KVRow, len(winners))
+	for key, w := range winners {
+		if w.isTombstone {
 			continue
 		}
 		out[key] = KVRow{
 			Key:       key,
-			Value:     e.Content,
-			Scope:     rowScope,
-			UserID:    rowUser,
-			UpdatedAt: e.CreatedAt,
-			UpdatedBy: e.CreatedBy,
-			EntryID:   e.ID,
+			Value:     w.row.Content,
+			Scope:     w.scope,
+			UserID:    w.userID,
+			UpdatedAt: w.row.CreatedAt,
+			UpdatedBy: w.row.CreatedBy,
+			EntryID:   w.row.ID,
 		}
 	}
 	return out, nil
+}
+
+// containsTag is a small helper for tombstone-detection on the
+// projection path. The ledger's own anyTagMatch is unexported so we
+// keep the trivial inline scan local to derivations.
+func containsTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesScope filters a row against KVProjectionOptions. Legacy rows

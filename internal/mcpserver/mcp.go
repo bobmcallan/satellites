@@ -387,6 +387,49 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(specSetTool, s.handleProjectWorkflowSpecSet)
 
+		// Unified KV verbs (story_3d392258). Single family taking a
+		// `scope` arg covering the four tiers from epic:kv-scopes.
+		// Per-scope role gates land in story_eb17cb16.
+		kvGetTool := mcpgo.NewTool("kv_get",
+			mcpgo.WithDescription("Read a KV value at the named scope. scope=system|workspace|project|user. Returns {key, value, scope, updated_at, updated_by, entry_id} or not_found. Scope-strict: does not walk the resolution chain (see kv_get_resolved in story_405b7221)."),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("KV scope: system|workspace|project|user.")),
+			mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("KV key.")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Required for scope=workspace and scope=user.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Required for scope=project.")),
+			mcpgo.WithString("user_id", mcpgo.Description("scope=user only. Defaults to the authenticated caller.")),
+		)
+		s.mcp.AddTool(kvGetTool, s.handleKVGet)
+
+		kvSetTool := mcpgo.NewTool("kv_set",
+			mcpgo.WithDescription("Write a KV value at the named scope. Appends a Type=kv ledger row tagged scope:<scope> + key:<name> (+ user:<id> for scope=user). scope=system requires global_admin; finer per-scope role gates land in story_eb17cb16."),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("KV scope: system|workspace|project|user.")),
+			mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("KV key.")),
+			mcpgo.WithString("value", mcpgo.Required(), mcpgo.Description("KV value (string).")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Required for scope=workspace and scope=user.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Required for scope=project.")),
+			mcpgo.WithString("user_id", mcpgo.Description("scope=user only. Defaults to the authenticated caller.")),
+		)
+		s.mcp.AddTool(kvSetTool, s.handleKVSet)
+
+		kvDeleteTool := mcpgo.NewTool("kv_delete",
+			mcpgo.WithDescription("Delete a KV value at the named scope. Appends a tombstone row (kind:tombstone tag + empty Content) — the projection then suppresses the key. Append-only ledger; the prior values stay in the audit chain. scope=system requires global_admin."),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("KV scope: system|workspace|project|user.")),
+			mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("KV key.")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Required for scope=workspace and scope=user.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Required for scope=project.")),
+			mcpgo.WithString("user_id", mcpgo.Description("scope=user only. Defaults to the authenticated caller.")),
+		)
+		s.mcp.AddTool(kvDeleteTool, s.handleKVDelete)
+
+		kvListTool := mcpgo.NewTool("kv_list",
+			mcpgo.WithDescription("List all KV values at the named scope. Returns {scope, count, items[]} sorted by key. Tombstoned keys are excluded."),
+			mcpgo.WithString("scope", mcpgo.Required(), mcpgo.Description("KV scope: system|workspace|project|user.")),
+			mcpgo.WithString("workspace_id", mcpgo.Description("Required for scope=workspace and scope=user.")),
+			mcpgo.WithString("project_id", mcpgo.Description("Required for scope=project.")),
+			mcpgo.WithString("user_id", mcpgo.Description("scope=user only. Defaults to the authenticated caller.")),
+		)
+		s.mcp.AddTool(kvListTool, s.handleKVList)
+
 		workflowClaimTool := mcpgo.NewTool("workflow_claim",
 			mcpgo.WithDescription("Lock a workflow shape for a story. Validates proposed_contracts against the project's workflow_spec, resolves each contract_name to a document{type=contract}, creates one contract_instance per slot (all status=ready), and writes a kind:workflow-claim ledger row. Resolution precedence when proposed_contracts is omitted: story.configuration_id (story_4ca6cb1b) → agent.default_configuration_id when agent_id is supplied (story_fb600b97) → project workflow_spec default. Idempotent: re-calling with an existing workflow returns the existing CIs."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
