@@ -200,6 +200,13 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("lifecycle agents seed failed")
 		}
 
+		// story_b1108d4a: migrate legacy skill→contract bindings into
+		// agent.skill_refs so the new contract_next resolution path
+		// surfaces skills via the allocated agent. Idempotent — skills
+		// without a binding or already migrated are no-ops. Runs AFTER
+		// seedLifecycleAgents so the matching agent docs exist.
+		document.MigrateSkillContractBindings(ctx, docStore, logger, time.Now().UTC())
+
 		// Backfill required_role on pre-existing contract documents.
 		// Contracts without a required_role field in their structured
 		// payload receive role_orchestrator so the process-order gate's

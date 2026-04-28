@@ -124,10 +124,14 @@ func (d Document) Validate() error {
 		}
 	}
 	switch d.Type {
-	case TypeSkill, TypeReviewer:
+	case TypeReviewer:
 		if d.ContractBinding == nil || *d.ContractBinding == "" {
 			return fmt.Errorf("document: contract_binding required for type=%s", d.Type)
 		}
+	case TypeSkill:
+		// story_b1108d4a: skill no longer requires contract_binding.
+		// Skills bind to AGENTS via agent.skill_refs; the binding field
+		// is preserved on the type for legacy rows but is optional.
 	case TypeAgent:
 		// agent documents may optionally pin to a contract via contract_binding
 		// (mirrors reviewer); the field is permitted but not required.

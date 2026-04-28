@@ -388,6 +388,46 @@ func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
 	}
 }
 
+// TestValidate_SkillContractBindingOptional verifies story_b1108d4a's
+// validation split: skill no longer requires contract_binding (skills
+// bind to agents via skill_refs); reviewer still does (reviewer
+// rubrics remain per-contract).
+func TestValidate_SkillContractBindingOptional(t *testing.T) {
+	t.Parallel()
+	// Skill without contract_binding: accepted post-migration.
+	skillUnbound := Document{
+		Type:      TypeSkill,
+		Scope:     ScopeProject,
+		Name:      "golang-testing",
+		ProjectID: StringPtr("proj_x"),
+	}
+	if err := skillUnbound.Validate(); err != nil {
+		t.Errorf("skill without contract_binding: %v", err)
+	}
+	// Skill with contract_binding still accepted (legacy rows valid
+	// during the migration window).
+	skillBound := Document{
+		Type:            TypeSkill,
+		Scope:           ScopeProject,
+		Name:            "golang-style",
+		ProjectID:       StringPtr("proj_x"),
+		ContractBinding: StringPtr("doc_contract_y"),
+	}
+	if err := skillBound.Validate(); err != nil {
+		t.Errorf("skill with legacy contract_binding: %v", err)
+	}
+	// Reviewer without contract_binding: still rejected.
+	reviewerUnbound := Document{
+		Type:      TypeReviewer,
+		Scope:     ScopeProject,
+		Name:      "delivery-reviewer",
+		ProjectID: StringPtr("proj_x"),
+	}
+	if err := reviewerUnbound.Validate(); err == nil {
+		t.Errorf("reviewer without contract_binding accepted; want rejection (story_b1108d4a does NOT change reviewer requirement)")
+	}
+}
+
 func TestValidate_AgentContractBindingOptional(t *testing.T) {
 	t.Parallel()
 	// Agent without contract_binding: accepted.
@@ -450,12 +490,14 @@ func TestValidate_ProjectIDNullableOnSystem(t *testing.T) {
 
 func TestValidate_ContractBindingShape(t *testing.T) {
 	t.Parallel()
-	// Skill without ContractBinding rejected.
+	// Skill without ContractBinding accepted (story_b1108d4a — skills
+	// bind to agents via skill_refs, not to contracts).
 	skillNaked := Document{Type: TypeSkill, Scope: ScopeProject, Name: "s", ProjectID: StringPtr("proj_x")}
-	if err := skillNaked.Validate(); err == nil {
-		t.Errorf("skill without contract_binding accepted; want rejection")
+	if err := skillNaked.Validate(); err != nil {
+		t.Errorf("skill without contract_binding rejected post-story_b1108d4a: %v", err)
 	}
-	// Reviewer without ContractBinding rejected.
+	// Reviewer without ContractBinding still rejected (reviewer
+	// rubrics remain per-contract).
 	reviewerNaked := Document{Type: TypeReviewer, Scope: ScopeProject, Name: "r", ProjectID: StringPtr("proj_x")}
 	if err := reviewerNaked.Validate(); err == nil {
 		t.Errorf("reviewer without contract_binding accepted; want rejection")
@@ -465,7 +507,8 @@ func TestValidate_ContractBindingShape(t *testing.T) {
 	if err := artifactBound.Validate(); err == nil {
 		t.Errorf("artifact with contract_binding accepted; want rejection")
 	}
-	// Skill happy.
+	// Skill happy: still accepted with binding (legacy rows valid
+	// during the migration window).
 	skill := Document{Type: TypeSkill, Scope: ScopeProject, Name: "s", ProjectID: StringPtr("proj_x"), ContractBinding: StringPtr("doc_contract")}
 	if err := skill.Validate(); err != nil {
 		t.Errorf("skill happy: %v", err)

@@ -407,6 +407,116 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 	}
 }
 
+// TestContractNext_SkillsViaAgent verifies story_b1108d4a's resolution
+// path: when a CI has an allocated AgentID, contract_next returns the
+// skills the agent's skill_refs name — even when those skills carry NO
+// contract_binding.
+func TestContractNext_SkillsViaAgent(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
+		"story_id":           f.storyID,
+		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+	}))
+	if err != nil || claim.IsError {
+		t.Fatalf("claim: err=%v text=%s", err, firstText(claim))
+	}
+	var claimBody struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	_ = json.Unmarshal([]byte(firstText(claim)), &claimBody)
+	preplanCIID := claimBody.ContractInstances[0].ID
+
+	// Seed an unbound skill (no contract_binding) — only reachable via
+	// the agent path.
+	skillDoc, err := f.server.docs.Create(f.ctx, document.Document{
+		WorkspaceID: f.wsID,
+		Type:        document.TypeSkill,
+		Scope:       document.ScopeSystem,
+		Name:        "agent-routed-skill",
+		Body:        "skill body via agent",
+		Status:      document.StatusActive,
+	}, f.now)
+	if err != nil {
+		t.Fatalf("seed skill: %v", err)
+	}
+
+	agentSettings, _ := document.MarshalAgentSettings(document.AgentSettings{
+		PermissionPatterns: []string{"Read:**"},
+		SkillRefs:          []string{skillDoc.ID},
+	})
+	agentDoc, err := f.server.docs.Create(f.ctx, document.Document{
+		WorkspaceID: f.wsID,
+		Type:        document.TypeAgent,
+		Scope:       document.ScopeSystem,
+		Name:        "preplan_agent_test",
+		Body:        "test agent",
+		Status:      document.StatusActive,
+		Structured:  agentSettings,
+	}, f.now)
+	if err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := f.server.contracts.SetAgent(f.ctx, preplanCIID, agentDoc.ID, f.now, []string{f.wsID}); err != nil {
+		t.Fatalf("set CI agent: %v", err)
+	}
+
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("next: err=%v text=%s", err, firstText(res))
+	}
+	text := firstText(res)
+	if !strings.Contains(text, `"name":"agent-routed-skill"`) {
+		t.Fatalf("expected agent-routed-skill in result, got %s", text)
+	}
+}
+
+// TestContractNext_SkillsLegacyFallback verifies that CIs without an
+// allocated AgentID still surface skills via the legacy
+// contract_binding lookup. Guards the migration window.
+func TestContractNext_SkillsLegacyFallback(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
+		"story_id":           f.storyID,
+		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+	}))
+	if err != nil || claim.IsError {
+		t.Fatalf("claim: err=%v text=%s", err, firstText(claim))
+	}
+	var claimBody struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	_ = json.Unmarshal([]byte(firstText(claim)), &claimBody)
+	preplanContractID := claimBody.ContractInstances[0].ContractID
+
+	// Legacy skill: contract_binding set, no agent path involved.
+	if _, err := f.server.docs.Create(f.ctx, document.Document{
+		WorkspaceID:     f.wsID,
+		Type:            document.TypeSkill,
+		Scope:           document.ScopeSystem,
+		Name:            "legacy-bound-skill",
+		Body:            "legacy skill body",
+		Status:          document.StatusActive,
+		ContractBinding: document.StringPtr(preplanContractID),
+	}, f.now); err != nil {
+		t.Fatalf("seed skill: %v", err)
+	}
+
+	res, err := f.server.handleContractNext(f.callerCtx(), newCallToolReq("contract_next", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("next: err=%v text=%s", err, firstText(res))
+	}
+	text := firstText(res)
+	if !strings.Contains(text, `"name":"legacy-bound-skill"`) {
+		t.Fatalf("expected legacy-bound-skill in result via fallback, got %s", text)
+	}
+}
+
 func TestWorkflowClaim_StoryNotFound(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)

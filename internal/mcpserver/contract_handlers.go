@@ -276,12 +276,7 @@ func (s *Server) handleContractNext(ctx context.Context, req mcpgo.CallToolReque
 		return mcpgo.NewToolResultText(string(body)), nil
 	}
 	resp["contract_instance"] = next
-	// Skills: documents with type=skill + contract_binding matching.
-	skills, _ := s.docs.List(ctx, document.ListOptions{
-		Type:            document.TypeSkill,
-		ContractBinding: next.ContractID,
-	}, memberships)
-	resp["skills"] = skills
+	resp["skills"] = s.resolveSkillsForCI(ctx, next, memberships)
 	body, _ := json.Marshal(resp)
 	s.logger.Info().
 		Str("method", "tools/call").
@@ -291,6 +286,42 @@ func (s *Server) handleContractNext(ctx context.Context, req mcpgo.CallToolReque
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// resolveSkillsForCI returns the skills relevant to the given CI.
+// Story_b1108d4a routes through agent.skill_refs first: when the CI
+// has an allocated agent, the agent's skill_refs name the skill docs
+// to return. The legacy contract_binding lookup remains as a fallback
+// for un-migrated CIs (no agent) so existing rows keep working.
+func (s *Server) resolveSkillsForCI(ctx context.Context, ci *contract.ContractInstance, memberships []string) []document.Document {
+	if ci == nil {
+		return nil
+	}
+	if ci.AgentID != "" && s.docs != nil {
+		agentDoc, err := s.docs.GetByID(ctx, ci.AgentID, memberships)
+		if err == nil {
+			settings, derr := document.UnmarshalAgentSettings(agentDoc.Structured)
+			if derr == nil && len(settings.SkillRefs) > 0 {
+				out := make([]document.Document, 0, len(settings.SkillRefs))
+				for _, skillID := range settings.SkillRefs {
+					skill, gerr := s.docs.GetByID(ctx, skillID, memberships)
+					if gerr != nil {
+						continue
+					}
+					if skill.Type == document.TypeSkill && skill.Status == "active" {
+						out = append(out, skill)
+					}
+				}
+				return out
+			}
+		}
+	}
+	// Legacy fallback: list skills bound to the CI's contract.
+	skills, _ := s.docs.List(ctx, document.ListOptions{
+		Type:            document.TypeSkill,
+		ContractBinding: ci.ContractID,
+	}, memberships)
+	return skills
 }
 
 // planAmendInvocation is the per-add payload accepted by handlePlanAmend.
