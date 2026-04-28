@@ -14,7 +14,7 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main" x-data="repoView()" x-init="start()">
+  <main class="portal-main" x-data="repoView">
 
     {{if .Composite.Empty}}
       <section class="panel-headed" data-testid="repo-empty">
@@ -30,14 +30,14 @@
           <span class="panel-header-meta">
             <code>branch {{.Composite.Repo.DefaultBranch}}</code>
             <code class="status-pill status-{{.Composite.Repo.Status}}">{{.Composite.Repo.Status}}</code>
-            <code class="status-pill" :class="reindexChipClass()" data-testid="reindex-chip" x-text="reindexChipLabel()"></code>
-            <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+            <code class="status-pill" :class="reindexChipClass" data-testid="reindex-chip" x-text="reindexChipLabel"></code>
+            <span class="live-dot" :class="liveClass" aria-label="live">●</span>
             {{if .Composite.IsAdmin}}
             <button type="button"
                     class="btn-link reindex-btn"
                     data-testid="reindex-btn"
-                    @click="triggerReindex()"
-                    :disabled="reindexChip === 'running'">reindex</button>
+                    @click="triggerReindex"
+                    :disabled="reindexRunning">reindex</button>
             {{end}}
           </span>
         </header>
@@ -58,7 +58,7 @@
           <div class="repo-symbol-search">
             <input type="text" placeholder="symbol query…"
                    x-model="symbolQuery"
-                   @keydown.enter="searchSymbols()"
+                   @keydown.enter="searchSymbols"
                    data-testid="symbol-query">
             <select x-model="symbolKind" data-testid="symbol-kind">
               <option value="">all kinds</option>
@@ -72,20 +72,20 @@
               <option value="">all languages</option>
               <option value="go">go</option>
             </select>
-            <button type="button" @click="searchSymbols()" data-testid="symbol-search-btn">search</button>
+            <button type="button" @click="searchSymbols" data-testid="symbol-search-btn">search</button>
           </div>
           <template x-if="symbolError">
             <p class="muted" data-testid="symbol-error" x-text="symbolError"></p>
           </template>
-          <template x-if="symbols.length === 0 && !symbolError">
+          <template x-if="symbolsEmpty">
             <p class="muted" data-testid="symbol-empty">Run a search to list symbols.</p>
           </template>
           <ul class="symbol-results">
             <template x-for="s in symbols" :key="s.id">
-              <li :data-testid="'symbol-row-' + s.id" @click="openSymbol(s)">
+              <li :data-testid="s.testid" :data-symbol-id="s.id" @click="openSymbol">
                 <code class="symbol-kind" x-text="s.kind"></code>
                 <code class="symbol-name" x-text="s.name"></code>
-                <span class="muted" x-text="s.file + ':' + s.start_line"></span>
+                <span class="muted" x-text="s.location"></span>
                 <span class="symbol-signature" x-text="s.signature"></span>
               </li>
             </template>
@@ -117,7 +117,7 @@
       <section class="panel-headed" data-testid="branch-diff-panel">
         <header class="panel-header"><h2>branch diff</h2></header>
         <div class="panel-body">
-          <form class="diff-form" @submit.prevent="loadDiff()">
+          <form class="diff-form" @submit.prevent="loadDiff">
             <input type="text" placeholder="from ref (sha or branch)" x-model="diff.from" data-testid="diff-from">
             <input type="text" placeholder="to ref (sha or branch)" x-model="diff.to" data-testid="diff-to">
             <button type="submit" data-testid="diff-submit">compare</button>
@@ -127,11 +127,11 @@
           </template>
           <template x-if="diff.result">
             <div data-testid="diff-result">
-              <p class="muted" x-show="diff.result.diff_source === 'unavailable'" data-testid="diff-source-unavailable">
+              <p class="muted" x-show="diffSourceUnavailable" data-testid="diff-source-unavailable">
                 Unified diff content is not yet wired (follow-up story will integrate the GitHub Compare API). Commits between the two refs are listed below.
               </p>
               <ul class="commit-list">
-                <template x-for="c in (diff.result.commits || [])" :key="c.sha">
+                <template x-for="c in diffCommits" :key="c.sha">
                   <li>
                     <code class="commit-sha" x-text="c.sha"></code>
                     <span class="commit-subject" x-text="c.subject"></span>
@@ -146,7 +146,7 @@
       <aside class="symbol-drawer" x-show="drawer.open" x-cloak data-testid="symbol-drawer">
         <header class="panel-header">
           <h2>symbol <code x-text="drawer.symbol.name"></code></h2>
-          <button type="button" class="btn-link" @click="closeDrawer()">close</button>
+          <button type="button" class="btn-link" @click="closeDrawer">close</button>
         </header>
         <div class="panel-body">
           <pre class="story-prose" x-text="drawer.source"></pre>

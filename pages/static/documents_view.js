@@ -3,6 +3,11 @@
  * browser page (slice 11.4, story_5bc06738). Type tabs (rendered as
  * server-side links) + client-side filter on already-loaded cards +
  * WS-driven reload on document.created / document.updated events.
+ *
+ * Migrated to Alpine.data registration (epic:portal-csp-strict,
+ * story_384ef71e). Per-card strings (testid, href, tagsList) are
+ * precomputed via decorateCard so the template binds via bare property
+ * access on the iteration variable.
  */
 (function () {
     'use strict';
@@ -26,13 +31,13 @@
         window.history.replaceState(null, '', url);
     }
 
-    window.documentsView = function () {
+    function documentsView() {
         return {
             cards: [],
             wsStatus: 'idle',
             filters: { type: '', query: '', sort: '' },
 
-            start() {
+            init() {
                 const u = readURL();
                 this.filters.type = u.type;
                 this.filters.query = u.query;
@@ -61,9 +66,16 @@
                 }.bind(this));
             },
 
-            push(card) { this.cards.push(card); },
+            push(card) { this.cards.push(decorateCard(card)); },
 
-            liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get cardsEmpty() { return this.cards.length === 0; },
+            get tabAllActive() { return this.filters.type === '' ? 'tab-active' : ''; },
+            get tabArtifactActive() { return this.filters.type === 'artifact' ? 'tab-active' : ''; },
+            get tabContractActive() { return this.filters.type === 'contract' ? 'tab-active' : ''; },
+            get tabSkillActive() { return this.filters.type === 'skill' ? 'tab-active' : ''; },
+            get tabPrincipleActive() { return this.filters.type === 'principle' ? 'tab-active' : ''; },
+            get tabReviewerActive() { return this.filters.type === 'reviewer' ? 'tab-active' : ''; },
 
             async reload() {
                 writeURL(this.filters);
@@ -95,13 +107,24 @@
             applyEvent(ev) {
                 if (!ev || !ev.Kind) { return; }
                 if (ev.Kind === 'document.created' || ev.Kind === 'document.updated' || ev.Kind === 'document.archived') {
-                    // Soft-refresh on relevant events. We re-fetch via a
-                    // page reload to keep the list authoritative.
                     if (typeof window !== 'undefined' && window.location) {
                         window.location.reload();
                     }
                 }
             }
         };
-    };
+    }
+
+    function decorateCard(card) {
+        card.testid = 'document-card-' + (card.id || '');
+        card.href = '/documents/' + (card.id || '');
+        card.tagsList = card.tags || [];
+        return card;
+    }
+
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('documentsView', documentsView);
+    });
+
+    window.documentsView = documentsView;
 })();

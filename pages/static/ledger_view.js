@@ -3,6 +3,12 @@
  * page (slice 11.3, story_a9f8be3c). Tailing toggle + N-new pill + URL
  * querystring filter sync + row expansion.
  *
+ * Migrated to Alpine.data registration (epic:portal-csp-strict,
+ * story_384ef71e). Per-row strings (testid, tagsList, expanded) are
+ * precomputed via decorateRow; the row-expand toggle uses the
+ * data-attribute pattern (data-row-id + $event.currentTarget) so the
+ * template stays free of method-with-arg directives.
+ *
  * Bootstrap input (set by project_ledger.html):
  *   window.SATELLITES_LEDGER = { projectID, apiURL }
  *
@@ -46,19 +52,18 @@
         window.history.replaceState(null, '', url);
     }
 
-    window.ledgerView = function () {
+    function ledgerView() {
         return {
             projectID: '',
             apiURL: '',
             rows: [],
             pendingRows: [],
-            expanded: {},
             tailing: false,
             wsStatus: 'idle',
             filters: { query: '', type: '', tags: [], story_id: '', contract_id: '', durability: '', source_type: '', status: '' },
             tagInput: '',
 
-            start() {
+            init() {
                 const cfg = window.SATELLITES_LEDGER || {};
                 this.projectID = cfg.projectID || '';
                 this.apiURL = cfg.apiURL || '';
@@ -85,14 +90,13 @@
             },
 
             hydrateFromSSR() {
-                // The SSR markup includes <li data-testid="ledger-row-ssr-..."> rows.
-                // We don't reuse them — Alpine renders fresh from `rows`. The
-                // server already populated `rows` at SSR time, but for a JS-active
-                // page we re-fetch via the JSON API to get the structured field.
                 this.reload();
             },
 
-            liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get rowsEmpty() { return this.rows.length === 0; },
+            get showNewRowsPill() { return !this.tailing && this.pendingRows.length > 0; },
+            get pendingCount() { return this.pendingRows.length; },
 
             reloadTags() {
                 this.filters.tags = (this.tagInput || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -115,13 +119,21 @@
                     const r = await fetch(this.apiURL + (sp.toString() ? '?' + sp.toString() : ''), { credentials: 'same-origin' });
                     if (!r.ok) { return; }
                     const data = await r.json();
-                    this.rows = data.rows || [];
+                    this.rows = (data.rows || []).map(decorateRow);
                     this.pendingRows = [];
                 } catch (e) { /* leave UI as-is */ }
             },
 
-            toggleExpand(id) {
-                this.expanded[id] = !this.expanded[id];
+            toggleExpand($event) {
+                const target = $event && $event.currentTarget ? $event.currentTarget : null;
+                const id = target && target.dataset ? target.dataset.rowId : '';
+                if (!id) { return; }
+                for (let i = 0; i < this.rows.length; i++) {
+                    if (this.rows[i].id === id) {
+                        this.rows[i] = Object.assign({}, this.rows[i], { expanded: !this.rows[i].expanded });
+                        break;
+                    }
+                }
             },
 
             attachWS() {
@@ -145,7 +157,7 @@
                 if (!row || !row.id) { return; }
                 if (ev.Kind === 'ledger.created') {
                     if (!this._matchesFilters(row)) { return; }
-                    const view = mapRowToView(row);
+                    const view = decorateRow(mapRowToView(row));
                     if (this.tailing) {
                         this.rows = prependRow(this.rows, view);
                     } else {
@@ -183,7 +195,14 @@
                 return true;
             }
         };
-    };
+    }
+
+    function decorateRow(row) {
+        row.testid = 'ledger-row-' + (row.id || '');
+        row.tagsList = row.tags || [];
+        if (typeof row.expanded !== 'boolean') { row.expanded = false; }
+        return row;
+    }
 
     function mapRowToView(row) {
         const tags = row.tags || row.Tags || [];
@@ -210,5 +229,10 @@
         return out;
     }
 
-    window.ledgerView.__test__ = { mapRowToView: mapRowToView, prependRow: prependRow, readURLFilters: readURLFilters };
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('ledgerView', ledgerView);
+    });
+
+    window.ledgerView = ledgerView;
+    window.ledgerView.__test__ = { mapRowToView: mapRowToView, prependRow: prependRow, readURLFilters: readURLFilters, decorateRow: decorateRow };
 })();

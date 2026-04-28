@@ -13,14 +13,14 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main" x-data="ledgerView()" x-init="start()">
+  <main class="portal-main" x-data="ledgerView">
 
     <section class="panel-headed" data-testid="ledger-header">
       <header class="panel-header">
         <h1>{{.Project.Name}} · ledger</h1>
         <span class="panel-header-meta">
           <code>(<span x-text="rows.length">{{len .Composite.Rows}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
           <label class="ledger-tail-toggle">
             <input type="checkbox" x-model="tailing" data-testid="tail-toggle">
             <span>tailing</span>
@@ -31,7 +31,7 @@
         <p class="muted"><a href="/projects/{{.Project.ID}}">&larr; back to project</a></p>
         <input type="text" class="ledger-search" placeholder="search content + tags…"
                x-model.debounce.300ms="filters.query"
-               @input="reload()"
+               @input="reload"
                data-testid="ledger-search">
       </div>
     </section>
@@ -42,7 +42,7 @@
         <header class="panel-header"><h2>filters</h2></header>
         <div class="panel-body">
           <label>type
-            <select x-model="filters.type" @change="reload()" data-testid="filter-type">
+            <select x-model="filters.type" @change="reload" data-testid="filter-type">
               <option value="">all</option>
               <option value="plan">plan</option>
               <option value="action_claim">action_claim</option>
@@ -56,7 +56,7 @@
             </select>
           </label>
           <label>durability
-            <select x-model="filters.durability" @change="reload()" data-testid="filter-durability">
+            <select x-model="filters.durability" @change="reload" data-testid="filter-durability">
               <option value="">all</option>
               <option value="ephemeral">ephemeral</option>
               <option value="pipeline">pipeline</option>
@@ -64,7 +64,7 @@
             </select>
           </label>
           <label>source
-            <select x-model="filters.source_type" @change="reload()" data-testid="filter-source">
+            <select x-model="filters.source_type" @change="reload" data-testid="filter-source">
               <option value="">all</option>
               <option value="agent">agent</option>
               <option value="user">user</option>
@@ -75,7 +75,7 @@
             </select>
           </label>
           <label>status
-            <select x-model="filters.status" @change="reload()" data-testid="filter-status">
+            <select x-model="filters.status" @change="reload" data-testid="filter-status">
               <option value="">active+archived</option>
               <option value="active">active</option>
               <option value="archived">archived</option>
@@ -83,15 +83,15 @@
             </select>
           </label>
           <label>story id
-            <input type="text" x-model.debounce.300ms="filters.story_id" @input="reload()"
+            <input type="text" x-model.debounce.300ms="filters.story_id" @input="reload"
                    data-testid="filter-story-id" placeholder="sty_…">
           </label>
           <label>contract id
-            <input type="text" x-model.debounce.300ms="filters.contract_id" @input="reload()"
+            <input type="text" x-model.debounce.300ms="filters.contract_id" @input="reload"
                    data-testid="filter-contract-id" placeholder="ci_…">
           </label>
           <label>tag
-            <input type="text" x-model.debounce.300ms="tagInput" @input="reloadTags()"
+            <input type="text" x-model.debounce.300ms="tagInput" @input="reloadTags"
                    data-testid="filter-tag" placeholder="kind:verdict,phase:plan">
           </label>
         </div>
@@ -101,25 +101,25 @@
         <header class="panel-header">
           <h2>rows</h2>
           <button type="button"
-                  x-show="!tailing && pendingRows.length > 0"
+                  x-show="showNewRowsPill"
                   data-testid="new-rows-pill"
                   class="ledger-new-pill"
-                  @click="flushPending()">
-            <span x-text="pendingRows.length"></span> new rows · jump to top
+                  @click="flushPending">
+            <span x-text="pendingCount"></span> new rows · jump to top
           </button>
         </header>
         <div class="panel-body">
-          <template x-if="rows.length === 0">
+          <template x-if="rowsEmpty">
             <p class="muted" data-testid="ledger-empty">No rows match the current filters.</p>
           </template>
           {{if not .Composite.Rows}}<noscript><p class="muted" data-testid="ledger-empty-ssr">No rows match.</p></noscript>{{end}}
           <ul class="ledger-rows">
             <template x-for="row in rows" :key="row.id">
-              <li :data-testid="'ledger-row-' + row.id">
-                <div class="ledger-row-summary" @click="toggleExpand(row.id)">
+              <li :data-testid="row.testid">
+                <div class="ledger-row-summary" :data-row-id="row.id" @click="toggleExpand">
                   <code x-text="row.created_at"></code>
                   <code class="type-pill" x-text="row.type"></code>
-                  <template x-for="t in (row.tags || [])" :key="t">
+                  <template x-for="t in row.tagsList" :key="t">
                     <code class="tag-chip" x-text="t"></code>
                   </template>
                   <template x-if="row.story_id">
@@ -127,7 +127,7 @@
                   </template>
                   <span class="muted ledger-content" x-text="row.content"></span>
                 </div>
-                <pre class="ledger-row-detail" x-show="expanded[row.id]" x-cloak><span x-text="row.content"></span><template x-if="row.structured"><span x-text="row.structured"></span></template></pre>
+                <pre class="ledger-row-detail" x-show="row.expanded" x-cloak><span x-text="row.content"></span><template x-if="row.structured"><span x-text="row.structured"></span></template></pre>
               </li>
             </template>
             {{range .Composite.Rows}}

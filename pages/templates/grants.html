@@ -13,17 +13,17 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main" x-data="grantsView()" x-init="start()">
+  <main class="portal-main" x-data="grantsView">
     <section class="panel-headed" data-testid="grants-page">
       <header class="panel-header">
         <h1>grants</h1>
         <span class="panel-header-meta">
           <code>(<span x-text="rows.length">{{len .Composite.Rows}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="rows.length === 0">
+        <template x-if="rowsEmpty">
           <p class="muted" data-testid="grants-empty">No active grants.</p>
         </template>
         {{if not .Composite.Rows}}<noscript><p class="muted" data-testid="grants-empty-ssr">No active grants.</p></noscript>{{end}}
@@ -33,18 +33,18 @@
           </thead>
           <tbody>
             <template x-for="g in rows" :key="g.id">
-              <tr :data-testid="'grant-row-' + g.id">
+              <tr :data-testid="g.testid">
                 <td><code x-text="g.id"></code></td>
-                <td><code x-text="g.role_name || g.role_id"></code></td>
-                <td><code x-text="g.agent_name || g.agent_id"></code></td>
-                <td><code x-text="g.grantee_kind + ':' + g.grantee_id"></code></td>
+                <td><code x-text="g.displayRole"></code></td>
+                <td><code x-text="g.displayAgent"></code></td>
+                <td><code x-text="g.granteeLabel"></code></td>
                 <td><code x-text="g.issued_at"></code></td>
                 <td>
                   <template x-if="isAdmin">
-                    <button type="button" class="btn-link" @click="release(g)" :data-testid="'revoke-' + g.id">revoke</button>
+                    <button type="button" class="btn-link" @click="release" :data-grant-id="g.id" :data-testid="g.revokeTestid">revoke</button>
                   </template>
-                  <template x-if="!isAdmin">
-                    <button type="button" class="btn-link" disabled title="admin only" :data-testid="'revoke-disabled-' + g.id">revoke</button>
+                  <template x-if="notAdmin">
+                    <button type="button" class="btn-link" disabled title="admin only" :data-testid="g.revokeDisabledTestid">revoke</button>
                   </template>
                 </td>
               </tr>

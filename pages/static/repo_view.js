@@ -4,11 +4,16 @@
  * `/api/repos/{id}/symbols` endpoint (which wraps codeindex.SearchSymbols);
  * symbol drawer via `/api/repos/{id}/symbols/{symbol_id}` (which wraps
  * codeindex.GetSymbolSource).
+ *
+ * Migrated to Alpine.data registration (epic:portal-csp-strict,
+ * story_384ef71e). Per-symbol strings (testid, location) are
+ * precomputed via decorateSymbol; scope-level getters absorb the
+ * inline boolean / comparison expressions previously in the template.
  */
 (function () {
     'use strict';
 
-    window.repoView = function () {
+    function repoView() {
         return {
             wsStatus: 'idle',
             symbolQuery: '',
@@ -21,13 +26,26 @@
             reindexChip: 'idle',
             reindexError: '',
 
-            reindexChipClass() { return 'reindex-chip-' + (this.reindexChip || 'idle'); },
-            reindexChipLabel() {
+            init() {
+                this.attachWS();
+            },
+
+            get liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get reindexChipClass() { return 'reindex-chip-' + (this.reindexChip || 'idle'); },
+            get reindexChipLabel() {
                 switch (this.reindexChip) {
                     case 'running': return 'reindexing…';
                     case 'failed': return 'reindex failed';
                     default: return 'idle';
                 }
+            },
+            get reindexRunning() { return this.reindexChip === 'running'; },
+            get symbolsEmpty() { return this.symbols.length === 0 && !this.symbolError; },
+            get diffSourceUnavailable() {
+                return this.diff.result && this.diff.result.diff_source === 'unavailable';
+            },
+            get diffCommits() {
+                return (this.diff.result && this.diff.result.commits) || [];
             },
 
             async triggerReindex() {
@@ -50,8 +68,6 @@
                         this.reindexError = 'reindex enqueue failed (' + r.status + ')';
                         return;
                     }
-                    // Server accepted; ws event will flip the chip back
-                    // when the worker finishes.
                 } catch (e) {
                     this.reindexChip = 'failed';
                     this.reindexError = 'reindex enqueue failed: ' + e;
@@ -79,12 +95,6 @@
                 }
             },
 
-            start() {
-                this.attachWS();
-            },
-
-            liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
-
             async searchSymbols() {
                 const cfg = window.SATELLITES_REPO || {};
                 if (!cfg.symbolsURL) { return; }
@@ -102,20 +112,28 @@
                         return;
                     }
                     const data = await r.json();
-                    // codeindex returns { symbols: [...], count: N } shape.
-                    this.symbols = (data && data.symbols) || [];
+                    const list = (data && data.symbols) || [];
+                    this.symbols = list.map(decorateSymbol);
                 } catch (e) {
                     this.symbolError = 'symbol search failed: ' + e;
                     this.symbols = [];
                 }
             },
 
-            async openSymbol(s) {
+            async openSymbol($event) {
+                const target = $event && $event.currentTarget ? $event.currentTarget : null;
+                const id = target && target.dataset ? target.dataset.symbolId : '';
+                if (!id) { return; }
+                let symbol = null;
+                for (let i = 0; i < this.symbols.length; i++) {
+                    if (this.symbols[i].id === id) { symbol = this.symbols[i]; break; }
+                }
+                if (!symbol) { return; }
                 const cfg = window.SATELLITES_REPO || {};
-                if (!cfg.sourceURL || !s.id) { return; }
-                this.drawer = { open: true, symbol: s, source: '(loading…)' };
+                if (!cfg.sourceURL) { return; }
+                this.drawer = { open: true, symbol: symbol, source: '(loading…)' };
                 try {
-                    const r = await fetch(cfg.sourceURL + s.id, { credentials: 'same-origin' });
+                    const r = await fetch(cfg.sourceURL + id, { credentials: 'same-origin' });
                     if (!r.ok) {
                         this.drawer.source = 'load failed (' + r.status + ')';
                         return;
@@ -158,5 +176,17 @@
                 this._ws.connect();
             }
         };
-    };
+    }
+
+    function decorateSymbol(s) {
+        s.testid = 'symbol-row-' + (s.id || '');
+        s.location = (s.file || '') + ':' + (s.start_line || '');
+        return s;
+    }
+
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('repoView', repoView);
+    });
+
+    window.repoView = repoView;
 })();
