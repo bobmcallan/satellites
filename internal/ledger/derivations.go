@@ -9,11 +9,30 @@ import (
 	"time"
 )
 
-// KVRow is the projection-shape returned by KVProjection: the latest
-// ledger row that carries a `key:<name>` tag plus the parsed value.
+// KVScope is the visibility tier of a KV entry. Rows carry a
+// `scope:<scope>` tag identifying the tier; rows that pre-date the
+// scope-tag convention (e.g. existing key:workflow_spec rows) are
+// treated as KVScopeProject — the legacy implicit shape.
+type KVScope string
+
+// KVScope enum. story_61abf197.
+const (
+	KVScopeSystem    KVScope = "system"
+	KVScopeWorkspace KVScope = "workspace"
+	KVScopeProject   KVScope = "project"
+	KVScopeUser      KVScope = "user"
+)
+
+// KVRow is the projection-shape returned by KVProjection / KVProjectionScoped:
+// the latest ledger row that carries a `key:<name>` tag plus the parsed
+// value. Scope/UserID are populated from the row's `scope:<scope>` and
+// `user:<id>` tags; legacy rows without a `scope:` tag report
+// Scope=KVScopeProject.
 type KVRow struct {
 	Key       string
 	Value     string
+	Scope     KVScope
+	UserID    string
 	UpdatedAt time.Time
 	UpdatedBy string
 	EntryID   string
@@ -31,15 +50,67 @@ type CostSummary struct {
 	SkippedRows  int
 }
 
-// kvKeyTagPrefix is the convention for kv-row key encoding: the row
-// carries a tag of the form `key:<name>` and Content holds the value.
-const kvKeyTagPrefix = "key:"
+// Tag prefixes for the KV ledger-row convention. A KV row carries one
+// `key:<name>` tag, and (post-story_61abf197) optionally one
+// `scope:<scope>` and one `user:<id>` tag. The existing ledger tag-array
+// indexes (workspace_id, tags) cover lookup by both scope and key
+// without requiring a new index.
+const (
+	kvKeyTagPrefix   = "key:"
+	kvScopeTagPrefix = "scope:"
+	kvUserTagPrefix  = "user:"
+)
+
+// KVProjectionOptions configures KVProjectionScoped. story_61abf197.
+//
+// Scope is required. The other identifier fields are required for
+// scopes that name them: WorkspaceID for workspace/project/user;
+// ProjectID for project; UserID for user. System scope ignores all
+// identifier fields.
+type KVProjectionOptions struct {
+	Scope       KVScope
+	WorkspaceID string
+	ProjectID   string
+	UserID      string
+}
 
 // KVProjection returns the latest Type=kv row per key inside projectID.
+// Backwards-compatible wrapper that resolves to project-scope projection.
 // Multiple rows for the same key shadow older versions; the newest by
 // CreatedAt wins. Workspace-scoped per memberships.
 func KVProjection(ctx context.Context, store Store, projectID string, memberships []string) (map[string]KVRow, error) {
-	rows, err := store.List(ctx, projectID, ListOptions{Type: TypeKV, Limit: MaxListLimit}, memberships)
+	return KVProjectionScoped(ctx, store, KVProjectionOptions{
+		Scope:     KVScopeProject,
+		ProjectID: projectID,
+	}, memberships)
+}
+
+// KVProjectionScoped returns the latest Type=kv row per key for the
+// given scope-and-identifier tuple. Filters in-memory after a
+// store.List call:
+//
+//   - System rows: scope tag = "scope:system", workspace_id = "" (the
+//     system-actor convention used by the seed loader).
+//   - Workspace rows: scope tag = "scope:workspace", workspace_id =
+//     opts.WorkspaceID, project_id = "".
+//   - Project rows: scope tag = "scope:project" OR no scope tag at all
+//     (legacy default), workspace_id = opts.WorkspaceID (when supplied,
+//     otherwise unconstrained), project_id = opts.ProjectID.
+//   - User rows: scope tag = "scope:user", workspace_id =
+//     opts.WorkspaceID, user tag = "user:<UserID>".
+//
+// Multiple rows for the same key shadow older versions per CreatedAt.
+// Workspace-scoped per memberships (caller is responsible for including
+// "" in memberships when querying system scope).
+func KVProjectionScoped(ctx context.Context, store Store, opts KVProjectionOptions, memberships []string) (map[string]KVRow, error) {
+	if opts.Scope == "" {
+		return nil, fmt.Errorf("ledger: kv projection: scope is required")
+	}
+	listProjectID := ""
+	if opts.Scope == KVScopeProject {
+		listProjectID = opts.ProjectID
+	}
+	rows, err := store.List(ctx, listProjectID, ListOptions{Type: TypeKV, Limit: MaxListLimit}, memberships)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: kv projection list: %w", err)
 	}
@@ -49,12 +120,19 @@ func KVProjection(ctx context.Context, store Store, projectID string, membership
 		if key == "" {
 			continue
 		}
+		rowScope := extractScope(e.Tags)
+		rowUser := extractUserTag(e.Tags)
+		if !matchesScope(opts, e, rowScope, rowUser) {
+			continue
+		}
 		if existing, ok := out[key]; ok && existing.UpdatedAt.After(e.CreatedAt) {
 			continue
 		}
 		out[key] = KVRow{
 			Key:       key,
 			Value:     e.Content,
+			Scope:     rowScope,
+			UserID:    rowUser,
 			UpdatedAt: e.CreatedAt,
 			UpdatedBy: e.CreatedBy,
 			EntryID:   e.ID,
@@ -63,10 +141,53 @@ func KVProjection(ctx context.Context, store Store, projectID string, membership
 	return out, nil
 }
 
+// matchesScope filters a row against KVProjectionOptions. Legacy rows
+// without a `scope:*` tag are treated as project-scope.
+func matchesScope(opts KVProjectionOptions, e LedgerEntry, rowScope KVScope, rowUser string) bool {
+	switch opts.Scope {
+	case KVScopeSystem:
+		return rowScope == KVScopeSystem && e.WorkspaceID == ""
+	case KVScopeWorkspace:
+		return rowScope == KVScopeWorkspace && e.WorkspaceID == opts.WorkspaceID && e.ProjectID == ""
+	case KVScopeProject:
+		// project_id filter is enforced by store.List via listProjectID;
+		// require either an explicit scope:project tag or the legacy
+		// no-scope shape.
+		return rowScope == KVScopeProject
+	case KVScopeUser:
+		return rowScope == KVScopeUser && e.WorkspaceID == opts.WorkspaceID && rowUser == opts.UserID && rowUser != ""
+	default:
+		return false
+	}
+}
+
 func extractKey(tags []string) string {
 	for _, t := range tags {
 		if strings.HasPrefix(t, kvKeyTagPrefix) {
 			return strings.TrimPrefix(t, kvKeyTagPrefix)
+		}
+	}
+	return ""
+}
+
+// extractScope returns the row's scope. Rows without a `scope:` tag
+// default to KVScopeProject — the legacy implicit shape used by
+// pre-story_61abf197 KV rows (e.g. key:workflow_spec).
+func extractScope(tags []string) KVScope {
+	for _, t := range tags {
+		if strings.HasPrefix(t, kvScopeTagPrefix) {
+			return KVScope(strings.TrimPrefix(t, kvScopeTagPrefix))
+		}
+	}
+	return KVScopeProject
+}
+
+// extractUserTag returns the user_id encoded in a `user:<id>` tag, or
+// "" when no such tag is present.
+func extractUserTag(tags []string) string {
+	for _, t := range tags {
+		if strings.HasPrefix(t, kvUserTagPrefix) {
+			return strings.TrimPrefix(t, kvUserTagPrefix)
 		}
 	}
 	return ""
