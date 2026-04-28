@@ -64,6 +64,17 @@ func (fm Frontmatter) String(key string) string {
 	return s
 }
 
+// Bool returns fm[key] as a bool. Defaults to false when absent or
+// non-bool. Used for opt-in flags like `template: true` (story_6593bb8c).
+func (fm Frontmatter) Bool(key string) bool {
+	v, ok := fm[key]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
 // StringSlice returns fm[key] as a []string, accepting either a YAML
 // sequence of strings or a single string (which is wrapped). Returns
 // nil when absent or non-string-shaped.

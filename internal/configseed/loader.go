@@ -1,6 +1,7 @@
 package configseed
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,13 +9,27 @@ import (
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/kvtemplate"
 )
 
 // LoadDir walks dir/<kindSubdir>/*.md, parses each file, and returns
 // the upsert inputs ready for Run to apply. Errors per file go into
 // the second return; one bad file does not abort the others. Caller
 // supplies workspaceID + actor for the resulting Documents.
+//
+// LoadDir renders no templates. Files with `template: true` in
+// frontmatter are loaded with their literal body. To enable
+// {{key}} substitution, call LoadDirWithResolver instead.
 func LoadDir(rootDir string, kind Kind, workspaceID, actor string) ([]document.UpsertInput, []ErrorEntry) {
+	return LoadDirWithResolver(context.Background(), rootDir, kind, workspaceID, actor, nil)
+}
+
+// LoadDirWithResolver is the templated-load variant. When resolver is
+// non-nil and a file's frontmatter sets `template: true`, the body is
+// rendered through kvtemplate.Render before buildInput. Unresolved keys
+// produce an ErrorEntry naming the file and the missing keys, and the
+// file is skipped (per pr_evidence — fail loud, not silent). story_6593bb8c.
+func LoadDirWithResolver(ctx context.Context, rootDir string, kind Kind, workspaceID, actor string, resolver kvtemplate.Resolver) ([]document.UpsertInput, []ErrorEntry) {
 	subdir := filepath.Join(rootDir, kindSubdir(kind))
 	entries, err := os.ReadDir(subdir)
 	if err != nil {
@@ -47,6 +62,18 @@ func LoadDir(rootDir string, kind Kind, workspaceID, actor string) ([]document.U
 		if err != nil {
 			errs = append(errs, ErrorEntry{Path: path, Reason: fmt.Sprintf("parse: %v", err)})
 			continue
+		}
+		if fm.Bool("template") && resolver != nil {
+			rendered, rerr := kvtemplate.Render(ctx, string(body), resolver)
+			if rerr != nil {
+				errs = append(errs, ErrorEntry{Path: path, Reason: fmt.Sprintf("template render: %v", rerr)})
+				continue
+			}
+			if len(rendered.Unresolved) > 0 {
+				errs = append(errs, ErrorEntry{Path: path, Reason: fmt.Sprintf("template unresolved keys: %s (searched system,workspace,project,user tiers)", strings.Join(rendered.Unresolved, ","))})
+				continue
+			}
+			body = []byte(rendered.Text)
 		}
 		input, err := buildInput(kind, fm, body, workspaceID, actor)
 		if err != nil {
