@@ -872,6 +872,21 @@ input:disabled, select:disabled, textarea:disabled {
     padding: 1rem 1.25rem;
 }
 
+/* /config selector form (story_9fd0b9de). Lays out the label + select
+   inline with breathing room, and adds bottom-margin so the muted
+   helper paragraph below doesn't collide. */
+.config-selector-form {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+.config-selector-form label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 /* Stories list (story_59b11d8c). Header carries the (n / total) count and
    a refresh affordance; body holds the search input, filter chips, and
    the sortable column table. */

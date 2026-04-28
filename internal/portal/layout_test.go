@@ -42,6 +42,25 @@ func TestPortalCSS_PanelBodyHasPadding(t *testing.T) {
 	}
 }
 
+// TestPortalCSS_ConfigSelectorFormStyled covers AC1 + AC3 of
+// story_9fd0b9de: the /config selector form has explicit flex layout +
+// gap + bottom margin, so the label/select don't sit cramped against
+// each other or the muted helper paragraph below.
+func TestPortalCSS_ConfigSelectorFormStyled(t *testing.T) {
+	t.Parallel()
+	src := readCSS(t)
+	body := ruleBody(t, src, ".config-selector-form")
+	if !strings.Contains(body, "display: flex") {
+		t.Errorf(".config-selector-form must declare display: flex; body=%q", body)
+	}
+	if !regexp.MustCompile(`gap\s*:\s*[^0;]`).MatchString(body) {
+		t.Errorf(".config-selector-form must declare a non-zero gap; body=%q", body)
+	}
+	if !regexp.MustCompile(`margin-bottom\s*:\s*[^0;]`).MatchString(body) {
+		t.Errorf(".config-selector-form must declare a non-zero margin-bottom; body=%q", body)
+	}
+}
+
 // extractMaxWidth pulls the max-width value from the named rule. Fails
 // the test when the rule or property is missing.
 func extractMaxWidth(t *testing.T, src, selector string) string {
