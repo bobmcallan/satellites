@@ -259,6 +259,9 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /help/{slug}", p.handleHelpDetail)
 	mux.HandleFunc("GET /admin/system-config", p.handleAdminSystemConfig)
 	mux.HandleFunc("POST /admin/system-config/reseed", p.handleAdminSystemConfigReseed)
+	mux.HandleFunc("GET /admin/kv", p.handleAdminKV)
+	mux.HandleFunc("POST /admin/kv/set", p.handleAdminKVSet)
+	mux.HandleFunc("POST /admin/kv/delete", p.handleAdminKVDelete)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))

@@ -1,0 +1,95 @@
+{{define "admin_kv.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="admin-kv-panel">
+      <header class="panel-header"><h1>System KV</h1></header>
+      <div class="panel-body">
+        <p class="muted">
+          Browse, set, and delete <code>scope=system</code> KV values. Resolved-view shows which tier
+          (system / workspace / project / user) supplies a key for the current caller.
+        </p>
+
+        {{if .Flash}}
+        <p class="admin-kv-flash admin-kv-flash-{{.FlashKind}}" data-testid="admin-kv-flash">{{.Flash}}</p>
+        {{end}}
+
+        <section class="panel-headed" data-testid="admin-kv-resolve">
+          <header class="panel-header"><h2>Resolve a key</h2></header>
+          <div class="panel-body">
+            <form method="get" action="/admin/kv" data-testid="admin-kv-resolve-form">
+              <label for="resolve-input">Key</label>
+              <input id="resolve-input" type="text" name="resolve" value="{{.ResolveKey}}" placeholder="e.g. default_theme">
+              <button type="submit" class="btn-secondary">Resolve</button>
+            </form>
+            {{if .ResolveKey}}
+              {{if .ResolvedFound}}
+              <dl class="kv-list" data-testid="admin-kv-resolved">
+                <dt>key</dt><dd><code>{{.Resolved.Key}}</code></dd>
+                <dt>resolved_scope</dt><dd><code>{{.Resolved.Scope}}</code></dd>
+                <dt>value</dt><dd><code>{{.Resolved.Value}}</code></dd>
+                <dt>updated_at</dt><dd><code>{{.Resolved.UpdatedAt}}</code></dd>
+                <dt>updated_by</dt><dd><code>{{.Resolved.UpdatedBy}}</code></dd>
+              </dl>
+              {{else}}
+              <p class="muted" data-testid="admin-kv-resolved-miss">no value at any tier for <code>{{.ResolveKey}}</code></p>
+              {{end}}
+            {{end}}
+          </div>
+        </section>
+
+        <section class="panel-headed" data-testid="admin-kv-list">
+          <header class="panel-header"><h2>System-tier KV</h2></header>
+          <div class="panel-body">
+            {{if .Rows}}
+            <table class="data-table" data-testid="admin-kv-table">
+              <thead>
+                <tr><th>key</th><th>value</th><th>updated_at</th><th>updated_by</th><th>actions</th></tr>
+              </thead>
+              <tbody>
+                {{range .Rows}}
+                <tr data-testid="admin-kv-row">
+                  <td><code>{{.Key}}</code></td>
+                  <td><code>{{.Value}}</code></td>
+                  <td><code>{{.UpdatedAt}}</code></td>
+                  <td><code>{{.UpdatedBy}}</code></td>
+                  <td>
+                    <form method="post" action="/admin/kv/delete" data-testid="admin-kv-delete-form">
+                      <input type="hidden" name="key" value="{{.Key}}">
+                      <button type="submit" class="btn-secondary" data-testid="admin-kv-delete-button">delete</button>
+                    </form>
+                  </td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
+            {{else}}
+            <p class="muted" data-testid="admin-kv-empty">No system-tier KV values yet.</p>
+            {{end}}
+          </div>
+        </section>
+
+        <section class="panel-headed" data-testid="admin-kv-set">
+          <header class="panel-header"><h2>Set a value</h2></header>
+          <div class="panel-body">
+            <form method="post" action="/admin/kv/set" data-testid="admin-kv-set-form">
+              <label for="set-key">Key</label>
+              <input id="set-key" type="text" name="key" required placeholder="e.g. default_theme">
+              <label for="set-value">Value</label>
+              <input id="set-value" type="text" name="value" placeholder="e.g. dark">
+              <button type="submit" class="btn-secondary" data-testid="admin-kv-set-button">Set</button>
+            </form>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}
