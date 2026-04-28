@@ -29,6 +29,7 @@ type helpIndexData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -45,6 +46,7 @@ type helpDetailData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -127,6 +129,7 @@ func (p *Portal) handleHelpIndex(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -171,6 +174,7 @@ func (p *Portal) handleHelpDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),

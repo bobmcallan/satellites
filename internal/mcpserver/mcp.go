@@ -537,6 +537,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(removeMemberTool, s.handleWorkspaceMemberRemove)
 	}
 
+	// story_33e1a323: re-seed the system-tier configuration markdown
+	// without restarting the server. Gated to global_admin via
+	// CallerIdentity.GlobalAdmin (story_3548cde2).
+	systemSeedTool := mcpgo.NewTool("system_seed_run",
+		mcpgo.WithDescription("Re-run the system-tier configseed loader (config/seed + config/help). Global admin only. Returns a summary {loaded, created, updated, skipped, errors, ledger_id}. Each invocation writes a kind:system-seed-run ledger row."),
+	)
+	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
+
 	if s.grants != nil {
 		claimTool := mcpgo.NewTool("agent_role_claim",
 			mcpgo.WithDescription("Claim a role-grant binding a grantee (session/task/worker) to a role under an agent document. Validates role in agent.permitted_roles and that agent.tool_ceiling covers role.allowed_mcp_verbs. Writes a kind:role-grant,event:claimed ledger row. When provider_override=\"mechanical\" OR no agent-document resolves for the role, falls through to the deterministic mechanical runner and tags resulting ledger rows provider:mechanical (story_548ab5a5)."),

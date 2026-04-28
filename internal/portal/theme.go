@@ -105,6 +105,7 @@ type settingsData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -129,6 +130,7 @@ func (p *Portal) handleSettings(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: "/settings",
 		WSConfig:        buildWSConfig(active, r),

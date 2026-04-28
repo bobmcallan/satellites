@@ -1,0 +1,53 @@
+{{define "admin_system_config.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="admin-system-config-panel">
+      <header class="panel-header"><h1>System Config</h1></header>
+      <div class="panel-body">
+        <p class="muted">
+          Re-seed system-tier configuration from <code>{{.SeedDir}}</code> and <code>{{.HelpDir}}</code>.
+          Markdown changes pick up without a restart.
+        </p>
+
+        {{if .LastRun}}
+        <section class="panel-headed" data-testid="admin-last-run">
+          <header class="panel-header"><h2>Last run</h2></header>
+          <div class="panel-body">
+            <dl class="kv-list">
+              <dt>at</dt><dd><code>{{.LastRun.CreatedAt}}</code></dd>
+              <dt>by</dt><dd><code>{{.LastRun.CreatedBy}}</code></dd>
+              <dt>loaded</dt><dd>{{.LastRun.Loaded}}</dd>
+              <dt>created</dt><dd>{{.LastRun.Created}}</dd>
+              <dt>updated</dt><dd>{{.LastRun.Updated}}</dd>
+              <dt>skipped</dt><dd>{{.LastRun.Skipped}}</dd>
+              <dt>errors</dt><dd>{{len .LastRun.Errors}}</dd>
+            </dl>
+            {{if .LastRun.Errors}}
+            <ul class="muted">
+              {{range .LastRun.Errors}}
+              <li><code>{{.Path}}</code>: {{.Reason}}</li>
+              {{end}}
+            </ul>
+            {{end}}
+          </div>
+        </section>
+        {{else}}
+        <p class="muted" data-testid="admin-no-runs">No re-seed runs yet — the boot-time seed is the first known state.</p>
+        {{end}}
+
+        <form method="post" action="/admin/system-config/reseed" data-testid="admin-reseed-form">
+          <button type="submit" class="btn-secondary" data-testid="admin-reseed-button">Re-seed now</button>
+        </form>
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}

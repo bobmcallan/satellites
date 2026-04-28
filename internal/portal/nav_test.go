@@ -157,7 +157,6 @@ func TestNav_NoUnimplementedRoutes(t *testing.T) {
 		`href="/profile"`,
 		`href="/changelog"`,
 		`href="/feedback"`,
-		`href="/admin/`,
 	} {
 		if strings.Contains(body, banned) {
 			t.Errorf("nav must NOT link to unimplemented route: %q", banned)

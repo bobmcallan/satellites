@@ -257,6 +257,8 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /config", p.handleConfigPage)
 	mux.HandleFunc("GET /help", p.handleHelpIndex)
 	mux.HandleFunc("GET /help/{slug}", p.handleHelpDetail)
+	mux.HandleFunc("GET /admin/system-config", p.handleAdminSystemConfig)
+	mux.HandleFunc("POST /admin/system-config/reseed", p.handleAdminSystemConfigReseed)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -274,6 +276,7 @@ type landingData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -307,6 +310,7 @@ type projectsListData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -324,6 +328,7 @@ type projectDetailData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -363,6 +368,7 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -432,6 +438,7 @@ func (p *Portal) handleProjectsList(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -490,6 +497,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -512,6 +520,7 @@ type projectConfigurationData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -550,6 +559,7 @@ func (p *Portal) handleProjectConfiguration(w http.ResponseWriter, r *http.Reque
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -572,6 +582,7 @@ type projectLedgerData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -609,6 +620,7 @@ func (p *Portal) handleProjectLedger(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -690,6 +702,7 @@ type storiesListData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -719,6 +732,7 @@ type storyDetailData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -839,6 +853,7 @@ func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -970,6 +985,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1030,6 +1046,7 @@ type tasksPageData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1057,6 +1074,7 @@ func (p *Portal) handleTasks(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1104,6 +1122,7 @@ type documentsListData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1120,6 +1139,7 @@ type documentDetailData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1145,6 +1165,7 @@ func (p *Portal) handleDocumentsList(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1203,6 +1224,7 @@ func (p *Portal) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1225,6 +1247,7 @@ type documentVersionDetailData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1290,6 +1313,7 @@ func (p *Portal) handleDocumentVersionDetail(w http.ResponseWriter, r *http.Requ
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1310,6 +1334,7 @@ type repoViewData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1343,6 +1368,7 @@ func (p *Portal) handleRepoView(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1501,6 +1527,7 @@ type rolesPageData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1516,6 +1543,7 @@ type agentsPageData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1531,6 +1559,7 @@ type grantsPageData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1555,6 +1584,7 @@ func (p *Portal) handleRoles(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1583,6 +1613,7 @@ func (p *Portal) handleAgents(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1612,6 +1643,7 @@ func (p *Portal) handleGrants(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
@@ -1632,6 +1664,7 @@ type configPageData struct {
 	ActiveWorkspace wsChip
 	DevMode         bool
 	GlobalAdminChip bool
+	IsGlobalAdmin   bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -1660,6 +1693,7 @@ func (p *Portal) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
 		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
+		IsGlobalAdmin:   p.isGlobalAdmin(user),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),

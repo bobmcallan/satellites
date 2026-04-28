@@ -69,6 +69,7 @@
       <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown" @click.outside="close">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
         <a href="/settings" data-testid="nav-settings-link">settings</a>
+        {{if .IsGlobalAdmin}}<a href="/admin/system-config" class="nav-admin-item" data-testid="nav-system-config-link">system config</a>{{end}}
         <form action="/auth/logout" method="post" class="nav-dropdown-form">
           <button type="submit" class="nav-dropdown-logout">sign out</button>
         </form>
