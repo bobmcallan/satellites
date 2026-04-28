@@ -255,6 +255,8 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /theme", p.handleThemeSet)
 	mux.HandleFunc("GET /settings", p.handleSettings)
 	mux.HandleFunc("GET /config", p.handleConfigPage)
+	mux.HandleFunc("GET /help", p.handleHelpIndex)
+	mux.HandleFunc("GET /help/{slug}", p.handleHelpDetail)
 	static, err := pages.Static()
 	if err == nil {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))

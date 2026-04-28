@@ -1,0 +1,23 @@
+{{define "help_detail.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="help-detail-panel">
+      <header class="panel-header"><h1 data-testid="help-detail-title">{{.Entry.Title}}</h1></header>
+      <div class="panel-body help-body" data-testid="help-detail-body">
+        <p class="muted">
+          <a href="/help">&larr; back to help</a>
+        </p>
+        {{.BodyHTML}}
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}

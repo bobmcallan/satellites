@@ -130,9 +130,10 @@ func TestNav_HamburgerDropdown(t *testing.T) {
 	}
 }
 
-// TestNav_NoUnimplementedRoutes verifies the rendered HTML does NOT link
-// to any route that doesn't have a handler in this build (Skills,
-// MCP-info, Help, Settings, Profile, Changelog, Feedback, admin).
+// TestNav_NoUnimplementedRoutes verifies the rendered HTML does NOT
+// link to any route that doesn't have a handler in this build.
+// `/help` was on this list until story_42f2f2c0 wired the help portal
+// pages; admin/* will follow in story_33e1a323.
 func TestNav_NoUnimplementedRoutes(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
@@ -153,7 +154,6 @@ func TestNav_NoUnimplementedRoutes(t *testing.T) {
 	for _, banned := range []string{
 		`href="/skills"`,
 		`href="/mcp-info"`,
-		`href="/help"`,
 		`href="/profile"`,
 		`href="/changelog"`,
 		`href="/feedback"`,

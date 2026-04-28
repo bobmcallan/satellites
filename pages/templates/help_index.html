@@ -1,0 +1,33 @@
+{{define "help_index.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="help-panel">
+      <header class="panel-header"><h1>Help</h1></header>
+      <div class="panel-body">
+        {{if not .Entries}}
+          <p class="muted" data-testid="help-empty">No help pages yet — re-seed from <code>config/help/</code>.</p>
+        {{else}}
+          <ul class="document-cards" data-testid="help-list">
+            {{range .Entries}}
+            <li data-testid="help-entry-{{.Slug}}">
+              <a href="/help/{{.Slug}}" class="document-card-link">
+                <span class="document-name">{{.Title}}</span>
+                <code class="muted">{{.Slug}}</code>
+              </a>
+            </li>
+            {{end}}
+          </ul>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}
