@@ -8,21 +8,31 @@
   {{template "nav.html" .}}
   <main class="portal-main">
     <section class="panel-headed" data-testid="admin-kv-panel">
-      <header class="panel-header"><h1>System KV</h1></header>
+      <header class="panel-header"><h1>KV</h1></header>
       <div class="panel-body">
         <p class="muted">
-          Browse, set, and delete <code>scope=system</code> KV values. Resolved-view shows which tier
-          (system / workspace / project / user) supplies a key for the current caller.
+          Browse and edit KV values across the four scopes. Write affordances appear only for scopes you have permission to modify. Resolved-view shows which tier (system / user / project / workspace) supplies a key for the current caller.
         </p>
 
         {{if .Flash}}
         <p class="admin-kv-flash admin-kv-flash-{{.FlashKind}}" data-testid="admin-kv-flash">{{.Flash}}</p>
         {{end}}
 
+        <nav class="admin-kv-tabs" data-testid="admin-kv-tabs">
+          {{range .Scopes}}
+            {{if eq . $.Scope}}
+              <span class="admin-kv-tab admin-kv-tab-active" data-testid="admin-kv-tab-{{.}}-active">{{.}}</span>
+            {{else}}
+              <a class="admin-kv-tab" href="/admin/kv?scope={{.}}" data-testid="admin-kv-tab-{{.}}">{{.}}</a>
+            {{end}}
+          {{end}}
+        </nav>
+
         <section class="panel-headed" data-testid="admin-kv-resolve">
           <header class="panel-header"><h2>Resolve a key</h2></header>
           <div class="panel-body">
             <form method="get" action="/admin/kv" data-testid="admin-kv-resolve-form">
+              <input type="hidden" name="scope" value="{{.Scope}}">
               <label for="resolve-input">Key</label>
               <input id="resolve-input" type="text" name="resolve" value="{{.ResolveKey}}" placeholder="e.g. default_theme">
               <button type="submit" class="btn-secondary">Resolve</button>
@@ -44,12 +54,12 @@
         </section>
 
         <section class="panel-headed" data-testid="admin-kv-list">
-          <header class="panel-header"><h2>System-tier KV</h2></header>
+          <header class="panel-header"><h2><code>{{.Scope}}</code> KV</h2></header>
           <div class="panel-body">
             {{if .Rows}}
             <table class="data-table" data-testid="admin-kv-table">
               <thead>
-                <tr><th>key</th><th>value</th><th>updated_at</th><th>updated_by</th><th>actions</th></tr>
+                <tr><th>key</th><th>value</th><th>updated_at</th><th>updated_by</th>{{if .CanWrite}}<th>actions</th>{{end}}</tr>
               </thead>
               <tbody>
                 {{range .Rows}}
@@ -58,26 +68,31 @@
                   <td><code>{{.Value}}</code></td>
                   <td><code>{{.UpdatedAt}}</code></td>
                   <td><code>{{.UpdatedBy}}</code></td>
+                  {{if $.CanWrite}}
                   <td>
                     <form method="post" action="/admin/kv/delete" data-testid="admin-kv-delete-form">
+                      <input type="hidden" name="scope" value="{{$.Scope}}">
                       <input type="hidden" name="key" value="{{.Key}}">
                       <button type="submit" class="btn-secondary" data-testid="admin-kv-delete-button">delete</button>
                     </form>
                   </td>
+                  {{end}}
                 </tr>
                 {{end}}
               </tbody>
             </table>
             {{else}}
-            <p class="muted" data-testid="admin-kv-empty">No system-tier KV values yet.</p>
+            <p class="muted" data-testid="admin-kv-empty">No <code>{{.Scope}}</code>-tier KV values yet.</p>
             {{end}}
           </div>
         </section>
 
+        {{if .CanWrite}}
         <section class="panel-headed" data-testid="admin-kv-set">
           <header class="panel-header"><h2>Set a value</h2></header>
           <div class="panel-body">
             <form method="post" action="/admin/kv/set" data-testid="admin-kv-set-form">
+              <input type="hidden" name="scope" value="{{.Scope}}">
               <label for="set-key">Key</label>
               <input id="set-key" type="text" name="key" required placeholder="e.g. default_theme">
               <label for="set-value">Value</label>
@@ -86,6 +101,9 @@
             </form>
           </div>
         </section>
+        {{else}}
+        <p class="muted" data-testid="admin-kv-readonly">Read-only: your role cannot write at scope=<code>{{.Scope}}</code>.</p>
+        {{end}}
       </div>
     </section>
   </main>

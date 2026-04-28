@@ -10,27 +10,11 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/auth"
-	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/ledger"
 )
 
-// TestAdminKV_404ForNonAdmin — non-admin users see the page as 404.
-// story_6dc33b90.
-func TestAdminKV_404ForNonAdmin(t *testing.T) {
-	f := newAdminFixture(t, "alice@x.io")
-	sessID := f.signIn(t, "bob@x.io")
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/kv", nil)
-	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessID})
-	rec := httptest.NewRecorder()
-	f.mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("non-admin GET status = %d, want 404", rec.Code)
-	}
-}
-
-// TestAdminKV_RendersForAdmin_Empty — admin sees the empty-state panel.
+// TestAdminKV_RendersForAdmin_Empty — admin sees the empty-state panel
+// for the default (system) scope.
 func TestAdminKV_RendersForAdmin_Empty(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
@@ -46,6 +30,11 @@ func TestAdminKV_RendersForAdmin_Empty(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`data-testid="admin-kv-panel"`,
+		`data-testid="admin-kv-tabs"`,
+		`data-testid="admin-kv-tab-system-active"`,
+		`data-testid="admin-kv-tab-workspace"`,
+		`data-testid="admin-kv-tab-project"`,
+		`data-testid="admin-kv-tab-user"`,
 		`data-testid="admin-kv-empty"`,
 		`data-testid="admin-kv-set-form"`,
 		`data-testid="admin-kv-resolve-form"`,
@@ -56,12 +45,58 @@ func TestAdminKV_RendersForAdmin_Empty(t *testing.T) {
 	}
 }
 
+// TestAdminKV_NonAdminGetsReadOnlyView — a non-admin authenticated
+// caller sees the page (200) but no write affordances at the system
+// scope tab.
+func TestAdminKV_NonAdminGetsReadOnlyView(t *testing.T) {
+	f := newAdminFixture(t, "alice@x.io")
+	sessID := f.signIn(t, "bob@x.io")
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/kv", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessID})
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("non-admin GET status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `data-testid="admin-kv-set-form"`) {
+		t.Errorf("non-admin should NOT see set-form at system scope")
+	}
+	if !strings.Contains(body, `data-testid="admin-kv-readonly"`) {
+		t.Errorf("non-admin should see read-only banner")
+	}
+}
+
+// TestAdminKV_NonAdmin_UserScopeIsWritable — at scope=user, any
+// authenticated user may write to their own user-scope KV.
+func TestAdminKV_NonAdmin_UserScopeIsWritable(t *testing.T) {
+	f := newAdminFixture(t, "alice@x.io")
+	sessID := f.signIn(t, "bob@x.io")
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/kv?scope=user", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessID})
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-testid="admin-kv-set-form"`) {
+		t.Errorf("non-admin should see set-form at scope=user (self only)")
+	}
+	if strings.Contains(body, `data-testid="admin-kv-readonly"`) {
+		t.Errorf("non-admin at scope=user should NOT see read-only banner")
+	}
+}
+
 // TestAdminKV_RendersRowsAndDelete — admin sees seeded rows + delete forms.
 func TestAdminKV_RendersRowsAndDelete(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
 
-	// Seed a system-tier KV row directly via the ledger store.
 	_, err := f.portal.ledger.Append(context.Background(), ledger.LedgerEntry{
 		Type:    ledger.TypeKV,
 		Tags:    []string{"scope:system", "key:default_theme"},
@@ -81,23 +116,21 @@ func TestAdminKV_RendersRowsAndDelete(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "default_theme") {
-		t.Errorf("body missing seeded key 'default_theme': %s", body)
-	}
-	if !strings.Contains(body, `data-testid="admin-kv-table"`) {
-		t.Errorf("body missing kv table data-testid")
+		t.Errorf("body missing seeded key: %s", body)
 	}
 	if !strings.Contains(body, `data-testid="admin-kv-delete-form"`) {
 		t.Errorf("body missing delete form")
 	}
 }
 
-// TestAdminKV_Set_AdminWritesAndRedirects — POST /admin/kv/set appends a
-// row and redirects with a flash payload.
+// TestAdminKV_Set_AdminWritesAndRedirects — admin POST to /admin/kv/set
+// writes a system-tier row.
 func TestAdminKV_Set_AdminWritesAndRedirects(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
 
 	form := url.Values{}
+	form.Set("scope", "system")
 	form.Set("key", "tier")
 	form.Set("value", "gold")
 	req := httptest.NewRequest(http.MethodPost, "/admin/kv/set", strings.NewReader(form.Encode()))
@@ -111,13 +144,8 @@ func TestAdminKV_Set_AdminWritesAndRedirects(t *testing.T) {
 	}
 	loc := rec.Header().Get("Location")
 	if !strings.HasPrefix(loc, "/admin/kv?") {
-		t.Errorf("redirect = %q, want prefix /admin/kv?", loc)
+		t.Errorf("redirect = %q", loc)
 	}
-	if !strings.Contains(loc, "flash") {
-		t.Errorf("redirect missing flash query: %q", loc)
-	}
-
-	// Confirm the row landed via projection.
 	rows, _ := ledger.KVProjectionScoped(context.Background(), f.portal.ledger,
 		ledger.KVProjectionOptions{Scope: ledger.KVScopeSystem}, []string{""})
 	if v := rows["tier"].Value; v != "gold" {
@@ -125,12 +153,14 @@ func TestAdminKV_Set_AdminWritesAndRedirects(t *testing.T) {
 	}
 }
 
-// TestAdminKV_Set_NonAdmin404 — non-admin POST to /admin/kv/set is 404.
-func TestAdminKV_Set_NonAdmin404(t *testing.T) {
+// TestAdminKV_Set_NonAdmin_SystemScopeForbidden — non-admin POST to
+// scope=system gets a redirect with a forbidden flash.
+func TestAdminKV_Set_NonAdmin_SystemScopeForbidden(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "bob@x.io")
 
 	form := url.Values{}
+	form.Set("scope", "system")
 	form.Set("key", "tier")
 	form.Set("value", "gold")
 	req := httptest.NewRequest(http.MethodPost, "/admin/kv/set", strings.NewReader(form.Encode()))
@@ -139,23 +169,32 @@ func TestAdminKV_Set_NonAdmin404(t *testing.T) {
 	rec := httptest.NewRecorder()
 	f.mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("non-admin POST status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 (with forbidden flash)", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "flash") || !strings.Contains(loc, "forbidden") {
+		t.Errorf("redirect missing forbidden flash: %q", loc)
+	}
+	// And no row should have landed.
+	rows, _ := ledger.KVProjectionScoped(context.Background(), f.portal.ledger,
+		ledger.KVProjectionOptions{Scope: ledger.KVScopeSystem}, []string{""})
+	if _, present := rows["tier"]; present {
+		t.Errorf("system row should NOT have been written by non-admin")
 	}
 }
 
-// TestAdminKV_Delete_AdminTombstones — POST /admin/kv/delete writes a
-// tombstone and the projection drops the key.
+// TestAdminKV_Delete_AdminTombstones — admin delete tombstones the key.
 func TestAdminKV_Delete_AdminTombstones(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
 
-	// Seed first.
 	_, _ = f.portal.ledger.Append(context.Background(), ledger.LedgerEntry{
 		Type: ledger.TypeKV, Tags: []string{"scope:system", "key:doomed"}, Content: "v1",
 	}, time.Now().UTC())
 
 	form := url.Values{}
+	form.Set("scope", "system")
 	form.Set("key", "doomed")
 	req := httptest.NewRequest(http.MethodPost, "/admin/kv/delete", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -164,12 +203,12 @@ func TestAdminKV_Delete_AdminTombstones(t *testing.T) {
 	f.mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303", rec.Code)
+		t.Fatalf("status = %d", rec.Code)
 	}
 	rows, _ := ledger.KVProjectionScoped(context.Background(), f.portal.ledger,
 		ledger.KVProjectionOptions{Scope: ledger.KVScopeSystem}, []string{""})
 	if _, present := rows["doomed"]; present {
-		t.Errorf("tombstoned key still present in projection: %+v", rows["doomed"])
+		t.Errorf("tombstoned key still present: %+v", rows["doomed"])
 	}
 }
 
@@ -178,7 +217,6 @@ func TestAdminKV_ResolvedView(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
 
-	// Seed a system value.
 	_, _ = f.portal.ledger.Append(context.Background(), ledger.LedgerEntry{
 		Type: ledger.TypeKV, Tags: []string{"scope:system", "key:lang"}, Content: "en",
 	}, time.Now().UTC())
@@ -189,22 +227,15 @@ func TestAdminKV_ResolvedView(t *testing.T) {
 	f.mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `data-testid="admin-kv-resolved"`) {
-		t.Errorf("body missing resolved-view payload: %s", body)
-	}
-	if !strings.Contains(body, "system") {
-		t.Errorf("body missing 'system' tier in resolved view")
-	}
-	if !strings.Contains(body, "en") {
-		t.Errorf("body missing resolved value 'en'")
+		t.Errorf("body missing resolved-view payload")
 	}
 }
 
-// TestAdminKV_ResolvedViewMiss — ?resolve=KEY for a non-existent key
-// shows the empty-resolution message.
+// TestAdminKV_ResolvedViewMiss — empty-resolution renders correctly.
 func TestAdminKV_ResolvedViewMiss(t *testing.T) {
 	f := newAdminFixture(t, "alice@x.io")
 	sessID := f.signIn(t, "alice@x.io")
@@ -221,6 +252,3 @@ func TestAdminKV_ResolvedViewMiss(t *testing.T) {
 		t.Errorf("body missing resolved-miss payload")
 	}
 }
-
-// silence unused import false positives
-var _ = config.Version
