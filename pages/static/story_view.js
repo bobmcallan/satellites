@@ -240,6 +240,10 @@
         v.testid = 'verdict-row-' + (v.ledger_id || '');
         // prominentClass set later by reindexProminent.
         if (typeof v.prominentClass !== 'string') { v.prominentClass = ''; }
+        // x-show workaround for @alpinejs/csp x-show reactivity bug
+        // (story_739823eb): precompute the visibility class so the
+        // template binds :class="v.scoreClass" instead of x-show="v.score".
+        v.scoreClass = v.score ? 'verdict-score' : 'verdict-score is-hidden';
         return v;
     }
 

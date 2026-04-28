@@ -111,6 +111,56 @@ func waitForIndicatorState(ctx context.Context, state string, timeout time.Durat
 	return fmt.Errorf("timed out waiting for indicator state %q", state)
 }
 
+// jsClick fires a synthetic click on the first node matching the
+// selector via `HTMLElement.click()`, dispatched as a JS-level click
+// event. Required because @alpinejs/csp@3.14.9 (introduced by
+// story_739823eb) does not invoke Alpine's `@click="handler"` binding
+// for chromedp's CDP-injected Input.dispatchMouseEvent — only synthetic
+// JS events fire the handler. Real user clicks in production browsers
+// are unaffected; this is purely a chromedp ↔ @alpinejs/csp interaction
+// quirk. Use this helper everywhere a chromedp test needs to drive an
+// `@click` handler.
+func jsClick(selector string) chromedp.Action {
+	expr := `(() => {
+		const el = document.querySelector(` + jsString(selector) + `);
+		if (!el) { return false; }
+		el.click();
+		return true;
+	})()`
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		var ok bool
+		if err := chromedp.Run(ctx, chromedp.Evaluate(expr, &ok)); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("jsClick: no element matched selector %q", selector)
+		}
+		return nil
+	})
+}
+
+// jsString returns a JS string literal safely encoding s (single quotes
+// + escapes). Used by jsClick so callers can pass a raw CSS selector.
+func jsString(s string) string {
+	var b []byte
+	b = append(b, '\'')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\\', '\'':
+			b = append(b, '\\', c)
+		case '\n':
+			b = append(b, '\\', 'n')
+		case '\r':
+			b = append(b, '\\', 'r')
+		default:
+			b = append(b, c)
+		}
+	}
+	b = append(b, '\'')
+	return string(b)
+}
+
 // containsClassToken reports whether `class` (a whitespace-separated
 // class attribute value) carries `target` as a complete token.
 func containsClassToken(class, target string) bool {

@@ -35,11 +35,16 @@ func TestPortalCSP_HeaderEmittedByHarness(t *testing.T) {
 		"default-src 'self'",
 		"script-src",
 		"https://cdn.jsdelivr.net",
-		"'unsafe-eval'", // story_a7297367
 	} {
 		if !strings.Contains(csp, want) {
 			t.Errorf("CSP missing %q; got %q", want, csp)
 		}
+	}
+	// story_739823eb dropped 'unsafe-eval' after migrating to
+	// @alpinejs/csp; the harness must reflect the same tightened
+	// policy production emits.
+	if strings.Contains(csp, "'unsafe-eval'") {
+		t.Errorf("CSP must not contain 'unsafe-eval'; got %q", csp)
 	}
 }
 
@@ -78,7 +83,7 @@ func TestPortalCSP_AlpineWorks(t *testing.T) {
 		chromedp.WaitVisible(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
 		chromedp.Sleep(400*time.Millisecond),
 		chromedp.Evaluate(disp, &dispOnLoad),
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(300*time.Millisecond),
 		chromedp.Evaluate(disp, &dispAfterClick),
 		chromedp.KeyEvent(kb.Escape),

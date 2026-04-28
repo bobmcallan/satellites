@@ -69,8 +69,6 @@ func TestSecurityHeaders_AllPresent(t *testing.T) {
 		{"Content-Security-Policy", "https://fonts.googleapis.com"},
 		{"Content-Security-Policy", "https://fonts.gstatic.com"},
 		{"Content-Security-Policy", "'unsafe-inline'"},
-		// Alpine v3 standard build needs unsafe-eval (story_a7297367).
-		{"Content-Security-Policy", "'unsafe-eval'"},
 		// Inline SVG caret arrows for <select> elements (story_cffd92d4).
 		{"Content-Security-Policy", "img-src 'self' data:"},
 	} {
@@ -85,6 +83,12 @@ func TestSecurityHeaders_AllPresent(t *testing.T) {
 	}
 	if got.Get("Strict-Transport-Security") != "" {
 		t.Errorf("dev env emitted HSTS; should be prod-only")
+	}
+	// 'unsafe-eval' MUST be absent — story_739823eb completed the
+	// @alpinejs/csp migration, removing the script-src grant the
+	// standard Alpine build required.
+	if csp := got.Get("Content-Security-Policy"); strings.Contains(csp, "'unsafe-eval'") {
+		t.Errorf("CSP must not contain 'unsafe-eval'; got %q", csp)
 	}
 }
 

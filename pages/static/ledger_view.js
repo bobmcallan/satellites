@@ -98,6 +98,12 @@
             get showNewRowsPill() { return !this.tailing && this.pendingRows.length > 0; },
             get pendingCount() { return this.pendingRows.length; },
 
+            // x-show workaround for @alpinejs/csp x-show reactivity bug
+            // (story_739823eb): bind :class to a getter or per-row method
+            // returning '' or 'is-hidden' instead of relying on x-show.
+            get hiddenWhenShowNewRowsPill() { return this.showNewRowsPill ? '' : 'is-hidden'; },
+            rowDetailClass(row) { return row.expanded ? 'ledger-row-detail' : 'ledger-row-detail is-hidden'; },
+
             reloadTags() {
                 this.filters.tags = (this.tagInput || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
                 this.reload();

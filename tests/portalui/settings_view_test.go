@@ -38,7 +38,7 @@ func TestSettings_ViaNav(t *testing.T) {
 
 	// Step 2 — open hamburger, click settings link.
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Click(`[data-testid="nav-settings-link"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`section[data-testid="settings-panel"]`, chromedp.ByQuery),

@@ -48,6 +48,12 @@
                 return (this.diff.result && this.diff.result.commits) || [];
             },
 
+            // x-show workaround for @alpinejs/csp x-show reactivity bug
+            // (story_739823eb): bind :class to a getter returning ''
+            // or 'is-hidden' instead of relying on x-show.
+            get hiddenWhenDrawerOpen() { return this.drawer.open ? '' : 'is-hidden'; },
+            get hiddenWhenDiffSourceUnavailable() { return this.diffSourceUnavailable ? '' : 'is-hidden'; },
+
             async triggerReindex() {
                 const cfg = window.SATELLITES_REPO || {};
                 if (!cfg.repoID) { return; }

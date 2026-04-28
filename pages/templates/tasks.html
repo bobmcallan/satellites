@@ -166,7 +166,7 @@
     </div>
 
     <!-- Drawer -->
-    <aside class="task-drawer" x-show="drawer.open" x-cloak data-testid="task-drawer">
+    <aside class="task-drawer" x-cloak :class="hiddenWhenDrawerOpen" data-testid="task-drawer">
       <header class="panel-header">
         <h2>task <code x-text="drawer.task.id"></code></h2>
         <button type="button" class="btn-link" @click="closeDrawer">close</button>

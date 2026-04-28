@@ -60,6 +60,7 @@ document.addEventListener('alpine:init', () => {
         open: false,
         toggle() { this.open = !this.open; },
         close() { this.open = false; },
+        get hiddenWhenOpen() { return this.open ? '' : 'is-hidden'; },
     }));
 
     // Workspace switcher — nav.html's left-side WORKSPACE / <name> dropdown.
@@ -70,13 +71,20 @@ document.addEventListener('alpine:init', () => {
         open: false,
         toggle() { this.open = !this.open; },
         close() { this.open = false; },
+        get hiddenWhenOpen() { return this.open ? '' : 'is-hidden'; },
     }));
 
     // Theme picker — login page's three-button dark/system/light selector.
     // Each button has its own getter so the CSP build can bind
-    // `:aria-pressed="isDarkMode"` without an inline comparison.
-    Alpine.data('themePicker', (initialMode) => ({
-        mode: initialMode,
+    // `:aria-pressed="isDarkMode"` without an inline comparison. Initial
+    // mode is read from `data-mode` on the host element — @alpinejs/csp
+    // does not invoke factories declared with arguments via
+    // `x-data="themePicker('mode')"` (story_739823eb).
+    Alpine.data('themePicker', () => ({
+        mode: '',
+        init() {
+            this.mode = (this.$el && this.$el.dataset && this.$el.dataset.mode) || '';
+        },
         get isDarkMode() { return this.mode === 'dark'; },
         get isLightMode() { return this.mode === 'light'; },
         get isSystemMode() { return this.mode === 'system'; },
@@ -84,10 +92,16 @@ document.addEventListener('alpine:init', () => {
 
     // Project-detail search input — debounced text filter with a clear
     // button. Methods reach the form/input via Alpine's $refs so the
-    // template stays free of inline expressions like `$el.form...`.
-    Alpine.data('projectSearchInput', (initialQuery) => ({
-        q: initialQuery,
+    // template stays free of inline expressions like `$el.form...`. The
+    // initial query is read from `data-initial-query` on the host
+    // element for the same reason as themePicker (story_739823eb).
+    Alpine.data('projectSearchInput', () => ({
+        q: '',
+        init() {
+            this.q = (this.$el && this.$el.dataset && this.$el.dataset.initialQuery) || '';
+        },
         get hasQuery() { return this.q.length > 0; },
+        get hiddenWhenHasQuery() { return this.hasQuery ? '' : 'is-hidden'; },
         submitForm() {
             if (this.$root && typeof this.$root.requestSubmit === 'function') {
                 this.$root.requestSubmit();

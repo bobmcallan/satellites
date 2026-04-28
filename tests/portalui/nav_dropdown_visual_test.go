@@ -72,7 +72,7 @@ func TestNavDropdown_VisuallyHidden_OnLoad(t *testing.T) {
 			// Open + close: the pixel before/after open MUST differ.
 			t.Run("open_close", func(t *testing.T) {
 				if err := chromedp.Run(browserCtx,
-					chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+					jsClick(`button[data-testid="nav-hamburger"]`),
 					chromedp.Sleep(250*time.Millisecond),
 				); err != nil {
 					t.Fatalf("click hamburger: %v", err)

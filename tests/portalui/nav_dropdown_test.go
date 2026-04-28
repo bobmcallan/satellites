@@ -51,10 +51,10 @@ func TestNavDropdown_OpenClose(t *testing.T) {
 	var afterFirstClick bool
 	var afterSecondClick bool
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(isVisible, &afterFirstClick),
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(isVisible, &afterSecondClick),
 	); err != nil {
@@ -71,7 +71,7 @@ func TestNavDropdown_OpenClose(t *testing.T) {
 	var afterOpenForOutside bool
 	var afterOutsideClick bool
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(isVisible, &afterOpenForOutside),
 		// Click in the page body well clear of the dropdown.
@@ -97,7 +97,7 @@ func TestNavDropdown_OpenClose(t *testing.T) {
 	var afterOpenForEsc bool
 	var afterEsc bool
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(isVisible, &afterOpenForEsc),
 		chromedp.KeyEvent(kb.Escape),

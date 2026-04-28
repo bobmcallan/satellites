@@ -101,7 +101,7 @@
         <header class="panel-header">
           <h2>rows</h2>
           <button type="button"
-                  x-show="showNewRowsPill"
+                  :class="hiddenWhenShowNewRowsPill"
                   data-testid="new-rows-pill"
                   class="ledger-new-pill"
                   @click="flushPending">
@@ -127,7 +127,7 @@
                   </template>
                   <span class="muted ledger-content" x-text="row.content"></span>
                 </div>
-                <pre class="ledger-row-detail" x-show="row.expanded" x-cloak><span x-text="row.content"></span><template x-if="row.structured"><span x-text="row.structured"></span></template></pre>
+                <pre x-cloak :class="rowDetailClass(row)"><span x-text="row.content"></span><template x-if="row.structured"><span x-text="row.structured"></span></template></pre>
               </li>
             </template>
             {{range .Composite.Rows}}

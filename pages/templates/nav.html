@@ -12,7 +12,7 @@
         WORKSPACE / {{if $activeID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
         <span aria-hidden="true">▾</span>
       </button>
-      <ul class="nav-workspace-menu" x-show="open" x-cloak @click.outside="close" data-testid="nav-workspace-menu">
+      <ul class="nav-workspace-menu" x-cloak :class="hiddenWhenOpen" @click.outside="close" data-testid="nav-workspace-menu">
         {{range .Workspaces}}
         {{if ne .ID $activeID}}
         <li>
@@ -41,10 +41,10 @@
         <span class="ws-dot" aria-hidden="true"></span>
         <span class="sr-only" x-text="statusText"></span>
       </button>
-      <div class="ws-debug" x-show="debugOpen" x-cloak @click.outside="closeDebug" @keydown.escape.window="closeDebug">
+      <div class="ws-debug" x-cloak :class="hiddenWhenDebugOpen" @click.outside="closeDebug" @keydown.escape.window="closeDebug">
         <div class="ws-debug-header">
           <span x-text="statusText"></span>
-          <button type="button" class="btn-link" x-show="isDisconnected" @click="retry">retry</button>
+          <button type="button" class="btn-link" :class="hiddenWhenIsDisconnected" @click="retry">retry</button>
         </div>
         <ul class="ws-debug-events">
           <template x-for="ev in recentEvents" :key="ev.id">
@@ -53,7 +53,7 @@
               <span class="ws-debug-ts" x-text="ev.created_at"></span>
             </li>
           </template>
-          <li x-show="hasNoRecentEvents" class="ws-debug-empty">no events yet</li>
+          <li class="ws-debug-empty" :class="hiddenWhenHasNoRecentEvents">no events yet</li>
         </ul>
       </div>
     </div>
@@ -64,7 +64,7 @@
       <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="toggle" aria-label="open menu">
         <span class="nav-hamburger-icon" aria-hidden="true"></span>
       </button>
-      <div x-show="open" x-cloak class="nav-dropdown" data-testid="nav-dropdown" @click.outside="close">
+      <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown" @click.outside="close">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
         <a href="/settings" data-testid="nav-settings-link">settings</a>
         <form action="/auth/logout" method="post" class="nav-dropdown-form">

@@ -1,5 +1,5 @@
 {{define "theme_picker.html"}}
-<form class="theme-picker" method="post" action="/theme" data-theme-picker x-data="themePicker('{{.ThemeMode}}')">
+<form class="theme-picker" method="post" action="/theme" data-theme-picker x-data="themePicker" data-mode="{{.ThemeMode}}">
   <input type="hidden" name="next" value="{{.ThemePickerNext}}">
   <button type="submit" name="mode" value="dark" class="theme-picker-btn" :aria-pressed="isDarkMode" aria-pressed="{{if eq .ThemeMode "dark"}}true{{else}}false{{end}}">Dark</button>
   <button type="submit" name="mode" value="system" class="theme-picker-btn" :aria-pressed="isSystemMode" aria-pressed="{{if eq .ThemeMode "system"}}true{{else}}false{{end}}">Sys</button>

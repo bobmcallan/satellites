@@ -28,30 +28,38 @@ function toasts() {
 }
 
 // sectionToggle (story_25695308) — collapsible panel-headed section.
-// `key` is a stable per-page identifier (e.g. "proj-{id}-stories"); the
-// open/closed state is persisted in sessionStorage so navigation within
-// the same browser tab restores the user's choice.
+// The stable per-page identifier (e.g. "proj-{id}-stories") is read
+// from `data-toggle-key` on the host element so the factory takes no
+// arguments — @alpinejs/csp@3.14.9 does not invoke factories declared
+// via `x-data="sectionToggle('arg')"` (story_739823eb). Bare-name
+// `x-data="sectionToggle"` plus `data-toggle-key="..."` is the
+// CSP-safe shape.
 //
 // Migrated to Alpine.data registration (story_ecce93ea). Inline
 // expression directives are gone from project_detail.html — getters
 // `caret` + `collapsed` keep the bindings CSP-compatible.
-function sectionToggle(key) {
+function sectionToggle() {
     return {
         open: true,
+        _toggleKey: '',
         init() {
+            this._toggleKey = (this.$el && this.$el.dataset && this.$el.dataset.toggleKey) || '';
+            if (!this._toggleKey) { return; }
             try {
-                const stored = sessionStorage.getItem('section-toggle:' + key);
+                const stored = sessionStorage.getItem('section-toggle:' + this._toggleKey);
                 if (stored === 'closed') { this.open = false; }
             } catch (e) { /* sessionStorage unavailable */ }
         },
         toggle() {
             this.open = !this.open;
+            if (!this._toggleKey) { return; }
             try {
-                sessionStorage.setItem('section-toggle:' + key, this.open ? 'open' : 'closed');
+                sessionStorage.setItem('section-toggle:' + this._toggleKey, this.open ? 'open' : 'closed');
             } catch (e) { /* sessionStorage unavailable */ }
         },
         get caret() { return this.open ? '▾' : '▸'; },
         get collapsed() { return !this.open; },
+        get hiddenWhenOpen() { return this.open ? '' : 'is-hidden'; },
     };
 }
 

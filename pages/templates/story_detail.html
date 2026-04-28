@@ -148,7 +148,7 @@
             <li :class="v.prominentClass" :data-testid="v.testid">
               <code class="verdict-pill" x-text="v.verdict || 'pending'"></code>
               <code x-text="v.contract_name || '—'"></code>
-              <span class="verdict-score" x-show="v.score">score <code x-text="v.score"></code></span>
+              <span :class="v.scoreClass">score <code x-text="v.score"></code></span>
               <span class="verdict-when muted" x-text="v.created_at"></span>
               <p class="verdict-reasoning" x-text="v.reasoning"></p>
             </li>

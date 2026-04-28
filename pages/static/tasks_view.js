@@ -173,7 +173,14 @@
                 } catch (e) { /* drawer stays closed */ }
             },
 
-            closeDrawer() { this.drawer.open = false; }
+            closeDrawer() { this.drawer.open = false; },
+
+            // x-show workaround for @alpinejs/csp x-show reactivity bug
+            // (story_739823eb): bind :class to a getter returning ''
+            // or 'is-hidden' instead of relying on x-show to toggle
+            // display. The supporting `.is-hidden` class is defined in
+            // portal.css.
+            get hiddenWhenDrawerOpen() { return this.drawer.open ? '' : 'is-hidden'; },
         };
     }
 

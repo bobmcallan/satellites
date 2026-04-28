@@ -47,6 +47,16 @@
     display: none !important;
 }
 
+/* x-show workaround for @alpinejs/csp 3.13.7+ x-show reactivity bug
+ * (epic:portal-csp-strict, story_739823eb). Bindings that would have
+ * been x-show="X" are written :class="hiddenWhenX" with a getter
+ * returning '' or 'is-hidden'. The static class on the element also
+ * carries `is-hidden` so first paint is hidden without x-cloak.
+ */
+.is-hidden {
+    display: none !important;
+}
+
 /* === RESET === */
 
 * {

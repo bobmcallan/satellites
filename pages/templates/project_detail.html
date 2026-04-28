@@ -9,7 +9,8 @@
   <main class="portal-main">
 
     <section class="panel-headed" data-testid="workspace-project-meta"
-             x-data="sectionToggle('proj-{{.Project.ID}}-meta')"
+             x-data="sectionToggle"
+             data-toggle-key="proj-{{.Project.ID}}-meta"
              :class="{ 'section-collapsed': collapsed }">
       <header class="panel-header section-toggle" @click="toggle">
         <h1>{{.Project.Name}}</h1>
@@ -17,7 +18,7 @@
           <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
-      <div class="panel-body" x-show="open">
+      <div class="panel-body" :class="hiddenWhenOpen">
         <dl class="kv-list">
           <dt>id</dt><dd><code>{{.Project.ID}}</code></dd>
           <dt>status</dt><dd>{{.Project.Status}}</dd>
@@ -33,7 +34,8 @@
 
     <section class="workspace-search" data-testid="workspace-search">
       <form method="get" action="" class="workspace-search-form"
-            x-data="projectSearchInput('{{.Composite.Filters.Query}}')"
+            x-data="projectSearchInput"
+            data-initial-query="{{.Composite.Filters.Query}}"
             data-testid="workspace-search-form">
         <input type="text" name="q" x-model="q" value="{{.Composite.Filters.Query}}"
                class="workspace-search-input workspace-search-borderless"
@@ -43,7 +45,7 @@
                x-ref="searchInput"
                @input.debounce.300ms="submitForm">
         <button type="button" class="workspace-search-clear"
-                x-show="hasQuery" x-cloak
+                x-cloak :class="hiddenWhenHasQuery"
                 data-testid="workspace-search-clear"
                 @click="clearAndSubmit"
                 aria-label="clear search">×</button>
@@ -52,7 +54,8 @@
     </section>
 
     <section class="panel-headed" data-testid="workspace-stories-panel"
-             x-data="sectionToggle('proj-{{.Project.ID}}-stories')"
+             x-data="sectionToggle"
+             data-toggle-key="proj-{{.Project.ID}}-stories"
              :class="{ 'section-collapsed': collapsed }">
       <header class="panel-header section-toggle" @click="toggle">
         <h2>stories</h2>
@@ -61,7 +64,7 @@
           <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
-      <div class="panel-body" x-show="open">
+      <div class="panel-body" :class="hiddenWhenOpen">
         {{if not .Composite.Stories}}
           <p class="muted" data-testid="workspace-stories-empty">No matches</p>
         {{else}}
@@ -84,7 +87,8 @@
     </section>
 
     <section class="panel-headed" data-testid="workspace-documents-panel"
-             x-data="sectionToggle('proj-{{.Project.ID}}-documents')"
+             x-data="sectionToggle"
+             data-toggle-key="proj-{{.Project.ID}}-documents"
              :class="{ 'section-collapsed': collapsed }">
       <header class="panel-header section-toggle" @click="toggle">
         <h2>documents</h2>
@@ -93,7 +97,7 @@
           <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
-      <div class="panel-body" x-show="open">
+      <div class="panel-body" :class="hiddenWhenOpen">
         {{if not .Composite.Documents}}
           <p class="muted" data-testid="workspace-documents-empty">No matches</p>
         {{else}}
@@ -116,7 +120,8 @@
     </section>
 
     <section class="panel-headed" data-testid="workspace-configuration-section"
-             x-data="sectionToggle('proj-{{.Project.ID}}-configuration')"
+             x-data="sectionToggle"
+             data-toggle-key="proj-{{.Project.ID}}-configuration"
              :class="{ 'section-collapsed': collapsed }">
       <header class="panel-header section-toggle" @click="toggle">
         <h2>configuration</h2>
@@ -124,7 +129,7 @@
           <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
-      <div class="panel-body" x-show="open">
+      <div class="panel-body" :class="hiddenWhenOpen">
         <p>
           <a href="/projects/{{.Project.ID}}/configuration" data-testid="workspace-configuration-link">Open configuration page →</a>
         </p>

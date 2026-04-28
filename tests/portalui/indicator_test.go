@@ -121,7 +121,7 @@ func TestIndicator_ProlongedOutage_TurnsRed(t *testing.T) {
 	// reachable, then assert visibility.
 	var retryHTML string
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(".ws-indicator .ws-indicator-btn", chromedp.ByQuery),
+		jsClick(".ws-indicator .ws-indicator-btn"),
 		chromedp.WaitVisible(".ws-debug button.btn-link", chromedp.ByQuery),
 		chromedp.OuterHTML(".ws-debug button.btn-link", &retryHTML, chromedp.ByQuery),
 	); err != nil {
@@ -167,9 +167,9 @@ func TestIndicator_RetryButton_Recovers(t *testing.T) {
 	// another reconnecting cycle and we just bounce.
 	h.EnableWS()
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(".ws-indicator .ws-indicator-btn", chromedp.ByQuery),
+		jsClick(".ws-indicator .ws-indicator-btn"),
 		chromedp.WaitVisible(".ws-debug button.btn-link", chromedp.ByQuery),
-		chromedp.Click(".ws-debug button.btn-link", chromedp.ByQuery),
+		jsClick(".ws-debug button.btn-link"),
 	); err != nil {
 		t.Fatalf("retry click: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestIndicator_DebugPanel_RendersEvents(t *testing.T) {
 	// avoids any reliance on Alpine internals (Alpine 3 doesn't expose
 	// `el.__x`); we trust the DOM.
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(".ws-indicator .ws-indicator-btn", chromedp.ByQuery),
+		jsClick(".ws-indicator .ws-indicator-btn"),
 		chromedp.WaitVisible(".ws-debug", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("open debug panel: %v", err)

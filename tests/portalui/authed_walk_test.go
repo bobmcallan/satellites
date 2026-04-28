@@ -58,7 +58,7 @@ func TestPortal_AuthedWalk(t *testing.T) {
 	// (covers story_690b8f5c regression).
 	var menuChildren int
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`.nav-workspace .btn-link`, chromedp.ByQuery),
+		jsClick(`.nav-workspace .btn-link`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(
 			`document.querySelectorAll('[data-testid="nav-workspace-menu"] > li').length`,
@@ -111,7 +111,7 @@ func TestPortal_AuthedWalk(t *testing.T) {
 	var settingsLinkVisible bool
 	var themePickerInDropdown bool
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`button[data-testid="nav-hamburger"]`, chromedp.ByQuery),
+		jsClick(`button[data-testid="nav-hamburger"]`),
 		chromedp.Sleep(150*time.Millisecond),
 		chromedp.Evaluate(
 			`(() => { const el = document.querySelector('[data-testid="nav-dropdown"]'); return !!el && el.offsetParent !== null; })()`,

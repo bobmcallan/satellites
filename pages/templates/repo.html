@@ -127,7 +127,7 @@
           </template>
           <template x-if="diff.result">
             <div data-testid="diff-result">
-              <p class="muted" x-show="diffSourceUnavailable" data-testid="diff-source-unavailable">
+              <p class="muted" :class="hiddenWhenDiffSourceUnavailable" data-testid="diff-source-unavailable">
                 Unified diff content is not yet wired (follow-up story will integrate the GitHub Compare API). Commits between the two refs are listed below.
               </p>
               <ul class="commit-list">
@@ -143,7 +143,7 @@
         </div>
       </section>
 
-      <aside class="symbol-drawer" x-show="drawer.open" x-cloak data-testid="symbol-drawer">
+      <aside class="symbol-drawer" x-cloak :class="hiddenWhenDrawerOpen" data-testid="symbol-drawer">
         <header class="panel-header">
           <h2>symbol <code x-text="drawer.symbol.name"></code></h2>
           <button type="button" class="btn-link" @click="closeDrawer">close</button>

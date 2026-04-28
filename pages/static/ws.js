@@ -267,6 +267,9 @@ function wsIndicator() {
         get hasNoRecentEvents() {
             return this.recentEvents.length === 0;
         },
+        get hiddenWhenDebugOpen() { return this.debugOpen ? '' : 'is-hidden'; },
+        get hiddenWhenIsDisconnected() { return this.isDisconnected ? '' : 'is-hidden'; },
+        get hiddenWhenHasNoRecentEvents() { return this.hasNoRecentEvents ? '' : 'is-hidden'; },
         get statusText() {
             switch (this.status) {
                 case STATE_LIVE: return 'live';
