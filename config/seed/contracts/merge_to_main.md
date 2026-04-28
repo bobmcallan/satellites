@@ -1,0 +1,48 @@
+---
+name: merge_to_main
+category: merge_to_main
+required_role: role_orchestrator
+required_categories: [merge_to_main]
+validation_mode: llm
+permitted_actions:
+  - "Read:**"
+  - "Bash:git_status"
+  - "Bash:git_log"
+  - "Bash:git_diff"
+  - "Bash:git_fetch"
+  - "Bash:git_checkout"
+  - "Bash:git_branch"
+  - "Bash:git_merge"
+  - "mcp__satellites__satellites_*"
+evidence_required: |
+  Inline in close markdown:
+  1. Source branch (or "direct on main").
+  2. Pre-merge log + post-merge SHA.
+  3. `git status -uno` clean.
+  4. Confirmation: fast-forward only.
+tags: [v4, lifecycle, system]
+---
+# Merge to Main Contract
+
+Aligns local main with origin after push. The v4 trunk-based flow
+does not produce merge commits — merges are fast-forward only. When
+work landed directly on main (the common case), this contract is a
+no-op confirmation.
+
+## What it does
+
+- Confirms current branch + sync state.
+- Runs `git merge --ff-only` to advance local main.
+- Records SHA + ff-only confirmation on close evidence.
+
+## How
+
+Read-only git inspection plus checkout/branch/merge with the
+`--ff-only` constraint.
+
+## Limitations
+
+- Fast-forward only. If a merge commit would be required, the
+  contract aborts and the operator files a follow-up.
+- Cannot delete branches.
+- Cannot push.

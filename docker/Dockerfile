@@ -38,6 +38,10 @@ WORKDIR /app
 COPY --from=builder /bin/satellites /app/satellites
 COPY --from=builder /bin/satellites-agent /app/satellites-agent
 COPY docker/entrypoint-local.sh /app/docker/
+# story_7bfd629c: ship the system-tier configuration markdown into the
+# image. The boot path resolves these via SATELLITES_SEED_DIR /
+# SATELLITES_HELP_DIR, defaulting to ./config/seed and ./config/help.
+COPY config /app/config
 RUN chmod +x /app/docker/entrypoint-local.sh
 
 EXPOSE 8080

@@ -18,6 +18,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/configseed"
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/dispatcher"
@@ -198,6 +199,29 @@ func main() {
 		// Story_488b8223.
 		if err := seedLifecycleAgents(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("lifecycle agents seed failed")
+		}
+
+		// story_7bfd629c: load system-tier configuration from
+		// ./config/seed/{agents,contracts,workflows}/*.md and
+		// ./config/help/*.md. Markdown is the single source of truth;
+		// this loader runs after the in-Go seeds so it can override
+		// their content with the file-driven version. Failures log at
+		// warn — the platform stays bootable on a malformed file.
+		if summary, err := configseed.RunAll(ctx, docStore,
+			configseed.ResolveSeedDir(), configseed.ResolveHelpDir(),
+			systemWsID, "system", time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("configseed run failed")
+		} else {
+			logger.Info().
+				Int("loaded", summary.Loaded).
+				Int("created", summary.Created).
+				Int("updated", summary.Updated).
+				Int("skipped", summary.Skipped).
+				Int("errors", len(summary.Errors)).
+				Msg("configseed run complete")
+			for _, e := range summary.Errors {
+				logger.Warn().Str("path", e.Path).Str("reason", e.Reason).Msg("configseed entry failed")
+			}
 		}
 
 		// story_b1108d4a: migrate legacy skill→contract bindings into

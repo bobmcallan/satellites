@@ -30,6 +30,15 @@ const (
 	TypeAgent         = "agent"
 	TypeRole          = "role"
 	TypeConfiguration = "configuration"
+	// TypeWorkflow names a system-scope document that defines the
+	// required-slot shape for a workflow (e.g. preplan → plan → develop
+	// → push → merge_to_main → story_close). Seeded from
+	// config/seed/workflows/*.md by configseed. story_7bfd629c.
+	TypeWorkflow = "workflow"
+	// TypeHelp names a system-scope help page rendered by the portal
+	// /help routes. Seeded from config/help/*.md by configseed.
+	// story_cc5c67a9.
+	TypeHelp = "help"
 )
 
 // Scope enum values per docs/architecture.md §2.
@@ -54,6 +63,8 @@ var validTypes = map[string]struct{}{
 	TypeAgent:         {},
 	TypeRole:          {},
 	TypeConfiguration: {},
+	TypeWorkflow:      {},
+	TypeHelp:          {},
 }
 
 var validScopes = map[string]struct{}{
