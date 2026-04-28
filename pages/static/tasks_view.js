@@ -3,6 +3,14 @@
  * (slice 11.2, story_f2d71c27). Subscribes to the workspace websocket
  * via the global SatellitesWS client and live-updates the three columns.
  *
+ * Migrated to Alpine.data registration with CSP-compatible templates
+ * (epic:portal-csp-strict, story_597a6b9c). Per-row class strings and
+ * the testid attribute are precomputed in mergeTaskCard /
+ * hydrateFromSSR so tasks.html can bind via bare property access on
+ * the iteration variable. The drawer click handler reads its task id
+ * from data-task-id via $event.currentTarget.dataset.taskId so the
+ * template stays free of method-with-arg expressions.
+ *
  * Bootstrap input (set by tasks.html):
  *   window.SATELLITES_TASKS = { drawerURL }
  *
@@ -11,12 +19,6 @@
  *   - "task.claimed" / "task.in_flight" / "task.updated" → move to in_flight
  *   - "task.closed" → move to recently closed
  *   - any other kind ignored
- *
- * On reconnect (live → reconnecting → live) the factory refetches the
- * page state via /tasks (HTML) — for simplicity we trigger a soft
- * reload of the composite via a fresh fetch to /api/tasks (added to
- * Portal.Register if/when needed; for now the WS replay buffer covers
- * brief outages).
  */
 (function () {
     'use strict';
@@ -24,7 +26,7 @@
     function originMatches(filter, t) { return !filter || t.origin === filter; }
     function priorityMatches(filter, t) { return !filter || t.priority === filter; }
 
-    window.tasksView = function () {
+    function tasksView() {
         return {
             wsStatus: 'idle',
             inFlight: [],
@@ -38,7 +40,7 @@
                 excerpts: []
             },
 
-            start() {
+            init() {
                 this.hydrateFromSSR();
                 this.attachWS();
             },
@@ -61,7 +63,7 @@
                         const storyEl = li.querySelector('.task-story-link');
                         const whenEl = li.querySelector('.task-when');
                         const workerEl = li.querySelector('.task-worker');
-                        out.push({
+                        const card = {
                             id: idEl ? idEl.textContent.trim() : id,
                             origin: originEl ? originEl.textContent.trim() : '',
                             priority: priorityEl ? priorityEl.textContent.trim() : '',
@@ -72,7 +74,8 @@
                             claimed_at: status === 'claimed' || status === 'in_flight' ? (whenEl ? whenEl.textContent.trim() : '') : '',
                             completed_at: status === 'closed' ? (whenEl ? whenEl.textContent.trim() : '') : '',
                             claimed_by: workerEl ? workerEl.textContent.trim() : ''
-                        });
+                        };
+                        out.push(decorateCard(card));
                     });
                     return out;
                 };
@@ -81,11 +84,19 @@
                 this.closed = grab('[data-testid="column-closed"]');
             },
 
-            liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+            get liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
 
             filteredInFlight() { return this.inFlight.filter(this._match.bind(this)); },
             filteredEnqueued() { return this.enqueued.filter(this._match.bind(this)); },
             filteredClosed() { return this.closed.filter(this._match.bind(this)); },
+
+            get inFlightCount() { return this.filteredInFlight().length; },
+            get enqueuedCount() { return this.filteredEnqueued().length; },
+            get closedCount() { return this.filteredClosed().length; },
+
+            get inFlightEmpty() { return this.inFlightCount === 0; },
+            get enqueuedEmpty() { return this.enqueuedCount === 0; },
+            get closedEmpty() { return this.closedCount === 0; },
 
             _match(t) {
                 return originMatches(this.filter.origin, t) && priorityMatches(this.filter.priority, t);
@@ -143,7 +154,10 @@
                 }
             },
 
-            async openDrawer(taskID) {
+            async openDrawer($event) {
+                const target = $event && $event.currentTarget ? $event.currentTarget : null;
+                const taskID = target && target.dataset ? target.dataset.taskId : '';
+                if (!taskID) { return; }
                 const cfg = window.SATELLITES_TASKS || {};
                 if (!cfg.drawerURL) { return; }
                 try {
@@ -161,10 +175,22 @@
 
             closeDrawer() { this.drawer.open = false; }
         };
-    };
+    }
+
+    // decorateCard adds the precomputed strings the CSP-safe template
+    // binds to via `t.X` property access. Iteration vars in Alpine CSP
+    // cannot use string concatenation in directive expressions, so the
+    // factory pre-builds the per-row class names + testid here.
+    function decorateCard(card) {
+        card.testid = 'task-card-' + card.id;
+        card.priorityClass = 'priority-pill priority-' + (card.priority || '');
+        card.statusClass = 'status-pill status-' + (card.status || '');
+        card.outcomeClass = 'outcome-pill outcome-' + (card.outcome || '');
+        return card;
+    }
 
     function mergeTaskCard(row) {
-        return {
+        return decorateCard({
             id: row.id || '',
             origin: row.origin || '',
             status: row.status || '',
@@ -175,7 +201,7 @@
             completed_at: row.completed_at || '',
             outcome: row.outcome || '',
             created_at: row.created_at || ''
-        };
+        });
     }
 
     function upsertById(arr, card, cap) {
@@ -190,6 +216,11 @@
         return arr.filter(function (c) { return c.id !== id; });
     }
 
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('tasksView', tasksView);
+    });
+
     // Expose helpers for tests that grep the source.
-    window.tasksView.__test__ = { mergeTaskCard: mergeTaskCard, upsertById: upsertById, removeById: removeById };
+    window.tasksView = tasksView;
+    window.tasksView.__test__ = { mergeTaskCard: mergeTaskCard, upsertById: upsertById, removeById: removeById, decorateCard: decorateCard };
 })();

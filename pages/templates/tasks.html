@@ -12,13 +12,13 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main" x-data="tasksView()" x-init="start()">
+  <main class="portal-main" x-data="tasksView">
 
     <section class="panel-headed" data-testid="tasks-header">
       <header class="panel-header">
         <h1>tasks</h1>
         <span class="panel-header-meta">
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body tasks-filters">
@@ -49,20 +49,20 @@
       <section class="panel-headed tasks-column" data-testid="column-in-flight">
         <header class="panel-header">
           <h2>in flight</h2>
-          <span class="panel-header-meta"><code>(<span x-text="filteredInFlight().length">{{len .Composite.InFlight}}</span>)</code></span>
+          <span class="panel-header-meta"><code>(<span x-text="inFlightCount">{{len .Composite.InFlight}}</span>)</code></span>
         </header>
         <div class="panel-body">
-          <template x-if="filteredInFlight().length === 0">
+          <template x-if="inFlightEmpty">
             <p class="muted" data-testid="in-flight-empty">No tasks in flight.</p>
           </template>
           {{if not .Composite.InFlight}}<noscript><p class="muted" data-testid="in-flight-empty-ssr">No tasks in flight.</p></noscript>{{end}}
           <ul class="task-list">
             <template x-for="t in filteredInFlight()" :key="t.id">
-              <li :data-testid="'task-card-' + t.id" :data-status="t.status" @click="openDrawer(t.id)">
+              <li :data-testid="t.testid" :data-task-id="t.id" :data-status="t.status" @click="openDrawer">
                 <code class="task-id" x-text="t.id"></code>
-                <code :class="'priority-pill priority-' + t.priority" x-text="t.priority"></code>
+                <code :class="t.priorityClass" x-text="t.priority"></code>
                 <code class="origin-pill" x-text="t.origin"></code>
-                <code :class="'status-pill status-' + t.status" x-text="t.status"></code>
+                <code :class="t.statusClass" x-text="t.status"></code>
                 <template x-if="t.story_id">
                   <code class="task-story-link" x-text="t.story_id"></code>
                 </template>
@@ -90,18 +90,18 @@
       <section class="panel-headed tasks-column" data-testid="column-enqueued">
         <header class="panel-header">
           <h2>enqueued</h2>
-          <span class="panel-header-meta"><code>(<span x-text="filteredEnqueued().length">{{len .Composite.Enqueued}}</span>)</code></span>
+          <span class="panel-header-meta"><code>(<span x-text="enqueuedCount">{{len .Composite.Enqueued}}</span>)</code></span>
         </header>
         <div class="panel-body">
-          <template x-if="filteredEnqueued().length === 0">
+          <template x-if="enqueuedEmpty">
             <p class="muted" data-testid="enqueued-empty">No tasks enqueued.</p>
           </template>
           {{if not .Composite.Enqueued}}<noscript><p class="muted" data-testid="enqueued-empty-ssr">No tasks enqueued.</p></noscript>{{end}}
           <ul class="task-list">
             <template x-for="t in filteredEnqueued()" :key="t.id">
-              <li :data-testid="'task-card-' + t.id" :data-status="t.status" @click="openDrawer(t.id)">
+              <li :data-testid="t.testid" :data-task-id="t.id" :data-status="t.status" @click="openDrawer">
                 <code class="task-id" x-text="t.id"></code>
-                <code :class="'priority-pill priority-' + t.priority" x-text="t.priority"></code>
+                <code :class="t.priorityClass" x-text="t.priority"></code>
                 <code class="origin-pill" x-text="t.origin"></code>
                 <template x-if="t.story_id">
                   <code class="task-story-link" x-text="t.story_id"></code>
@@ -127,20 +127,20 @@
       <section class="panel-headed tasks-column" data-testid="column-closed">
         <header class="panel-header">
           <h2>recently closed</h2>
-          <span class="panel-header-meta"><code>(<span x-text="filteredClosed().length">{{len .Composite.Closed}}</span>)</code></span>
+          <span class="panel-header-meta"><code>(<span x-text="closedCount">{{len .Composite.Closed}}</span>)</code></span>
         </header>
         <div class="panel-body">
-          <template x-if="filteredClosed().length === 0">
+          <template x-if="closedEmpty">
             <p class="muted" data-testid="closed-empty">No closed tasks yet.</p>
           </template>
           {{if not .Composite.Closed}}<noscript><p class="muted" data-testid="closed-empty-ssr">No closed tasks yet.</p></noscript>{{end}}
           <ul class="task-list">
             <template x-for="t in filteredClosed()" :key="t.id">
-              <li :data-testid="'task-card-' + t.id" :data-status="t.status" @click="openDrawer(t.id)">
+              <li :data-testid="t.testid" :data-task-id="t.id" :data-status="t.status" @click="openDrawer">
                 <code class="task-id" x-text="t.id"></code>
-                <code :class="'priority-pill priority-' + t.priority" x-text="t.priority"></code>
+                <code :class="t.priorityClass" x-text="t.priority"></code>
                 <code class="origin-pill" x-text="t.origin"></code>
-                <code :class="'outcome-pill outcome-' + t.outcome" x-text="t.outcome"></code>
+                <code :class="t.outcomeClass" x-text="t.outcome"></code>
                 <template x-if="t.story_id">
                   <code class="task-story-link" x-text="t.story_id"></code>
                 </template>
@@ -169,7 +169,7 @@
     <aside class="task-drawer" x-show="drawer.open" x-cloak data-testid="task-drawer">
       <header class="panel-header">
         <h2>task <code x-text="drawer.task.id"></code></h2>
-        <button type="button" class="btn-link" @click="closeDrawer()">close</button>
+        <button type="button" class="btn-link" @click="closeDrawer">close</button>
       </header>
       <div class="panel-body">
         <dl class="kv-list">
