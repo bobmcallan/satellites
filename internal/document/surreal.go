@@ -196,7 +196,11 @@ func (s *SurrealStore) Upsert(ctx context.Context, in UpsertInput, now time.Time
 	}
 	existing, err := s.GetByName(ctx, projectID, in.Name, nil)
 	if err == nil {
-		if existing.BodyHash == hash {
+		// Body-hash match short-circuits the write path UNLESS the
+		// type has drifted (a row whose type was rewritten by an
+		// upstream migration like MigrateLegacyRows must reconverge
+		// to the seed's intent on the next pass). story_7992c382.
+		if existing.BodyHash == hash && existing.Type == in.Type {
 			return UpsertResult{Document: existing}, nil
 		}
 		if verr := s.writeVersion(ctx, versionFromDocument(existing)); verr != nil {
@@ -846,8 +850,16 @@ func (s *SurrealStore) MigrateLegacyRows(ctx context.Context, now time.Time) (in
 		vars  map[string]any
 	}{
 		{
+			// Stamp `type=artifact` ONLY on legacy rows whose type is
+			// missing or empty. The previous WHERE clause also coerced
+			// `type NOT IN [<v3-allowlist>]` to artifact, which was
+			// silently rewriting v4-only types (agent, role,
+			// configuration, workflow, help) every boot — see
+			// story_7992c382 root-cause analysis. Drop that clause; the
+			// validTypes set in document.go is the authoritative
+			// allow-list now, enforced at write time by Validate.
 			label: "type=artifact",
-			sql:   "UPDATE documents SET type = 'artifact', updated_at = $now WHERE type IS NONE OR type = '' OR type NOT IN ['artifact','contract','skill','principle','reviewer'] RETURN AFTER",
+			sql:   "UPDATE documents SET type = 'artifact', updated_at = $now WHERE type IS NONE OR type = '' RETURN AFTER",
 			vars:  map[string]any{"now": now},
 		},
 		{

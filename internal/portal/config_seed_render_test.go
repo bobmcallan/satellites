@@ -126,19 +126,15 @@ func TestConfigPage_SeededDocsExistInStore(t *testing.T) {
 }
 
 // TestConfigPage_RendersSeededItems is the regression-pin for the
-// shipped bug behind story_7992c382: even though the configseed loader
-// writes documents into the store at boot, the /config page renders
-// them as if absent. The test is intentionally skipped today; once
-// story_7992c382 ships the page fix, removing the t.Skip flips it to
-// a passing assertion that pins the rendering boundary.
+// shipped bug originally tracked under story_7992c382: even though the
+// configseed loader writes documents into the store at boot, the
+// /config page rendered them as if absent. story_7992c382's page fix
+// (System Content panels via SystemContracts / SystemAgents /
+// SystemWorkflows on the composite) makes this assertion pass.
 //
-// Splitting the loader-vs-render assertions into two tests keeps
-// `go test ./...` green during the bug window while still documenting
-// exactly which code path needs to change.
+// Keeping the test parallel-tagged is fine — it only mutates an env
+// var via t.Setenv, which Go scopes to the subtest.
 func TestConfigPage_RendersSeededItems(t *testing.T) {
-	t.Parallel()
-	t.Skip("RED until story_7992c382: /config queries type=configuration bundles + applies workspace memberships filter, so seeded type=contract/agent/workflow docs land in the store but never reach the rendered page. Remove this skip in story_7992c382's develop close.")
-
 	t.Setenv(auth.GlobalAdminEmailsEnv, "alice@x.io")
 
 	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})

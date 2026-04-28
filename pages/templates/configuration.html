@@ -157,6 +157,96 @@
     </section>
     {{end}}
 
+    {{if .Composite.SystemContracts}}
+    <section class="panel-headed" data-testid="config-system-contracts-panel">
+      <header class="panel-header">
+        <h2>system contracts</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-system-contracts-count">({{len .Composite.SystemContracts}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">Lifecycle contracts seeded from <code>config/seed/contracts/</code>.</p>
+        <ul class="document-cards" data-testid="config-system-contracts-list">
+          {{range .Composite.SystemContracts}}
+          <li data-testid="config-system-contract-{{.ID}}">
+            <a href="/documents/{{.ID}}" class="document-card-link">
+              <code class="type-pill">{{.Type}}</code>
+              <code class="scope-pill">{{.Scope}}</code>
+              <span class="document-name">{{.Name}}</span>
+              <code class="version-pill">v{{.Version}}</code>
+              <span class="muted">{{.UpdatedAt}}</span>
+            </a>
+          </li>
+          {{end}}
+        </ul>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Composite.SystemWorkflows}}
+    <section class="panel-headed" data-testid="config-system-workflows-panel">
+      <header class="panel-header">
+        <h2>system workflows</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-system-workflows-count">({{len .Composite.SystemWorkflows}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">Default workflow shapes seeded from <code>config/seed/workflows/</code>.</p>
+        <ul class="document-cards" data-testid="config-system-workflows-list">
+          {{range .Composite.SystemWorkflows}}
+          <li data-testid="config-system-workflow-{{.ID}}">
+            <a href="/documents/{{.ID}}" class="document-card-link">
+              <code class="type-pill">{{.Type}}</code>
+              <code class="scope-pill">{{.Scope}}</code>
+              <span class="document-name">{{.Name}}</span>
+              <code class="version-pill">v{{.Version}}</code>
+              <span class="muted">{{.UpdatedAt}}</span>
+            </a>
+          </li>
+          {{end}}
+        </ul>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Composite.SystemAgents}}
+    <section class="panel-headed" data-testid="config-system-agents-panel">
+      <header class="panel-header">
+        <h2>system agents</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-system-agents-count">({{len .Composite.SystemAgents}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">Lifecycle agents seeded from <code>config/seed/agents/</code>.</p>
+        <table class="data-table" data-testid="config-system-agents-list">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>permission patterns</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.SystemAgents}}
+            <tr data-testid="config-system-agent-{{.ID}}">
+              <td><a href="/documents/{{.ID}}"><code>{{.Name}}</code></a></td>
+              <td>
+                {{if .PermissionPatterns}}
+                  {{range .PermissionPatterns}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
+                {{else}}
+                  <span class="muted">—</span>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {{end}}
+
     <section class="panel-headed" data-testid="config-agents-panel">
       <header class="panel-header">
         <h2>agents</h2>

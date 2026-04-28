@@ -42,8 +42,11 @@ type phaseAllocationCard struct {
 }
 
 // configComposite is the view-model fed to configuration.html. When no
-// Configuration documents exist the four resolved slices are empty and
-// the template renders the empty state.
+// Configuration documents exist the bundle-driven slices are empty and
+// the template renders the empty state. System* slices carry the
+// scope=system docs the configseed loader writes — they render
+// regardless of whether a Configuration bundle is selected
+// (story_7992c382).
 type configComposite struct {
 	// Configurations lists every type=configuration document the caller
 	// can see, sorted by Name. Empty when none exist.
@@ -72,6 +75,16 @@ type configComposite struct {
 	// Configuration. Empty until at least one story claims the
 	// Configuration's workflow. Story_7b77ffb0.
 	PerPhaseAllocation []phaseAllocationCard
+	// SystemContracts lists every scope=system, type=contract document
+	// the configseed loader writes. Visible regardless of whether a
+	// Configuration bundle is selected. story_7992c382.
+	SystemContracts []documentCard
+	// SystemAgents lists every scope=system, type=agent document.
+	// story_7992c382.
+	SystemAgents []agentRow
+	// SystemWorkflows lists every scope=system, type=workflow document.
+	// story_7992c382.
+	SystemWorkflows []documentCard
 }
 
 // buildConfigComposite assembles the composite for the /config page.
@@ -83,6 +96,13 @@ func buildConfigComposite(ctx context.Context, docs document.Store, contracts co
 	if docs == nil {
 		return out
 	}
+
+	// Always populate the System* slices so the configseed-loaded
+	// docs render whether or not a Configuration bundle exists.
+	// story_7992c382.
+	out.SystemContracts = listSystemDocuments(ctx, docs, document.TypeContract)
+	out.SystemWorkflows = listSystemDocuments(ctx, docs, document.TypeWorkflow)
+	out.SystemAgents = listSystemAgents(ctx, docs)
 
 	rows, err := docs.List(ctx, document.ListOptions{Type: document.TypeConfiguration, Limit: configListLimit}, memberships)
 	if err != nil || len(rows) == 0 {
@@ -149,6 +169,52 @@ func resolveCards(ctx context.Context, docs document.Store, memberships []string
 func listAgentsForConfig(ctx context.Context, docs document.Store, memberships []string) []agentRow {
 	composite := buildAgentsComposite(ctx, docs, memberships, agentFilter{})
 	return composite.Rows
+}
+
+// listSystemDocuments returns every active scope=system document of the
+// given type. Read with nil memberships because system-scope content is
+// globally readable inside the workspace per pr_0779e5af. Used to
+// surface configseed-loaded contracts/workflows on /config regardless
+// of whether the caller's memberships include the system workspace.
+// story_7992c382.
+func listSystemDocuments(ctx context.Context, docs document.Store, docType string) []documentCard {
+	if docs == nil {
+		return nil
+	}
+	rows, err := docs.List(ctx, document.ListOptions{
+		Type:  docType,
+		Scope: document.ScopeSystem,
+		Limit: configListLimit,
+	}, nil)
+	if err != nil {
+		return nil
+	}
+	out := make([]documentCard, 0, len(rows))
+	for _, r := range rows {
+		if r.Status != document.StatusActive {
+			continue
+		}
+		out = append(out, documentCardFor(r))
+	}
+	return out
+}
+
+// listSystemAgents reuses buildAgentsComposite with nil memberships
+// (bypasses the workspace filter) and keeps only the scope=system
+// rows. story_7992c382.
+func listSystemAgents(ctx context.Context, docs document.Store) []agentRow {
+	if docs == nil {
+		return nil
+	}
+	all := buildAgentsComposite(ctx, docs, nil, agentFilter{}).Rows
+	out := make([]agentRow, 0, len(all))
+	for _, row := range all {
+		if row.Scope != document.ScopeSystem {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // perPhaseAllocationFor returns the per-contract allocation rows for

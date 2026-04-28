@@ -372,7 +372,9 @@ func (m *MemoryStore) Upsert(ctx context.Context, in UpsertInput, now time.Time)
 		}
 	}
 	if existing, ok := m.findByName(projectID, in.Name); ok {
-		if existing.BodyHash == hash {
+		// Body-hash match short-circuits unless the type has drifted —
+		// see surreal.go for the corresponding rationale (story_7992c382).
+		if existing.BodyHash == hash && existing.Type == in.Type {
 			return UpsertResult{Document: existing}, nil
 		}
 		m.appendVersionLocked(existing)
