@@ -71,4 +71,34 @@ document.addEventListener('alpine:init', () => {
         toggle() { this.open = !this.open; },
         close() { this.open = false; },
     }));
+
+    // Theme picker — login page's three-button dark/system/light selector.
+    // Each button has its own getter so the CSP build can bind
+    // `:aria-pressed="isDarkMode"` without an inline comparison.
+    Alpine.data('themePicker', (initialMode) => ({
+        mode: initialMode,
+        get isDarkMode() { return this.mode === 'dark'; },
+        get isLightMode() { return this.mode === 'light'; },
+        get isSystemMode() { return this.mode === 'system'; },
+    }));
+
+    // Project-detail search input — debounced text filter with a clear
+    // button. Methods reach the form/input via Alpine's $refs so the
+    // template stays free of inline expressions like `$el.form...`.
+    Alpine.data('projectSearchInput', (initialQuery) => ({
+        q: initialQuery,
+        get hasQuery() { return this.q.length > 0; },
+        submitForm() {
+            if (this.$root && typeof this.$root.requestSubmit === 'function') {
+                this.$root.requestSubmit();
+            }
+        },
+        clearAndSubmit() {
+            this.q = '';
+            const input = this.$refs && this.$refs.searchInput;
+            if (input) {
+                input.value = '';
+            }
+        },
+    }));
 });

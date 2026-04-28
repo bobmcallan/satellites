@@ -1,8 +1,8 @@
 {{define "theme_picker.html"}}
-<form class="theme-picker" method="post" action="/theme" data-theme-picker x-data="{ mode: '{{.ThemeMode}}' }">
+<form class="theme-picker" method="post" action="/theme" data-theme-picker x-data="themePicker('{{.ThemeMode}}')">
   <input type="hidden" name="next" value="{{.ThemePickerNext}}">
-  <button type="submit" name="mode" value="dark" class="theme-picker-btn" :aria-pressed="mode === 'dark'" aria-pressed="{{if eq .ThemeMode "dark"}}true{{else}}false{{end}}">Dark</button>
-  <button type="submit" name="mode" value="system" class="theme-picker-btn" :aria-pressed="mode === 'system'" aria-pressed="{{if eq .ThemeMode "system"}}true{{else}}false{{end}}">Sys</button>
-  <button type="submit" name="mode" value="light" class="theme-picker-btn" :aria-pressed="mode === 'light'" aria-pressed="{{if eq .ThemeMode "light"}}true{{else}}false{{end}}">Light</button>
+  <button type="submit" name="mode" value="dark" class="theme-picker-btn" :aria-pressed="isDarkMode" aria-pressed="{{if eq .ThemeMode "dark"}}true{{else}}false{{end}}">Dark</button>
+  <button type="submit" name="mode" value="system" class="theme-picker-btn" :aria-pressed="isSystemMode" aria-pressed="{{if eq .ThemeMode "system"}}true{{else}}false{{end}}">Sys</button>
+  <button type="submit" name="mode" value="light" class="theme-picker-btn" :aria-pressed="isLightMode" aria-pressed="{{if eq .ThemeMode "light"}}true{{else}}false{{end}}">Light</button>
 </form>
 {{end}}

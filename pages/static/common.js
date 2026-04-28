@@ -31,6 +31,10 @@ function toasts() {
 // `key` is a stable per-page identifier (e.g. "proj-{id}-stories"); the
 // open/closed state is persisted in sessionStorage so navigation within
 // the same browser tab restores the user's choice.
+//
+// Migrated to Alpine.data registration (story_ecce93ea). Inline
+// expression directives are gone from project_detail.html — getters
+// `caret` + `collapsed` keep the bindings CSP-compatible.
 function sectionToggle(key) {
     return {
         open: true,
@@ -46,5 +50,11 @@ function sectionToggle(key) {
                 sessionStorage.setItem('section-toggle:' + key, this.open ? 'open' : 'closed');
             } catch (e) { /* sessionStorage unavailable */ }
         },
+        get caret() { return this.open ? '▾' : '▸'; },
+        get collapsed() { return !this.open; },
     };
 }
+
+document.addEventListener('alpine:init', () => {
+    Alpine.data('sectionToggle', sectionToggle);
+});

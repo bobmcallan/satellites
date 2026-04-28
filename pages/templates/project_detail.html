@@ -9,12 +9,12 @@
   <main class="portal-main">
 
     <section class="panel-headed" data-testid="workspace-project-meta"
-             x-data="sectionToggle('proj-{{.Project.ID}}-meta')" x-init="init()"
-             :class="{ 'section-collapsed': !open }">
-      <header class="panel-header section-toggle" @click="toggle()">
+             x-data="sectionToggle('proj-{{.Project.ID}}-meta')"
+             :class="{ 'section-collapsed': collapsed }">
+      <header class="panel-header section-toggle" @click="toggle">
         <h1>{{.Project.Name}}</h1>
         <span class="panel-header-meta">
-          <span class="section-toggle-caret" aria-hidden="true" x-text="open ? '▾' : '▸'"></span>
+          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
       <div class="panel-body" x-show="open">
@@ -33,31 +33,32 @@
 
     <section class="workspace-search" data-testid="workspace-search">
       <form method="get" action="" class="workspace-search-form"
-            x-data="{ q: '{{.Composite.Filters.Query}}' }"
+            x-data="projectSearchInput('{{.Composite.Filters.Query}}')"
             data-testid="workspace-search-form">
         <input type="text" name="q" x-model="q" value="{{.Composite.Filters.Query}}"
                class="workspace-search-input workspace-search-borderless"
                placeholder="search stories + documents…"
                autocomplete="off"
                data-testid="workspace-search-input"
-               @input.debounce.300ms="$el.form.requestSubmit()">
+               x-ref="searchInput"
+               @input.debounce.300ms="submitForm">
         <button type="button" class="workspace-search-clear"
-                x-show="q.length > 0" x-cloak
+                x-show="hasQuery" x-cloak
                 data-testid="workspace-search-clear"
-                @click="q=''; $el.previousElementSibling.dispatchEvent(new Event('input', {bubbles:true}))"
+                @click="clearAndSubmit"
                 aria-label="clear search">×</button>
         <noscript><button type="submit" class="btn-secondary">search</button></noscript>
       </form>
     </section>
 
     <section class="panel-headed" data-testid="workspace-stories-panel"
-             x-data="sectionToggle('proj-{{.Project.ID}}-stories')" x-init="init()"
-             :class="{ 'section-collapsed': !open }">
-      <header class="panel-header section-toggle" @click="toggle()">
+             x-data="sectionToggle('proj-{{.Project.ID}}-stories')"
+             :class="{ 'section-collapsed': collapsed }">
+      <header class="panel-header section-toggle" @click="toggle">
         <h2>stories</h2>
         <span class="panel-header-meta">
           <code data-testid="workspace-stories-count">({{.Composite.StoryTotal}})</code>
-          <span class="section-toggle-caret" aria-hidden="true" x-text="open ? '▾' : '▸'"></span>
+          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
       <div class="panel-body" x-show="open">
@@ -83,13 +84,13 @@
     </section>
 
     <section class="panel-headed" data-testid="workspace-documents-panel"
-             x-data="sectionToggle('proj-{{.Project.ID}}-documents')" x-init="init()"
-             :class="{ 'section-collapsed': !open }">
-      <header class="panel-header section-toggle" @click="toggle()">
+             x-data="sectionToggle('proj-{{.Project.ID}}-documents')"
+             :class="{ 'section-collapsed': collapsed }">
+      <header class="panel-header section-toggle" @click="toggle">
         <h2>documents</h2>
         <span class="panel-header-meta">
           <code data-testid="workspace-documents-count">({{.Composite.DocTotal}})</code>
-          <span class="section-toggle-caret" aria-hidden="true" x-text="open ? '▾' : '▸'"></span>
+          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
       <div class="panel-body" x-show="open">
@@ -115,12 +116,12 @@
     </section>
 
     <section class="panel-headed" data-testid="workspace-configuration-section"
-             x-data="sectionToggle('proj-{{.Project.ID}}-configuration')" x-init="init()"
-             :class="{ 'section-collapsed': !open }">
-      <header class="panel-header section-toggle" @click="toggle()">
+             x-data="sectionToggle('proj-{{.Project.ID}}-configuration')"
+             :class="{ 'section-collapsed': collapsed }">
+      <header class="panel-header section-toggle" @click="toggle">
         <h2>configuration</h2>
         <span class="panel-header-meta">
-          <span class="section-toggle-caret" aria-hidden="true" x-text="open ? '▾' : '▸'"></span>
+          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
       <div class="panel-body" x-show="open">
