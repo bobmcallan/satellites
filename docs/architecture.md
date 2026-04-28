@@ -585,6 +585,22 @@ Example `.mcp.json` entry:
 
 The harness's SessionStart hook reads `--default-workspace` and includes it as `workspace_id` on the `session_register` call. Empty / omitted is fine — the session simply runs unbound until a future verb stamps a workspace on it.
 
+#### Global admin (story_3548cde2)
+
+Workspace tenancy is the audit boundary (pr_0779e5af). A global_admin is the platform-tier role allowed to operate across workspaces — typically the platform operator assisting a customer's project without being a member of their workspace.
+
+Configuration is env-driven for the single-admin case:
+
+```
+SATELLITES_GLOBAL_ADMIN_EMAILS=ops@example.com,bob@example.com
+```
+
+Comma-separated list of email addresses; case-insensitive. Loaded at MCP server / portal boot and cached for the process lifetime — changes require a restart. The persisted `User.GlobalAdmin` field on the user record exists for forward compatibility with second-admin workflows but is unused while the env path covers all current cases.
+
+When a global_admin writes a ledger row inside a workspace they are not a member of, the row carries `impersonating_as_workspace = <target workspace_id>`. Reviewers walking the audit chain see exactly which writes happened under cross-tenancy authority and which workspace they applied to. Routine writes inside the actor's own workspace leave the field empty (omitempty).
+
+The portal nav surfaces a `GLOBAL ADMIN` chip whenever the active session is rendering a workspace outside the user's memberships, so the operator never accidentally forgets they are crossing tenancy.
+
 ### Worker ↔ server protocol
 
 The satellites-agent speaks the same MCP as the Claude session, but via a task-driven loop:

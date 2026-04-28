@@ -58,6 +58,7 @@
       </div>
     </div>
     {{end}}
+    {{if .GlobalAdminChip}}<span class="nav-global-admin-chip" data-testid="global-admin-chip" title="Global admin acting outside their workspace memberships">GLOBAL ADMIN</span>{{end}}
     {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
     <div class="nav-hamburger-wrap" x-data="navHamburger" @keydown.escape.window="close">

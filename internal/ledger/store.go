@@ -120,6 +120,7 @@ func (m *MemoryStore) SetPublisher(p hubemit.Publisher) { m.publisher = p }
 // Append implements Store for MemoryStore.
 func (m *MemoryStore) Append(ctx context.Context, entry LedgerEntry, now time.Time) (LedgerEntry, error) {
 	applyDefaults(&entry)
+	stampImpersonationFromCtx(ctx, &entry)
 	if err := entry.Validate(); err != nil {
 		return LedgerEntry{}, err
 	}

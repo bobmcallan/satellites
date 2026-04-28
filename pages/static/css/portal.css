@@ -321,6 +321,20 @@ a:hover {
     font-weight: 700;
     letter-spacing: 0.15em;
 }
+/* GLOBAL ADMIN chip (story_3548cde2). Renders when a global_admin is
+   acting on a workspace they are not a member of. Sits next to the DEV
+   chip in the nav strip; uses an accent border so the cross-tenancy
+   signal is unmistakable without being alarming. */
+.nav-global-admin-chip {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    margin-left: 0.5rem;
+    border: 1px solid #c0392b;
+    color: #c0392b;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+}
 
 /* Hamburger menu (story_e7e8b455). Replaces the inline logout form. */
 .nav-hamburger-wrap { position: relative; margin-left: 0.5rem; }

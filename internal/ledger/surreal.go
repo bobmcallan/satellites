@@ -150,11 +150,12 @@ func (c *SurrealChunkStore) SearchByEmbedding(ctx context.Context, opts ChunkSea
 }
 
 // selectCols preserves the string form of id (see internal/project/surreal.go).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, type, tags, content, structured, durability, expires_at, source_type, sensitive, status, created_at, created_by"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, type, tags, content, structured, durability, expires_at, source_type, sensitive, status, created_at, created_by, impersonating_as_workspace"
 
 // Append implements Store for SurrealStore.
 func (s *SurrealStore) Append(ctx context.Context, entry LedgerEntry, now time.Time) (LedgerEntry, error) {
 	applyDefaults(&entry)
+	stampImpersonationFromCtx(ctx, &entry)
 	if err := entry.Validate(); err != nil {
 		return LedgerEntry{}, err
 	}

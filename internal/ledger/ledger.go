@@ -94,6 +94,13 @@ type LedgerEntry struct {
 	Status      string     `json:"status"`
 	CreatedAt   time.Time  `json:"created_at"`
 	CreatedBy   string     `json:"created_by"`
+	// ImpersonatingAsWorkspace is set when the row was written by a
+	// global_admin acting on a workspace they are not a member of. Empty
+	// for routine writes inside the actor's own workspace. Populated
+	// either by the public ledger_add handler at write time or by
+	// internal callers that stamp ledger.WithImpersonatingWorkspace on
+	// ctx before calling Append. story_3548cde2.
+	ImpersonatingAsWorkspace string `json:"impersonating_as_workspace,omitempty"`
 
 	// BestChunkScore is populated transiently by SearchSemantic with the
 	// cosine similarity of the highest-scoring chunk that backed this

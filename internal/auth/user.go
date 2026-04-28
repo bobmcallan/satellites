@@ -12,4 +12,9 @@ type User struct {
 	DisplayName    string
 	Provider       string // "local" | "google" | "github"
 	HashedPassword string // bcrypt hash; empty for OAuth-only users
+	// GlobalAdmin marks a user as a platform-tier admin who may operate
+	// across workspaces. Resolved via either this persisted field OR the
+	// SATELLITES_GLOBAL_ADMIN_EMAILS env list — see IsGlobalAdmin.
+	// story_3548cde2.
+	GlobalAdmin bool
 }

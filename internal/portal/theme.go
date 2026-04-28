@@ -104,6 +104,7 @@ type settingsData struct {
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
 	DevMode         bool
+	GlobalAdminChip bool
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
@@ -118,7 +119,7 @@ func (p *Portal) handleSettings(w http.ResponseWriter, r *http.Request) {
 		p.redirectToLogin(w, r)
 		return
 	}
-	active, chips, _ := p.activeWorkspace(r, user)
+	active, chips, memberships := p.activeWorkspace(r, user)
 	data := settingsData{
 		Title:           buildPageTitle(active, "", "settings"),
 		Version:         config.Version,
@@ -127,6 +128,7 @@ func (p *Portal) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Workspaces:      chips,
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
+		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
 		ThemeMode:       themeFromRequest(r),
 		ThemePickerNext: "/settings",
 		WSConfig:        buildWSConfig(active, r),

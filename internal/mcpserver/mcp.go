@@ -741,11 +741,19 @@ func (s *Server) resolveProjectID(ctx context.Context, requested string, caller 
 		if requested == s.defaultProjectID {
 			return requested, nil
 		}
-		p, err := s.projectsSafe().GetByID(ctx, requested, memberships)
+		// story_3548cde2: global_admin callers may resolve any project
+		// regardless of workspace membership or ownership. The
+		// impersonating_as_workspace audit field captures the
+		// cross-tenancy write at ledger-stamp time.
+		lookupMemberships := memberships
+		if caller.GlobalAdmin {
+			lookupMemberships = nil
+		}
+		p, err := s.projectsSafe().GetByID(ctx, requested, lookupMemberships)
 		if err != nil {
 			return "", errors.New("project not found or access denied")
 		}
-		if p.OwnerUserID != caller.UserID {
+		if p.OwnerUserID != caller.UserID && !caller.GlobalAdmin {
 			return "", errors.New("project not found or access denied")
 		}
 		return requested, nil
@@ -820,6 +828,22 @@ func (s *Server) resolveCallerWorkspaceID(ctx context.Context, caller CallerIden
 // non-empty workspace ids otherwise. See docs/architecture.md §8.
 func (s *Server) resolveCallerMemberships(ctx context.Context, caller CallerIdentity) []string {
 	return s.ensureCallerWorkspaces(ctx, caller)
+}
+
+// ledgerWorkspaceInMemberships reports whether wsID is in the caller's
+// memberships slice. Used by handleLedgerAppend to decide whether a
+// write crosses the tenancy boundary and warrants stamping
+// impersonating_as_workspace. story_3548cde2.
+func ledgerWorkspaceInMemberships(wsID string, memberships []string) bool {
+	if wsID == "" || len(memberships) == 0 {
+		return false
+	}
+	for _, m := range memberships {
+		if m == wsID {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveProjectWorkspaceID returns the workspace_id of the given project,
@@ -1346,6 +1370,12 @@ func (s *Server) handleLedgerAppend(ctx context.Context, req mcpgo.CallToolReque
 		SourceType:  req.GetString("source_type", ""),
 		Sensitive:   req.GetBool("sensitive", false),
 		CreatedBy:   caller.UserID,
+	}
+	// story_3548cde2: stamp impersonation when a global_admin writes
+	// outside their own workspace memberships. Empty when the actor is
+	// in the workspace they're acting on.
+	if caller.GlobalAdmin && wsID != "" && !ledgerWorkspaceInMemberships(wsID, memberships) {
+		entry.ImpersonatingAsWorkspace = wsID
 	}
 	if structured := req.GetString("structured", ""); structured != "" {
 		if !json.Valid([]byte(structured)) {

@@ -22,6 +22,10 @@ type CallerIdentity struct {
 	Email  string
 	UserID string
 	Source string // "session" | "apikey"
+	// GlobalAdmin is set when the resolved user has the persisted flag
+	// or matches SATELLITES_GLOBAL_ADMIN_EMAILS. Used by handlers that
+	// stamp impersonation audit fields. story_3548cde2.
+	GlobalAdmin bool
 }
 
 // UserFrom returns the caller identity attached by AuthMiddleware.
@@ -57,6 +61,10 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 			keyset[k] = struct{}{}
 		}
 	}
+	// story_3548cde2: load the global-admin email set once at middleware
+	// construction. Changes require a restart — acceptable while there
+	// is a single global admin.
+	adminEmails := auth.LoadGlobalAdminEmails()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
@@ -74,11 +82,13 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 				// 2. OAuth bearer (Google / GitHub / satellites-signed).
 				if deps.OAuthValidator != nil {
 					if info, err := deps.OAuthValidator.Validate(r.Context(), token); err == nil {
-						ctx := context.WithValue(r.Context(), userKey, CallerIdentity{
+						caller := CallerIdentity{
 							Email:  info.Email,
 							UserID: info.UserID,
 							Source: "oauth:" + info.Provider,
-						})
+						}
+						caller.GlobalAdmin = auth.IsGlobalAdmin(auth.User{Email: info.Email}, adminEmails)
+						ctx := context.WithValue(r.Context(), userKey, caller)
 						next.ServeHTTP(w, r.WithContext(ctx))
 						return
 					}
@@ -90,11 +100,13 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 				if err == nil {
 					user, err := deps.Users.GetByID(sess.UserID)
 					if err == nil {
-						ctx := context.WithValue(r.Context(), userKey, CallerIdentity{
+						caller := CallerIdentity{
 							Email:  user.Email,
 							UserID: user.ID,
 							Source: "session",
-						})
+						}
+						caller.GlobalAdmin = auth.IsGlobalAdmin(user, adminEmails)
+						ctx := context.WithValue(r.Context(), userKey, caller)
 						next.ServeHTTP(w, r.WithContext(ctx))
 						return
 					}
