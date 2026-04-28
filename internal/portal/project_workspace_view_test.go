@@ -86,30 +86,6 @@ func TestProjectWorkspace_EmptyQueryReturnsRecentRows(t *testing.T) {
 	}
 }
 
-func TestProjectWorkspace_QueryFiltersBothSections(t *testing.T) {
-	t.Parallel()
-	led := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(led)
-	docs := document.NewMemoryStore()
-
-	now := time.Now().UTC()
-	seedStory(t, stories, "proj_a", "alpha story", "first", now)
-	seedStory(t, stories, "proj_a", "beta story", "matches needle in description", now)
-	seedStory(t, stories, "proj_a", "gamma needle", "third", now)
-	seedDoc(t, docs, "proj_a", document.TypeArtifact, "needle artifact", "x", now)
-	seedDoc(t, docs, "proj_a", document.TypeArtifact, "other", "body has needle", now)
-	seedDoc(t, docs, "proj_a", document.TypeArtifact, "unrelated", "x", now)
-
-	got := buildProjectWorkspaceComposite(context.Background(), stories, docs, "proj_a", projectWorkspaceFilters{Query: "needle", Limit: 25}, nil)
-
-	if len(got.Stories) != 2 {
-		t.Errorf("Stories filtered count = %d, want 2", len(got.Stories))
-	}
-	if len(got.Documents) != 2 {
-		t.Errorf("Documents filtered count = %d, want 2", len(got.Documents))
-	}
-}
-
 func TestProjectWorkspace_ExcludesContractAndSkillDocs(t *testing.T) {
 	t.Parallel()
 	led := ledger.NewMemoryStore()
@@ -304,7 +280,7 @@ func renderWorkspace(t *testing.T, query string, seedFn func(ctx context.Context
 	return rec
 }
 
-func TestProjectWorkspaceRender_SearchInputAndSectionsPresent(t *testing.T) {
+func TestProjectWorkspaceRender_SectionsPresentNoSearchBox(t *testing.T) {
 	t.Parallel()
 	rec := renderWorkspace(t, "", nil)
 	if rec.Code != http.StatusOK {
@@ -312,18 +288,25 @@ func TestProjectWorkspaceRender_SearchInputAndSectionsPresent(t *testing.T) {
 	}
 	body := rec.Body.String()
 	wants := []string{
-		`data-testid="workspace-search-form"`,
-		`data-testid="workspace-search-input"`,
-		`name="q"`,
-		`@input.debounce.300ms`,
 		`data-testid="workspace-stories-panel"`,
 		`data-testid="workspace-documents-panel"`,
 		`data-testid="workspace-stories-empty"`,
 		`data-testid="workspace-documents-empty"`,
+		`data-testid="workspace-stories-open"`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
+		}
+	}
+	mustNot := []string{
+		`data-testid="workspace-search-form"`,
+		`data-testid="workspace-search-input"`,
+		`data-testid="workspace-search-clear"`,
+	}
+	for _, no := range mustNot {
+		if strings.Contains(body, no) {
+			t.Errorf("body still contains workspace-search marker %q (story_59b11d8c moved search to /stories)", no)
 		}
 	}
 }
@@ -360,11 +343,3 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 	}
 }
 
-func TestProjectWorkspaceRender_QueryEchoedIntoInput(t *testing.T) {
-	t.Parallel()
-	rec := renderWorkspace(t, "q=alpha", nil)
-	body := rec.Body.String()
-	if !strings.Contains(body, `value="alpha"`) {
-		t.Errorf("input value not echoed; body = %s", body)
-	}
-}

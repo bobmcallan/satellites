@@ -858,6 +858,136 @@ input:disabled, select:disabled, textarea:disabled {
     padding: 1rem 1.25rem;
 }
 
+/* Stories list (story_59b11d8c). Header carries the (n / total) count and
+   a refresh affordance; body holds the search input, filter chips, and
+   the sortable column table. */
+.stories-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.stories-count {
+    font-weight: 400;
+    margin-left: 0.5rem;
+    opacity: 0.85;
+}
+
+.stories-back-link {
+    margin: 0 0 0.75rem 0;
+}
+
+.stories-search-form {
+    margin-bottom: 0.75rem;
+}
+
+.stories-search-input {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    padding: 0.55rem 0.75rem;
+    font-family: inherit;
+    font-size: var(--font-size-control);
+}
+
+.stories-search-input:focus {
+    outline: none;
+    border-color: var(--color-fg);
+}
+
+.filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--color-border);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+}
+
+.filter-chip-clear {
+    color: var(--color-fg);
+    text-decoration: none;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.filter-chip-clear:hover {
+    text-decoration: none;
+    opacity: 0.7;
+}
+
+.btn-icon {
+    display: inline-block;
+    padding: 0.25rem 0.55rem;
+    color: inherit;
+    text-decoration: none;
+    border: 1px solid currentColor;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.btn-icon:hover {
+    opacity: 0.8;
+}
+
+.stories-table {
+    margin-top: 0.5rem;
+}
+
+.stories-table th a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.stories-table th a:hover {
+    text-decoration: underline;
+}
+
+.stories-table .col-select { width: 2rem; }
+.stories-table .col-id { width: 9rem; }
+.stories-table .col-pts { width: 3rem; text-align: right; }
+.stories-table .col-created,
+.stories-table .col-updated { width: 11rem; white-space: nowrap; }
+
+.stories-tag-row {
+    margin-top: 0.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.stories-title-link {
+    font-weight: 700;
+    text-decoration: none;
+    color: inherit;
+}
+
+.stories-title-link:hover {
+    text-decoration: underline;
+}
+
+.cell-pill {
+    border: 1px solid var(--color-border);
+    padding: 0.05rem 0.4rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.panel-actions {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+}
+
 /* story_25695308 — every panel-headed section gains a click-target
    header that toggles its body. The body uses x-show/Alpine; the
    .section-collapsed class is also toggled on the section element so
@@ -877,49 +1007,6 @@ input:disabled, select:disabled, textarea:disabled {
 
 .section-collapsed > .panel-body {
     display: none !important;
-}
-
-/* Borderless full-width search row (story_25695308 AC1+AC2). The
-   search input sits on the page with no visible border so it reads as
-   the primary interaction surface. The clear button overlays the
-   right edge of the input. */
-.workspace-search {
-    margin-bottom: 1.5rem;
-}
-
-.workspace-search-form {
-    position: relative;
-    width: 100%;
-}
-
-.workspace-search-input.workspace-search-borderless {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--color-fg);
-    padding: 0.75rem 2.5rem 0.75rem 0;
-    font-family: inherit;
-    font-size: 1rem;
-    outline: none;
-    border-bottom: 1px solid transparent;
-}
-
-.workspace-search-input.workspace-search-borderless:focus {
-    border-bottom-color: var(--color-fg);
-}
-
-.workspace-search-clear {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    background: transparent;
-    border: 0;
-    color: var(--color-fg);
-    font-size: 1.25rem;
-    line-height: 1;
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
 }
 
 .panel-content {

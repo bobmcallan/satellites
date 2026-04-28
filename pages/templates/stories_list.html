@@ -7,49 +7,113 @@
 <body>
   {{template "nav.html" .}}
   <main class="portal-main">
-    <section class="panel-headed">
-      <header class="panel-header">
-        <h1>{{.Project.Name}} · stories</h1>
+    <section class="panel-headed" data-testid="stories-panel">
+      <header class="panel-header stories-panel-header">
+        <h1>
+          STORIES
+          <code class="stories-count" data-testid="stories-count">({{len .Stories}} / {{.Total}})</code>
+        </h1>
+        <a href="{{.ThemePickerNext}}" class="btn-icon" data-testid="stories-panel-refresh"
+           title="refresh" aria-label="refresh">↻</a>
       </header>
       <div class="panel-body">
-        <p class="muted">
+        <p class="muted stories-back-link">
           <a href="/projects/{{.Project.ID}}">&larr; back to project</a>
-          &nbsp;·&nbsp;
-          {{if .StatusAll}}
-            showing all &nbsp;·&nbsp; <a href="?">default filter</a>
-          {{else}}
-            showing open &nbsp;·&nbsp; <a href="?status=all">show all</a>
-          {{end}}
         </p>
+
         {{if .Disabled}}
           <p class="muted">Stories are unavailable in this environment (no database configured).</p>
-        {{else if not .Stories}}
-          <p class="muted">No stories match the current filter.</p>
         {{else}}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>title</th>
-                <th>status</th>
-                <th>priority</th>
-                <th>tags</th>
-                <th>created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .Stories}}
-              <tr>
-                <td><a href="/projects/{{$.Project.ID}}/stories/{{.ID}}">{{.Title}}</a></td>
-                <td><code>{{.Status}}</code></td>
-                <td>{{.Priority}}</td>
-                <td>
-                  {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
-                </td>
-                <td><code>{{.CreatedAt}}</code></td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
+          <form method="get" action="" class="stories-search-form" data-testid="stories-search-form">
+            <input type="text" name="q" value="{{.Filters.Query}}"
+                   class="stories-search-input"
+                   placeholder="Search... (tags:epic:ops-automation priority:high status:done)"
+                   autocomplete="off"
+                   data-testid="stories-search-input">
+            {{if .Filters.Status}}<input type="hidden" name="status" value="{{.Filters.Status}}">{{end}}
+            {{if .Filters.Priority}}<input type="hidden" name="priority" value="{{.Filters.Priority}}">{{end}}
+            {{if .Filters.Category}}<input type="hidden" name="category" value="{{.Filters.Category}}">{{end}}
+            {{if .Filters.Tag}}<input type="hidden" name="tag" value="{{.Filters.Tag}}">{{end}}
+            <noscript><button type="submit" class="btn-secondary">search</button></noscript>
+          </form>
+
+          <div class="filter-chips" data-testid="stories-filter-chips">
+            {{$base := printf "/projects/%s/stories" .Project.ID}}
+            {{$f := .Filters}}
+            {{$statusLabel := "status:open"}}
+            {{if eq $f.Status "all"}}{{$statusLabel = "status:all"}}{{else if $f.Status}}{{$statusLabel = printf "status:%s" $f.Status}}{{end}}
+            <span class="filter-chip" data-testid="filter-chip-status">
+              {{$statusLabel}}
+              <a class="filter-chip-clear" data-testid="filter-chip-status-clear"
+                 href="{{$base}}?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}{{if $f.Tag}}tag={{$f.Tag}}&{{end}}status=all">×</a>
+            </span>
+
+            {{$priorityLabel := "priority:all"}}
+            {{if $f.Priority}}{{$priorityLabel = printf "priority:%s" $f.Priority}}{{end}}
+            <span class="filter-chip" data-testid="filter-chip-priority">
+              {{$priorityLabel}}
+              {{if $f.Priority}}<a class="filter-chip-clear" data-testid="filter-chip-priority-clear"
+                                   href="{{$base}}?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}{{if $f.Tag}}tag={{$f.Tag}}{{end}}">×</a>{{end}}
+            </span>
+
+            {{$categoryLabel := "category:all"}}
+            {{if $f.Category}}{{$categoryLabel = printf "category:%s" $f.Category}}{{end}}
+            <span class="filter-chip" data-testid="filter-chip-category">
+              {{$categoryLabel}}
+              {{if $f.Category}}<a class="filter-chip-clear" data-testid="filter-chip-category-clear"
+                                   href="{{$base}}?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Tag}}tag={{$f.Tag}}{{end}}">×</a>{{end}}
+            </span>
+
+            {{if $f.Tag}}
+              <span class="filter-chip" data-testid="filter-chip-tag">
+                tag:{{$f.Tag}}
+                <a class="filter-chip-clear" data-testid="filter-chip-tag-clear"
+                   href="{{$base}}?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}{{end}}">×</a>
+              </span>
+            {{end}}
+          </div>
+
+          {{if not .Stories}}
+            <p class="muted" data-testid="stories-empty">No stories match the current filter.</p>
+          {{else}}
+            <table class="data-table stories-table" data-testid="stories-table">
+              <thead>
+                <tr>
+                  <th class="col-select"><input type="checkbox" disabled aria-label="bulk select (not yet wired)"></th>
+                  <th class="col-id" data-testid="col-id"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=id">ID</a></th>
+                  <th class="col-title" data-testid="col-title"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=title">TITLE</a></th>
+                  <th class="col-category" data-testid="col-category"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=category">CATEGORY</a></th>
+                  <th class="col-priority" data-testid="col-priority"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=priority">PRIORITY</a></th>
+                  <th class="col-status" data-testid="col-status"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=status">STATUS</a></th>
+                  <th class="col-pts">PTS</th>
+                  <th class="col-created" data-testid="col-created"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=created">CREATED</a></th>
+                  <th class="col-updated" data-testid="col-updated"><a href="?{{if $f.Query}}q={{$f.Query}}&{{end}}{{if $f.Status}}status={{$f.Status}}&{{end}}{{if $f.Priority}}priority={{$f.Priority}}&{{end}}{{if $f.Category}}category={{$f.Category}}&{{end}}sort=updated">UPDATED</a></th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Stories}}
+                <tr data-testid="stories-row-{{.ID}}">
+                  <td class="col-select"><input type="checkbox" disabled aria-label="select {{.ID}} (not yet wired)"></td>
+                  <td class="col-id"><code>{{.ID}}</code></td>
+                  <td class="col-title">
+                    <a href="/projects/{{$.Project.ID}}/stories/{{.ID}}" class="stories-title-link">{{.Title}}</a>
+                    {{if .Tags}}
+                      <div class="stories-tag-row">
+                        {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                      </div>
+                    {{end}}
+                  </td>
+                  <td class="col-category">{{if .Category}}<code class="cell-pill">{{.Category}}</code>{{else}}—{{end}}</td>
+                  <td class="col-priority">{{if .Priority}}<code class="cell-pill">{{.Priority}}</code>{{else}}—{{end}}</td>
+                  <td class="col-status"><code class="cell-pill">{{.Status}}</code></td>
+                  <td class="col-pts">—</td>
+                  <td class="col-created"><code>{{.CreatedAt}}</code></td>
+                  <td class="col-updated"><code>{{.UpdatedAt}}</code></td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{end}}
         {{end}}
       </div>
     </section>

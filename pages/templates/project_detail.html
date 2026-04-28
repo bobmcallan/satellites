@@ -32,27 +32,6 @@
       </div>
     </section>
 
-    <section class="workspace-search" data-testid="workspace-search">
-      <form method="get" action="" class="workspace-search-form"
-            x-data="projectSearchInput"
-            data-initial-query="{{.Composite.Filters.Query}}"
-            data-testid="workspace-search-form">
-        <input type="text" name="q" x-model="q" value="{{.Composite.Filters.Query}}"
-               class="workspace-search-input workspace-search-borderless"
-               placeholder="search stories + documents…"
-               autocomplete="off"
-               data-testid="workspace-search-input"
-               x-ref="searchInput"
-               @input.debounce.300ms="submitForm">
-        <button type="button" class="workspace-search-clear"
-                x-cloak :class="hiddenWhenHasQuery"
-                data-testid="workspace-search-clear"
-                @click="clearAndSubmit"
-                aria-label="clear search">×</button>
-        <noscript><button type="submit" class="btn-secondary">search</button></noscript>
-      </form>
-    </section>
-
     <section class="panel-headed" data-testid="workspace-stories-panel"
              x-data="sectionToggle"
              data-toggle-key="proj-{{.Project.ID}}-stories"
@@ -65,6 +44,9 @@
         </span>
       </header>
       <div class="panel-body" :class="hiddenWhenOpen">
+        <p class="panel-actions">
+          <a href="/projects/{{.Project.ID}}/stories" data-testid="workspace-stories-open">Open stories →</a>
+        </p>
         {{if not .Composite.Stories}}
           <p class="muted" data-testid="workspace-stories-empty">No matches</p>
         {{else}}

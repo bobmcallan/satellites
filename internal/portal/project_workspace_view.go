@@ -1,8 +1,8 @@
-// Project workspace composite for story_6a0aca5a. Single project-scoped
-// search box on project_detail.html that returns matching stories and
-// non-config documents (artifact, principle, reviewer) in two labelled
-// sections. Mirrors the documents_view.go shape — same card pattern,
-// same in-process substring filter — so the surfaces stay consistent.
+// Project workspace composite for story_6a0aca5a. The composite renders
+// two sections (Stories, Documents) on project_detail.html as previews;
+// the dedicated /projects/<id>/stories page owns search and filtering
+// (story_59b11d8c). Document rows mirror the documents_view.go shape so
+// the cards stay consistent.
 package portal
 
 import (
@@ -23,8 +23,7 @@ const (
 )
 
 // projectWorkspaceComposite is the view-model for the project_detail page.
-// Stories and Documents render in two distinct sections; the Filters echo
-// back the current query for the form input.
+// Stories and Documents render in two distinct sections.
 type projectWorkspaceComposite struct {
 	Stories    []storyCard
 	Documents  []documentCard
@@ -44,21 +43,16 @@ type storyCard struct {
 	UpdatedAt string
 }
 
-// projectWorkspaceFilters carries the parsed query input plus the per-section
-// row cap.
+// projectWorkspaceFilters carries the per-section row cap.
 type projectWorkspaceFilters struct {
-	Query string
 	Limit int
 }
 
-// parseProjectWorkspaceFilters reads `?q=` and `?limit=` from the request,
-// clamping the limit to [1, projectWorkspaceMaxLimit].
+// parseProjectWorkspaceFilters reads `?limit=` from the request, clamping
+// to [1, projectWorkspaceMaxLimit].
 func parseProjectWorkspaceFilters(r *http.Request) projectWorkspaceFilters {
 	q := r.URL.Query()
-	f := projectWorkspaceFilters{
-		Query: strings.TrimSpace(q.Get("q")),
-		Limit: projectWorkspaceDefaultLimit,
-	}
+	f := projectWorkspaceFilters{Limit: projectWorkspaceDefaultLimit}
 	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			if n > projectWorkspaceMaxLimit {
@@ -91,10 +85,10 @@ func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, do
 	return out
 }
 
-// collectStoryCards lists project-scoped stories, applies the substring
-// filter against title + description, sorts by UpdatedAt desc, and caps
-// at f.Limit. Returns an empty slice when the store is nil or errors —
-// the page still renders.
+// collectStoryCards lists project-scoped stories, sorts by UpdatedAt desc,
+// and caps at f.Limit. Returns an empty slice when the store is nil or
+// errors — the page still renders. Filtering lives on the dedicated
+// /projects/<id>/stories page (story_59b11d8c).
 func collectStoryCards(ctx context.Context, stories story.Store, projectID string, f projectWorkspaceFilters, memberships []string) []storyCard {
 	if stories == nil || projectID == "" {
 		return []storyCard{}
@@ -102,9 +96,6 @@ func collectStoryCards(ctx context.Context, stories story.Store, projectID strin
 	rows, err := stories.List(ctx, projectID, story.ListOptions{Limit: projectWorkspaceListLimit}, memberships)
 	if err != nil {
 		return []storyCard{}
-	}
-	if f.Query != "" {
-		rows = filterStoriesByQuery(rows, f.Query)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].UpdatedAt.After(rows[j].UpdatedAt) })
 	if len(rows) > f.Limit {
@@ -119,17 +110,13 @@ func collectStoryCards(ctx context.Context, stories story.Store, projectID strin
 
 // collectDocumentCards loads documents in project scope and system scope,
 // drops contract + skill types (those live on the Configuration tab),
-// dedupes by id, applies the substring filter, sorts by UpdatedAt desc,
-// and caps at f.Limit.
+// dedupes by id, sorts by UpdatedAt desc, and caps at f.Limit.
 func collectDocumentCards(ctx context.Context, docs document.Store, projectID string, f projectWorkspaceFilters, memberships []string) []documentCard {
 	if docs == nil {
 		return []documentCard{}
 	}
 	rows := loadProjectAndSystemDocs(ctx, docs, projectID, memberships)
 	rows = excludeConfigDocs(rows)
-	if f.Query != "" {
-		rows = filterByQuery(rows, f.Query)
-	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].UpdatedAt.After(rows[j].UpdatedAt) })
 	if len(rows) > f.Limit {
 		rows = rows[:f.Limit]
@@ -181,20 +168,6 @@ func excludeConfigDocs(rows []document.Document) []document.Document {
 			continue
 		}
 		out = append(out, d)
-	}
-	return out
-}
-
-// filterStoriesByQuery applies a case-insensitive substring filter on
-// title + description. Mirrors filterByQuery for documents so the two
-// sections behave consistently.
-func filterStoriesByQuery(rows []story.Story, q string) []story.Story {
-	q = strings.ToLower(q)
-	out := make([]story.Story, 0, len(rows))
-	for _, s := range rows {
-		if strings.Contains(strings.ToLower(s.Title), q) || strings.Contains(strings.ToLower(s.Description), q) {
-			out = append(out, s)
-		}
 	}
 	return out
 }

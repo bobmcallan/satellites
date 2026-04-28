@@ -90,29 +90,4 @@ document.addEventListener('alpine:init', () => {
         get isSystemMode() { return this.mode === 'system'; },
     }));
 
-    // Project-detail search input — debounced text filter with a clear
-    // button. Methods reach the form/input via Alpine's $refs so the
-    // template stays free of inline expressions like `$el.form...`. The
-    // initial query is read from `data-initial-query` on the host
-    // element for the same reason as themePicker (story_739823eb).
-    Alpine.data('projectSearchInput', () => ({
-        q: '',
-        init() {
-            this.q = (this.$el && this.$el.dataset && this.$el.dataset.initialQuery) || '';
-        },
-        get hasQuery() { return this.q.length > 0; },
-        get hiddenWhenHasQuery() { return this.hasQuery ? '' : 'is-hidden'; },
-        submitForm() {
-            if (this.$root && typeof this.$root.requestSubmit === 'function') {
-                this.$root.requestSubmit();
-            }
-        },
-        clearAndSubmit() {
-            this.q = '';
-            const input = this.$refs && this.$refs.searchInput;
-            if (input) {
-                input.value = '';
-            }
-        },
-    }));
 });

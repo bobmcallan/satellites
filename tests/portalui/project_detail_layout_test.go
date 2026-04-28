@@ -62,9 +62,10 @@ func TestProjectDetail_SectionOrder(t *testing.T) {
 		t.Fatalf("navigate /projects/%s: %v", projID, err)
 	}
 
+	// story_59b11d8c moved the workspace-search out of project_detail
+	// into the dedicated /projects/<id>/stories page.
 	order := []string{
 		`data-testid="workspace-project-meta"`,
-		`data-testid="workspace-search"`,
 		`data-testid="workspace-stories-panel"`,
 		`data-testid="workspace-documents-panel"`,
 		`data-testid="workspace-configuration-section"`,
@@ -83,66 +84,10 @@ func TestProjectDetail_SectionOrder(t *testing.T) {
 	}
 }
 
-// TestProjectDetail_SearchClearButton (story_25695308 AC1+AC2) —
-// borderless input + × button appears on input and clears the value.
-func TestProjectDetail_SearchClearButton(t *testing.T) {
-	h := StartHarness(t)
-
-	parent, cancel := withTimeout(context.Background(), browserDeadline)
-	defer cancel()
-	browserCtx, cancelBrowser := newChromedpContext(t, parent)
-	defer cancelBrowser()
-
-	if err := installSessionCookie(browserCtx, h); err != nil {
-		t.Fatalf("install session: %v", err)
-	}
-	projID, err := firstProjectID(browserCtx, h)
-	if err != nil {
-		t.Fatalf("locate project: %v", err)
-	}
-
-	var clearVisibleBefore, clearVisibleAfterType, clearVisibleAfterClick bool
-	var inputValue string
-	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-		chromedp.WaitVisible(`[data-testid="workspace-search-input"]`, chromedp.ByQuery),
-		// On load with empty query the clear button is hidden.
-		chromedp.Evaluate(`(() => {
-			const el = document.querySelector('[data-testid="workspace-search-clear"]');
-			return el && el.offsetParent !== null;
-		})()`, &clearVisibleBefore),
-		chromedp.Focus(`[data-testid="workspace-search-input"]`, chromedp.ByQuery),
-		chromedp.SendKeys(`[data-testid="workspace-search-input"]`, "foo", chromedp.ByQuery),
-		// Wait for Alpine to react.
-		chromedp.Evaluate(`new Promise(r => setTimeout(r, 50))`, nil, chromedp.EvalAsValue),
-		chromedp.Evaluate(`(() => {
-			const el = document.querySelector('[data-testid="workspace-search-clear"]');
-			return el && el.offsetParent !== null;
-		})()`, &clearVisibleAfterType),
-		chromedp.Click(`[data-testid="workspace-search-clear"]`, chromedp.ByQuery),
-		chromedp.Evaluate(`new Promise(r => setTimeout(r, 50))`, nil, chromedp.EvalAsValue),
-		chromedp.Value(`[data-testid="workspace-search-input"]`, &inputValue, chromedp.ByQuery),
-		chromedp.Evaluate(`(() => {
-			const el = document.querySelector('[data-testid="workspace-search-clear"]');
-			return el && el.offsetParent !== null;
-		})()`, &clearVisibleAfterClick),
-	); err != nil {
-		t.Fatalf("clear-button flow: %v", err)
-	}
-
-	if clearVisibleBefore {
-		t.Errorf("clear button visible on empty input; expected hidden")
-	}
-	if !clearVisibleAfterType {
-		t.Errorf("clear button hidden after typing; expected visible")
-	}
-	if inputValue != "" {
-		t.Errorf("input value after clear = %q, want empty", inputValue)
-	}
-	if clearVisibleAfterClick {
-		t.Errorf("clear button still visible after clicking; expected hidden")
-	}
-}
+// TestProjectDetail_SearchClearButton was deleted in story_59b11d8c when
+// the cross-entity workspace-search moved out of project_detail. The
+// V3-style search lives on /projects/<id>/stories now and is covered by
+// internal/portal/stories_list_search_test.go.
 
 // TestProjectDetail_SectionToggle (story_25695308 AC5+AC6) — clicking
 // a section header collapses it and the state is preserved across page
