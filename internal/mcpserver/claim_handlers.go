@@ -265,6 +265,9 @@ func (s *Server) handleSessionWhoami(ctx context.Context, req mcpgo.CallToolRequ
 		"registered_at": sess.Registered,
 		"last_seen_at":  sess.LastSeenAt,
 	}
+	if sess.WorkspaceID != "" {
+		payload["workspace_id"] = sess.WorkspaceID
+	}
 	if sess.OrchestratorGrantID != "" {
 		payload["orchestrator_grant_id"] = sess.OrchestratorGrantID
 		if verbs := s.resolveGrantEffectiveVerbs(ctx, sess.OrchestratorGrantID); len(verbs) > 0 {
@@ -358,10 +361,16 @@ func (s *Server) handleSessionRegister(ctx context.Context, req mcpgo.CallToolRe
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	source := req.GetString("source", session.SourceSessionStart)
+	workspaceID := req.GetString("workspace_id", "")
 	now := s.nowUTC()
 	sess, err := s.sessions.Register(ctx, caller.UserID, sessionID, source, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if workspaceID != "" {
+		if updated, err := s.sessions.SetWorkspace(ctx, caller.UserID, sessionID, workspaceID, now); err == nil {
+			sess = updated
+		}
 	}
 	if updated, ok := s.issueOrchestratorGrant(ctx, sess, caller.UserID, now); ok {
 		sess = updated

@@ -480,9 +480,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			s.mcp.AddTool(whoamiTool, s.handleSessionWhoami)
 
 			registerTool := mcpgo.NewTool("session_register",
-				mcpgo.WithDescription("Upsert a session row keyed by (caller_user_id, session_id). Called by the SessionStart hook + by tests. LastSeenAt is set to now."),
+				mcpgo.WithDescription("Upsert a session row keyed by (caller_user_id, session_id). Called by the SessionStart hook + by tests. LastSeenAt is set to now. Optional workspace_id binds the session to a workspace for tenant-scoped resolution (story_798631fd)."),
 				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session id to register.")),
 				mcpgo.WithString("source", mcpgo.Description("Source string (session_start | enforce_hook | apikey). Defaults to session_start.")),
+				mcpgo.WithString("workspace_id", mcpgo.Description("Optional workspace id to bind to the session row. When present in .mcp.json default_workspace, callers should pass it on registration so subsequent verbs scope to this workspace.")),
 			)
 			s.mcp.AddTool(registerTool, s.handleSessionRegister)
 		}

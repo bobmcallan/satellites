@@ -120,6 +120,45 @@ func TestMemoryStore_SetOrchestratorGrant_NotFound(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_SetWorkspace_RoundTrip covers AC3 of story_798631fd:
+// the workspace_id stamped via SetWorkspace survives a Get round-trip.
+func TestMemoryStore_SetWorkspace_RoundTrip(t *testing.T) {
+	t.Parallel()
+	s := NewMemoryStore()
+	ctx := context.Background()
+	now := time.Date(2026, 4, 28, 9, 0, 0, 0, time.UTC)
+	if _, err := s.Register(ctx, "u1", "abc", SourceSessionStart, now); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	updated, err := s.SetWorkspace(ctx, "u1", "abc", "wksp_alpha", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("set workspace: %v", err)
+	}
+	if updated.WorkspaceID != "wksp_alpha" {
+		t.Fatalf("returned workspace_id = %q, want %q", updated.WorkspaceID, "wksp_alpha")
+	}
+
+	got, err := s.Get(ctx, "u1", "abc")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.WorkspaceID != "wksp_alpha" {
+		t.Errorf("Get workspace_id = %q, want %q", got.WorkspaceID, "wksp_alpha")
+	}
+	if !got.LastSeenAt.Equal(now.Add(time.Minute)) {
+		t.Errorf("LastSeenAt not refreshed by SetWorkspace; got %v", got.LastSeenAt)
+	}
+}
+
+func TestMemoryStore_SetWorkspace_NotFound(t *testing.T) {
+	t.Parallel()
+	s := NewMemoryStore()
+	if _, err := s.SetWorkspace(context.Background(), "u1", "missing", "wksp_x", time.Now().UTC()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestMemoryStore_RegisterIdempotent(t *testing.T) {
 	t.Parallel()
 	s := NewMemoryStore()

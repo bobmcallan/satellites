@@ -31,6 +31,13 @@ type Store interface {
 	// exist.
 	SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error)
 
+	// SetWorkspace stamps the workspace_id on an existing session row.
+	// Called by session_register when the caller supplies a workspace_id
+	// (e.g. via .mcp.json default_workspace) and by future verbs that
+	// resolve a workspace from a project. Returns ErrNotFound if the
+	// session does not exist. story_798631fd.
+	SetWorkspace(ctx context.Context, userID, sessionID, workspaceID string, now time.Time) (Session, error)
+
 	// ListAll returns every registered session row. Used by the
 	// boot-time CI grant-backfill migration in story_4608a82c to build a
 	// session_id → orchestrator_grant_id lookup. Unscoped read — callers
@@ -124,6 +131,21 @@ func (m *MemoryStore) SetOrchestratorGrant(ctx context.Context, userID, sessionI
 		return Session{}, ErrNotFound
 	}
 	sess.OrchestratorGrantID = grantID
+	sess.LastSeenAt = now
+	m.rows[key] = sess
+	return sess, nil
+}
+
+// SetWorkspace implements Store for MemoryStore.
+func (m *MemoryStore) SetWorkspace(ctx context.Context, userID, sessionID, workspaceID string, now time.Time) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := memKey(userID, sessionID)
+	sess, ok := m.rows[key]
+	if !ok {
+		return Session{}, ErrNotFound
+	}
+	sess.WorkspaceID = workspaceID
 	sess.LastSeenAt = now
 	m.rows[key] = sess
 	return sess, nil

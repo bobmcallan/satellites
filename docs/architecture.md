@@ -559,7 +559,31 @@ Grouped by primitive. Every verb is workspace-scoped at the handler.
 - **Task:** `task_enqueue`, `task_get`, `task_list`, `task_claim`, `task_close`.
 - **Ledger:** `ledger_add`, `ledger_get`, `ledger_list`, `ledger_search`, `ledger_recall`.
 - **Repo:** `repo_add`, `repo_get`, `repo_list`, `repo_scan`, `repo_search`, `repo_search_text`, `repo_get_symbol_source`, `repo_get_file`, `repo_get_outline`.
-- **Session:** `session_whoami` (returns canonical chat UUID from the SessionStart hook).
+- **Session:** `session_whoami` (returns canonical chat UUID from the SessionStart hook), `session_register` (called by the SessionStart hook).
+
+#### `.mcp.json` workspace_id carrier (story_798631fd)
+
+When an MCP client (Claude Code session, satellites-agent worker, or any tool consuming the MCP surface) operates against a specific workspace, the convention is to carry the workspace id through `.mcp.json` and pass it on `session_register`. This binds the session row to that workspace; subsequent `session_whoami` calls echo the bound id, and future verbs that need a workspace-scoped resolution can read it from the session registry rather than re-deriving from the project on every call.
+
+The substrate is project → workspace deterministic today (every project carries `workspace_id`), so explicit binding is only required when the same git remote could plausibly be added under multiple workspaces (e.g. an agency repo cloned into a Magentus client workspace alongside the agency's own).
+
+Example `.mcp.json` entry:
+
+```json
+{
+  "mcpServers": {
+    "satellites": {
+      "command": "satellites-mcp",
+      "args": ["--default-workspace", "wksp_alpha"],
+      "env": {
+        "SATELLITES_MCP_URL": "https://satellites.example.com/mcp"
+      }
+    }
+  }
+}
+```
+
+The harness's SessionStart hook reads `--default-workspace` and includes it as `workspace_id` on the `session_register` call. Empty / omitted is fine — the session simply runs unbound until a future verb stamps a workspace on it.
 
 ### Worker ↔ server protocol
 

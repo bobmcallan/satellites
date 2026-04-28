@@ -37,4 +37,9 @@ type Session struct {
 	Registered          time.Time `json:"registered_at"`
 	LastSeenAt          time.Time `json:"last_seen_at"`
 	OrchestratorGrantID string    `json:"orchestrator_grant_id,omitempty"`
+	// WorkspaceID binds the session to a specific workspace once known.
+	// Populated by session_register or by future verbs (e.g.
+	// project_status) that resolve a project's workspace. Empty until
+	// the session has been bound. story_798631fd.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
