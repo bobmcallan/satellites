@@ -107,7 +107,7 @@ a:hover {
 .portal-main {
     flex: 1;
     width: 100%;
-    max-width: 1120px;
+    max-width: 90%;
     margin: 0 auto;
     padding: 2rem 1.5rem;
 }
@@ -852,6 +852,10 @@ input:disabled, select:disabled, textarea:disabled {
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.1em;
+}
+
+.panel-body {
+    padding: 1rem 1.25rem;
 }
 
 /* story_25695308 — every panel-headed section gains a click-target
