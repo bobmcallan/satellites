@@ -232,6 +232,8 @@ func TestValidate_TypeEnum(t *testing.T) {
 		{TypeAgent, false},
 		{TypeRole, false},
 		{TypeConfiguration, false},
+		{TypeWorkflow, false},
+		{TypeHelp, false},
 		{"", true},
 		{"architecture", true},
 		{"random", true},
@@ -262,7 +264,18 @@ func TestValidate_TypeEnum(t *testing.T) {
 		if tc.typ == TypeConfiguration {
 			d.Structured = []byte(`{"contract_refs":[],"skill_refs":[],"principle_refs":[]}`)
 		}
-		d.ProjectID = StringPtr("proj_x")
+		// type=help is system-scope and requires a body. story_cc5c67a9.
+		if tc.typ == TypeHelp {
+			d.Scope = ScopeSystem
+			d.Body = "help body"
+		}
+		// type=workflow is system-scope. story_7bfd629c.
+		if tc.typ == TypeWorkflow {
+			d.Scope = ScopeSystem
+		}
+		if tc.typ != TypeHelp && tc.typ != TypeWorkflow {
+			d.ProjectID = StringPtr("proj_x")
+		}
 		err := d.Validate()
 		if tc.wantErr && err == nil {
 			t.Errorf("Validate(type=%q) accepted; want rejection", tc.typ)
@@ -308,6 +321,40 @@ func TestValidate_ConfigurationShape(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("Validate rejected: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_HelpRequiresBody covers AC1 of story_cc5c67a9: a help
+// document with an empty body is rejected by Validate.
+func TestValidate_HelpRequiresBody(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "non-empty body", body: "# Some Help\n\nbody", wantErr: false},
+		{name: "empty body", body: "", wantErr: true},
+		{name: "whitespace only", body: "   \n\t\n", wantErr: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := Document{
+				Type:  TypeHelp,
+				Scope: ScopeSystem,
+				Name:  "agents",
+				Body:  tc.body,
+			}
+			err := d.Validate()
+			if tc.wantErr && err == nil {
+				t.Errorf("expected rejection for body=%q", tc.body)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error for body=%q: %v", tc.body, err)
 			}
 		})
 	}

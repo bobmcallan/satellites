@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -161,6 +162,16 @@ func (d Document) Validate() error {
 		}
 		if len(d.Structured) == 0 {
 			return errors.New("document: type=configuration requires non-empty structured payload")
+		}
+		if d.ContractBinding != nil && *d.ContractBinding != "" {
+			return errors.New("document: contract_binding allowed only for type=skill, type=reviewer, or type=agent")
+		}
+	case TypeHelp:
+		// Help docs are seed-driven system content. The body IS the
+		// rendered page; an empty body would render a blank help page,
+		// which is never useful. story_cc5c67a9.
+		if strings.TrimSpace(d.Body) == "" {
+			return errors.New("document: type=help requires non-empty body")
 		}
 		if d.ContractBinding != nil && *d.ContractBinding != "" {
 			return errors.New("document: contract_binding allowed only for type=skill, type=reviewer, or type=agent")
