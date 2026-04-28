@@ -3,6 +3,13 @@
  * story_3b450d9e). Subscribes to the workspace websocket via the global
  * `SatellitesWS` client and live-updates the five panels.
  *
+ * Migrated to Alpine.data registration with CSP-compatible templates
+ * (epic:portal-csp-strict, story_f7d5529d). Per-row strings (testid,
+ * statusClass, seqLabel, claimedLabel, closedLabel, prominentClass,
+ * shaShort, tagsList) are precomputed in dedicated decorate* helpers
+ * that run after every data mutation, so story_detail.html can bind
+ * via bare property access on iteration variables.
+ *
  * Bootstrap input (set by story_detail.html):
  *   window.SATELLITES_STORY = { storyID, compositeURL }
  *
@@ -28,7 +35,7 @@
         return false;
     }
 
-    window.storyView = function () {
+    function storyView() {
         return {
             storyID: '',
             compositeURL: '',
@@ -43,7 +50,7 @@
             },
             wsStatus: 'idle',
 
-            start() {
+            init() {
                 const cfg = window.SATELLITES_STORY || {};
                 this.storyID = cfg.storyID || '';
                 this.compositeURL = cfg.compositeURL || '';
@@ -51,9 +58,21 @@
                 this.attachWS();
             },
 
-            liveClass() {
-                return 'live-dot-' + (this.wsStatus || 'idle');
+            get liveClass() { return 'live-dot-' + (this.wsStatus || 'idle'); },
+
+            get deliveryStatusLabel() {
+                return '[' + (this.composite.delivery && this.composite.delivery.status || '') + ']';
             },
+
+            get ciCount() { return (this.composite.contract_instances || []).length; },
+            get verdictsCount() { return (this.composite.verdicts || []).length; },
+            get commitsCount() { return (this.composite.commits || []).length; },
+            get excerptsCount() { return (this.composite.ledger_excerpts || []).length; },
+
+            get ciEmpty() { return this.ciCount === 0; },
+            get verdictsEmpty() { return this.verdictsCount === 0; },
+            get commitsEmpty() { return this.commitsCount === 0; },
+            get excerptsEmpty() { return this.excerptsCount === 0; },
 
             async fetchComposite() {
                 if (!this.compositeURL) { return; }
@@ -62,7 +81,7 @@
                     if (!r.ok) { return; }
                     const data = await r.json();
                     if (data && data.story) {
-                        this.composite = data;
+                        this.composite = decorateComposite(data);
                     }
                 } catch (e) {
                     // Network error — leave SSR-rendered state alone; the
@@ -122,13 +141,13 @@
                 const tags = row.tags || row.Tags || [];
                 const isVerdict = tags.indexOf('kind:verdict') >= 0;
                 const isCommit = tags.indexOf('kind:commit') >= 0;
-                const excerpt = {
+                const excerpt = decorateExcerpt({
                     id: row.id,
                     type: row.type || row.Type || '',
                     tags: tags,
                     content: row.content || row.Content || '',
                     created_at: row.created_at || row.CreatedAt || ''
-                };
+                });
                 this.composite.ledger_excerpts = prepend(this.composite.ledger_excerpts, excerpt, 50);
                 if (isVerdict) {
                     let phase = '';
@@ -137,7 +156,7 @@
                             phase = tags[i].substring('phase:'.length);
                         }
                     }
-                    const verdict = {
+                    const verdict = decorateVerdict({
                         ledger_id: row.id,
                         contract_instance_id: row.contract_id || row.ContractID || '',
                         contract_name: phase,
@@ -145,21 +164,21 @@
                         score: (row.structured && row.structured.score) || 0,
                         reasoning: (row.structured && row.structured.reasoning) || row.content || '',
                         created_at: excerpt.created_at
-                    };
-                    this.composite.verdicts = prepend(this.composite.verdicts, verdict, 100);
+                    });
+                    this.composite.verdicts = reindexProminent(prepend(this.composite.verdicts, verdict, 100));
                     if (verdict.contract_name === 'story_close') {
                         this.composite.delivery = applyVerdictToStrip(this.composite.delivery, verdict);
                     }
                 }
                 if (isCommit) {
-                    const commit = {
+                    const commit = decorateCommit({
                         ledger_id: row.id,
                         sha: (row.structured && row.structured.sha) || '',
                         subject: (row.structured && row.structured.subject) || row.content || '',
                         author: (row.structured && row.structured.author) || '',
                         url: (row.structured && row.structured.url) || '',
                         created_at: excerpt.created_at
-                    };
+                    });
                     this.composite.commits = prepend(this.composite.commits, commit, 100);
                 }
             },
@@ -170,13 +189,13 @@
                 let found = false;
                 for (let i = 0; i < cis.length; i++) {
                     if (cis[i].id === row.id) {
-                        cis[i] = mergeCI(cis[i], row);
+                        cis[i] = decorateCI(mergeCI(cis[i], row));
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
-                    cis.push(mergeCI({}, row));
+                    cis.push(decorateCI(mergeCI({}, row)));
                     cis.sort(function (a, b) { return (a.sequence || 0) - (b.sequence || 0); });
                 }
                 this.composite.contract_instances = cis;
@@ -196,7 +215,51 @@
                 if (row.title) { this.composite.story.Title = row.title; }
             }
         };
-    };
+    }
+
+    function decorateComposite(data) {
+        const out = Object.assign({}, data);
+        out.contract_instances = (data.contract_instances || []).map(decorateCI);
+        out.verdicts = reindexProminent((data.verdicts || []).map(decorateVerdict));
+        out.commits = (data.commits || []).map(decorateCommit);
+        out.ledger_excerpts = (data.ledger_excerpts || []).map(decorateExcerpt);
+        out.delivery = data.delivery || { status: '' };
+        return out;
+    }
+
+    function decorateCI(ci) {
+        ci.testid = 'ci-row-' + (ci.id || '');
+        ci.statusClass = 'status-pill status-' + (ci.status || '');
+        ci.seqLabel = '#' + (ci.sequence || 0);
+        ci.claimedLabel = ci.claimed_at ? 'claimed ' + ci.claimed_at : '';
+        ci.closedLabel = ci.closed_at ? 'closed ' + ci.closed_at : '';
+        return ci;
+    }
+
+    function decorateVerdict(v) {
+        v.testid = 'verdict-row-' + (v.ledger_id || '');
+        // prominentClass set later by reindexProminent.
+        if (typeof v.prominentClass !== 'string') { v.prominentClass = ''; }
+        return v;
+    }
+
+    function reindexProminent(verdicts) {
+        for (let i = 0; i < verdicts.length; i++) {
+            verdicts[i].prominentClass = i === 0 ? 'verdict-prominent' : '';
+        }
+        return verdicts;
+    }
+
+    function decorateCommit(c) {
+        c.shaShort = c.sha ? c.sha.substring(0, 8) : '';
+        return c;
+    }
+
+    function decorateExcerpt(row) {
+        row.testid = 'excerpt-row-' + (row.id || '');
+        row.tagsList = row.tags || [];
+        return row;
+    }
 
     function prepend(arr, item, cap) {
         const out = [item];
@@ -236,6 +299,21 @@
         });
     }
 
-    // Expose the helper for tests that grep the source.
-    window.storyView.__test__ = { matchesStory: matchesStory, prepend: prepend, mergeCI: mergeCI, applyVerdictToStrip: applyVerdictToStrip };
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('storyView', storyView);
+    });
+
+    // Expose helpers + the factory for tests that grep the source.
+    window.storyView = storyView;
+    window.storyView.__test__ = {
+        matchesStory: matchesStory,
+        prepend: prepend,
+        mergeCI: mergeCI,
+        applyVerdictToStrip: applyVerdictToStrip,
+        decorateCI: decorateCI,
+        decorateVerdict: decorateVerdict,
+        decorateCommit: decorateCommit,
+        decorateExcerpt: decorateExcerpt,
+        reindexProminent: reindexProminent
+    };
 })();

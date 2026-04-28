@@ -13,14 +13,14 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main" x-data="storyView()" x-init="start()">
+  <main class="portal-main" x-data="storyView">
 
     <!-- Delivery status strip — banner per ui-design §2.2 -->
     <section class="panel-headed delivery-strip" data-testid="delivery-strip">
       <header class="panel-header">
         <h2>delivery</h2>
         <span class="panel-header-meta" data-testid="delivery-status">
-          <code class="status-pill status-{{.Composite.Delivery.Status}}" x-text="'[' + composite.delivery.status + ']'">[{{.Composite.Delivery.Status}}]</code>
+          <code class="status-pill status-{{.Composite.Delivery.Status}}" x-text="deliveryStatusLabel">[{{.Composite.Delivery.Status}}]</code>
           <template x-if="composite.delivery.resolution">
             <code class="resolution-pill" x-text="composite.delivery.resolution"></code>
           </template>
@@ -82,24 +82,24 @@
       <header class="panel-header">
         <h2>contracts</h2>
         <span class="panel-header-meta" data-testid="ci-count">
-          <code>(<span x-text="composite.contract_instances.length">{{len .Composite.CIs}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <code>(<span x-text="ciCount">{{len .Composite.CIs}}</span>)</code>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="composite.contract_instances.length === 0">
+        <template x-if="ciEmpty">
           <p class="muted" data-testid="ci-empty">No contract instances yet.</p>
         </template>
         {{if not .Composite.CIs}}<noscript><p class="muted" data-testid="ci-empty-ssr">No contract instances yet.</p></noscript>{{end}}
         <ul class="ci-timeline">
           <template x-for="ci in composite.contract_instances" :key="ci.id">
-            <li :data-ci-id="ci.id" :data-status="ci.status" :data-testid="'ci-row-' + ci.id">
-              <code class="ci-seq" x-text="'#' + ci.sequence"></code>
+            <li :data-ci-id="ci.id" :data-status="ci.status" :data-testid="ci.testid">
+              <code class="ci-seq" x-text="ci.seqLabel"></code>
               <code class="ci-name" x-text="ci.contract_name"></code>
-              <code :class="'status-pill status-' + ci.status" x-text="ci.status"></code>
+              <code :class="ci.statusClass" x-text="ci.status"></code>
               <span class="ci-times">
-                <template x-if="ci.claimed_at"><code x-text="'claimed ' + ci.claimed_at"></code></template>
-                <template x-if="ci.closed_at"><code x-text="'closed ' + ci.closed_at"></code></template>
+                <template x-if="ci.claimed_at"><code x-text="ci.claimedLabel"></code></template>
+                <template x-if="ci.closed_at"><code x-text="ci.closedLabel"></code></template>
               </span>
             </li>
           </template>
@@ -134,18 +134,18 @@
       <header class="panel-header">
         <h2>reviewer verdicts</h2>
         <span class="panel-header-meta" data-testid="verdict-count">
-          <code>(<span x-text="composite.verdicts.length">{{len .Composite.Verdicts}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <code>(<span x-text="verdictsCount">{{len .Composite.Verdicts}}</span>)</code>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="composite.verdicts.length === 0">
+        <template x-if="verdictsEmpty">
           <p class="muted" data-testid="verdict-empty">No reviewer verdicts yet.</p>
         </template>
         {{if not .Composite.Verdicts}}<noscript><p class="muted" data-testid="verdict-empty-ssr">No reviewer verdicts yet.</p></noscript>{{end}}
         <ul class="verdict-list">
-          <template x-for="(v, idx) in composite.verdicts" :key="v.ledger_id">
-            <li :class="idx === 0 ? 'verdict-prominent' : ''" :data-testid="'verdict-row-' + v.ledger_id">
+          <template x-for="v in composite.verdicts" :key="v.ledger_id">
+            <li :class="v.prominentClass" :data-testid="v.testid">
               <code class="verdict-pill" x-text="v.verdict || 'pending'"></code>
               <code x-text="v.contract_name || '—'"></code>
               <span class="verdict-score" x-show="v.score">score <code x-text="v.score"></code></span>
@@ -162,19 +162,19 @@
       <header class="panel-header">
         <h2>repo provenance</h2>
         <span class="panel-header-meta">
-          <code>(<span x-text="composite.commits.length">{{len .Composite.Commits}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <code>(<span x-text="commitsCount">{{len .Composite.Commits}}</span>)</code>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="composite.commits.length === 0">
+        <template x-if="commitsEmpty">
           <p class="muted" data-testid="repo-empty">No commits linked yet. Commits get linked when a future commit-receiver writes <code>kind:commit</code> ledger rows scoped to this story id.</p>
         </template>
         {{if not .Composite.Commits}}<noscript><p class="muted" data-testid="repo-empty-ssr">No commits linked yet.</p></noscript>{{end}}
         <ul class="commit-list">
           <template x-for="c in composite.commits" :key="c.ledger_id">
             <li>
-              <code class="commit-sha" x-text="c.sha ? c.sha.substring(0, 8) : ''"></code>
+              <code class="commit-sha" x-text="c.shaShort"></code>
               <span class="commit-subject" x-text="c.subject"></span>
               <span class="muted commit-when" x-text="c.created_at"></span>
               <template x-if="c.url"><a :href="c.url" rel="noreferrer">link</a></template>
@@ -189,12 +189,12 @@
       <header class="panel-header">
         <h2>ledger excerpts</h2>
         <span class="panel-header-meta">
-          <code>(<span x-text="composite.ledger_excerpts.length">{{len .Composite.Excerpts}}</span>)</code>
-          <span class="live-dot" :class="liveClass()" aria-label="live">●</span>
+          <code>(<span x-text="excerptsCount">{{len .Composite.Excerpts}}</span>)</code>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="composite.ledger_excerpts.length === 0">
+        <template x-if="excerptsEmpty">
           <p class="muted" data-testid="excerpts-empty">No ledger rows yet.</p>
         </template>
         <table class="data-table">
@@ -203,11 +203,11 @@
           </thead>
           <tbody>
             <template x-for="row in composite.ledger_excerpts" :key="row.id">
-              <tr :data-testid="'excerpt-row-' + row.id">
+              <tr :data-testid="row.testid">
                 <td><code x-text="row.created_at"></code></td>
                 <td><code x-text="row.type"></code></td>
                 <td>
-                  <template x-for="t in (row.tags || [])" :key="t">
+                  <template x-for="t in row.tagsList" :key="t">
                     <code class="tag-chip" x-text="t"></code>
                   </template>
                 </td>
