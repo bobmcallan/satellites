@@ -10,6 +10,7 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 // validKVScope reports whether s is one of the four supported scope
@@ -20,6 +21,71 @@ func validKVScope(s string) (ledger.KVScope, bool) {
 		return ledger.KVScope(s), true
 	default:
 		return "", false
+	}
+}
+
+// kvCheckWriteAuth enforces the per-scope role gate for kv_set and
+// kv_delete (story_eb17cb16). Reads remain unrestricted within
+// workspace boundaries.
+//
+//   - system: caller.GlobalAdmin == true. The seed loader writes via
+//     the internal Append path, not MCP; this gate covers MCP callers.
+//   - workspace: caller is RoleAdmin of opts.WorkspaceID.
+//   - project: caller is project.OwnerUserID OR workspace admin of
+//     project.WorkspaceID.
+//   - user: caller.UserID == opts.UserID. v1 default is self-only;
+//     cross-user writes are not permitted (cross-tier admin override
+//     deferred to a future story).
+//
+// Returns nil on permit and a structured "forbidden: scope=X requires
+// role=Y" error on reject. Errors are user-safe.
+func (s *Server) kvCheckWriteAuth(ctx context.Context, scope ledger.KVScope, opts ledger.KVProjectionOptions, caller CallerIdentity) error {
+	switch scope {
+	case ledger.KVScopeSystem:
+		if !caller.GlobalAdmin {
+			return fmt.Errorf("forbidden: scope=system requires role=global_admin")
+		}
+		return nil
+	case ledger.KVScopeWorkspace:
+		if caller.GlobalAdmin {
+			return nil
+		}
+		if s.workspaces == nil {
+			return fmt.Errorf("forbidden: workspace store unavailable")
+		}
+		role, err := s.workspaces.GetRole(ctx, opts.WorkspaceID, caller.UserID)
+		if err != nil || role != workspace.RoleAdmin {
+			return fmt.Errorf("forbidden: scope=workspace requires role=workspace_admin")
+		}
+		return nil
+	case ledger.KVScopeProject:
+		if caller.GlobalAdmin {
+			return nil
+		}
+		if s.projects == nil {
+			return fmt.Errorf("forbidden: project store unavailable")
+		}
+		p, err := s.projects.GetByID(ctx, opts.ProjectID, nil)
+		if err == nil && p.OwnerUserID == caller.UserID {
+			return nil
+		}
+		// Workspace admin of the project's workspace also passes.
+		if s.workspaces != nil && opts.WorkspaceID != "" {
+			role, rerr := s.workspaces.GetRole(ctx, opts.WorkspaceID, caller.UserID)
+			if rerr == nil && role == workspace.RoleAdmin {
+				return nil
+			}
+		}
+		return fmt.Errorf("forbidden: scope=project requires role=project_owner_or_workspace_admin")
+	case ledger.KVScopeUser:
+		// v1 default: only self may write to their own user-scope KV.
+		// Cross-user writes (workspace/global admins overriding) deferred.
+		if caller.UserID == "" || caller.UserID != opts.UserID {
+			return fmt.Errorf("forbidden: scope=user is self-only (v1)")
+		}
+		return nil
+	default:
+		return fmt.Errorf("forbidden: unknown scope %q", scope)
 	}
 }
 
@@ -175,11 +241,11 @@ func (s *Server) handleKVSet(ctx context.Context, req mcpgo.CallToolRequest) (*m
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	if scope == ledger.KVScopeSystem && !caller.GlobalAdmin {
-		return mcpgo.NewToolResultError("forbidden: scope=system requires global_admin"), nil
-	}
 	opts, _, err := s.resolveKVScopeArgs(ctx, scope, req, caller)
 	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.kvCheckWriteAuth(ctx, scope, opts, caller); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	entry := kvWriteEntry(opts, key, value, caller.UserID, false)
@@ -221,11 +287,11 @@ func (s *Server) handleKVDelete(ctx context.Context, req mcpgo.CallToolRequest) 
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	if scope == ledger.KVScopeSystem && !caller.GlobalAdmin {
-		return mcpgo.NewToolResultError("forbidden: scope=system requires global_admin"), nil
-	}
 	opts, _, err := s.resolveKVScopeArgs(ctx, scope, req, caller)
 	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.kvCheckWriteAuth(ctx, scope, opts, caller); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	entry := kvWriteEntry(opts, key, "", caller.UserID, true)

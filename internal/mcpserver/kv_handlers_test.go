@@ -233,3 +233,86 @@ func TestKVHandlers_WorkspaceFKMissing(t *testing.T) {
 		t.Fatal("expected error when workspace_id is missing for scope=workspace")
 	}
 }
+
+// TestKVHandlers_AuthMatrix exercises every scope × caller-role combo
+// the v1 auth gate covers (story_eb17cb16). Read paths are intentionally
+// not gated; only kv_set is exercised here.
+func TestKVHandlers_AuthMatrix(t *testing.T) {
+	t.Parallel()
+	s := newKVTestServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Two workspaces with different admins; a project owned by alice in ws1.
+	ws1, _ := s.workspaces.Create(ctx, "u_alice", "alpha", now)
+	_ = s.workspaces.AddMember(ctx, ws1.ID, "u_alice", workspace.RoleAdmin, "u_alice", now)
+	_ = s.workspaces.AddMember(ctx, ws1.ID, "u_bob", workspace.RoleMember, "u_alice", now)
+
+	ws2, _ := s.workspaces.Create(ctx, "u_carol", "bravo", now)
+	_ = s.workspaces.AddMember(ctx, ws2.ID, "u_carol", workspace.RoleAdmin, "u_carol", now)
+
+	proj, _ := s.projects.Create(ctx, "u_alice", ws1.ID, "alpha-1", now)
+
+	type tc struct {
+		name      string
+		caller    CallerIdentity
+		args      map[string]any
+		wantError bool
+	}
+	cases := []tc{
+		// system
+		{"system/admin/ok", CallerIdentity{UserID: "u_admin", GlobalAdmin: true}, map[string]any{"scope": "system", "key": "policy", "value": "v"}, false},
+		{"system/non-admin/forbidden", CallerIdentity{UserID: "u_alice"}, map[string]any{"scope": "system", "key": "policy", "value": "v"}, true},
+		// workspace
+		{"workspace/admin/ok", CallerIdentity{UserID: "u_alice"}, map[string]any{"scope": "workspace", "workspace_id": ws1.ID, "key": "tier", "value": "gold"}, false},
+		{"workspace/global-admin/ok", CallerIdentity{UserID: "u_admin", GlobalAdmin: true}, map[string]any{"scope": "workspace", "workspace_id": ws1.ID, "key": "tier", "value": "gold"}, false},
+		{"workspace/member/forbidden", CallerIdentity{UserID: "u_bob"}, map[string]any{"scope": "workspace", "workspace_id": ws1.ID, "key": "tier", "value": "gold"}, true},
+		{"workspace/non-member/forbidden", CallerIdentity{UserID: "u_carol"}, map[string]any{"scope": "workspace", "workspace_id": ws1.ID, "key": "tier", "value": "gold"}, true},
+		// project
+		{"project/owner/ok", CallerIdentity{UserID: "u_alice"}, map[string]any{"scope": "project", "project_id": proj.ID, "key": "feat", "value": "on"}, false},
+		{"project/ws-admin/ok", CallerIdentity{UserID: "u_alice"}, map[string]any{"scope": "project", "project_id": proj.ID, "key": "feat", "value": "on"}, false},
+		{"project/member-not-owner/forbidden", CallerIdentity{UserID: "u_bob"}, map[string]any{"scope": "project", "project_id": proj.ID, "key": "feat", "value": "on"}, true},
+		{"project/other-workspace/forbidden", CallerIdentity{UserID: "u_carol"}, map[string]any{"scope": "project", "project_id": proj.ID, "key": "feat", "value": "on"}, true},
+		// user
+		{"user/self/ok", CallerIdentity{UserID: "u_alice"}, map[string]any{"scope": "user", "workspace_id": ws1.ID, "key": "theme", "value": "dark"}, false},
+		{"user/cross-user/forbidden", CallerIdentity{UserID: "u_bob"}, map[string]any{"scope": "user", "workspace_id": ws1.ID, "user_id": "u_alice", "key": "theme", "value": "dark"}, true},
+		{"user/global-admin-cross/forbidden", CallerIdentity{UserID: "u_admin", GlobalAdmin: true}, map[string]any{"scope": "user", "workspace_id": ws1.ID, "user_id": "u_alice", "key": "theme", "value": "dark"}, true},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			authedCtx := withCaller(ctx, c.caller)
+			res, _ := s.handleKVSet(authedCtx, newCallToolReq("kv_set", c.args))
+			if c.wantError && !res.IsError {
+				t.Fatalf("kv_set: expected error, got success: %s", firstText(res))
+			}
+			if !c.wantError && res.IsError {
+				t.Fatalf("kv_set: expected success, got error: %s", firstText(res))
+			}
+		})
+	}
+}
+
+// TestKVHandlers_DeleteHonoursAuth confirms kv_delete uses the same
+// gate as kv_set.
+func TestKVHandlers_DeleteHonoursAuth(t *testing.T) {
+	t.Parallel()
+	s := newKVTestServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ws, _ := s.workspaces.Create(ctx, "u_alice", "alpha", now)
+	_ = s.workspaces.AddMember(ctx, ws.ID, "u_alice", workspace.RoleAdmin, "u_alice", now)
+	_ = s.workspaces.AddMember(ctx, ws.ID, "u_bob", workspace.RoleMember, "u_alice", now)
+
+	// Workspace member (non-admin) cannot delete a workspace-scope key.
+	bobCtx := withCaller(ctx, CallerIdentity{UserID: "u_bob"})
+	res, _ := s.handleKVDelete(bobCtx, newCallToolReq("kv_delete", map[string]any{
+		"scope":        "workspace",
+		"workspace_id": ws.ID,
+		"key":          "tier",
+	}))
+	if !res.IsError {
+		t.Fatal("kv_delete: workspace member expected forbidden")
+	}
+}
