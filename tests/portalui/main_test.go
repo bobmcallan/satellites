@@ -40,7 +40,7 @@ func TestHarness_Boots(t *testing.T) {
 	if !strings.Contains(body, `class="ws-indicator"`) {
 		t.Fatalf("landing missing ws-indicator widget; body=%s", body)
 	}
-	if !strings.Contains(body, `wsIndicator()`) {
+	if !strings.Contains(body, `x-data="wsIndicator"`) {
 		t.Errorf("landing missing Alpine binding")
 	}
 	if !strings.Contains(body, h.WorkspaceID) {

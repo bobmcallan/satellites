@@ -55,10 +55,18 @@
  */
 
 document.addEventListener('alpine:init', () => {
-    // Reference factory: the simplest case — a binary toggle. Used by
-    // nav.html's hamburger menu once story_ac9b77c6 swaps the inline
-    // `x-data="{open: false}"` for `x-data="navHamburger"`.
+    // Hamburger dropdown — nav.html's right-side menu (settings + sign-out).
     Alpine.data('navHamburger', () => ({
+        open: false,
+        toggle() { this.open = !this.open; },
+        close() { this.open = false; },
+    }));
+
+    // Workspace switcher — nav.html's left-side WORKSPACE / <name> dropdown.
+    // Same shape as navHamburger; kept as a separate factory so the
+    // workspace and hamburger menus can be open independently and so the
+    // factory name documents intent at the callsite.
+    Alpine.data('navWorkspaceMenu', () => ({
         open: false,
         toggle() { this.open = !this.open; },
         close() { this.open = false; },

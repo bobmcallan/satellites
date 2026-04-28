@@ -222,14 +222,18 @@ SatellitesWS.STATES = [
 
 window.SatellitesWS = SatellitesWS;
 
-// Alpine.js component factory — bound in nav.html.
-window.wsIndicator = function () {
+// Alpine.js component factory — bound in nav.html via x-data="wsIndicator".
+// Registered through Alpine.data so the bare-name binding works under the
+// @alpinejs/csp build (epic:portal-csp-strict). Inline expression directives
+// (`:class="'pre-' + s"`, `x-show="status === '...'"`) are absent from
+// nav.html — every binding is a property, getter, or method ref.
+function wsIndicator() {
     return {
         status: STATE_IDLE,
         debugOpen: false,
         recentEvents: [],
         client: null,
-        start() {
+        init() {
             const cfg = window.SATELLITES_WS || {};
             if (!cfg.workspaceId) { return; }
             this.client = new SatellitesWS({
@@ -253,10 +257,17 @@ window.wsIndicator = function () {
             if (!window.SATELLITES_WS || !window.SATELLITES_WS.debug) { return; }
             this.debugOpen = !this.debugOpen;
         },
-        statusClass() {
+        closeDebug() { this.debugOpen = false; },
+        get indicatorClass() {
             return 'ws-indicator-' + this.status;
         },
-        statusText() {
+        get isDisconnected() {
+            return this.status === STATE_DISCONNECTED;
+        },
+        get hasNoRecentEvents() {
+            return this.recentEvents.length === 0;
+        },
+        get statusText() {
             switch (this.status) {
                 case STATE_LIVE: return 'live';
                 case STATE_CONNECTING: return 'connecting';
@@ -264,6 +275,10 @@ window.wsIndicator = function () {
                 case STATE_DISCONNECTED: return 'disconnected';
                 default: return 'idle';
             }
-        }
+        },
     };
-};
+}
+
+document.addEventListener('alpine:init', () => {
+    Alpine.data('wsIndicator', wsIndicator);
+});

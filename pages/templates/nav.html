@@ -7,12 +7,12 @@
     {{$activeID := .ActiveWorkspace.ID}}
     {{$hasOther := false}}
     {{range .Workspaces}}{{if ne .ID $activeID}}{{$hasOther = true}}{{end}}{{end}}
-    <div class="nav-workspace" x-data="{wsOpen: false}">
-      <button type="button" class="btn-link" @click="wsOpen = !wsOpen" @keydown.escape.window="wsOpen = false">
+    <div class="nav-workspace" x-data="navWorkspaceMenu" @keydown.escape.window="close">
+      <button type="button" class="btn-link" @click="toggle">
         WORKSPACE / {{if $activeID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
         <span aria-hidden="true">▾</span>
       </button>
-      <ul class="nav-workspace-menu" x-show="wsOpen" x-cloak @click.outside="wsOpen = false" data-testid="nav-workspace-menu">
+      <ul class="nav-workspace-menu" x-show="open" x-cloak @click.outside="close" data-testid="nav-workspace-menu">
         {{range .Workspaces}}
         {{if ne .ID $activeID}}
         <li>
@@ -36,15 +36,15 @@
     {{end}}
     <div class="nav-spacer"></div>
     {{if .WSConfig.WorkspaceID}}
-    <div class="ws-indicator" x-data="wsIndicator()" x-init="start()" :class="'ws-indicator-' + status">
-      <button type="button" class="ws-indicator-btn" @click="toggleDebug()" :title="statusText()" :aria-label="statusText()">
+    <div class="ws-indicator" x-data="wsIndicator" :class="indicatorClass">
+      <button type="button" class="ws-indicator-btn" @click="toggleDebug" :title="statusText" :aria-label="statusText">
         <span class="ws-dot" aria-hidden="true"></span>
-        <span class="sr-only" x-text="statusText()"></span>
+        <span class="sr-only" x-text="statusText"></span>
       </button>
-      <div class="ws-debug" x-show="debugOpen" x-cloak @click.outside="debugOpen = false" @keydown.escape.window="debugOpen = false">
+      <div class="ws-debug" x-show="debugOpen" x-cloak @click.outside="closeDebug" @keydown.escape.window="closeDebug">
         <div class="ws-debug-header">
-          <span x-text="statusText()"></span>
-          <button type="button" class="btn-link" x-show="status === 'disconnected'" @click="retry()">retry</button>
+          <span x-text="statusText"></span>
+          <button type="button" class="btn-link" x-show="isDisconnected" @click="retry">retry</button>
         </div>
         <ul class="ws-debug-events">
           <template x-for="ev in recentEvents" :key="ev.id">
@@ -53,18 +53,18 @@
               <span class="ws-debug-ts" x-text="ev.created_at"></span>
             </li>
           </template>
-          <li x-show="recentEvents.length === 0" class="ws-debug-empty">no events yet</li>
+          <li x-show="hasNoRecentEvents" class="ws-debug-empty">no events yet</li>
         </ul>
       </div>
     </div>
     {{end}}
     {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
-    <div class="nav-hamburger-wrap" x-data="{open: false}" @keydown.escape.window="open = false">
-      <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="open = !open" aria-label="open menu">
+    <div class="nav-hamburger-wrap" x-data="navHamburger" @keydown.escape.window="close">
+      <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="toggle" aria-label="open menu">
         <span class="nav-hamburger-icon" aria-hidden="true"></span>
       </button>
-      <div x-show="open" x-cloak class="nav-dropdown" data-testid="nav-dropdown" @click.outside="open = false">
+      <div x-show="open" x-cloak class="nav-dropdown" data-testid="nav-dropdown" @click.outside="close">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
         <a href="/settings" data-testid="nav-settings-link">settings</a>
         <form action="/auth/logout" method="post" class="nav-dropdown-form">
