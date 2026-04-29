@@ -872,6 +872,70 @@ input:disabled, select:disabled, textarea:disabled {
     padding: 1rem 1.25rem;
 }
 
+/* /config system-* panels (story_64935bc0). V3-style table layout with
+   click-to-expand sub-rows. Click a `tr.system-doc-row` to toggle the
+   adjacent `tr.system-doc-expansion` (Alpine x-show). Subtle green pills
+   for category/scope/status reuse the agent-canonical-pill palette. */
+.system-doc-table .system-doc-row {
+    cursor: pointer;
+}
+.system-doc-table .system-doc-row:hover {
+    background: #f5f5f5;
+}
+.system-doc-table .system-doc-expansion > td {
+    background: #fafafa;
+    padding: 0.75rem 1rem;
+}
+.system-doc-section {
+    margin-bottom: 0.75rem;
+}
+.system-doc-section:last-child {
+    margin-bottom: 0;
+}
+.system-doc-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.7rem;
+}
+.system-doc-body {
+    white-space: pre-wrap;
+    font-size: 0.75rem;
+    margin: 0.25rem 0;
+    padding: 0.4rem 0.6rem;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+}
+
+.scope-pill, .category-pill, .status-pill {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: #eaf5ec;
+    color: #2d5b3a;
+    border: 1px solid #4ca97a;
+}
+
+[data-theme="dark"] .system-doc-table .system-doc-row:hover {
+    background: #1a1a1a;
+}
+[data-theme="dark"] .system-doc-table .system-doc-expansion > td {
+    background: #0f0f0f;
+}
+[data-theme="dark"] .system-doc-body {
+    background: #050505;
+    border-color: #222;
+}
+[data-theme="dark"] .scope-pill,
+[data-theme="dark"] .category-pill,
+[data-theme="dark"] .status-pill {
+    background: #142013;
+    color: #b8d8c0;
+    border-color: #4ca97a;
+}
+
 /* Compact panel body for empty-state banners (story_dda346f9). Used on
    /config when no Configurations exist so two short lines don't take
    the full panel-body padding. */

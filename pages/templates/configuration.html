@@ -165,25 +165,64 @@
       </header>
       <div class="panel-body">
         <p class="muted">Lifecycle contracts seeded from <code>config/seed/contracts/</code>. Read-only — edit the seed file and reseed to change.</p>
-        <ul class="document-cards system-doc-list" data-testid="config-system-contracts-list">
-          {{range .Composite.SystemContracts}}
-          <li data-testid="config-system-contract-{{.ID}}">
-            <details class="system-doc-row">
-              <summary class="system-doc-summary">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-              </summary>
-              <div class="system-doc-meta">
-                <span class="muted">created <time>{{.CreatedAt}}</time></span>
-                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
-              </div>
-              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
-            </details>
-          </li>
-          {{end}}
-        </ul>
+        <table class="data-table system-doc-table" data-testid="config-system-contracts-list" x-data="{ open: null }">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>project</th>
+              <th>category</th>
+              <th>scope</th>
+              <th>status</th>
+              <th>phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range $i, $c := .Composite.SystemContracts}}
+            <tr class="system-doc-row" data-testid="config-system-contract-{{$c.ID}}"
+                @click="open = open === '{{$c.ID}}' ? null : '{{$c.ID}}'">
+              <td><strong>{{$c.Name}}</strong></td>
+              <td><span class="muted">—</span></td>
+              <td>{{if $c.Category}}<code class="category-pill">{{$c.Category}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+              <td><code class="scope-pill">{{$c.Scope}}</code></td>
+              <td><code class="status-pill">{{$c.Status}}</code></td>
+              <td><span class="muted">{{$i}}</span></td>
+            </tr>
+            <tr class="system-doc-expansion" x-show="open === '{{$c.ID}}'" x-cloak>
+              <td colspan="6">
+                {{if $c.EvidenceRequired}}
+                <div class="system-doc-section">
+                  <strong>Evidence required</strong>
+                  <pre class="system-doc-body">{{$c.EvidenceRequired}}</pre>
+                </div>
+                {{end}}
+                {{if $c.Body}}
+                <div class="system-doc-section">
+                  <pre class="system-doc-body">{{$c.Body}}</pre>
+                </div>
+                {{end}}
+                {{if $c.PermittedActions}}
+                <div class="system-doc-section">
+                  <span class="muted">Permitted actions:</span>
+                  {{range $c.PermittedActions}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
+                </div>
+                {{end}}
+                {{if $c.Tags}}
+                <div class="system-doc-section">
+                  <span class="muted">Tags:</span>
+                  {{range $c.Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                </div>
+                {{end}}
+                <div class="system-doc-meta">
+                  <code class="muted">{{$c.ID}}</code>
+                  <span class="muted">v{{$c.Version}}</span>
+                  <span class="muted">created <time>{{$c.CreatedAt}}</time></span>
+                  <span class="muted">updated <time>{{$c.UpdatedAt}}</time></span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
     </section>
     {{end}}
@@ -198,25 +237,52 @@
       </header>
       <div class="panel-body">
         <p class="muted">Default workflow shapes seeded from <code>config/seed/workflows/</code>. Read-only — edit the seed file and reseed to change.</p>
-        <ul class="document-cards system-doc-list" data-testid="config-system-workflows-list">
-          {{range .Composite.SystemWorkflows}}
-          <li data-testid="config-system-workflow-{{.ID}}">
-            <details class="system-doc-row">
-              <summary class="system-doc-summary">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-              </summary>
-              <div class="system-doc-meta">
-                <span class="muted">created <time>{{.CreatedAt}}</time></span>
-                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
-              </div>
-              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
-            </details>
-          </li>
-          {{end}}
-        </ul>
+        <table class="data-table system-doc-table" data-testid="config-system-workflows-list" x-data="{ open: null }">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>project</th>
+              <th>category</th>
+              <th>scope</th>
+              <th>status</th>
+              <th>phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.SystemWorkflows}}
+            <tr class="system-doc-row" data-testid="config-system-workflow-{{.ID}}"
+                @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
+              <td><strong>{{.Name}}</strong></td>
+              <td><span class="muted">—</span></td>
+              <td><code class="category-pill">workflow</code></td>
+              <td><code class="scope-pill">{{.Scope}}</code></td>
+              <td><code class="status-pill">{{.Status}}</code></td>
+              <td><span class="muted">—</span></td>
+            </tr>
+            <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
+              <td colspan="6">
+                {{if .Body}}
+                <div class="system-doc-section">
+                  <pre class="system-doc-body">{{.Body}}</pre>
+                </div>
+                {{end}}
+                {{if .Tags}}
+                <div class="system-doc-section">
+                  <span class="muted">Tags:</span>
+                  {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                </div>
+                {{end}}
+                <div class="system-doc-meta">
+                  <code class="muted">{{.ID}}</code>
+                  <span class="muted">v{{.Version}}</span>
+                  <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                  <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
     </section>
     {{end}}
@@ -231,33 +297,51 @@
       </header>
       <div class="panel-body">
         <p class="muted">Lifecycle agents seeded from <code>config/seed/agents/</code>. Read-only — edit the seed file and reseed to change.</p>
-        <ul class="document-cards system-doc-list" data-testid="config-system-agents-list">
-          {{range .Composite.SystemAgents}}
-          <li data-testid="config-system-agent-{{.ID}}">
-            <details class="system-doc-row">
-              <summary class="system-doc-summary">
-                <code class="type-pill">agent</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                {{if .Ephemeral}}<code class="status-pill agent-ephemeral-pill">ephemeral</code>{{else}}<code class="status-pill agent-canonical-pill">canonical</code>{{end}}
-              </summary>
-              <div class="system-doc-meta">
-                <span class="muted">created <time>{{.CreatedAt}}</time></span>
-                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
-              </div>
-              <div class="system-doc-section">
-                <span class="muted">permission patterns:</span>
+        <table class="data-table system-doc-table" data-testid="config-system-agents-list" x-data="{ open: null }">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>project</th>
+              <th>category</th>
+              <th>scope</th>
+              <th>status</th>
+              <th>phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.SystemAgents}}
+            <tr class="system-doc-row" data-testid="config-system-agent-{{.ID}}"
+                @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
+              <td><strong>{{.Name}}</strong></td>
+              <td><span class="muted">—</span></td>
+              <td><code class="category-pill">agent</code></td>
+              <td><code class="scope-pill">{{.Scope}}</code></td>
+              <td>{{if .Ephemeral}}<code class="status-pill agent-ephemeral-pill">ephemeral</code>{{else}}<code class="status-pill agent-canonical-pill">canonical</code>{{end}}</td>
+              <td><span class="muted">—</span></td>
+            </tr>
+            <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
+              <td colspan="6">
                 {{if .PermissionPatterns}}
+                <div class="system-doc-section">
+                  <span class="muted">Permission patterns:</span>
                   {{range .PermissionPatterns}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
-                {{else}}
-                  <span class="muted">—</span>
+                </div>
                 {{end}}
-              </div>
-              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
-            </details>
-          </li>
-          {{end}}
-        </ul>
+                {{if .Body}}
+                <div class="system-doc-section">
+                  <pre class="system-doc-body">{{.Body}}</pre>
+                </div>
+                {{end}}
+                <div class="system-doc-meta">
+                  <code class="muted">{{.ID}}</code>
+                  <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                  <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
       </div>
     </section>
     {{end}}

@@ -178,14 +178,15 @@ func TestConfigPage_SystemDefaultConfigurationRendersInDropdown(t *testing.T) {
 	}
 }
 
-// TestConfigPage_SystemDocsAreReadOnlyExpandable (story_be487d68 AC1-5,7) —
-// system contracts, workflows, and agents render as <details>/<summary>
-// expand-collapse rows with no /documents/{id} anchor, with the doc body
-// inline plus both CreatedAt and UpdatedAt timestamps. The view-model
-// (documentCard.Body+CreatedAt for contracts/workflows; agentRow.Body+
-// CreatedAt+UpdatedAt for agents) carries the data — the template no
-// longer concats name + timestamp into a single anchor link.
-func TestConfigPage_SystemDocsAreReadOnlyExpandable(t *testing.T) {
+// TestConfigPage_SystemDocsRenderAsTableWithExpansion (story_64935bc0
+// AC1-5,7-8) — the three system-* panels render as <table class="data-
+// table system-doc-table"> with header rows, per-doc <tr class="system-
+// doc-row"> data rows, and sibling <tr class="system-doc-expansion">
+// rows carrying the body, evidence, chips, and timestamps. Subtle green
+// pills (category-pill / scope-pill / status-pill) replace the prior
+// stack of <details>. The view-model carries Category for contracts so
+// the template doesn't parse Structured JSON in markup.
+func TestConfigPage_SystemDocsRenderAsTableWithExpansion(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
 	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
@@ -199,8 +200,19 @@ func TestConfigPage_SystemDocsAreReadOnlyExpandable(t *testing.T) {
 	createdAt := time.Date(2026, 4, 28, 12, 13, 12, 0, time.UTC)
 	updatedAt := time.Date(2026, 4, 29, 9, 30, 0, 0, time.UTC)
 
-	contractDoc := seedDoc(t, docs, "", document.TypeContract, "develop-system",
-		"develop contract body content", createdAt)
+	contractStructured := []byte(`{"category":"develop","evidence_required":"build + test","permitted_actions":["Read:**","Edit:**"]}`)
+	contractSrc := document.Document{
+		Type:       document.TypeContract,
+		Scope:      document.ScopeSystem,
+		Name:       "develop-system",
+		Body:       "develop contract body content",
+		Status:     document.StatusActive,
+		Structured: contractStructured,
+	}
+	contractDoc, err := docs.Create(context.Background(), contractSrc, createdAt)
+	if err != nil {
+		t.Fatalf("seed contract: %v", err)
+	}
 	if _, err := docs.Update(context.Background(), contractDoc.ID, document.UpdateFields{}, "", updatedAt, nil); err != nil {
 		t.Fatalf("bump contract UpdatedAt: %v", err)
 	}
@@ -298,32 +310,55 @@ func TestConfigPage_SystemDocsAreReadOnlyExpandable(t *testing.T) {
 		},
 	} {
 		panelHTML := systemPanelSlice(tc.panelTestID)
-		// AC 1-3: <details> wrapper present, no anchor to /documents/{id}.
-		if !strings.Contains(panelHTML, `<details class="system-doc-row"`) {
-			t.Errorf("%s: panel missing system-doc-row <details> (AC 1-3)", tc.label)
+		// AC 1-3: panel uses <table class="data-table system-doc-table">
+		// with a header row carrying the column labels; no anchor to
+		// /documents/{id} for the seeded doc id.
+		if !strings.Contains(panelHTML, `data-table system-doc-table`) {
+			t.Errorf("%s: panel missing system-doc-table (AC 1-3 expected V3-style table)", tc.label)
+		}
+		for _, header := range []string{"<th>name</th>", "<th>scope</th>", "<th>status</th>", "<th>category</th>"} {
+			if !strings.Contains(panelHTML, header) {
+				t.Errorf("%s: panel missing header %q (AC 1-3)", tc.label, header)
+			}
 		}
 		if strings.Contains(panelHTML, tc.linkSubstring) {
 			t.Errorf("%s: panel still contains %q — system docs must not link to /documents/{id} (AC 1-3)", tc.label, tc.linkSubstring)
 		}
-		// AC 4: summary block carries scope-pill + name.
-		if !strings.Contains(panelHTML, `class="system-doc-summary"`) {
-			t.Errorf("%s: panel missing system-doc-summary class (AC 4)", tc.label)
+		// AC 7: data-testid is on the data <tr class="system-doc-row">
+		// (not the expansion row).
+		dataRowMarker := `<tr class="system-doc-row" data-testid="config-system-` // contract|workflow|agent suffix follows
+		if !strings.Contains(panelHTML, dataRowMarker) {
+			t.Errorf("%s: panel data row missing system-doc-row class + data-testid (AC 7)", tc.label)
 		}
-		if !strings.Contains(panelHTML, `class="scope-pill"`) {
-			t.Errorf("%s: panel missing scope-pill (AC 4)", tc.label)
+		// AC 4: expansion sub-row present in DOM with colspan="6", carries
+		// body + chips + timestamps.
+		if !strings.Contains(panelHTML, `<tr class="system-doc-expansion"`) {
+			t.Errorf("%s: panel missing system-doc-expansion row (AC 4)", tc.label)
 		}
-		if !strings.Contains(panelHTML, tc.name) {
-			t.Errorf("%s: panel missing document name %q (AC 4)", tc.label, tc.name)
+		if !strings.Contains(panelHTML, `colspan="6"`) {
+			t.Errorf("%s: panel expansion row missing colspan=6 (AC 4)", tc.label)
 		}
-		// AC 5: expanded body contains the markdown body + both timestamps.
 		if !strings.Contains(panelHTML, tc.bodyText) {
-			t.Errorf("%s: panel missing document body %q (AC 5)", tc.label, tc.bodyText)
+			t.Errorf("%s: panel missing document body %q (AC 4)", tc.label, tc.bodyText)
 		}
 		if !strings.Contains(panelHTML, createdLiteral) {
-			t.Errorf("%s: panel missing CreatedAt %q (AC 5)", tc.label, createdLiteral)
+			t.Errorf("%s: panel missing CreatedAt %q (AC 4)", tc.label, createdLiteral)
 		}
 		if !strings.Contains(panelHTML, updatedLiteral) {
-			t.Errorf("%s: panel missing UpdatedAt %q (AC 5)", tc.label, updatedLiteral)
+			t.Errorf("%s: panel missing UpdatedAt %q (AC 4)", tc.label, updatedLiteral)
+		}
+		// AC 5: green pills for category/scope/status. Match the bare
+		// class token rather than the full attribute so that combined
+		// classes like "status-pill agent-canonical-pill" still satisfy
+		// the assertion.
+		for _, pillClass := range []string{"category-pill", "scope-pill", "status-pill"} {
+			if !strings.Contains(panelHTML, pillClass) {
+				t.Errorf("%s: panel missing pill class %q (AC 5)", tc.label, pillClass)
+			}
+		}
+		// AC 4: name appears (in the data row's first cell).
+		if !strings.Contains(panelHTML, tc.name) {
+			t.Errorf("%s: panel missing document name %q (AC 4)", tc.label, tc.name)
 		}
 	}
 
@@ -331,10 +366,15 @@ func TestConfigPage_SystemDocsAreReadOnlyExpandable(t *testing.T) {
 		t.Fatalf("test setup wrong: created == updated, can't distinguish")
 	}
 
-	// AC 4: version-pill renders for contracts and workflows (agents use
-	// a status pill instead).
-	if !strings.Contains(body, `class="version-pill"`) {
-		t.Errorf("body missing version-pill (AC 4)")
+	// AC 8: chips render for permitted_actions on the agent expansion row.
+	agentSlice := systemPanelSlice("config-system-agents-panel")
+	if !strings.Contains(agentSlice, `class="tag-chip pattern-chip"`) {
+		t.Errorf("agents panel missing pattern-chip class (AC 8 — chips for permitted_actions)")
+	}
+	for _, pattern := range []string{"Read:**", "Edit:**"} {
+		if !strings.Contains(agentSlice, pattern) {
+			t.Errorf("agents panel missing permission pattern %q (AC 8)", pattern)
+		}
 	}
 }
 

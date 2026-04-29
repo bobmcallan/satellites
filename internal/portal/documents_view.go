@@ -6,6 +6,7 @@ package portal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -51,16 +52,19 @@ type agentDetail struct {
 }
 
 type documentCard struct {
-	ID        string   `json:"id"`
-	Type      string   `json:"type"`
-	Scope     string   `json:"scope"`
-	Name      string   `json:"name"`
-	Tags      []string `json:"tags,omitempty"`
-	Version   int      `json:"version"`
-	Status    string   `json:"status"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
-	Body      string   `json:"body,omitempty"`
+	ID               string   `json:"id"`
+	Type             string   `json:"type"`
+	Scope            string   `json:"scope"`
+	Name             string   `json:"name"`
+	Tags             []string `json:"tags,omitempty"`
+	Version          int      `json:"version"`
+	Status           string   `json:"status"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
+	Body             string   `json:"body,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	EvidenceRequired string   `json:"evidence_required,omitempty"`
+	PermittedActions []string `json:"permitted_actions,omitempty"`
 }
 
 type documentFilters struct {
@@ -223,8 +227,12 @@ func versionHistoryFor(ctx context.Context, store document.Store, documentID str
 }
 
 // documentCardFor projects a document.Document into the card shape.
+// For type=contract documents, the structured payload's category,
+// evidence_required, and permitted_actions are extracted onto typed
+// fields so the template renders them without parsing JSON in markup.
+// story_64935bc0.
 func documentCardFor(d document.Document) documentCard {
-	return documentCard{
+	out := documentCard{
 		ID:        d.ID,
 		Type:      d.Type,
 		Scope:     d.Scope,
@@ -236,6 +244,19 @@ func documentCardFor(d document.Document) documentCard {
 		UpdatedAt: d.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		Body:      d.Body,
 	}
+	if d.Type == document.TypeContract && len(d.Structured) > 0 {
+		var payload struct {
+			Category         string   `json:"category"`
+			EvidenceRequired string   `json:"evidence_required"`
+			PermittedActions []string `json:"permitted_actions"`
+		}
+		if err := json.Unmarshal(d.Structured, &payload); err == nil {
+			out.Category = payload.Category
+			out.EvidenceRequired = payload.EvidenceRequired
+			out.PermittedActions = payload.PermittedActions
+		}
+	}
+	return out
 }
 
 // linkedStoriesFor finds stories whose `source:` tags reference docName.
