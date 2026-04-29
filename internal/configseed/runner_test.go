@@ -421,8 +421,8 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List principles: %v", err)
 	}
-	if len(principles) != 9 {
-		t.Fatalf("principles count = %d, want 9", len(principles))
+	if len(principles) != 10 {
+		t.Fatalf("principles count = %d, want 10", len(principles))
 	}
 
 	wantNames := map[string]bool{
@@ -430,6 +430,7 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 		"Evidence must be verifiable":                            false,
 		"Iterate locally, deploy once":                           false,
 		"Lifecycle and project contract separation":              false,
+		"Mandate enforced by reviewer, not substrate":            false,
 		"No unrequested abstractions or backwards-compat layers": false,
 		"Pipeline integrity":                                     false,
 		"Process is trust":                                       false,
