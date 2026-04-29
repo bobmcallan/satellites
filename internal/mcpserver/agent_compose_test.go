@@ -322,3 +322,87 @@ func TestArchiveEphemeralAgentsForStory_RetainsWithinWindow(t *testing.T) {
 		t.Errorf("archived %d, want 0 (retention not elapsed)", n)
 	}
 }
+
+// TestAgentCompose_PrinciplesContextPopulated covers story_c0489be2
+// (S7) AC1+AC2+AC3+AC4: every agent_compose response — including for
+// non-orchestrator agents — carries a principles_context populated
+// from the active system + project principle set. Archived rows are
+// excluded.
+func TestAgentCompose_PrinciplesContextPopulated(t *testing.T) {
+	t.Parallel()
+	f := newContractFixture(t)
+	developID := firstContractDocID(t, f, "develop")
+	skillID := seedSkill(t, f, "golang-testing", developID)
+
+	// Seed two system principles (active) + one archived (status≠active).
+	for _, p := range []struct {
+		name   string
+		body   string
+		status string
+	}{
+		{"pr_test_active_a", "Active principle A description.", document.StatusActive},
+		{"pr_test_active_b", "Active principle B description.", document.StatusActive},
+		{"pr_test_archived", "Archived principle description.", document.StatusArchived},
+	} {
+		_, err := f.server.docs.Create(context.Background(), document.Document{
+			Type:   document.TypePrinciple,
+			Scope:  document.ScopeSystem,
+			Name:   p.name,
+			Body:   p.body,
+			Status: p.status,
+		}, f.now)
+		if err != nil {
+			t.Fatalf("seed principle %q: %v", p.name, err)
+		}
+	}
+
+	// Compose a non-orchestrator agent — covers AC4.
+	res, err := f.server.handleAgentCompose(f.callerCtx(), newCallToolReq("agent_compose", map[string]any{
+		"name":                "developer_agent_S7",
+		"skill_refs":          []string{skillID},
+		"permission_patterns": []string{"Edit:**", "Bash:go_test"},
+		"ephemeral":           true,
+		"story_id":            f.storyID,
+		"reason":              "S7 principles_context test",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("isError: %s", firstText(res))
+	}
+
+	var body struct {
+		Agent             document.Document `json:"agent"`
+		PrinciplesContext []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"principles_context"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.Agent.Name != "developer_agent_S7" {
+		t.Fatalf("agent name = %q", body.Agent.Name)
+	}
+
+	// AC1 + AC2: principles_context populated for a non-orchestrator agent.
+	gotNames := map[string]string{}
+	for _, p := range body.PrinciplesContext {
+		gotNames[p.Name] = p.Description
+	}
+	for _, want := range []string{"pr_test_active_a", "pr_test_active_b"} {
+		if _, ok := gotNames[want]; !ok {
+			t.Errorf("principles_context missing %q; got %d entries: %+v", want, len(body.PrinciplesContext), body.PrinciplesContext)
+		}
+	}
+	// AC3: archived principle excluded.
+	if _, ok := gotNames["pr_test_archived"]; ok {
+		t.Errorf("principles_context should not include archived principle")
+	}
+	// AC3 (description body): payload carries the principle's body text.
+	if got := gotNames["pr_test_active_a"]; !strings.Contains(got, "Active principle A description") {
+		t.Errorf("principle description not propagated: got %q", got)
+	}
+}

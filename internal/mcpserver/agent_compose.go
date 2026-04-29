@@ -221,9 +221,11 @@ func (s *Server) handleAgentCompose(ctx context.Context, req mcpgo.CallToolReque
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
+	principlesContext := s.loadActivePrinciples(ctx, projectID, memberships)
 	body, _ := json.Marshal(map[string]any{
 		"agent":                   created,
 		"agent_compose_ledger_id": row.ID,
+		"principles_context":      principlesContext,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
@@ -362,4 +364,57 @@ func (s *Server) archiveEphemeralAgentsForStory(ctx context.Context, storyID str
 		archived++
 	}
 	return archived, nil
+}
+
+// principleSummary is the per-principle wire shape on the
+// agent_compose response's principles_context field. story_c0489be2
+// (S7): every agent_compose response carries the resolved active
+// principles so downstream invokers can layer them onto the agent's
+// system message without a separate principle_list round-trip.
+type principleSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// loadActivePrinciples resolves the active principle set for a project
+// (system principles always; project-scope principles when projectID
+// is non-empty). Mirrors the semantics of
+// satellites_principle_list(active_only=true, project_id=...).
+// story_c0489be2 (S7).
+func (s *Server) loadActivePrinciples(ctx context.Context, projectID string, memberships []string) []principleSummary {
+	if s.docs == nil {
+		return nil
+	}
+	out := make([]principleSummary, 0, 16)
+	sysRows, err := s.docs.List(ctx, document.ListOptions{
+		Type:  document.TypePrinciple,
+		Scope: document.ScopeSystem,
+		Limit: 200,
+	}, nil)
+	if err == nil {
+		for _, r := range sysRows {
+			if r.Status != document.StatusActive {
+				continue
+			}
+			out = append(out, principleSummary{ID: r.ID, Name: r.Name, Description: r.Body})
+		}
+	}
+	if projectID != "" {
+		projRows, err := s.docs.List(ctx, document.ListOptions{
+			Type:      document.TypePrinciple,
+			Scope:     document.ScopeProject,
+			ProjectID: projectID,
+			Limit:     200,
+		}, memberships)
+		if err == nil {
+			for _, r := range projRows {
+				if r.Status != document.StatusActive {
+					continue
+				}
+				out = append(out, principleSummary{ID: r.ID, Name: r.Name, Description: r.Body})
+			}
+		}
+	}
+	return out
 }
