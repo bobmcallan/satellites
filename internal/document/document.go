@@ -154,11 +154,14 @@ func (d Document) Validate() error {
 			return err
 		}
 	case TypeConfiguration:
-		// Configurations are project-scoped bundles whose ref payload lives
-		// in Structured. ContractBinding is meaningless (a Configuration
-		// references many contracts via its payload, not a single one).
-		if d.Scope != ScopeProject {
-			return fmt.Errorf("document: type=%s requires scope=project, got scope=%s", TypeConfiguration, d.Scope)
+		// Configurations are bundles of refs (contracts, skills, principles)
+		// whose payload lives in Structured. ContractBinding is meaningless
+		// (a Configuration references many contracts via its payload, not a
+		// single one). story_d371f155 introduced the type as project-scope;
+		// story_764726d3 also accepts scope=system so configseed can ship
+		// a default Configuration that operators clone into project scope.
+		if d.Scope != ScopeProject && d.Scope != ScopeSystem {
+			return fmt.Errorf("document: type=%s requires scope=project or scope=system, got scope=%s", TypeConfiguration, d.Scope)
 		}
 		if len(d.Structured) == 0 {
 			return errors.New("document: type=configuration requires non-empty structured payload")

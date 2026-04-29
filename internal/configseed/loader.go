@@ -95,6 +95,8 @@ func kindSubdir(kind Kind) string {
 		return "contracts"
 	case KindWorkflow:
 		return "workflows"
+	case KindConfiguration:
+		return "configurations"
 	case KindHelp:
 		// Help docs live at the seed-dir root rather than under a
 		// subdirectory — see HelpDir wiring in runner.go.

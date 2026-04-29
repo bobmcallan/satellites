@@ -285,15 +285,46 @@ func TestMemoryStore_CreateConfiguration_BadScope(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Now()
 
+	// scope=system is now accepted (story_764726d3) so the only invalid
+	// scope is scope=workspace (the scope-switch in Validate rejects it
+	// because it's not type=role).
 	doc := newConfigurationDoc(t, Configuration{})
-	doc.Scope = ScopeSystem
+	doc.Scope = ScopeWorkspace
 	doc.ProjectID = nil
 	_, err := store.Create(ctx, doc, now)
 	if err == nil {
-		t.Fatalf("Create with scope=system accepted; want rejection")
+		t.Fatalf("Create with scope=workspace accepted; want rejection")
 	}
-	if !strings.Contains(err.Error(), "scope=project") {
-		t.Errorf("error message must name the required scope; got %q", err.Error())
+	if !strings.Contains(err.Error(), "workspace") {
+		t.Errorf("error message must name the rejected scope; got %q", err.Error())
+	}
+}
+
+// TestMemoryStore_CreateConfiguration_SystemScope (story_764726d3) — the
+// substrate now accepts scope=system Configurations so configseed can
+// ship a default Configuration that operators clone into project scope.
+func TestMemoryStore_CreateConfiguration_SystemScope(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	now := time.Now()
+
+	// scope=system Configuration with empty refs validates because the
+	// FK validator only fires when refs are present.
+	doc := Document{
+		WorkspaceID: cfgTestWorkspace,
+		Type:        TypeConfiguration,
+		Name:        "system_default",
+		Body:        "system default config",
+		Scope:       ScopeSystem,
+		Structured:  []byte(`{"contract_refs":[],"skill_refs":[],"principle_refs":[]}`),
+	}
+	out, err := store.Create(ctx, doc, now)
+	if err != nil {
+		t.Fatalf("Create scope=system Configuration rejected: %v", err)
+	}
+	if out.Scope != ScopeSystem {
+		t.Errorf("Created doc scope = %q, want %q", out.Scope, ScopeSystem)
 	}
 }
 

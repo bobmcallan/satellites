@@ -122,6 +122,62 @@ func TestConfigPage_DropdownListsConfigurations(t *testing.T) {
 	}
 }
 
+// TestConfigPage_SystemDefaultConfigurationRendersInDropdown
+// (story_764726d3 AC4) — when configseed has produced the system_default
+// scope=system Configuration, the /config page renders it in the
+// selector dropdown rather than the empty-state banner.
+func TestConfigPage_SystemDefaultConfigurationRendersInDropdown(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_1", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	now := time.Now().UTC()
+	cfgPayload, err := document.MarshalConfiguration(document.Configuration{
+		ContractRefs: []string{}, SkillRefs: []string{}, PrincipleRefs: []string{},
+	})
+	if err != nil {
+		t.Fatalf("marshal Configuration: %v", err)
+	}
+	systemCfg := document.Document{
+		Type:       document.TypeConfiguration,
+		Scope:      document.ScopeSystem,
+		Name:       "system_default",
+		Body:       "system default configuration",
+		Status:     document.StatusActive,
+		Structured: cfgPayload,
+	}
+	if _, err := docs.Create(context.Background(), systemCfg, now); err != nil {
+		t.Fatalf("seed system_default Configuration: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/config", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, body)
+	}
+	for _, want := range []string{
+		`data-testid="config-selector"`,
+		"system_default",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/config body missing %q (system_default Configuration must populate the dropdown)", want)
+		}
+	}
+	if strings.Contains(body, `data-testid="config-empty-banner"`) {
+		t.Error("/config still renders the empty banner — system_default should populate the dropdown")
+	}
+}
+
 // TestConfigPage_SystemDocsAreReadOnlyExpandable (story_be487d68 AC1-5,7) —
 // system contracts, workflows, and agents render as <details>/<summary>
 // expand-collapse rows with no /documents/{id} anchor, with the doc body

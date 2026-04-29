@@ -297,7 +297,10 @@ func TestValidate_ConfigurationShape(t *testing.T) {
 		wantErr    bool
 	}{
 		{"happy", ScopeProject, good, nil, false},
-		{"scope=system rejected", ScopeSystem, good, nil, true},
+		// story_764726d3 — system-scope Configurations are now accepted so
+		// configseed can ship a default Configuration operators clone.
+		{"scope=system accepted", ScopeSystem, good, nil, false},
+		{"scope=workspace rejected", ScopeWorkspace, good, nil, true},
 		{"empty structured rejected", ScopeProject, nil, nil, true},
 		{"contract_binding rejected", ScopeProject, good, StringPtr("doc_x"), true},
 	}

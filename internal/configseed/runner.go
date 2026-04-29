@@ -46,11 +46,14 @@ func ResolveHelpDir() string {
 	return DefaultHelpDir
 }
 
-// Run executes the system-tier seed: agents + contracts + workflows.
-// Help is run via RunHelp. Returns a Summary with the per-pass counts.
-// Errors per file are surfaced via Summary.Errors; the function returns
-// a non-nil error only on a structural failure (e.g. missing root dir
-// when the caller demands strict mode).
+// Run executes the system-tier seed: agents + contracts + workflows,
+// then a fourth phase loads configurations (story_764726d3) which
+// reference contracts/skills/principles by name and need the prior
+// phases' IDs to resolve. Help is run via RunHelp. Returns a Summary
+// with the per-pass counts. Errors per file are surfaced via
+// Summary.Errors; the function returns a non-nil error only on a
+// structural failure (e.g. missing root dir when the caller demands
+// strict mode).
 func Run(ctx context.Context, docs document.Store, seedDir, workspaceID, actor string, now time.Time) (Summary, error) {
 	if docs == nil {
 		return Summary{}, fmt.Errorf("configseed: doc store is nil")
@@ -82,7 +85,85 @@ func Run(ctx context.Context, docs document.Store, seedDir, workspaceID, actor s
 			}
 		}
 	}
+	// Configuration phase — runs after the prior phases so contract /
+	// skill / principle name→ID lookups resolve against the just-seeded
+	// docs. story_764726d3.
+	cfgSummary := runConfigurationPhase(ctx, docs, seedDir, workspaceID, actor, now)
+	summary.Add(cfgSummary)
 	return summary, nil
+}
+
+// runConfigurationPhase loads `configurations/*.md` and upserts each as
+// a scope=system type=configuration document. Refs are resolved by name
+// against the doc store (which the agent/contract/workflow phases have
+// already populated).
+func runConfigurationPhase(ctx context.Context, docs document.Store, seedDir, workspaceID, actor string, now time.Time) Summary {
+	summary := Summary{}
+	subdir := filepath.Join(seedDir, kindSubdir(KindConfiguration))
+	entries, err := os.ReadDir(subdir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return summary
+		}
+		summary.Errors = append(summary.Errors, ErrorEntry{Path: subdir, Reason: fmt.Sprintf("read dir: %v", err)})
+		return summary
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	resolveBy := func(docType string) func(name string) (string, bool) {
+		return func(name string) (string, bool) {
+			rows, err := docs.List(ctx, document.ListOptions{Type: docType, Scope: document.ScopeSystem, Limit: 500}, nil)
+			if err != nil {
+				return "", false
+			}
+			for _, r := range rows {
+				if r.Name == name && r.Status == document.StatusActive {
+					return r.ID, true
+				}
+			}
+			return "", false
+		}
+	}
+	resolveContract := resolveBy(document.TypeContract)
+	resolveSkill := resolveBy(document.TypeSkill)
+	resolvePrinciple := resolveBy(document.TypePrinciple)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(subdir, entry.Name())
+		content, err := os.ReadFile(path)
+		if err != nil {
+			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: fmt.Sprintf("read: %v", err)})
+			continue
+		}
+		fm, body, err := Parse(content)
+		if err != nil {
+			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: fmt.Sprintf("parse: %v", err)})
+			continue
+		}
+		input, err := configurationToInput(fm, body, resolveContract, resolveSkill, resolvePrinciple, workspaceID, actor)
+		if err != nil {
+			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: err.Error()})
+			continue
+		}
+		summary.Loaded++
+		res, err := docs.Upsert(ctx, input, now)
+		if err != nil {
+			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: err.Error()})
+			continue
+		}
+		switch {
+		case res.Created:
+			summary.Created++
+		case res.Changed:
+			summary.Updated++
+		default:
+			summary.Skipped++
+		}
+	}
+	return summary
 }
 
 // RunHelp executes the help-tier seed: walks helpDir/*.md and upserts
