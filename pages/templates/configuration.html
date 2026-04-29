@@ -69,16 +69,86 @@
       </div>
     </section>
 
+    {{if .Composite.SystemWorkflows}}
+    <section class="panel-headed" data-testid="config-system-workflows-panel">
+      <header class="panel-header">
+        <h2>workflows</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-system-workflows-count">({{len .Composite.SystemWorkflows}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">System rows are seed-owned and read-only. Add overrides at the appropriate scope:</p>
+        <div class="config-scope-affordances">
+          <a class="tag-chip" data-testid="config-create-workflow-workspace" href="/documents/new?type=workflow&amp;scope=workspace">+ workflow @ workspace</a>
+          <a class="tag-chip" data-testid="config-create-workflow-project" href="/documents/new?type=workflow&amp;scope=project">+ workflow @ project</a>
+          <a class="tag-chip" data-testid="config-create-workflow-user" href="/documents/new?type=workflow&amp;scope=user">+ workflow @ user</a>
+        </div>
+        <table class="data-table system-doc-table" data-testid="config-system-workflows-list" x-data="{ open: null }">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>project</th>
+              <th>category</th>
+              <th>scope</th>
+              <th>status</th>
+              <th>phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.SystemWorkflows}}
+            <tr class="system-doc-row" data-testid="config-system-workflow-{{.ID}}"
+                @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
+              <td><strong>{{.Name}}</strong></td>
+              <td><span class="muted">—</span></td>
+              <td><code class="category-pill">workflow</code></td>
+              <td><code class="scope-pill">{{.Scope}}</code></td>
+              <td><code class="status-pill">{{.Status}}</code></td>
+              <td><span class="muted">—</span></td>
+            </tr>
+            <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
+              <td colspan="6">
+                {{if .Body}}
+                <div class="system-doc-section">
+                  <pre class="system-doc-body">{{.Body}}</pre>
+                </div>
+                {{end}}
+                {{if .Tags}}
+                <div class="system-doc-section">
+                  <span class="muted">Tags:</span>
+                  {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                </div>
+                {{end}}
+                <div class="system-doc-meta">
+                  <code class="muted">{{.ID}}</code>
+                  <span class="muted">v{{.Version}}</span>
+                  <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                  <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {{end}}
+
     {{if .Composite.SystemContracts}}
     <section class="panel-headed" data-testid="config-system-contracts-panel">
       <header class="panel-header">
-        <h2>system contracts</h2>
+        <h2>contracts</h2>
         <span class="panel-header-meta">
           <code data-testid="config-system-contracts-count">({{len .Composite.SystemContracts}})</code>
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Lifecycle contracts seeded from <code>config/seed/contracts/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <p class="muted">System rows are seed-owned and read-only. Add overrides at the appropriate scope:</p>
+        <div class="config-scope-affordances">
+          <a class="tag-chip" data-testid="config-create-contract-workspace" href="/documents/new?type=contract&amp;scope=workspace">+ contract @ workspace</a>
+          <a class="tag-chip" data-testid="config-create-contract-project" href="/documents/new?type=contract&amp;scope=project">+ contract @ project</a>
+          <a class="tag-chip" data-testid="config-create-contract-user" href="/documents/new?type=contract&amp;scope=user">+ contract @ user</a>
+        </div>
         <table class="data-table system-doc-table" data-testid="config-system-contracts-list" x-data="{ open: null }">
           <thead>
             <tr>
@@ -141,76 +211,20 @@
     </section>
     {{end}}
 
-    {{if .Composite.SystemWorkflows}}
-    <section class="panel-headed" data-testid="config-system-workflows-panel">
-      <header class="panel-header">
-        <h2>system workflows</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-system-workflows-count">({{len .Composite.SystemWorkflows}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        <p class="muted">Default workflow shapes seeded from <code>config/seed/workflows/</code>. Read-only — edit the seed file and reseed to change.</p>
-        <table class="data-table system-doc-table" data-testid="config-system-workflows-list" x-data="{ open: null }">
-          <thead>
-            <tr>
-              <th>name</th>
-              <th>project</th>
-              <th>category</th>
-              <th>scope</th>
-              <th>status</th>
-              <th>phase</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Composite.SystemWorkflows}}
-            <tr class="system-doc-row" data-testid="config-system-workflow-{{.ID}}"
-                @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
-              <td><strong>{{.Name}}</strong></td>
-              <td><span class="muted">—</span></td>
-              <td><code class="category-pill">workflow</code></td>
-              <td><code class="scope-pill">{{.Scope}}</code></td>
-              <td><code class="status-pill">{{.Status}}</code></td>
-              <td><span class="muted">—</span></td>
-            </tr>
-            <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
-              <td colspan="6">
-                {{if .Body}}
-                <div class="system-doc-section">
-                  <pre class="system-doc-body">{{.Body}}</pre>
-                </div>
-                {{end}}
-                {{if .Tags}}
-                <div class="system-doc-section">
-                  <span class="muted">Tags:</span>
-                  {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
-                </div>
-                {{end}}
-                <div class="system-doc-meta">
-                  <code class="muted">{{.ID}}</code>
-                  <span class="muted">v{{.Version}}</span>
-                  <span class="muted">created <time>{{.CreatedAt}}</time></span>
-                  <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
-                </div>
-              </td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {{end}}
-
     {{if .Composite.SystemAgents}}
     <section class="panel-headed" data-testid="config-system-agents-panel">
       <header class="panel-header">
-        <h2>system agents</h2>
+        <h2>agents</h2>
         <span class="panel-header-meta">
           <code data-testid="config-system-agents-count">({{len .Composite.SystemAgents}})</code>
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Lifecycle agents seeded from <code>config/seed/agents/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <p class="muted">System rows are seed-owned and read-only. Add overrides at the appropriate scope:</p>
+        <div class="config-scope-affordances">
+          <a class="tag-chip" data-testid="config-create-agent-workspace" href="/documents/new?type=agent&amp;scope=workspace">+ agent @ workspace</a>
+          <a class="tag-chip" data-testid="config-create-agent-project" href="/documents/new?type=agent&amp;scope=project">+ agent @ project</a>
+        </div>
         <table class="data-table system-doc-table" data-testid="config-system-agents-list" x-data="{ open: null }">
           <thead>
             <tr>
@@ -263,13 +277,16 @@
     {{if .Composite.SystemPrinciples}}
     <section class="panel-headed" data-testid="config-system-principles-panel">
       <header class="panel-header">
-        <h2>system principles</h2>
+        <h2>principles</h2>
         <span class="panel-header-meta">
           <code data-testid="config-system-principles-count">({{len .Composite.SystemPrinciples}})</code>
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Active principles seeded from <code>config/seed/principles/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <p class="muted">System rows are seed-owned and read-only. Add overrides at the appropriate scope:</p>
+        <div class="config-scope-affordances">
+          <a class="tag-chip" data-testid="config-create-principle-project" href="/documents/new?type=principle&amp;scope=project">+ principle @ project</a>
+        </div>
         <table class="data-table system-doc-table" data-testid="config-system-principles-list" x-data="{ open: null }">
           <thead>
             <tr>
