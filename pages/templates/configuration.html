@@ -166,17 +166,23 @@
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Lifecycle contracts seeded from <code>config/seed/contracts/</code>.</p>
-        <ul class="document-cards" data-testid="config-system-contracts-list">
+        <p class="muted">Lifecycle contracts seeded from <code>config/seed/contracts/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <ul class="document-cards system-doc-list" data-testid="config-system-contracts-list">
           {{range .Composite.SystemContracts}}
           <li data-testid="config-system-contract-{{.ID}}">
-            <a href="/documents/{{.ID}}" class="document-card-link">
-              <code class="type-pill">{{.Type}}</code>
-              <code class="scope-pill">{{.Scope}}</code>
-              <span class="document-name">{{.Name}}</span>
-              <code class="version-pill">v{{.Version}}</code>
-              <span class="muted">{{.UpdatedAt}}</span>
-            </a>
+            <details class="system-doc-row">
+              <summary class="system-doc-summary">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+              </summary>
+              <div class="system-doc-meta">
+                <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+              </div>
+              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
+            </details>
           </li>
           {{end}}
         </ul>
@@ -193,17 +199,23 @@
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Default workflow shapes seeded from <code>config/seed/workflows/</code>.</p>
-        <ul class="document-cards" data-testid="config-system-workflows-list">
+        <p class="muted">Default workflow shapes seeded from <code>config/seed/workflows/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <ul class="document-cards system-doc-list" data-testid="config-system-workflows-list">
           {{range .Composite.SystemWorkflows}}
           <li data-testid="config-system-workflow-{{.ID}}">
-            <a href="/documents/{{.ID}}" class="document-card-link">
-              <code class="type-pill">{{.Type}}</code>
-              <code class="scope-pill">{{.Scope}}</code>
-              <span class="document-name">{{.Name}}</span>
-              <code class="version-pill">v{{.Version}}</code>
-              <span class="muted">{{.UpdatedAt}}</span>
-            </a>
+            <details class="system-doc-row">
+              <summary class="system-doc-summary">
+                <code class="type-pill">{{.Type}}</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                <code class="version-pill">v{{.Version}}</code>
+              </summary>
+              <div class="system-doc-meta">
+                <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+              </div>
+              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
+            </details>
           </li>
           {{end}}
         </ul>
@@ -220,29 +232,34 @@
         </span>
       </header>
       <div class="panel-body">
-        <p class="muted">Lifecycle agents seeded from <code>config/seed/agents/</code>.</p>
-        <table class="data-table" data-testid="config-system-agents-list">
-          <thead>
-            <tr>
-              <th>name</th>
-              <th>permission patterns</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Composite.SystemAgents}}
-            <tr data-testid="config-system-agent-{{.ID}}">
-              <td><a href="/documents/{{.ID}}"><code>{{.Name}}</code></a></td>
-              <td>
+        <p class="muted">Lifecycle agents seeded from <code>config/seed/agents/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <ul class="document-cards system-doc-list" data-testid="config-system-agents-list">
+          {{range .Composite.SystemAgents}}
+          <li data-testid="config-system-agent-{{.ID}}">
+            <details class="system-doc-row">
+              <summary class="system-doc-summary">
+                <code class="type-pill">agent</code>
+                <code class="scope-pill">{{.Scope}}</code>
+                <span class="document-name">{{.Name}}</span>
+                {{if .Ephemeral}}<code class="status-pill agent-ephemeral-pill">ephemeral</code>{{else}}<code class="status-pill agent-canonical-pill">canonical</code>{{end}}
+              </summary>
+              <div class="system-doc-meta">
+                <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+              </div>
+              <div class="system-doc-section">
+                <span class="muted">permission patterns:</span>
                 {{if .PermissionPatterns}}
                   {{range .PermissionPatterns}}<code class="tag-chip pattern-chip">{{.}}</code> {{end}}
                 {{else}}
                   <span class="muted">—</span>
                 {{end}}
-              </td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
+              </div>
+              {{if .Body}}<pre class="system-doc-body">{{.Body}}</pre>{{end}}
+            </details>
+          </li>
+          {{end}}
+        </ul>
       </div>
     </section>
     {{end}}

@@ -58,7 +58,9 @@ type documentCard struct {
 	Tags      []string `json:"tags,omitempty"`
 	Version   int      `json:"version"`
 	Status    string   `json:"status"`
+	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`
+	Body      string   `json:"body,omitempty"`
 }
 
 type documentFilters struct {
@@ -230,7 +232,9 @@ func documentCardFor(d document.Document) documentCard {
 		Tags:      d.Tags,
 		Version:   d.Version,
 		Status:    d.Status,
+		CreatedAt: d.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: d.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		Body:      d.Body,
 	}
 }
 

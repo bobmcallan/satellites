@@ -82,6 +82,9 @@ type agentRow struct {
 	OwningStoryID      string   `json:"owning_story_id,omitempty"`
 	OwningStoryHref    string   `json:"owning_story_href,omitempty"`
 	OwningProjectID    string   `json:"owning_project_id,omitempty"`
+	CreatedAt          string   `json:"created_at,omitempty"`
+	UpdatedAt          string   `json:"updated_at,omitempty"`
+	Body               string   `json:"body,omitempty"`
 }
 
 type grantRow struct {
@@ -161,9 +164,12 @@ func buildAgentsComposite(ctx context.Context, docs document.Store, memberships 
 	out := make([]agentRow, 0, len(rows))
 	for _, r := range rows {
 		row := agentRow{
-			ID:    r.ID,
-			Name:  r.Name,
-			Scope: r.Scope,
+			ID:        r.ID,
+			Name:      r.Name,
+			Scope:     r.Scope,
+			Body:      r.Body,
+			CreatedAt: r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt: r.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		}
 		if r.ContractBinding != nil {
 			row.ContractBinding = *r.ContractBinding
