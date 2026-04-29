@@ -38,6 +38,11 @@ const (
 	ScopeSystem    = "system"
 	ScopeProject   = "project"
 	ScopeWorkspace = "workspace"
+	// ScopeUser names a per-user override row. Story_f0a78759 (S5)
+	// adds the tier to support user-level workflow markdowns. The
+	// owning user is carried by `CreatedBy`; WorkspaceID is required;
+	// ProjectID must be nil.
+	ScopeUser = "user"
 )
 
 // Status enum values.
@@ -62,6 +67,7 @@ var validScopes = map[string]struct{}{
 	ScopeSystem:    {},
 	ScopeProject:   {},
 	ScopeWorkspace: {},
+	ScopeUser:      {},
 }
 
 // Document is the unified, type-discriminated row backing every authored
@@ -115,14 +121,27 @@ func (d Document) Validate() error {
 			return errors.New("document: project_id must be nil when scope=system")
 		}
 	case ScopeWorkspace:
-		if d.Type != TypeRole {
-			return fmt.Errorf("document: scope=workspace only valid for type=role, got type=%s", d.Type)
+		if d.Type != TypeRole && d.Type != TypeWorkflow {
+			return fmt.Errorf("document: scope=workspace only valid for type=role or type=workflow, got type=%s", d.Type)
 		}
 		if d.WorkspaceID == "" {
 			return errors.New("document: workspace_id required when scope=workspace")
 		}
 		if d.ProjectID != nil && *d.ProjectID != "" {
 			return errors.New("document: project_id must be nil when scope=workspace")
+		}
+	case ScopeUser:
+		if d.Type != TypeWorkflow {
+			return fmt.Errorf("document: scope=user only valid for type=workflow, got type=%s", d.Type)
+		}
+		if d.WorkspaceID == "" {
+			return errors.New("document: workspace_id required when scope=user")
+		}
+		if d.ProjectID != nil && *d.ProjectID != "" {
+			return errors.New("document: project_id must be nil when scope=user")
+		}
+		if d.CreatedBy == "" {
+			return errors.New("document: created_by (user_id) required when scope=user")
 		}
 	}
 	switch d.Type {

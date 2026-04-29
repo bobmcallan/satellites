@@ -315,12 +315,17 @@ func TestValidate_HelpRequiresBody(t *testing.T) {
 
 func TestValidate_ScopeEnum(t *testing.T) {
 	t.Parallel()
+	// scope=user is a member of the enum but is only valid for
+	// type=workflow (covered separately by TestValidate_UserScopeWorkflowOnly).
+	// The TypeArtifact case below therefore tests the enum membership
+	// and the per-type restriction in one shot.
 	cases := []struct {
 		scope   string
 		wantErr bool
 	}{
 		{ScopeProject, false},
 		{ScopeSystem, false},
+		{ScopeUser, true}, // type=artifact + scope=user rejected
 		{"", true},
 		{"global", true},
 	}
@@ -343,7 +348,7 @@ func TestValidate_ScopeEnum(t *testing.T) {
 	}
 }
 
-func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
+func TestValidate_WorkspaceScopeRoleOrWorkflow(t *testing.T) {
 	t.Parallel()
 	// Role with scope=workspace + workspace_id: accepted.
 	roleHappy := Document{
@@ -354,6 +359,16 @@ func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
 	}
 	if err := roleHappy.Validate(); err != nil {
 		t.Errorf("role scope=workspace happy: %v", err)
+	}
+	// Workflow with scope=workspace + workspace_id: accepted (story_f0a78759).
+	workflowHappy := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeWorkspace,
+		Name:        "workflow_custom",
+		WorkspaceID: "wksp_a",
+	}
+	if err := workflowHappy.Validate(); err != nil {
+		t.Errorf("workflow scope=workspace happy: %v", err)
 	}
 	// Role with scope=workspace but empty workspace_id: rejected.
 	roleNoWS := Document{
@@ -375,8 +390,7 @@ func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
 	if err := roleWithProject.Validate(); err == nil {
 		t.Errorf("role scope=workspace with project_id accepted; want rejection")
 	}
-	// Non-role document with scope=workspace: rejected (scope=workspace
-	// is a role-only shape in 6.2).
+	// Non-role/non-workflow document with scope=workspace: rejected.
 	agentWS := Document{
 		Type:        TypeAgent,
 		Scope:       ScopeWorkspace,
@@ -384,7 +398,95 @@ func TestValidate_WorkspaceScopeRoleOnly(t *testing.T) {
 		WorkspaceID: "wksp_a",
 	}
 	if err := agentWS.Validate(); err == nil {
-		t.Errorf("agent scope=workspace accepted; want rejection in 6.2")
+		t.Errorf("agent scope=workspace accepted; want rejection (only role/workflow allowed)")
+	}
+}
+
+// TestValidate_UserScopeWorkflowOnly covers the user-tier override row
+// added under story_f0a78759 (S5): only type=workflow lives at
+// scope=user; workspace_id required; project_id forbidden; created_by
+// required (the owning user_id).
+func TestValidate_UserScopeWorkflowOnly(t *testing.T) {
+	t.Parallel()
+	// Workflow with scope=user + workspace_id + created_by: accepted.
+	happy := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeUser,
+		Name:        "user_workflow",
+		WorkspaceID: "wksp_a",
+		CreatedBy:   "user_alice",
+	}
+	if err := happy.Validate(); err != nil {
+		t.Errorf("workflow scope=user happy: %v", err)
+	}
+	// Missing workspace_id: rejected.
+	noWS := Document{
+		Type:      TypeWorkflow,
+		Scope:     ScopeUser,
+		Name:      "user_workflow",
+		CreatedBy: "user_alice",
+	}
+	if err := noWS.Validate(); err == nil {
+		t.Errorf("workflow scope=user without workspace_id accepted; want rejection")
+	}
+	// project_id supplied: rejected.
+	withProj := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeUser,
+		Name:        "user_workflow",
+		WorkspaceID: "wksp_a",
+		ProjectID:   StringPtr("proj_x"),
+		CreatedBy:   "user_alice",
+	}
+	if err := withProj.Validate(); err == nil {
+		t.Errorf("workflow scope=user with project_id accepted; want rejection")
+	}
+	// Non-workflow type at scope=user: rejected.
+	agentUS := Document{
+		Type:        TypeAgent,
+		Scope:       ScopeUser,
+		Name:        "agent_custom",
+		WorkspaceID: "wksp_a",
+		CreatedBy:   "user_alice",
+	}
+	if err := agentUS.Validate(); err == nil {
+		t.Errorf("agent scope=user accepted; want rejection (only workflow allowed)")
+	}
+	// Missing created_by: rejected (scope=user requires the owning user id).
+	noUser := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeUser,
+		Name:        "user_workflow",
+		WorkspaceID: "wksp_a",
+	}
+	if err := noUser.Validate(); err == nil {
+		t.Errorf("workflow scope=user without created_by accepted; want rejection")
+	}
+}
+
+// TestValidate_ProjectScopeWorkflow covers the project-tier override
+// row: type=workflow accepted at scope=project provided project_id is
+// set (story_f0a78759).
+func TestValidate_ProjectScopeWorkflow(t *testing.T) {
+	t.Parallel()
+	happy := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeProject,
+		Name:        "project_workflow",
+		WorkspaceID: "wksp_a",
+		ProjectID:   StringPtr("proj_x"),
+	}
+	if err := happy.Validate(); err != nil {
+		t.Errorf("workflow scope=project happy: %v", err)
+	}
+	noProj := Document{
+		Type:        TypeWorkflow,
+		Scope:       ScopeProject,
+		Name:        "project_workflow",
+		WorkspaceID: "wksp_a",
+	}
+	if err := noProj.Validate(); err == nil {
+		t.Errorf("workflow scope=project without project_id accepted; want rejection")
 	}
 }
 

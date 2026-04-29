@@ -21,6 +21,54 @@
       </div>
     </section>
 
+    <section class="panel-headed" data-testid="config-mandate-stack-panel">
+      <header class="panel-header">
+        <h2>active mandate stack</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-mandate-effective-count">({{len .Composite.MandateStack.Effective}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">
+          Workflow markdowns at each scope tier (system → workspace → project → user)
+          merged into the effective <code>required_slots</code> the workflow-claim
+          gate enforces. Stricter min/max wins; <code>required:false</code> upgradable
+          to <code>required:true</code>, never downgradable.
+        </p>
+        {{if .Composite.MandateStack.Effective}}
+        <table class="data-table mandate-effective-table" data-testid="config-mandate-effective-list">
+          <thead>
+            <tr>
+              <th>contract</th>
+              <th>required</th>
+              <th>min</th>
+              <th>max</th>
+              <th>source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.MandateStack.Effective}}
+            <tr class="mandate-slot-row" data-testid="config-mandate-slot-{{.ContractName}}">
+              <td><strong>{{.ContractName}}</strong></td>
+              <td><code class="status-pill">{{.Required}}</code></td>
+              <td>{{.MinCount}}</td>
+              <td>{{if eq .MaxCount 0}}<span class="muted">∞</span>{{else}}{{.MaxCount}}{{end}}</td>
+              <td><code class="scope-pill">{{.Source}}</code></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p class="muted" data-testid="config-mandate-empty">No workflow markdowns found at any scope tier.</p>
+        {{end}}
+
+        {{range .Composite.MandateStack.System}}{{template "mandate-layer.html" .}}{{end}}
+        {{range .Composite.MandateStack.Workspace}}{{template "mandate-layer.html" .}}{{end}}
+        {{range .Composite.MandateStack.Project}}{{template "mandate-layer.html" .}}{{end}}
+        {{range .Composite.MandateStack.User}}{{template "mandate-layer.html" .}}{{end}}
+      </div>
+    </section>
+
     {{if .Composite.SystemContracts}}
     <section class="panel-headed" data-testid="config-system-contracts-panel">
       <header class="panel-header">

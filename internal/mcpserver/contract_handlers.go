@@ -127,20 +127,20 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
 
-	spec, err := s.loadWorkflowSpec(ctx, st.ProjectID, memberships)
+	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
 	if len(proposed) == 0 {
-		// No per-call proposed_contracts — fall back to the project
-		// workflow_spec default. Story.ConfigurationID and the per-agent
-		// default_configuration_id paths were removed when type=configuration
-		// was deleted (story_09c4086c per design ldg_81b5b9da §2);
-		// projects own the mandate via workflow_spec, and the orchestrator
-		// composes per-story overrides via proposed_contracts directly.
+		// No per-call proposed_contracts — fall back to the resolved
+		// scope-mandate stack default. Story.ConfigurationID and the
+		// per-agent default_configuration_id paths were removed when
+		// type=configuration was deleted (story_09c4086c per design
+		// ldg_81b5b9da §2); workflows own the mandate via the
+		// system→workspace→project→user resolver (story_f0a78759).
 		_ = agentID
-		proposed = expandDefaultProposed(spec)
+		proposed = expandResolvedDefault(spec)
 	}
 	if err := spec.Validate(proposed); err != nil {
 		return mcpgo.NewToolResultText(marshalSpecError(err)), nil
@@ -361,7 +361,7 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 		return mcpgo.NewToolResultError("plan_amend requires an initial workflow — call workflow_claim first"), nil
 	}
 
-	spec, err := s.loadWorkflowSpec(ctx, st.ProjectID, memberships)
+	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -607,7 +607,9 @@ func expandDefaultProposed(spec contract.WorkflowSpec) []string {
 
 // marshalSpecError renders a *contract.SpecError as a JSON tool-result
 // text. Non-spec errors are wrapped with a generic shape so callers can
-// still parse them.
+// still parse them. The `source` field names the originating scope tier
+// (system | workspace | project | user | merged) when populated by the
+// resolved-spec validation path (story_f0a78759).
 func marshalSpecError(err error) string {
 	var se *contract.SpecError
 	if errors.As(err, &se) {
@@ -617,6 +619,7 @@ func marshalSpecError(err error) string {
 			"count":         se.Count,
 			"min":           se.Min,
 			"max":           se.Max,
+			"source":        se.Source,
 			"message":       se.Error(),
 		})
 		return string(b)

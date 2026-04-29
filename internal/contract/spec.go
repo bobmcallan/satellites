@@ -40,6 +40,11 @@ type SpecError struct {
 	Count        int
 	Min          int
 	Max          int
+	// Source records the scope tier that introduced the offending slot
+	// (system | workspace | project | user | merged). Populated by
+	// resolved-spec validation paths so callers can name the source in
+	// their JSON error body. Empty for legacy single-tier validation.
+	Source string
 }
 
 // Error implements error. Message is stable per Kind.
@@ -82,12 +87,12 @@ func (s WorkflowSpec) Validate(proposed []string) error {
 		n := counts[slot.ContractName]
 		if slot.Required && n < slot.MinCount {
 			if n == 0 {
-				return &SpecError{Kind: "missing_required_slot", ContractName: slot.ContractName}
+				return &SpecError{Kind: "missing_required_slot", ContractName: slot.ContractName, Source: slot.Source}
 			}
-			return &SpecError{Kind: "count_out_of_range", ContractName: slot.ContractName, Count: n, Min: slot.MinCount, Max: slot.MaxCount}
+			return &SpecError{Kind: "count_out_of_range", ContractName: slot.ContractName, Count: n, Min: slot.MinCount, Max: slot.MaxCount, Source: slot.Source}
 		}
-		if n > slot.MaxCount {
-			return &SpecError{Kind: "count_out_of_range", ContractName: slot.ContractName, Count: n, Min: slot.MinCount, Max: slot.MaxCount}
+		if slot.MaxCount > 0 && n > slot.MaxCount {
+			return &SpecError{Kind: "count_out_of_range", ContractName: slot.ContractName, Count: n, Min: slot.MinCount, Max: slot.MaxCount, Source: slot.Source}
 		}
 	}
 	return nil

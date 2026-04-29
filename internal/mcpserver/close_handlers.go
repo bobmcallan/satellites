@@ -71,9 +71,10 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 	now := s.nowUTC()
 
 	// Preplan proposed_workflow validation — if supplied, must satisfy
-	// the project's workflow_spec. Mirrors workflow_claim.
+	// the resolved scope-mandate stack (system → workspace → project →
+	// user) per story_f0a78759. Mirrors workflow_claim.
 	if ci.ContractName == "preplan" && len(proposedWorkflow) > 0 {
-		spec, err := s.loadWorkflowSpec(ctx, ci.ProjectID, memberships)
+		spec, err := s.loadResolvedWorkflowSpec(ctx, ci.WorkspaceID, ci.ProjectID, caller.UserID, memberships)
 		if err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}

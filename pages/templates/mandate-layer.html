@@ -1,0 +1,27 @@
+{{define "mandate-layer.html"}}
+<details class="mandate-layer" data-testid="config-mandate-layer-{{.Scope}}-{{.DocumentID}}">
+  <summary><code class="scope-pill">{{.Scope}}</code> <strong>{{.Name}}</strong> <span class="muted">({{len .Slots}} slots)</span></summary>
+  {{if .Slots}}
+  <table class="data-table mandate-layer-table">
+    <thead>
+      <tr>
+        <th>contract</th>
+        <th>required</th>
+        <th>min</th>
+        <th>max</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Slots}}
+      <tr>
+        <td>{{.ContractName}}</td>
+        <td>{{.Required}}</td>
+        <td>{{.MinCount}}</td>
+        <td>{{if eq .MaxCount 0}}∞{{else}}{{.MaxCount}}{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+</details>
+{{end}}
