@@ -12,8 +12,8 @@
       <header class="panel-header">
         <h1>configuration</h1>
       </header>
+      {{if .Composite.Configurations}}
       <div class="panel-body">
-        {{if .Composite.Configurations}}
         <form method="get" action="/config" class="config-selector-form">
           <label>
             <span>configuration</span>
@@ -32,15 +32,13 @@
           to create one, or visit a project's
           <a href="/projects">configuration page</a>.
         </p>
-        {{else}}
-        <p class="muted" data-testid="config-empty">
-          No Configurations yet.
-        </p>
-        <p>
-          <a href="/documents" class="btn-secondary" data-testid="config-empty-cta">Create your first Configuration</a>
-        </p>
-        {{end}}
       </div>
+      {{else}}
+      <div class="panel-body panel-body-compact" data-testid="config-empty-banner">
+        <span class="muted" data-testid="config-empty">No Configurations yet.</span>
+        <a href="/documents" class="btn-secondary" data-testid="config-empty-cta">Create your first Configuration</a>
+      </div>
+      {{end}}
     </section>
 
     {{if .Composite.SelectedID}}

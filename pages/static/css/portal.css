@@ -872,6 +872,17 @@ input:disabled, select:disabled, textarea:disabled {
     padding: 1rem 1.25rem;
 }
 
+/* Compact panel body for empty-state banners (story_dda346f9). Used on
+   /config when no Configurations exist so two short lines don't take
+   the full panel-body padding. */
+.panel-body-compact {
+    padding: 0.4rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
 /* /config selector form (story_9fd0b9de). Lays out the label + select
    inline with breathing room, and adds bottom-margin so the muted
    helper paragraph below doesn't collide. */

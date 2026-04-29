@@ -40,10 +40,20 @@ func TestConfigPage_EmptyState(t *testing.T) {
 		`data-testid="config-empty"`,
 		`data-testid="config-empty-cta"`,
 		`No Configurations yet`,
+		// story_dda346f9: empty state renders as a compact banner inside
+		// a panel-body-compact div, not the full panel-body padding shell.
+		`data-testid="config-empty-banner"`,
+		`panel-body panel-body-compact`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/config empty body missing %q", want)
 		}
+	}
+	// story_dda346f9 AC1: the empty-state must NOT use the full
+	// `<p class="muted">...</p>` + separate `<p>` CTA layout that
+	// previously stacked two paragraphs inside the panel body.
+	if strings.Contains(body, `<p class="muted" data-testid="config-empty">`) {
+		t.Errorf("/config empty body still uses the stacked-paragraph layout — should be the compact banner")
 	}
 }
 
