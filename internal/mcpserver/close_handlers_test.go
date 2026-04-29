@@ -173,23 +173,12 @@ func TestClose_PreplanReentryWorkflowClaim(t *testing.T) {
 	}
 }
 
-func TestClose_PreplanWorkflowSpecInvalid(t *testing.T) {
-	t.Parallel()
-	f := newCloseFixture(t)
-	f.claim(t, 0, "")
-	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
-		"contract_instance_id": f.cis[0].ID,
-		"close_markdown":       "invalid shape",
-		"proposed_workflow":    []string{"plan", "develop", "story_close"}, // missing preplan
-	}))
-	if err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	text := firstText(res)
-	if !anySubstring(text, `"error":"missing_required_slot"`, `"contract_name":"preplan"`) {
-		t.Fatalf("expected spec error, got %s", text)
-	}
-}
+// TestClose_PreplanWorkflowSpecInvalid deleted by
+// epic:configuration-over-code-mandate (story_af79cf95) — preplan close
+// no longer validates proposed_workflow against a substrate spec; the
+// reviewer (story_reviewer) judges shape during the plan-approval
+// loop. proposed_workflow is informational metadata on the evidence
+// row only.
 
 func TestClose_PlanDeferred(t *testing.T) {
 	t.Parallel()

@@ -60,8 +60,8 @@ func newContractFixture(t *testing.T) *contractFixture {
 		t.Fatalf("project create: %v", err)
 	}
 
-	// Seed contract docs: preplan/plan/develop/story_close, scope=system.
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	// Seed contract docs: full 6-slot default workflow, scope=system.
+	for _, name := range []string{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"} {
 		if _, err := docStore.Create(ctx, document.Document{
 			Type:   document.TypeContract,
 			Scope:  document.ScopeSystem,
@@ -142,68 +142,10 @@ func (f *contractFixture) seedPlanApproved(t *testing.T) {
 	}
 }
 
-func TestProjectWorkflowSpec_Default(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	res, err := f.server.handleProjectWorkflowSpecGet(f.callerCtx(), newCallToolReq("project_workflow_spec_get", map[string]any{
-		"project_id": f.projectID,
-	}))
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error: %s", firstText(res))
-	}
-	var body struct {
-		Spec contract.WorkflowSpec `json:"spec"`
-	}
-	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if len(body.Spec.Slots) != 4 {
-		t.Fatalf("default slot count: got %d want 4", len(body.Spec.Slots))
-	}
-}
-
-func TestProjectWorkflowSpec_Roundtrip(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	slots := []contract.Slot{
-		{ContractName: "preplan", Required: true, MinCount: 1, MaxCount: 1, Source: "project"},
-		{ContractName: "develop", Required: true, MinCount: 1, MaxCount: 2, Source: "project"},
-		{ContractName: "story_close", Required: true, MinCount: 1, MaxCount: 1, Source: "project"},
-	}
-	raw, _ := json.Marshal(slots)
-	res, err := f.server.handleProjectWorkflowSpecSet(f.callerCtx(), newCallToolReq("project_workflow_spec_set", map[string]any{
-		"project_id": f.projectID,
-		"slots":      string(raw),
-	}))
-	if err != nil {
-		t.Fatalf("set: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("set isError: %s", firstText(res))
-	}
-
-	getRes, err := f.server.handleProjectWorkflowSpecGet(f.callerCtx(), newCallToolReq("project_workflow_spec_get", map[string]any{
-		"project_id": f.projectID,
-	}))
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	var body struct {
-		Spec contract.WorkflowSpec `json:"spec"`
-	}
-	if err := json.Unmarshal([]byte(firstText(getRes)), &body); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if len(body.Spec.Slots) != 3 {
-		t.Fatalf("slot count: got %d want 3", len(body.Spec.Slots))
-	}
-	if body.Spec.Slots[1].MaxCount != 2 {
-		t.Fatalf("develop max: got %d want 2", body.Spec.Slots[1].MaxCount)
-	}
-}
+// TestProjectWorkflowSpec_* deleted by epic:configuration-over-code-mandate
+// (story_af79cf95) — the substrate no longer carries a per-project
+// workflow spec; the orchestrator composes per-story plans and the
+// reviewer approves them via the plan-approval loop.
 
 func TestWorkflowClaim_HappyPath(t *testing.T) {
 	t.Parallel()
@@ -242,42 +184,11 @@ func TestWorkflowClaim_HappyPath(t *testing.T) {
 	}
 }
 
-func TestWorkflowClaim_MissingRequiredSlot(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
-		"story_id":           f.storyID,
-		"proposed_contracts": []string{"plan", "develop", "story_close"},
-	}))
-	if err != nil {
-		t.Fatalf("handler: %v", err)
-	}
-	text := firstText(res)
-	if !anySubstring(text, `"error":"missing_required_slot"`, `"contract_name":"preplan"`) {
-		t.Fatalf("expected structured missing_required_slot, got %s", text)
-	}
-}
-
-func TestWorkflowClaim_CountOutOfRange(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	props := []string{"preplan", "plan"}
-	for i := 0; i < 11; i++ {
-		props = append(props, "develop")
-	}
-	props = append(props, "story_close")
-	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
-		"story_id":           f.storyID,
-		"proposed_contracts": props,
-	}))
-	if err != nil {
-		t.Fatalf("handler: %v", err)
-	}
-	text := firstText(res)
-	if !anySubstring(text, `"error":"count_out_of_range"`, `"contract_name":"develop"`, `"count":11`) {
-		t.Fatalf("expected structured count_out_of_range, got %s", text)
-	}
-}
+// TestWorkflowClaim_MissingRequiredSlot and TestWorkflowClaim_CountOutOfRange
+// deleted by epic:configuration-over-code-mandate (story_af79cf95) —
+// substrate slot algebra is gone. The reviewer (story_reviewer) judges
+// shape during the plan-approval loop; workflow_claim accepts whatever
+// the reviewer approved.
 
 func TestWorkflowClaim_UnknownContract(t *testing.T) {
 	t.Parallel()
@@ -586,24 +497,24 @@ func TestContractNext_StoryNotFound(t *testing.T) {
 	}
 }
 
-func TestWorkflowClaim_DefaultsFromSpec(t *testing.T) {
+// TestWorkflowClaim_RejectsEmptyProposed: after story_af79cf95 the
+// workflow_claim handler no longer falls back to a project default —
+// callers must pass proposed_contracts derived from a reviewer-approved
+// plan. An empty list returns proposed_contracts_required.
+func TestWorkflowClaim_RejectsEmptyProposed(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
 	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":       f.storyID,
-		"claim_markdown": "no-proposed — spec defaults",
+		"claim_markdown": "no-proposed — should error",
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	if res.IsError {
-		t.Fatalf("isError: %s", firstText(res))
+	if !res.IsError {
+		t.Fatalf("expected isError on empty proposed_contracts, got %s", firstText(res))
 	}
-	var body struct {
-		ContractInstances []contract.ContractInstance `json:"contract_instances"`
-	}
-	_ = json.Unmarshal([]byte(firstText(res)), &body)
-	if len(body.ContractInstances) != 4 {
-		t.Fatalf("default expansion count: got %d want 4", len(body.ContractInstances))
+	if !strings.Contains(firstText(res), "proposed_contracts_required") {
+		t.Fatalf("expected proposed_contracts_required, got %s", firstText(res))
 	}
 }

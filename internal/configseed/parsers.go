@@ -85,44 +85,16 @@ func contractToInput(fm Frontmatter, body []byte, workspaceID, actor string) (do
 	}, nil
 }
 
-// workflowSlot is one entry in workflowStructured.RequiredSlots.
-type workflowSlot struct {
-	ContractName string `json:"contract_name"`
-	Required     bool   `json:"required"`
-	MinCount     int    `json:"min_count"`
-	MaxCount     int    `json:"max_count"`
-}
-
 // workflowToInput builds a document.UpsertInput for a kind=workflow file.
+// After epic:configuration-over-code-mandate (story_af79cf95) workflow
+// documents carry only prose body — the substrate no longer parses
+// required_slots frontmatter; the orchestrator and reviewer agents
+// read the body for context and the mandate principle defines the
+// floor.
 func workflowToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
 	name := fm.String("name")
 	if name == "" {
 		return document.UpsertInput{}, fmt.Errorf("workflow: name required")
-	}
-	rawSlots, _ := fm["required_slots"].([]any)
-	slots := make([]workflowSlot, 0, len(rawSlots))
-	for i, raw := range rawSlots {
-		m := asMap(raw)
-		if m == nil {
-			return document.UpsertInput{}, fmt.Errorf("workflow %q: required_slots[%d] not a map", name, i)
-		}
-		slot := workflowSlot{
-			ContractName: stringOf(m["contract_name"]),
-			Required:     boolOf(m["required"]),
-			MinCount:     intOf(m["min_count"]),
-			MaxCount:     intOf(m["max_count"]),
-		}
-		if slot.ContractName == "" {
-			return document.UpsertInput{}, fmt.Errorf("workflow %q: required_slots[%d] missing contract_name", name, i)
-		}
-		slots = append(slots, slot)
-	}
-	if len(slots) == 0 {
-		return document.UpsertInput{}, fmt.Errorf("workflow %q: required_slots empty", name)
-	}
-	structured, err := json.Marshal(map[string]any{"required_slots": slots})
-	if err != nil {
-		return document.UpsertInput{}, fmt.Errorf("workflow %q: marshal: %w", name, err)
 	}
 	return document.UpsertInput{
 		WorkspaceID: workspaceID,
@@ -130,7 +102,6 @@ func workflowToInput(fm Frontmatter, body []byte, workspaceID, actor string) (do
 		Type:        document.TypeWorkflow,
 		Name:        name,
 		Body:        body,
-		Structured:  structured,
 		Scope:       document.ScopeSystem,
 		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
 		Actor:       actor,

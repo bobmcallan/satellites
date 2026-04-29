@@ -1,46 +1,42 @@
 ---
 name: default
-required_slots:
-  - { contract_name: preplan,       required: true, min_count: 1, max_count: 1 }
-  - { contract_name: plan,          required: true, min_count: 1, max_count: 1 }
-  - { contract_name: develop,       required: true, min_count: 1, max_count: 10 }
-  - { contract_name: push,          required: true, min_count: 1, max_count: 1 }
-  - { contract_name: merge_to_main, required: true, min_count: 1, max_count: 1 }
-  - { contract_name: story_close,   required: true, min_count: 1, max_count: 1 }
 tags: [v4, system]
 ---
 # Default System Workflow
 
-The default 6-slot lifecycle every story passes through unless its
-project carries a project-scope workflow override.
+The default lifecycle every story passes through. After
+`epic:configuration-over-code-mandate` (story_af79cf95) the workflow is
+**prose-only context** for the orchestrator and reviewer agents — the
+substrate no longer enforces the shape.
 
 ## Shape
 
 `preplan → plan → develop → push → merge_to_main → story_close`
 
-- `preplan` (1) — readiness gate.
-- `plan` (1) — implementation strategy + review criteria.
-- `develop` (1–10) — code edits + tests + commit. Multiple develop
-  CIs are permitted when a story splits naturally (e.g. backend
-  then frontend), but each is its own CI with its own evidence.
-- `push` (1) — ship to origin.
-- `merge_to_main` (1) — local sync.
-- `story_close` (1) — transition + reviewer verdict.
+- `preplan` — readiness gate. Confirms the story is required, dependencies are met, and the proposed pipeline shape fits.
+- `plan` — implementation strategy + review criteria.
+- `develop` — code edits + tests + commit. Multiple develop CIs are permitted when a story splits naturally (e.g. backend then frontend), but each is its own CI with its own evidence.
+- `push` — ship to origin.
+- `merge_to_main` — local sync.
+- `story_close` — transition + reviewer verdict.
 
 ## How it's used
 
-When `satellites_story_workflow_claim` is called, the server
-validates the proposed contract list against this workflow's
-required slots. Missing required slots reject the claim; extra
-optional slots (when supported by the project's workflow_spec) are
-permitted between the required ones.
+The orchestrator agent reads this prose when composing a per-story plan
+and submits the plan via `satellites_orchestrator_submit_plan`. The
+`story_reviewer` agent (Gemini-backed) checks the proposed contract
+list against the mandate principle (`pr_mandate_reviewer_enforced`) and
+either accepts or asks for revisions.
 
-## Limitations
+The orchestrator MAY add optional middle slots (e.g. an extra `develop`
+for a multi-stage implementation), drop steps that don't apply to a
+particular story, or amend mid-story via `satellites_plan_amend`. The
+reviewer judges whether the proposed shape is appropriate; the
+substrate accepts whatever the reviewer approves.
 
-- This is a **system** workflow. Project-scope overrides live as
-  per-project workflow documents and supersede this one when set.
-- The slot order is enforced by the server. Stories cannot skip
-  preplan or plan, even when the change appears trivial.
-- Adding a new contract type to the lifecycle requires both a
-  contract markdown file (config/seed/contracts/) and an update
-  to this workflow's `required_slots` to include it.
+## Floor
+
+The mandate principle requires `preplan` and `plan` at the front and
+`story_close` at the end of every story. Everything else is the
+orchestrator's choice. Adding a new mandatory contract is an edit to
+the principle text and the reviewer agent rubrics, not a Go change.

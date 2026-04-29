@@ -15,101 +15,15 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 )
 
-// specKeyTag is the tag convention the workflow_spec kv row uses.
-// Kept low-cardinality so KVProjection (derivations slice 7.3) can
-// collapse versions without a secondary index.
-const specKeyTag = "key:workflow_spec"
-
-// handleProjectWorkflowSpecGet loads the project's workflow_spec from
-// the latest kv ledger row tagged key:workflow_spec. Falls back to
-// DefaultWorkflowSpec when no row exists.
-func (s *Server) handleProjectWorkflowSpecGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	start := time.Now()
-	caller, _ := UserFrom(ctx)
-	projectID, err := req.RequireString("project_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	resolvedID, err := s.resolveProjectID(ctx, projectID, caller, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	spec, err := s.loadWorkflowSpec(ctx, resolvedID, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	body, _ := json.Marshal(map[string]any{"project_id": resolvedID, "spec": spec})
-	s.logger.Info().
-		Str("method", "tools/call").
-		Str("tool", "project_workflow_spec_get").
-		Str("project_id", resolvedID).
-		Int("slot_count", len(spec.Slots)).
-		Int64("duration_ms", time.Since(start).Milliseconds()).
-		Msg("mcp tool call")
-	return mcpgo.NewToolResultText(string(body)), nil
-}
-
-// handleProjectWorkflowSpecSet persists a WorkflowSpec by appending a
-// new kv row. Older rows stay in the audit chain; KVProjection reads
-// the latest per key.
-func (s *Server) handleProjectWorkflowSpecSet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	start := time.Now()
-	caller, _ := UserFrom(ctx)
-	projectID, err := req.RequireString("project_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	raw := req.GetString("slots", "")
-	if raw == "" {
-		return mcpgo.NewToolResultError("slots is required (JSON array)"), nil
-	}
-	var slots []contract.Slot
-	if err := json.Unmarshal([]byte(raw), &slots); err != nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("slots parse error: %v", err)), nil
-	}
-	if len(slots) == 0 {
-		return mcpgo.NewToolResultError("slots must contain at least one entry"), nil
-	}
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	resolvedID, err := s.resolveProjectID(ctx, projectID, caller, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	wsID := s.resolveProjectWorkspaceID(ctx, resolvedID)
-	structured, _ := json.Marshal(contract.WorkflowSpec{Slots: slots})
-	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: wsID,
-		ProjectID:   resolvedID,
-		Type:        ledger.TypeKV,
-		Tags:        []string{specKeyTag},
-		Content:     "workflow_spec",
-		Structured:  structured,
-		CreatedBy:   caller.UserID,
-	}, time.Now().UTC())
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	body, _ := json.Marshal(map[string]any{
-		"project_id": resolvedID,
-		"ledger_id":  row.ID,
-		"spec":       contract.WorkflowSpec{Slots: slots},
-	})
-	s.logger.Info().
-		Str("method", "tools/call").
-		Str("tool", "project_workflow_spec_set").
-		Str("project_id", resolvedID).
-		Int("slot_count", len(slots)).
-		Int64("duration_ms", time.Since(start).Milliseconds()).
-		Msg("mcp tool call")
-	return mcpgo.NewToolResultText(string(body)), nil
-}
-
-// handleWorkflowClaim validates proposed against the project's
-// spec, resolves each contract_name to its document, and creates one
-// ContractInstance per slot. Idempotent on re-claim — returns the
-// existing CIs if a kind:workflow-claim row already exists for the
-// story.
+// handleWorkflowClaim resolves each proposed contract_name to its
+// document and creates one ContractInstance per entry. The
+// plan-approval precondition (story_a5826137) gates the call: a story
+// without a kind:plan-approved ledger row is rejected. Per
+// epic:configuration-over-code-mandate (story_af79cf95) there is no
+// substrate-side slot algebra — the orchestrator's plan IS the
+// configuration, and the reviewer enforced its shape during the
+// plan-approval loop. Idempotent on re-claim — returns the existing
+// CIs when the story already has a workflow-claim row.
 func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
@@ -142,23 +56,14 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
 
-	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
+	_ = agentID
 	if len(proposed) == 0 {
-		// No per-call proposed_contracts — fall back to the resolved
-		// scope-mandate stack default. Story.ConfigurationID and the
-		// per-agent default_configuration_id paths were removed when
-		// type=configuration was deleted (story_09c4086c per design
-		// ldg_81b5b9da §2); workflows own the mandate via the
-		// system→workspace→project→user resolver (story_f0a78759).
-		_ = agentID
-		proposed = expandResolvedDefault(spec)
-	}
-	if err := spec.Validate(proposed); err != nil {
-		return mcpgo.NewToolResultText(marshalSpecError(err)), nil
+		body, _ := json.Marshal(map[string]any{
+			"error":    "proposed_contracts_required",
+			"story_id": storyID,
+			"message":  "proposed_contracts must be non-empty; call satellites_orchestrator_submit_plan with the proposed list and approve before claiming",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
 	}
 
 	// Idempotence — return existing CIs if the story already has a
@@ -175,6 +80,8 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	// Resolve each contract_name → document id. Prefer scope=system.
+	// All proposed slots default to required_for_close=true; the closer
+	// rolls the story up only when every required CI is terminal.
 	resolved := make([]resolvedSlot, 0, len(proposed))
 	for _, name := range proposed {
 		doc, err := s.findContractDocByName(ctx, name, st.WorkspaceID)
@@ -186,7 +93,7 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 			})
 			return mcpgo.NewToolResultError(string(errBody)), nil
 		}
-		resolved = append(resolved, resolvedSlot{name: name, docID: doc.ID, required: specSlotRequired(spec, name)})
+		resolved = append(resolved, resolvedSlot{name: name, docID: doc.ID, required: requiredForCloseFor(name)})
 	}
 
 	// Write the workflow-claim ledger row first so the CIs have a
@@ -376,11 +283,6 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 		return mcpgo.NewToolResultError("plan_amend requires an initial workflow — call workflow_claim first"), nil
 	}
 
-	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
 	// Validate parent_invocation_id linkage against the existing CI set.
 	existingByID := make(map[string]contract.ContractInstance, len(existing))
 	for _, ci := range existing {
@@ -402,21 +304,11 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 		}
 	}
 
-	// Build the proposed list (existing names + amended names) and
-	// validate against the spec before any writes.
-	proposed := make([]string, 0, len(existing)+len(adds))
-	for _, ci := range existing {
-		proposed = append(proposed, ci.ContractName)
-	}
-	for _, add := range adds {
-		proposed = append(proposed, add.ContractName)
-	}
-	if err := spec.Validate(proposed); err != nil {
-		return mcpgo.NewToolResultText(marshalSpecError(err)), nil
-	}
-
 	// AC iteration cap: predict what the post-amend ContractInstance
-	// shape looks like to compute the next AC counts.
+	// shape looks like to compute the next AC counts. Substrate slot
+	// validation is gone (story_af79cf95) — the orchestrator's plan
+	// went through the reviewer-approved loop, and the reviewer judges
+	// whether amended contracts are appropriate.
 	predicted := make([]contract.ContractInstance, 0, len(adds))
 	for _, add := range adds {
 		predicted = append(predicted, contract.ContractInstance{
@@ -446,7 +338,7 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 			})
 			return mcpgo.NewToolResultError(string(errBody)), nil
 		}
-		resolved = append(resolved, resolvedSlot{name: add.ContractName, docID: doc.ID, required: specSlotRequired(spec, add.ContractName)})
+		resolved = append(resolved, resolvedSlot{name: add.ContractName, docID: doc.ID, required: requiredForCloseFor(add.ContractName)})
 	}
 
 	// Determine the starting sequence — append after the highest existing.
@@ -526,32 +418,6 @@ func (s *Server) handlePlanAmend(ctx context.Context, req mcpgo.CallToolRequest)
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// loadWorkflowSpec reads the project's latest kv row tagged
-// key:workflow_spec and decodes its Structured payload. Falls back to
-// DefaultWorkflowSpec when no row exists or decode fails.
-func (s *Server) loadWorkflowSpec(ctx context.Context, projectID string, memberships []string) (contract.WorkflowSpec, error) {
-	if s.ledger == nil {
-		return contract.DefaultWorkflowSpec(), nil
-	}
-	rows, err := s.ledger.List(ctx, projectID, ledger.ListOptions{
-		Type:  ledger.TypeKV,
-		Tags:  []string{specKeyTag},
-		Limit: 1,
-	}, memberships)
-	if err != nil {
-		return contract.WorkflowSpec{}, fmt.Errorf("spec load: %w", err)
-	}
-	if len(rows) == 0 {
-		return contract.DefaultWorkflowSpec(), nil
-	}
-	var spec contract.WorkflowSpec
-	if err := json.Unmarshal(rows[0].Structured, &spec); err != nil || len(spec.Slots) == 0 {
-		return contract.DefaultWorkflowSpec(), nil
-	}
-	return spec, nil
-}
-
-// resolveConfigurationProposed derives the proposed_contracts list from
 // findContractDocByName resolves a contract_name to a document{type=contract}.
 // System-scope rows are preferred; workspace-scoped rows are the
 // fallback so projects can override.
@@ -592,58 +458,20 @@ type resolvedSlot struct {
 	required bool
 }
 
-func specSlotRequired(spec contract.WorkflowSpec, name string) bool {
-	for _, slot := range spec.Slots {
-		if slot.ContractName == name {
-			return slot.Required
-		}
+// requiredForCloseFor maps a contract name to its required_for_close
+// flag. Replaces the prior workflow_spec-derived rule (story_af79cf95
+// removed the substrate slot algebra). The rule mirrors the v3 default:
+// pre-close phases (preplan/plan/develop) gate the rollup; post-commit
+// phases and the closer itself (push/merge_to_main/story_close) do not,
+// so the closer can transition the story without waiting on push or
+// merge_to_main.
+func requiredForCloseFor(name string) bool {
+	switch name {
+	case "preplan", "plan", "develop":
+		return true
+	default:
+		return false
 	}
-	return false
-}
-
-// expandDefaultProposed produces a proposed list from a spec using
-// each required slot's MinCount.
-func expandDefaultProposed(spec contract.WorkflowSpec) []string {
-	out := make([]string, 0, len(spec.Slots))
-	for _, slot := range spec.Slots {
-		if !slot.Required {
-			continue
-		}
-		n := slot.MinCount
-		if n <= 0 {
-			n = 1
-		}
-		for i := 0; i < n; i++ {
-			out = append(out, slot.ContractName)
-		}
-	}
-	return out
-}
-
-// marshalSpecError renders a *contract.SpecError as a JSON tool-result
-// text. Non-spec errors are wrapped with a generic shape so callers can
-// still parse them. The `source` field names the originating scope tier
-// (system | workspace | project | user | merged) when populated by the
-// resolved-spec validation path (story_f0a78759).
-func marshalSpecError(err error) string {
-	var se *contract.SpecError
-	if errors.As(err, &se) {
-		b, _ := json.Marshal(map[string]any{
-			"error":         se.Kind,
-			"contract_name": se.ContractName,
-			"count":         se.Count,
-			"min":           se.Min,
-			"max":           se.Max,
-			"source":        se.Source,
-			"message":       se.Error(),
-		})
-		return string(b)
-	}
-	b, _ := json.Marshal(map[string]any{
-		"error":   "invalid_spec",
-		"message": err.Error(),
-	})
-	return string(b)
 }
 
 // anySubstring is a tiny helper used by tests to match structured

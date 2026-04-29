@@ -21,54 +21,6 @@
       </div>
     </section>
 
-    <section class="panel-headed" data-testid="config-mandate-stack-panel">
-      <header class="panel-header">
-        <h2>active mandate stack</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-mandate-effective-count">({{len .Composite.MandateStack.Effective}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        <p class="muted">
-          Workflow markdowns at each scope tier (system → workspace → project → user)
-          merged into the effective <code>required_slots</code> the workflow-claim
-          gate enforces. Stricter min/max wins; <code>required:false</code> upgradable
-          to <code>required:true</code>, never downgradable.
-        </p>
-        {{if .Composite.MandateStack.Effective}}
-        <table class="data-table mandate-effective-table" data-testid="config-mandate-effective-list">
-          <thead>
-            <tr>
-              <th>contract</th>
-              <th>required</th>
-              <th>min</th>
-              <th>max</th>
-              <th>source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Composite.MandateStack.Effective}}
-            <tr class="mandate-slot-row" data-testid="config-mandate-slot-{{.ContractName}}">
-              <td><strong>{{.ContractName}}</strong></td>
-              <td><code class="status-pill">{{.Required}}</code></td>
-              <td>{{.MinCount}}</td>
-              <td>{{if eq .MaxCount 0}}<span class="muted">∞</span>{{else}}{{.MaxCount}}{{end}}</td>
-              <td><code class="scope-pill">{{.Source}}</code></td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-        {{else}}
-        <p class="muted" data-testid="config-mandate-empty">No workflow markdowns found at any scope tier.</p>
-        {{end}}
-
-        {{range .Composite.MandateStack.System}}{{template "mandate-layer.html" .}}{{end}}
-        {{range .Composite.MandateStack.Workspace}}{{template "mandate-layer.html" .}}{{end}}
-        {{range .Composite.MandateStack.Project}}{{template "mandate-layer.html" .}}{{end}}
-        {{range .Composite.MandateStack.User}}{{template "mandate-layer.html" .}}{{end}}
-      </div>
-    </section>
-
     {{if .Composite.SystemWorkflows}}
     <section class="panel-headed" data-testid="config-system-workflows-panel">
       <header class="panel-header">
@@ -92,7 +44,6 @@
               <th>category</th>
               <th>scope</th>
               <th>status</th>
-              <th>phase</th>
             </tr>
           </thead>
           <tbody>
@@ -104,10 +55,9 @@
               <td><code class="category-pill">workflow</code></td>
               <td><code class="scope-pill">{{.Scope}}</code></td>
               <td><code class="status-pill">{{.Status}}</code></td>
-              <td><span class="muted">—</span></td>
             </tr>
             <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
-              <td colspan="6">
+              <td colspan="5">
                 {{if .Body}}
                 <div class="system-doc-section">
                   <pre class="system-doc-body">{{.Body}}</pre>
@@ -157,11 +107,10 @@
               <th>category</th>
               <th>scope</th>
               <th>status</th>
-              <th>phase</th>
             </tr>
           </thead>
           <tbody>
-            {{range $i, $c := .Composite.SystemContracts}}
+            {{range $c := .Composite.SystemContracts}}
             <tr class="system-doc-row" data-testid="config-system-contract-{{$c.ID}}"
                 @click="open = open === '{{$c.ID}}' ? null : '{{$c.ID}}'">
               <td><strong>{{$c.Name}}</strong></td>
@@ -169,10 +118,9 @@
               <td>{{if $c.Category}}<code class="category-pill">{{$c.Category}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
               <td><code class="scope-pill">{{$c.Scope}}</code></td>
               <td><code class="status-pill">{{$c.Status}}</code></td>
-              <td><span class="muted">{{$i}}</span></td>
             </tr>
             <tr class="system-doc-expansion" x-show="open === '{{$c.ID}}'" x-cloak>
-              <td colspan="6">
+              <td colspan="5">
                 {{if $c.EvidenceRequired}}
                 <div class="system-doc-section">
                   <strong>Evidence required</strong>
@@ -233,7 +181,6 @@
               <th>category</th>
               <th>scope</th>
               <th>status</th>
-              <th>phase</th>
             </tr>
           </thead>
           <tbody>
@@ -245,10 +192,9 @@
               <td><code class="category-pill">agent</code></td>
               <td><code class="scope-pill">{{.Scope}}</code></td>
               <td>{{if .Ephemeral}}<code class="status-pill agent-ephemeral-pill">ephemeral</code>{{else}}<code class="status-pill agent-canonical-pill">canonical</code>{{end}}</td>
-              <td><span class="muted">—</span></td>
             </tr>
             <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
-              <td colspan="6">
+              <td colspan="5">
                 {{if .PermissionPatterns}}
                 <div class="system-doc-section">
                   <span class="muted">Permission patterns:</span>
@@ -295,7 +241,6 @@
               <th>category</th>
               <th>scope</th>
               <th>status</th>
-              <th>phase</th>
             </tr>
           </thead>
           <tbody>
@@ -307,10 +252,9 @@
               <td><code class="category-pill">principle</code></td>
               <td><code class="scope-pill">{{.Scope}}</code></td>
               <td><code class="status-pill">{{.Status}}</code></td>
-              <td><span class="muted">—</span></td>
             </tr>
             <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
-              <td colspan="6">
+              <td colspan="5">
                 {{if .Body}}
                 <div class="system-doc-section">
                   <pre class="system-doc-body">{{.Body}}</pre>

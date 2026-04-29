@@ -371,18 +371,12 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	}
 
 	if s.contracts != nil && s.stories != nil && s.ledger != nil && s.docs != nil && s.projects != nil {
-		specGetTool := mcpgo.NewTool("project_workflow_spec_get",
-			mcpgo.WithDescription("Return the project's workflow_spec (ordered list of contract_name slots with min/max counts). Returns the default spec when none has been set."),
-			mcpgo.WithString("project_id", mcpgo.Required(), mcpgo.Description("Project id.")),
-		)
-		s.mcp.AddTool(specGetTool, s.handleProjectWorkflowSpecGet)
-
-		specSetTool := mcpgo.NewTool("project_workflow_spec_set",
-			mcpgo.WithDescription("Persist a new workflow_spec for a project. Writes a kind:kv ledger row tagged key:workflow_spec; older rows remain in the audit chain (KVProjection reads the latest). Caller must own the project."),
-			mcpgo.WithString("project_id", mcpgo.Required(), mcpgo.Description("Project id.")),
-			mcpgo.WithString("slots", mcpgo.Required(), mcpgo.Description("JSON array of {contract_name, required, min_count, max_count, source} entries.")),
-		)
-		s.mcp.AddTool(specSetTool, s.handleProjectWorkflowSpecSet)
+		// project_workflow_spec_get / _set were removed by
+		// epic:configuration-over-code-mandate (story_af79cf95). The
+		// substrate no longer enforces a per-project workflow shape; the
+		// orchestrator composes per-story plans and the reviewer
+		// (story_reviewer, Gemini-backed) approves them via the
+		// plan-approval loop (orchestrator_submit_plan).
 
 		// Unified KV verbs (story_3d392258). Single family taking a
 		// `scope` arg covering the four tiers from epic:kv-scopes.

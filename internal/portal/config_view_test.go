@@ -154,8 +154,8 @@ func TestConfigPage_SystemDocsRenderAsTableWithExpansion(t *testing.T) {
 		if !strings.Contains(panelHTML, `<tr class="system-doc-expansion"`) {
 			t.Errorf("%s: panel missing system-doc-expansion row", tc.label)
 		}
-		if !strings.Contains(panelHTML, `colspan="6"`) {
-			t.Errorf("%s: panel expansion row missing colspan=6", tc.label)
+		if !strings.Contains(panelHTML, `colspan="5"`) {
+			t.Errorf("%s: panel expansion row missing colspan=5", tc.label)
 		}
 		if !strings.Contains(panelHTML, tc.bodyText) {
 			t.Errorf("%s: panel missing document body %q", tc.label, tc.bodyText)

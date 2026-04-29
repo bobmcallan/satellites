@@ -105,8 +105,9 @@ func TestOrchestratorComposePlan_EndToEnd(t *testing.T) {
 		t.Fatalf("parse response: %v", err)
 	}
 
-	// Proposed list = the four resolved slots.
-	wantNames := []string{"preplan", "plan", "develop", "story_close"}
+	// Proposed list = the v3-default 6-slot list (story_af79cf95 hardcoded
+	// the default in orchestrator_compose).
+	wantNames := []string{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"}
 	if len(body.ProposedContracts) != len(wantNames) {
 		t.Fatalf("proposed_contracts len: got %d want %d (%v)", len(body.ProposedContracts), len(wantNames), body.ProposedContracts)
 	}
@@ -221,9 +222,10 @@ func TestOrchestratorComposePlan_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	// 4 from the first call, none from the idempotent second call.
-	if len(tasks) != 4 {
-		t.Fatalf("tasks total after idempotent re-invoke: got %d want 4", len(tasks))
+	// 6 from the first call (default 6-slot list), none from the
+	// idempotent second call.
+	if len(tasks) != 6 {
+		t.Fatalf("tasks total after idempotent re-invoke: got %d want 6", len(tasks))
 	}
 }
 

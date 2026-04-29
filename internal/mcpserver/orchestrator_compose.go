@@ -78,14 +78,14 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		return mcpgo.NewToolResultText(string(body)), nil
 	}
 
-	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	proposed := expandResolvedDefault(spec)
-	if len(proposed) == 0 {
-		return mcpgo.NewToolResultError("orchestrator_compose_plan: no required slots in resolved scope mandate stack"), nil
-	}
+	// Default contract sequence after story_af79cf95 removed the
+	// substrate slot algebra. The orchestrator agent body documents
+	// the floor (preplan + plan + close per pr_mandate_reviewer_enforced);
+	// callers may pass a richer plan by way of agent_overrides /
+	// future verb args. For the legacy single-shot orchestrator_compose
+	// path we keep the v3 default to preserve callers that don't go
+	// through orchestrator_submit_plan.
+	proposed := []string{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"}
 
 	overrides := parseAgentOverrides(req.GetString("agent_overrides", ""))
 	assignments := make(map[string]string, len(proposed))
@@ -109,7 +109,6 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	planPayload, _ := json.Marshal(map[string]any{
 		"proposed_contracts": proposed,
 		"agent_assignments":  assignments,
-		"resolved_spec":      spec,
 	})
 	planRow, err := s.ledger.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: st.WorkspaceID,
@@ -193,9 +192,7 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		Idempotent        bool                        `json:"idempotent,omitempty"`
 		Error             string                      `json:"error,omitempty"`
 		ContractName      string                      `json:"contract_name,omitempty"`
-		Source            string                      `json:"source,omitempty"`
 		Message           string                      `json:"message,omitempty"`
-		Spec              contract.WorkflowSpec       `json:"spec,omitempty"`
 		_                 map[string]any
 	}
 	if texts := claimRes.Content; len(texts) > 0 {

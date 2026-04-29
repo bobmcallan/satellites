@@ -97,39 +97,10 @@ func TestPlanAmend_HappyPath(t *testing.T) {
 	}
 }
 
-// TestPlanAmend_SlotViolation rejects an amend that would push develop
-// over its workflow_spec MaxCount.
-func TestPlanAmend_SlotViolation(t *testing.T) {
-	t.Parallel()
-	f := newContractFixture(t)
-	// Tighten the spec: develop is required exactly once.
-	tightSpec := []map[string]any{
-		{"contract_name": "preplan", "required": true, "min_count": 1, "max_count": 1, "source": "system"},
-		{"contract_name": "plan", "required": true, "min_count": 1, "max_count": 1, "source": "system"},
-		{"contract_name": "develop", "required": true, "min_count": 1, "max_count": 1, "source": "system"},
-		{"contract_name": "story_close", "required": true, "min_count": 1, "max_count": 1, "source": "system"},
-	}
-	specJSON, _ := json.Marshal(tightSpec)
-	if _, err := f.server.handleProjectWorkflowSpecSet(f.callerCtx(), newCallToolReq("project_workflow_spec_set", map[string]any{
-		"project_id": f.projectID,
-		"slots":      string(specJSON),
-	})); err != nil {
-		t.Fatalf("spec set: %v", err)
-	}
-	_ = claimDefaultWorkflow(t, f)
-	addsJSON, _ := json.Marshal([]planAmendInvocation{
-		{ContractName: "develop", ACScope: []int{2}},
-	})
-	res, _ := f.server.handlePlanAmend(f.callerCtx(), newCallToolReq("plan_amend", map[string]any{
-		"story_id":        f.storyID,
-		"add_invocations": string(addsJSON),
-		"reason":          "violate slot cap",
-	}))
-	text := firstText(res)
-	if !strings.Contains(text, "count_out_of_range") || !strings.Contains(text, `"contract_name":"develop"`) {
-		t.Errorf("expected count_out_of_range for develop; got %s", text)
-	}
-}
+// TestPlanAmend_SlotViolation deleted by epic:configuration-over-code-mandate
+// (story_af79cf95) — substrate slot algebra (count_out_of_range) is
+// gone. The reviewer agent (story_reviewer / development_reviewer)
+// judges whether amended contracts are appropriate.
 
 // TestPlanAmend_ACCapExceeded rejects re-amending the same AC past the
 // configured cap.
