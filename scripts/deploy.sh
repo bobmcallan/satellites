@@ -4,11 +4,13 @@
 # operator invocation stays short. Subcommands: up (default), down, logs,
 # restart.
 #
-# Populate .env first by copying .env.example:
+# Populate .env first using the env-var reference in README.md
+# ("Server configuration" section):
 #
-#   cp .env.example .env
-#   # edit .env with DEV_USERNAME / DEV_PASSWORD / OAuth creds
+#   $EDITOR .env   # set DEV_USERNAME / DEV_PASSWORD / OAuth creds / etc.
 #   ./scripts/deploy.sh up
+#
+# .env is gitignored — treat it as machine-local.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -19,7 +21,7 @@ ENV_FILE=".env"
 require_env_file() {
   if [ ! -f "$ENV_FILE" ]; then
     echo "error: $ENV_FILE not found" >&2
-    echo "hint:  cp .env.example $ENV_FILE && edit before re-running" >&2
+    echo "hint:  create $ENV_FILE — see README.md \"Server configuration\" for the env-var reference" >&2
     exit 1
   fi
 }
@@ -76,7 +78,8 @@ Commands:
 
 Requires:
   docker    with the compose plugin (`docker compose`).
-  .env      copy .env.example → .env before first run.
+  .env      create at repo root (gitignored). See README.md
+            "Server configuration" for the env-var reference.
 
 The wrapped invocation is:
   docker compose -f docker/docker-compose.yml --env-file .env <subcommand>

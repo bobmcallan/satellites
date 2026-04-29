@@ -1,8 +1,11 @@
 # Claude Code per-machine settings (contains satellites hook token)
 .claude/settings.local.json
 
-# Local .env (use .env.example as the committed template)
+# Local .env files (gitignored at any depth). Use README "Server
+# configuration" for the repo-root variables and tests/.env.example
+# for the test-only whitelist.
 .env
+tests/.env
 
 # Local TOML config (use satellites.example.toml as the committed template)
 satellites.toml
