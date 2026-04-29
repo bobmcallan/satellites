@@ -553,7 +553,7 @@ func (s *Server) runReviewer(
 			ContractID:       contractDoc.ID,
 			ContractName:     contractDoc.Name,
 			AgentInstruction: contractDoc.Body,
-			ReviewerRubric:   s.lookupReviewerRubric(ctx, ci.ContractID, memberships),
+			ReviewerRubric:   s.lookupReviewerAgentBody(ctx, ci.ContractName, memberships),
 			EvidenceMarkdown: evidenceMarkdown,
 			EvidenceRefs:     evidenceLedgerIDs,
 			ACScope:          ci.ACScope,
@@ -698,18 +698,39 @@ func (s *Server) writeLLMUsageRow(ctx context.Context, ci contract.ContractInsta
 	return row.ID, nil
 }
 
-// lookupReviewerRubric returns the body of the first active
-// document{type=reviewer, contract_binding=contractID} visible in
-// memberships. Empty when none exists.
-func (s *Server) lookupReviewerRubric(ctx context.Context, contractID string, memberships []string) string {
+// lookupReviewerAgentBody returns the body of the system-scope reviewer
+// agent that reviews the given contract. story_b4d1107c
+// (epic:configuration-over-code-mandate) routes `develop` to
+// `development_reviewer`; everything else to `story_reviewer`. Empty
+// when the expected agent doc is missing.
+//
+// This replaces the prior contract_binding-keyed `lookupReviewerRubric`
+// lookup. The new model treats the reviewer rubric as an agent body
+// (story_6d259b99 seeded the two reviewer agents) keyed on contract
+// name; per pr_no_unrequested_compat the prior helper is deleted, not
+// aliased.
+//
+// Memberships argument is unused: per pr_0779e5af scope=system content
+// is globally readable inside the workspace, so the lookup passes nil
+// (mirroring `listSystemDocuments` in the portal config view).
+func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName string, _ []string) string {
+	agentName := "story_reviewer"
+	if contractName == "develop" {
+		agentName = "development_reviewer"
+	}
 	rows, err := s.docs.List(ctx, document.ListOptions{
-		Type:            document.TypeReviewer,
-		ContractBinding: contractID,
-	}, memberships)
-	if err != nil || len(rows) == 0 {
+		Type:  document.TypeAgent,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
 		return ""
 	}
-	return rows[0].Body
+	for _, r := range rows {
+		if r.Status == document.StatusActive && r.Name == agentName {
+			return r.Body
+		}
+	}
+	return ""
 }
 
 // ensureCloseHandlersCompile references the error + fmt packages to

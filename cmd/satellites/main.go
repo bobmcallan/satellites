@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ternarybob/arbor"
+
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/codeindex"
@@ -34,6 +36,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/ratelimit"
 	"github.com/bobmcallan/satellites/internal/repo"
+	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
@@ -361,6 +364,8 @@ func main() {
 		srv.SetHealthCheck(dbPing)
 	}
 
+	rev := buildReviewer(logger)
+
 	mcp := mcpserver.New(cfg, logger, startedAt, mcpserver.Deps{
 		DocStore:         docStore,
 		DocsDir:          cfg.DocsDir,
@@ -375,6 +380,7 @@ func main() {
 		TaskStore:        taskStore,
 		RepoStore:        repoStore,
 		Indexer:          repoIndexer,
+		Reviewer:         rev,
 	})
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions:       sessions,
@@ -676,4 +682,26 @@ func addRequiredRoleIfMissing(raw []byte, roleName string) ([]byte, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// buildReviewer wires the production Reviewer for the MCP server.
+// When GEMINI_API_KEY is set, returns a Gemini-backed reviewer using
+// GEMINI_REVIEW_MODEL (default gemini-2.5-flash). When unset, returns
+// AcceptAll with a warning log so test/dev boots stay green but the
+// operator knows the review path is a stub.
+func buildReviewer(logger arbor.ILogger) reviewer.Reviewer {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		logger.Warn().Msg("GEMINI_API_KEY not set — reviewer falls back to AcceptAll (validation_mode=llm closes auto-accepted)")
+		return reviewer.AcceptAll{}
+	}
+	model := os.Getenv("GEMINI_REVIEW_MODEL")
+	if model == "" {
+		model = reviewer.DefaultGeminiReviewModel
+	}
+	logger.Info().Str("model", model).Msg("gemini reviewer wired")
+	return reviewer.NewGeminiReviewer(reviewer.GeminiConfig{
+		APIKey: apiKey,
+		Model:  model,
+	})
 }
