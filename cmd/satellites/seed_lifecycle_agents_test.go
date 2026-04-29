@@ -8,10 +8,12 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
-// TestSeedLifecycleAgents_CreatesAllSixDocs verifies story_488b8223
-// AC1: seedLifecycleAgents creates the six lifecycle agent documents
-// each carrying populated permission_patterns.
-func TestSeedLifecycleAgents_CreatesAllSixDocs(t *testing.T) {
+// TestSeedLifecycleAgents_CreatesRoleAgents verifies that
+// seedLifecycleAgents creates the three role-shaped lifecycle agent
+// documents introduced by story_87b46d01 (S8): developer_agent,
+// releaser_agent, and story_close_agent. Each carries populated
+// permission_patterns.
+func TestSeedLifecycleAgents_CreatesRoleAgents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	now := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
@@ -21,7 +23,7 @@ func TestSeedLifecycleAgents_CreatesAllSixDocs(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	for _, name := range []string{"preplan_agent", "plan_agent", "develop_agent", "push_agent", "merge_agent", "story_close_agent"} {
+	for _, name := range []string{"developer_agent", "releaser_agent", "story_close_agent"} {
 		d, err := docStore.GetByName(ctx, "", name, nil)
 		if err != nil {
 			t.Fatalf("%s missing: %v", name, err)
@@ -40,6 +42,26 @@ func TestSeedLifecycleAgents_CreatesAllSixDocs(t *testing.T) {
 	}
 }
 
+// TestSeedLifecycleAgents_DropsShadowSeeds confirms the five 1-1
+// contract-shadow agent seeds removed under story_87b46d01 are NOT
+// re-seeded by the lifecycle path.
+func TestSeedLifecycleAgents_DropsShadowSeeds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+	docStore := document.NewMemoryStore()
+
+	if err := seedLifecycleAgents(ctx, docStore, "wksp_x", now); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	for _, name := range []string{"preplan_agent", "plan_agent", "develop_agent", "push_agent", "merge_agent"} {
+		if _, err := docStore.GetByName(ctx, "", name, nil); err == nil {
+			t.Errorf("removed shadow agent %q still seeded", name)
+		}
+	}
+}
+
 // TestSeedLifecycleAgents_Idempotent verifies AC1 idempotence: a
 // second invocation does not duplicate or overwrite existing rows.
 func TestSeedLifecycleAgents_Idempotent(t *testing.T) {
@@ -51,17 +73,17 @@ func TestSeedLifecycleAgents_Idempotent(t *testing.T) {
 	if err := seedLifecycleAgents(ctx, docStore, "wksp_x", now); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
-	first, err := docStore.GetByName(ctx, "", "develop_agent", nil)
+	first, err := docStore.GetByName(ctx, "", "developer_agent", nil)
 	if err != nil {
-		t.Fatalf("develop_agent missing after first seed: %v", err)
+		t.Fatalf("developer_agent missing after first seed: %v", err)
 	}
 
 	if err := seedLifecycleAgents(ctx, docStore, "wksp_x", now.Add(time.Hour)); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
-	second, err := docStore.GetByName(ctx, "", "develop_agent", nil)
+	second, err := docStore.GetByName(ctx, "", "developer_agent", nil)
 	if err != nil {
-		t.Fatalf("develop_agent missing after second seed: %v", err)
+		t.Fatalf("developer_agent missing after second seed: %v", err)
 	}
 	if first.ID != second.ID {
 		t.Errorf("ID changed across seeds: %q -> %q (idempotence violated)", first.ID, second.ID)

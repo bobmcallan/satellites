@@ -148,27 +148,42 @@ func newClaimFixture(t *testing.T) *claimFixture {
 		cis = append(cis, ci)
 	}
 
-	// Seed one lifecycle agent per phase (story_cc55e093). Each agent
-	// carries a non-empty permission_patterns set so the action_claim
-	// row's Structured payload has stable content.
+	// Seed the post-S8 (story_87b46d01) role agents and map every
+	// contract slot to its driving role agent. Story_cc55e093 made
+	// agent_id REQUIRED on contract_claim; the agents map keeps the
+	// per-phase resolution local to the fixture.
 	agents := map[string]string{}
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	roleAgents := map[string]string{
+		"developer_agent":   "Read:**,Bash:go_test",
+		"story_close_agent": "Read:**",
+	}
+	roleAgentIDs := map[string]string{}
+	for name, patterns := range roleAgents {
 		structured, _ := document.MarshalAgentSettings(document.AgentSettings{
-			PermissionPatterns: []string{"Read:**", "Bash:go_test"},
+			PermissionPatterns: []string{patterns},
 		})
 		d, err := docStore.Create(ctx, document.Document{
 			WorkspaceID: ws.ID,
 			Type:        document.TypeAgent,
 			Scope:       document.ScopeSystem,
 			Status:      document.StatusActive,
-			Name:        name + "_agent",
-			Body:        "lifecycle agent for " + name,
+			Name:        name,
+			Body:        "role agent: " + name,
 			Structured:  structured,
 		}, now)
 		if err != nil {
-			t.Fatalf("seed %s_agent: %v", name, err)
+			t.Fatalf("seed %s: %v", name, err)
 		}
-		agents[name] = d.ID
+		roleAgentIDs[name] = d.ID
+	}
+	contractToRole := map[string]string{
+		"preplan":     "developer_agent",
+		"plan":        "developer_agent",
+		"develop":     "developer_agent",
+		"story_close": "story_close_agent",
+	}
+	for contractName, roleName := range contractToRole {
+		agents[contractName] = roleAgentIDs[roleName]
 	}
 
 	server := New(cfg, satarbor.New("info"), now, Deps{

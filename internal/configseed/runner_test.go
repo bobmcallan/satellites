@@ -177,8 +177,7 @@ func TestRun_RealSeedAgentsCarryInstruction(t *testing.T) {
 		t.Fatalf("Run real seed: %v", err)
 	}
 	for _, name := range []string{
-		"preplan_agent", "plan_agent", "develop_agent",
-		"push_agent", "merge_agent", "story_close_agent",
+		"developer_agent", "releaser_agent", "story_close_agent",
 	} {
 		agentDoc, err := docs.GetByName(context.Background(), "", name, nil)
 		if err != nil {

@@ -109,7 +109,7 @@ func TestConfig_AgentsSectionRender(t *testing.T) {
 	if _, err := h.Documents.Create(context.Background(), document.Document{
 		WorkspaceID: h.WorkspaceID,
 		Type:        document.TypeAgent, Scope: document.ScopeSystem, Status: "active",
-		Name: "preplan_agent", Body: "preplan", Structured: settings,
+		Name: "developer_agent", Body: "developer", Structured: settings,
 	}, now); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestConfig_AgentsSectionRender(t *testing.T) {
 	); err != nil {
 		t.Fatalf("/config agents section: %v", err)
 	}
-	if !strings.Contains(body, "preplan_agent") {
+	if !strings.Contains(body, "developer_agent") {
 		t.Errorf("/config agents panel missing preplan_agent")
 	}
 }

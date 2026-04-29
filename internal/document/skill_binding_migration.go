@@ -15,8 +15,13 @@ import (
 //
 //  1. Looks up the contract document the binding references and reads
 //     its name (e.g. "develop").
-//  2. Looks up the matching lifecycle agent named `<contract>_agent`
-//     (e.g. "develop_agent") seeded by main.go::seedLifecycleAgents.
+//  2. Looks up the matching lifecycle agent. After the S8 collapse
+//     (story_87b46d01) the lifecycle is driven by three role agents
+//     — developer_agent (preplan/plan/develop), releaser_agent
+//     (push/merge_to_main), story_close_agent. The migration consults
+//     the role map first; non-lifecycle contracts (project-scope
+//     custom contracts) still fall through to the legacy
+//     `<contract>_agent` name match.
 //  3. Merges the skill id into the agent's AgentSettings.SkillRefs
 //     (no-op when already present).
 //  4. Clears the skill's ContractBinding so subsequent reads route
@@ -55,8 +60,7 @@ func MigrateSkillContractBindings(ctx context.Context, store Store, logger arbor
 			skipped++
 			continue
 		}
-		agentName := contractDoc.Name + "_agent"
-		agentDoc, err := store.GetByName(ctx, "", agentName, nil)
+		agentDoc, agentName, err := lookupAgentForContract(ctx, store, contractDoc.Name)
 		if err != nil {
 			logger.Warn().
 				Str("skill_id", skill.ID).
@@ -90,6 +94,37 @@ func MigrateSkillContractBindings(ctx context.Context, store Store, logger arbor
 		logger.Info().Int("migrated", migrated).Int("skipped", skipped).Msg("skill binding migration done")
 	}
 	return migrated, skipped
+}
+
+// lifecycleAgentForContract maps a lifecycle contract name to the
+// post-S8 role agent that drives it. Story_87b46d01.
+var lifecycleAgentForContract = map[string]string{
+	"preplan":       "developer_agent",
+	"plan":          "developer_agent",
+	"develop":       "developer_agent",
+	"push":          "releaser_agent",
+	"merge_to_main": "releaser_agent",
+	"story_close":   "story_close_agent",
+}
+
+// lookupAgentForContract resolves the agent document driving a given
+// contract. The role map is consulted first (post-S8 role agents);
+// when no role mapping exists, the legacy `<contract>_agent` name
+// match is tried so project-scope custom contracts still resolve.
+// Returns the matched agent doc + the name that was looked up + any
+// store error encountered on the final lookup.
+func lookupAgentForContract(ctx context.Context, store Store, contractName string) (Document, string, error) {
+	if roleName, ok := lifecycleAgentForContract[contractName]; ok {
+		if doc, err := store.GetByName(ctx, "", roleName, nil); err == nil {
+			return doc, roleName, nil
+		}
+	}
+	legacyName := contractName + "_agent"
+	doc, err := store.GetByName(ctx, "", legacyName, nil)
+	if err != nil {
+		return Document{}, legacyName, err
+	}
+	return doc, legacyName, nil
 }
 
 // mergeSkillRefIntoAgent appends skillID to the agent's

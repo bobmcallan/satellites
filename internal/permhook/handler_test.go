@@ -42,7 +42,7 @@ func TestHandler_DenyOrchestratorWrite(t *testing.T) {
 }
 
 // TestHandler_AllowDevelopEdit verifies AC5: develop CI claimed →
-// develop_agent.permission_patterns admit Edit.
+// developer_agent.permission_patterns admit Edit.
 func TestHandler_AllowDevelopEdit(t *testing.T) {
 	t.Parallel()
 	f := newResolveFixture(t)

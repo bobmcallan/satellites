@@ -55,7 +55,7 @@ func TestAgents_RendersPermissionPatternsAndSkills(t *testing.T) {
 
 	docs := p.documents.(*document.MemoryStore)
 	skill := seedSkillDoc(t, docs, "golang-testing", now)
-	seedAgent(t, docs, "develop_agent", document.AgentSettings{
+	seedAgent(t, docs, "developer_agent", document.AgentSettings{
 		PermissionPatterns: []string{"Edit:**", "Bash:go_test"},
 		SkillRefs:          []string{skill.ID},
 	}, "", now)

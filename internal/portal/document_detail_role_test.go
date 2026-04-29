@@ -30,7 +30,7 @@ func TestDocumentDetail_AgentRendersPermissionsAndSkills(t *testing.T) {
 
 	docs := p.documents.(*document.MemoryStore)
 	skill := seedSkillDoc(t, docs, "agent-skill", now)
-	agent := seedAgent(t, docs, "develop_agent", document.AgentSettings{
+	agent := seedAgent(t, docs, "developer_agent", document.AgentSettings{
 		PermissionPatterns: []string{"Edit:**", "Bash:go_test"},
 		SkillRefs:          []string{skill.ID},
 	}, "", now)

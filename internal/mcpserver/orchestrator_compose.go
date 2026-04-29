@@ -199,11 +199,31 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// pickAgentForContract returns the system agent's id whose name
-// matches the per-contract convention — `<contract_name>_agent` first,
-// then `agent_<contract_name>`. Empty when no system agent matches.
-// Story_66d4249f. The S8 audit will collapse these shadows into role
-// agents; until then the 1-1 mapping is the natural default.
+// agentRoleForContract maps a contract_name to the system role agent
+// that drives it after the S8 collapse (story_87b46d01). Multiple
+// contracts intentionally resolve to the same role agent: the
+// developer_agent drives preplan/plan/develop; the releaser_agent
+// drives push/merge_to_main; the story_close_agent drives
+// story_close. Unknown contract names map to "" (handler then falls
+// back to the legacy <contract>_agent / agent_<contract> name match
+// so project-scope custom contracts still resolve).
+var agentRoleForContract = map[string]string{
+	"preplan":       "developer_agent",
+	"plan":          "developer_agent",
+	"develop":       "developer_agent",
+	"push":          "releaser_agent",
+	"merge_to_main": "releaser_agent",
+	"story_close":   "story_close_agent",
+}
+
+// pickAgentForContract returns the system agent's id assigned to the
+// given contract slot. The role-based mapping (story_87b46d01) is
+// consulted first — every lifecycle contract resolves to one of three
+// role agents (developer_agent, releaser_agent, story_close_agent).
+// When the contract is not one of the lifecycle slots, the picker
+// falls back to a name-match against `<contract_name>_agent` /
+// `agent_<contract_name>` so project-scope custom contracts still
+// have a deterministic default agent.
 func (s *Server) pickAgentForContract(ctx context.Context, contractName string) string {
 	if s.docs == nil {
 		return ""
@@ -214,6 +234,16 @@ func (s *Server) pickAgentForContract(ctx context.Context, contractName string) 
 	}, nil)
 	if err != nil {
 		return ""
+	}
+	if roleName, ok := agentRoleForContract[contractName]; ok {
+		for _, d := range candidates {
+			if d.Status != document.StatusActive {
+				continue
+			}
+			if d.Name == roleName {
+				return d.ID
+			}
+		}
 	}
 	wantA := contractName + "_agent"
 	wantB := "agent_" + contractName

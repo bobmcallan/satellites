@@ -524,44 +524,28 @@ type lifecycleAgentSpec struct {
 }
 
 // seedLifecycleAgents creates one system-scope `type=agent` document
-// per lifecycle phase (preplan/plan/develop/push/merge_to_main/
-// story_close). Each agent's `permission_patterns` mirrors the
-// patterns the matching contract document carried as
-// `permitted_actions` (today's coverage) so the agents-own-permissions
-// follow-up (story_cc55e093) can flip CI claims to source patterns
-// from these docs without re-deriving the lists. Idempotent — agents
-// already present by name are skipped. story_488b8223.
+// per lifecycle role: **developer_agent** (preplan + plan + develop),
+// **releaser_agent** (push + merge_to_main), and **story_close_agent**
+// (story_close). Story_87b46d01 (S8 of
+// `epic:orchestrator-driven-configuration`) collapsed the original
+// 1-1 contract-shadow agents into these role-shaped agents per design
+// `docs/architecture-orchestrator-driven-configuration.md` §4. Each
+// agent's `permission_patterns` is the union of the patterns the
+// folded contracts needed, so action_claim resolution stays a simple
+// lookup against the agent doc's structured payload (story_cc55e093).
+// Idempotent — agents already present by name are skipped.
+// story_488b8223.
 func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
 	if docStore == nil {
 		return nil
 	}
 	specs := []lifecycleAgentSpec{
 		{
-			Name: "preplan_agent",
-			Body: "Lifecycle preplan agent — read-only investigation surface for the preplan contract. Permitted to read code + git history + MCP server state; not permitted to write.",
-			Patterns: []string{
-				"Read:**", "Grep:**", "Glob:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
-				"Bash:ls", "Bash:pwd",
-				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
-			},
-		},
-		{
-			Name: "plan_agent",
-			Body: "Lifecycle plan agent — read-only + ledger-write surface for authoring plan.md and review-criteria.md artefacts.",
-			Patterns: []string{
-				"Read:**", "Grep:**", "Glob:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
-				"Bash:ls", "Bash:pwd",
-				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
-			},
-		},
-		{
-			Name: "develop_agent",
-			Body: "Lifecycle develop agent — full code-edit + test + commit surface. Permitted to edit/write files, build/test/vet/fmt, run go tooling, and stage + commit changes. Not permitted to push (push_agent's job).",
+			Name: "developer_agent",
+			Body: "Role-shaped agent (story_87b46d01) covering preplan + plan + develop. Reads code/git/ledger, authors plan + review-criteria artefacts, edits + tests + commits. Bumps .version exactly once per story.",
 			Patterns: []string{
 				"Read:**", "Edit:**", "Write:**", "MultiEdit:**", "Grep:**", "Glob:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
+				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
 				"Bash:git_add", "Bash:git_commit",
 				"Bash:go_build", "Bash:go_test", "Bash:go_vet", "Bash:go_mod", "Bash:go_run",
 				"Bash:gofmt", "Bash:goimports", "Bash:golangci_lint",
@@ -570,23 +554,13 @@ func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspace
 			},
 		},
 		{
-			Name: "push_agent",
-			Body: "Lifecycle push agent — minimal surface to push the develop commit upstream. Permitted to git_fetch + git_push + read-only inspection. Not permitted to edit code or amend commits.",
+			Name: "releaser_agent",
+			Body: "Role-shaped agent (story_87b46d01) covering push + merge_to_main. Pushes the develop commit upstream; fast-forward merges to local main. Never re-bumps .version. No force operations.",
 			Patterns: []string{
 				"Read:**",
 				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
 				"Bash:git_fetch", "Bash:git_push",
-				"Bash:ls", "Bash:pwd",
-				"mcp__satellites__satellites_*",
-			},
-		},
-		{
-			Name: "merge_agent",
-			Body: "Lifecycle merge agent — fast-forward merges develop → main locally. Permitted to checkout/branch/merge with --ff-only; no force operations.",
-			Patterns: []string{
-				"Read:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
-				"Bash:git_fetch", "Bash:git_checkout", "Bash:git_branch", "Bash:git_merge",
+				"Bash:git_checkout", "Bash:git_branch", "Bash:git_merge",
 				"Bash:ls", "Bash:pwd",
 				"mcp__satellites__satellites_*",
 			},

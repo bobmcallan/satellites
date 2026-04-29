@@ -49,8 +49,10 @@ func newOrchestratorFixture(t *testing.T) *orchestratorFixture {
 		t.Fatalf("seed system workflow: %v", err)
 	}
 
-	// Seed system agents matching the picker convention.
-	for _, name := range []string{"preplan_agent", "plan_agent", "develop_agent", "story_close_agent"} {
+	// Seed system agents matching the role-mapping convention
+	// (story_87b46d01): one row per role agent, multiple contracts
+	// resolve to the same row.
+	for _, name := range []string{"developer_agent", "releaser_agent", "story_close_agent"} {
 		settings, _ := document.MarshalAgentSettings(document.AgentSettings{
 			PermissionPatterns: []string{"Read:**"},
 		})

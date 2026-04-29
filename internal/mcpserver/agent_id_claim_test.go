@@ -18,13 +18,13 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 
-	// Use the fixture's seeded preplan_agent for the cis[0] (preplan)
-	// claim. The fixture seeds each lifecycle agent with a known
-	// PermissionPatterns slice; we read them back to compare.
+	// Use the fixture's seeded role agent for the cis[0] (preplan)
+	// claim. After story_87b46d01 the fixture maps preplan to
+	// developer_agent; the lookup returns its agent doc id.
 	preplanAgentID := f.agentFor(0)
 	agentDoc, err := f.server.docs.GetByID(f.ctx, preplanAgentID, nil)
 	if err != nil {
-		t.Fatalf("lookup seeded preplan_agent: %v", err)
+		t.Fatalf("lookup seeded role agent for preplan: %v", err)
 	}
 	settings, err := document.UnmarshalAgentSettings(agentDoc.Structured)
 	if err != nil {

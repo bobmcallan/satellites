@@ -250,7 +250,7 @@ func TestStoryView_AgentLink(t *testing.T) {
 		ProjectID: proj.ID, Title: "agent-link", Status: "in_progress",
 		Priority: "high", Category: "feature", CreatedBy: user.ID,
 	}, now)
-	agent := seedAgentForStoryTest(t, docs, "develop_agent", now)
+	agent := seedAgentForStoryTest(t, docs, "developer_agent", now)
 	contractDoc := seedDoc(t, docs, "", document.TypeContract, "develop", "body", now)
 	allocated, err := contracts.Create(ctx, contract.ContractInstance{
 		StoryID: s.ID, ContractID: contractDoc.ID, ContractName: "develop",
@@ -276,7 +276,7 @@ func TestStoryView_AgentLink(t *testing.T) {
 	if !strings.Contains(body, `data-testid="ci-agent" data-agent-id="`+agent.ID+`"`) {
 		t.Errorf("allocated CI must render ci-agent with agent_id; body=%s", body)
 	}
-	if !strings.Contains(body, "develop_agent") {
+	if !strings.Contains(body, "developer_agent") {
 		t.Errorf("allocated CI must render the resolved agent name; body=%s", body)
 	}
 	_ = allocated

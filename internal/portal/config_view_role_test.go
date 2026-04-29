@@ -24,7 +24,7 @@ func TestConfig_AgentsSection(t *testing.T) {
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
 
-	seedAgent(t, docs, "preplan_agent", document.AgentSettings{
+	seedAgent(t, docs, "developer_agent", document.AgentSettings{
 		PermissionPatterns: []string{"Read:**"},
 	}, "", now)
 
@@ -36,7 +36,7 @@ func TestConfig_AgentsSection(t *testing.T) {
 	if !strings.Contains(body, `data-testid="config-agents-panel"`) {
 		t.Errorf("config-agents-panel missing")
 	}
-	if !strings.Contains(body, "preplan_agent") {
+	if !strings.Contains(body, "developer_agent") {
 		t.Errorf("seeded agent name not in /config body; body=%s", body)
 	}
 	_ = ctx

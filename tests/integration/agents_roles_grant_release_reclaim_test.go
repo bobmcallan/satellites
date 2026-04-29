@@ -153,11 +153,12 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	}
 	require.Len(t, ciIDs, 4)
 
-	// Look up the lifecycle agents seeded by seedLifecycleAgents (the
-	// boot-time seed in cmd/satellites/main.go). story_cc55e093 made
-	// agent_id REQUIRED on contract_claim.
-	preplanAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "preplan_agent")
-	planAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "plan_agent")
+	// Look up the lifecycle role agent seeded by seedLifecycleAgents
+	// (the boot-time seed in cmd/satellites/main.go). After the S8
+	// collapse (story_87b46d01), preplan + plan + develop all resolve
+	// to developer_agent.
+	preplanAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "developer_agent")
+	planAgent := preplanAgent
 
 	// Step 2: session A claims the preplan CI — succeeds under grant A.
 	claim1 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{

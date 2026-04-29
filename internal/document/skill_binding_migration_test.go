@@ -36,8 +36,8 @@ func TestMigrateSkillContractBindings(t *testing.T) {
 	agentDoc, err := store.Create(ctx, Document{
 		Type:       TypeAgent,
 		Scope:      ScopeSystem,
-		Name:       "develop_agent",
-		Body:       "develop lifecycle agent",
+		Name:       "developer_agent",
+		Body:       "developer role agent",
 		Structured: agentSettings,
 	}, now)
 	if err != nil {
