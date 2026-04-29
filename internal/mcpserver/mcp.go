@@ -669,6 +669,18 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("worker_id", mcpgo.Description("Optional worker id; when supplied, the handler rejects the close if the task has been reclaimed to a different worker since claim time.")),
 		)
 		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
+
+		// Story_66d4249f (S6): orchestrator dynamic plan composition.
+		// Wires the orchestrator role at the story-implement entry path —
+		// reads the resolved scope mandate stack + active principles +
+		// catalogs and emits per-slot tasks plus a kind:plan ledger row
+		// before invoking workflow_claim.
+		composeTool := mcpgo.NewTool("orchestrator_compose_plan",
+			mcpgo.WithDescription("Compose a per-story plan from the resolved scope mandate stack. Writes a kind:plan ledger row, enqueues one task per slot (origin=story_stage, payload={contract_name, agent_ref, sequence}), and calls workflow_claim. Idempotent — returns the existing CIs when the story already has a workflow claim. Story_66d4249f."),
+			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to compose a plan for.")),
+			mcpgo.WithString("agent_overrides", mcpgo.Description("Optional JSON object mapping contract_name -> agent_ref (document id) when the caller wants to pin a non-default agent for a specific slot.")),
+		)
+		s.mcp.AddTool(composeTool, s.handleOrchestratorComposePlan)
 	}
 
 	if s.repos != nil {
