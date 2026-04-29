@@ -46,6 +46,15 @@ func agentToInput(fm Frontmatter, body []byte, workspaceID, actor string) (docum
 }
 
 // contractToInput builds a document.UpsertInput for a kind=contract file.
+//
+// story_b7bf3a5f: contract documents carry only contract-level concerns —
+// category, required_role, required_categories, evidence_required, and
+// validation_mode. The historic `permitted_actions` field has been removed
+// here because the action-claim path in
+// internal/mcpserver/claim_handlers.go sources permission_patterns
+// exclusively from the claiming agent document (story_b39b393f /
+// story_cc55e093). Contract-side permitted_actions was dead data; this
+// stops writing it into the Structured payload.
 func contractToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
 	name := fm.String("name")
 	if name == "" {
@@ -57,7 +66,6 @@ func contractToInput(fm Frontmatter, body []byte, workspaceID, actor string) (do
 		"required_categories": fm.StringSlice("required_categories"),
 		"evidence_required":   fm.String("evidence_required"),
 		"validation_mode":     fm.String("validation_mode"),
-		"permitted_actions":   fm.StringSlice("permitted_actions"),
 	}
 	pruneEmpty(payload)
 	structured, err := json.Marshal(payload)

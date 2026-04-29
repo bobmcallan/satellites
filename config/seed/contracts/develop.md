@@ -4,27 +4,6 @@ category: develop
 required_role: role_orchestrator
 required_categories: [develop]
 validation_mode: llm
-permitted_actions:
-  - "Read:**"
-  - "Edit:**"
-  - "Write:**"
-  - "MultiEdit:**"
-  - "Grep:**"
-  - "Glob:**"
-  - "Bash:git_status"
-  - "Bash:git_log"
-  - "Bash:git_diff"
-  - "Bash:git_add"
-  - "Bash:git_commit"
-  - "Bash:go_build"
-  - "Bash:go_test"
-  - "Bash:go_vet"
-  - "Bash:go_mod"
-  - "Bash:go_run"
-  - "Bash:gofmt"
-  - "Bash:goimports"
-  - "Bash:golangci_lint"
-  - "mcp__satellites__satellites_*"
 evidence_required: |
   Inline in close markdown:
   1. Files changed list with one-line why per file.

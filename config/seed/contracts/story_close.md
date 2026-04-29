@@ -4,9 +4,6 @@ category: story-close
 required_role: role_orchestrator
 required_categories: [story-close]
 validation_mode: llm
-permitted_actions:
-  - "Read:**"
-  - "mcp__satellites__satellites_*"
 evidence_required: |
   Story review result recorded on the ledger with
   {review_status, score, story_id}.

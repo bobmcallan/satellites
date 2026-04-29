@@ -4,14 +4,6 @@ category: push
 required_role: role_orchestrator
 required_categories: [push]
 validation_mode: llm
-permitted_actions:
-  - "Read:**"
-  - "Bash:git_status"
-  - "Bash:git_log"
-  - "Bash:git_diff"
-  - "Bash:git_fetch"
-  - "Bash:git_push"
-  - "mcp__satellites__satellites_*"
 evidence_required: |
   Inline in close markdown:
   1. Commit SHA + subject being pushed.

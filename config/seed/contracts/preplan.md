@@ -4,13 +4,6 @@ category: pre-plan
 required_role: role_orchestrator
 required_categories: [preplan]
 validation_mode: llm
-permitted_actions:
-  - "Read:**"
-  - "Grep:**"
-  - "Glob:**"
-  - "Bash:git_log"
-  - "Bash:git_status"
-  - "mcp__satellites__satellites_*"
 evidence_required: |
   Structured preplan assessment recorded on the ledger with
   {relevance, ac_assessment, dependencies, prior_delivery,

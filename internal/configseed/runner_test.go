@@ -2,6 +2,7 @@ package configseed
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,10 @@ tags: [test]
 Body content for the test agent.
 `
 
+// sampleContractMD intentionally carries a permitted_actions key in
+// frontmatter so TestRun_ContractStructuredOmitsPermittedActions can
+// assert the loader IGNORES it (story_b7bf3a5f). The substrate sources
+// permission_patterns from the agent doc, not the contract.
 const sampleContractMD = `---
 name: test_contract
 category: develop
@@ -98,6 +103,42 @@ func TestRun_CreatesAgentsContractsWorkflows(t *testing.T) {
 	}
 	if got.Scope != document.ScopeSystem {
 		t.Errorf("scope = %q, want system", got.Scope)
+	}
+}
+
+// TestRun_ContractStructuredOmitsPermittedActions (story_b7bf3a5f AC1+5)
+// — even when the seed file's frontmatter carries `permitted_actions`,
+// the loader must NOT write it into the contract document's Structured
+// payload. The action-claim path sources permission_patterns from the
+// agent doc (story_b39b393f / story_cc55e093); the contract's field is
+// dead data.
+func TestRun_ContractStructuredOmitsPermittedActions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "contracts/test_contract.md", sampleContractMD)
+
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	if _, err := Run(context.Background(), docs, dir, "wksp_sys", "system", now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	contractDoc, err := docs.GetByName(context.Background(), "", "test_contract", nil)
+	if err != nil {
+		t.Fatalf("GetByName test_contract: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(contractDoc.Structured, &payload); err != nil {
+		t.Fatalf("decode contract Structured: %v", err)
+	}
+	if _, has := payload["permitted_actions"]; has {
+		t.Errorf("contract Structured carries permitted_actions key %v — story_b7bf3a5f drops the dead field; the action-claim path sources permission_patterns from the agent doc", payload["permitted_actions"])
+	}
+	// Sanity: contract-level fields preserved.
+	for _, key := range []string{"category", "evidence_required", "validation_mode"} {
+		if _, has := payload[key]; !has {
+			t.Errorf("contract Structured missing %q (must be preserved)", key)
+		}
 	}
 }
 

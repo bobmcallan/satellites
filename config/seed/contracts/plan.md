@@ -4,11 +4,6 @@ category: plan
 required_role: role_orchestrator
 required_categories: [plan]
 validation_mode: llm
-permitted_actions:
-  - "Read:**"
-  - "Grep:**"
-  - "Glob:**"
-  - "mcp__satellites__satellites_*"
 evidence_required: |
   Two ledger artifacts recorded on the story + plan CI:
   - plan.md  (scope, files-to-change, approach, test-strategy, AC mapping)
