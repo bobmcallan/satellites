@@ -1,5 +1,11 @@
 ---
 name: plan_agent
+instruction: |
+  Design the implementation strategy before code changes start. Produce two
+  ledger artefacts: plan.md (scope, files-to-change, approach, test
+  strategy, AC mapping) and review-criteria.md (per-AC verify / evidence /
+  pass-fail boundary). Read-only across files; ledger writes via MCP. Do
+  not edit files, run builds, or commit; the plan is binding for develop.
 permission_patterns:
   - "Read:**"
   - "Grep:**"

@@ -1,5 +1,10 @@
 ---
 name: merge_agent
+instruction: |
+  Fast-forward local main to match origin after push has shipped the work.
+  Run git fetch + git merge --ff-only or report "already up to date" when
+  the work landed directly on main. Record HEAD SHA + ff-only confirmation.
+  No merge commits, no rebases, no force, no branch deletion, no push.
 permission_patterns:
   - "Read:**"
   - "Bash:git_status"

@@ -1,5 +1,14 @@
 ---
 name: develop_agent
+instruction: |
+  Write code to satisfy the story's acceptance criteria. Edit, create, or
+  delete files per plan.md; iterate go build / test / vet / fmt / lint
+  locally until green; bump .version patch segment exactly once; stage
+  delivered files and create one conventional-commit per story (no AI
+  attribution). Record evidence on the ledger: files-changed list, command
+  outputs, AC-by-AC mapping with file:line citations, commit SHA. Do not
+  push, rewrite history, skip hooks, or introduce abstractions the AC did
+  not request.
 permission_patterns:
   - "Read:**"
   - "Edit:**"

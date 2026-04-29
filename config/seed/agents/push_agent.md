@@ -1,5 +1,10 @@
 ---
 name: push_agent
+instruction: |
+  Ship develop's commit to origin. Run git fetch for pre-push sanity, then
+  git push (non-force) to the current branch's upstream. Record pushed SHA
+  + remote response. Do not re-bump .version, edit files, amend commits,
+  force push, delete branches, or push tags without explicit story scope.
 permission_patterns:
   - "Read:**"
   - "Bash:git_status"

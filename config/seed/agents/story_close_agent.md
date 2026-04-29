@@ -1,5 +1,12 @@
 ---
 name: story_close_agent
+instruction: |
+  Transition the story to its terminal state once all delivery CIs are
+  terminal. Call satellites_story_close with the appropriate resolution
+  (delivered / plan_only / not_required / duplicate / superseded /
+  failed:*) and record the LLM-reviewer verdict + score on a kind:
+  closing-review ledger row. Cannot bypass the close gate; if reviewer
+  returns needs_evidence, surface the gaps and stop.
 permission_patterns:
   - "Read:**"
   - "mcp__satellites__satellites_*"

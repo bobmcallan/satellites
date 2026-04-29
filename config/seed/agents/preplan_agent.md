@@ -1,5 +1,11 @@
 ---
 name: preplan_agent
+instruction: |
+  Investigate a story before plan and develop run. Read the story
+  description, ACs, and cross-referenced documents; assess relevance,
+  dependencies, prior delivery; recommend proceed / improve_acs / cancel /
+  block. Record the assessment as a structured ledger row. Read-only — no
+  file edits, no git mutations, no claiming subsequent contracts.
 permission_patterns:
   - "Read:**"
   - "Grep:**"

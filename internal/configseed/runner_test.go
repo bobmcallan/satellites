@@ -106,6 +106,97 @@ func TestRun_CreatesAgentsContractsWorkflows(t *testing.T) {
 	}
 }
 
+// TestRun_AgentStructuredCarriesInstruction (story_b7bf3a5f AC2) — the
+// agent document carries the `instruction` frontmatter key in its
+// Structured payload alongside permission_patterns. This is the
+// concrete vehicle for agent-level execution guidance now that the
+// contract no longer carries it (see TestRun_ContractStructuredOmitsPermittedActions).
+//
+// The configseed loader's mergeFrontmatterIntoJSON preserves arbitrary
+// non-AgentSettings keys (parsers.go:181), so adding `instruction:` to
+// frontmatter Just Works without parser changes — this test guards
+// against accidental regression.
+func TestRun_AgentStructuredCarriesInstruction(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const agentWithInstructionMD = `---
+name: test_agent_with_instruction
+instruction: |
+  This is the agent's execution guidance: do X, do not do Y.
+permission_patterns:
+  - "Read:**"
+tags: [test]
+---
+# Test Agent
+
+Body.
+`
+	writeFile(t, dir, "agents/test_agent_with_instruction.md", agentWithInstructionMD)
+
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	if _, err := Run(context.Background(), docs, dir, "wksp_sys", "system", now); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	agentDoc, err := docs.GetByName(context.Background(), "", "test_agent_with_instruction", nil)
+	if err != nil {
+		t.Fatalf("GetByName test_agent_with_instruction: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(agentDoc.Structured, &payload); err != nil {
+		t.Fatalf("decode agent Structured: %v", err)
+	}
+	instruction, ok := payload["instruction"].(string)
+	if !ok {
+		t.Fatalf("agent Structured missing instruction string: payload=%v", payload)
+	}
+	if !strings.Contains(instruction, "do X") {
+		t.Errorf("instruction = %q, want substring 'do X' (round-trip from frontmatter)", instruction)
+	}
+	// Sanity: permission_patterns still present alongside.
+	patterns, _ := payload["permission_patterns"].([]any)
+	if len(patterns) == 0 {
+		t.Errorf("agent Structured missing permission_patterns alongside instruction")
+	}
+}
+
+// TestRun_RealSeedAgentsCarryInstruction (story_b7bf3a5f AC2) — every
+// lifecycle agent shipped in config/seed/agents/ declares an
+// `instruction` field, the canonical home for agent-level execution
+// guidance now that contracts carry only audit shape.
+func TestRun_RealSeedAgentsCarryInstruction(t *testing.T) {
+	t.Parallel()
+	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
+	if err != nil {
+		t.Fatalf("abs seed dir: %v", err)
+	}
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	if _, err := Run(context.Background(), docs, seedDir, "wksp_sys", "system", now); err != nil {
+		t.Fatalf("Run real seed: %v", err)
+	}
+	for _, name := range []string{
+		"preplan_agent", "plan_agent", "develop_agent",
+		"push_agent", "merge_agent", "story_close_agent",
+	} {
+		agentDoc, err := docs.GetByName(context.Background(), "", name, nil)
+		if err != nil {
+			t.Errorf("GetByName %s: %v", name, err)
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(agentDoc.Structured, &payload); err != nil {
+			t.Errorf("%s: decode Structured: %v", name, err)
+			continue
+		}
+		instruction, ok := payload["instruction"].(string)
+		if !ok || strings.TrimSpace(instruction) == "" {
+			t.Errorf("%s: missing or empty `instruction` field in Structured payload", name)
+		}
+	}
+}
+
 // TestRun_ContractStructuredOmitsPermittedActions (story_b7bf3a5f AC1+5)
 // — even when the seed file's frontmatter carries `permitted_actions`,
 // the loader must NOT write it into the contract document's Structured
