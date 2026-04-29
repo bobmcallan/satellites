@@ -517,3 +517,137 @@ func TestResolveSeedDir_Default(t *testing.T) {
 		t.Errorf("ResolveSeedDir = %q, want %q", got, DefaultSeedDir)
 	}
 }
+
+// samplePrincipleMD covers the principle frontmatter shape per
+// story_ac3dc4d0: id (documentation slug, not consumed by parser),
+// name (friendly title, used by Upsert.GetByName), scope (system),
+// tags (free-form). Body becomes Document.Body (the description).
+const samplePrincipleMD = `---
+id: pr_test_principle
+name: Test principle for seed loader
+scope: system
+tags:
+  - test
+---
+This is the description body of the test principle. It survives
+through the loader unchanged and lands in Document.Body.
+`
+
+// TestPrincipleSeedLoad covers story_ac3dc4d0 ACs 1, 3, 4, 5, 6, 7:
+// the principle phase loads `principles/*.md`, upserts as
+// type=principle scope=system, and is idempotent on re-run. story_ac3dc4d0.
+func TestPrincipleSeedLoad(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, dir, "principles/pr_test_principle.md", samplePrincipleMD)
+
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+
+	// First run: creates the principle doc.
+	summary, err := Run(context.Background(), docs, dir, "wksp_sys", "system", now)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(summary.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", summary.Errors)
+	}
+	if summary.Created < 1 {
+		t.Fatalf("created = %d, want >=1", summary.Created)
+	}
+
+	got, err := docs.GetByName(context.Background(), "", "Test principle for seed loader", nil)
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if got.Type != document.TypePrinciple {
+		t.Errorf("type = %q, want %q", got.Type, document.TypePrinciple)
+	}
+	if got.Scope != document.ScopeSystem {
+		t.Errorf("scope = %q, want system", got.Scope)
+	}
+	if !strings.Contains(got.Body, "description body of the test principle") {
+		t.Errorf("body did not survive: %q", got.Body)
+	}
+
+	// Second run: idempotent — body hash unchanged → 0 changes for this
+	// principle (skipped count goes up).
+	prevSkipped := summary.Skipped
+	summary2, err := Run(context.Background(), docs, dir, "wksp_sys", "system", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Run (second): %v", err)
+	}
+	if len(summary2.Errors) != 0 {
+		t.Fatalf("unexpected errors on re-run: %v", summary2.Errors)
+	}
+	if summary2.Created != 0 {
+		t.Errorf("re-run created = %d, want 0", summary2.Created)
+	}
+	if summary2.Skipped <= prevSkipped {
+		t.Errorf("re-run skipped = %d, want > prev %d (principle should have skipped)", summary2.Skipped, prevSkipped)
+	}
+}
+
+// TestRun_RealSeedDirShipsAllPrinciples (story_ac3dc4d0 AC1+AC7+AC8):
+// the on-disk config/seed/principles/ directory contains exactly 9
+// markdown files, each loads cleanly into a type=principle scope=system
+// document via the principle phase.
+func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
+	t.Parallel()
+	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
+	if err != nil {
+		t.Fatalf("abs seed dir: %v", err)
+	}
+	if _, err := os.Stat(seedDir); err != nil {
+		t.Fatalf("seed dir %q not found: %v", seedDir, err)
+	}
+
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	summary, err := Run(context.Background(), docs, seedDir, "wksp_sys", "system", now)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(summary.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", summary.Errors)
+	}
+
+	principles, err := docs.List(context.Background(), document.ListOptions{
+		Type:  document.TypePrinciple,
+		Scope: document.ScopeSystem,
+		Limit: 50,
+	}, nil)
+	if err != nil {
+		t.Fatalf("List principles: %v", err)
+	}
+	if len(principles) != 9 {
+		t.Fatalf("principles count = %d, want 9", len(principles))
+	}
+
+	wantNames := map[string]bool{
+		"Agile smallest-change delivery":                         false,
+		"Evidence must be verifiable":                            false,
+		"Iterate locally, deploy once":                           false,
+		"Lifecycle and project contract separation":              false,
+		"No unrequested abstractions or backwards-compat layers": false,
+		"Pipeline integrity":                                     false,
+		"Process is trust":                                       false,
+		"Quality over speed":                                     false,
+		"Root cause, not hack":                                   false,
+	}
+	for _, p := range principles {
+		if _, ok := wantNames[p.Name]; !ok {
+			t.Errorf("unexpected principle name %q", p.Name)
+			continue
+		}
+		wantNames[p.Name] = true
+		if p.Body == "" {
+			t.Errorf("principle %q has empty body", p.Name)
+		}
+	}
+	for name, found := range wantNames {
+		if !found {
+			t.Errorf("expected principle %q not seeded", name)
+		}
+	}
+}

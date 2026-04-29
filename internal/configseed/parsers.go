@@ -201,6 +201,33 @@ func configurationToInput(
 	}, nil
 }
 
+// principleToInput builds a document.UpsertInput for a kind=principle
+// file. Frontmatter carries `name` (required, the friendly principle
+// title) plus optional `id`, `scope`, `tags`. Body is the principle's
+// description text. story_ac3dc4d0.
+//
+// `id` is read but not propagated to UpsertInput — UpsertInput dedups
+// by Name (Upsert.GetByName at internal/document/surreal.go:197). The
+// `id` frontmatter field serves as a documentation slug matching the
+// filename stem, so a reader of pr_agile.md sees `id: pr_agile`
+// without having to infer it.
+func principleToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
+	name := fm.String("name")
+	if name == "" {
+		return document.UpsertInput{}, fmt.Errorf("principle: name required")
+	}
+	return document.UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypePrinciple,
+		Name:        name,
+		Body:        body,
+		Scope:       document.ScopeSystem,
+		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
+		Actor:       actor,
+	}, nil
+}
+
 // helpToInput builds a document.UpsertInput for a kind=help file.
 // Sibling story_cc5c67a9 owns the type=help discriminator + portal
 // surface; the loader entry point lives here so the runner stays

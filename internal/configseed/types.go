@@ -18,6 +18,7 @@ const (
 	KindWorkflow      Kind = "workflow"
 	KindHelp          Kind = "help"
 	KindConfiguration Kind = "configuration"
+	KindPrinciple     Kind = "principle"
 )
 
 // Summary captures the per-kind result counts a Run pass produces.

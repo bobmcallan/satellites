@@ -85,12 +85,52 @@ func Run(ctx context.Context, docs document.Store, seedDir, workspaceID, actor s
 			}
 		}
 	}
+	// Principle phase — runs after the agents/contracts/workflows main
+	// loop and before the configuration phase so the configuration
+	// phase's principle_refs resolve against just-seeded principle
+	// docs. Principles have no refs of their own; the standard
+	// LoadDir+Upsert path carries the work. story_ac3dc4d0.
+	prSummary := runPrinciplePhase(ctx, docs, seedDir, workspaceID, actor, now)
+	summary.Add(prSummary)
 	// Configuration phase — runs after the prior phases so contract /
 	// skill / principle name→ID lookups resolve against the just-seeded
 	// docs. story_764726d3.
 	cfgSummary := runConfigurationPhase(ctx, docs, seedDir, workspaceID, actor, now)
 	summary.Add(cfgSummary)
 	return summary, nil
+}
+
+// runPrinciplePhase loads `principles/*.md` and upserts each as a
+// scope=system type=principle document. Mirrors the
+// agents/contracts/workflows path through LoadDir+docs.Upsert; uses a
+// dedicated function (rather than appending KindPrinciple to the main
+// kinds slice) so the call site in Run sequences principles
+// explicitly between the main loop and runConfigurationPhase.
+// story_ac3dc4d0.
+func runPrinciplePhase(ctx context.Context, docs document.Store, seedDir, workspaceID, actor string, now time.Time) Summary {
+	summary := Summary{}
+	inputs, errs := LoadDir(seedDir, KindPrinciple, workspaceID, actor)
+	summary.Errors = append(summary.Errors, errs...)
+	for _, in := range inputs {
+		summary.Loaded++
+		res, err := docs.Upsert(ctx, in, now)
+		if err != nil {
+			summary.Errors = append(summary.Errors, ErrorEntry{
+				Path:   string(KindPrinciple) + "/" + in.Name,
+				Reason: err.Error(),
+			})
+			continue
+		}
+		switch {
+		case res.Created:
+			summary.Created++
+		case res.Changed:
+			summary.Updated++
+		default:
+			summary.Skipped++
+		}
+	}
+	return summary
 }
 
 // runConfigurationPhase loads `configurations/*.md` and upserts each as

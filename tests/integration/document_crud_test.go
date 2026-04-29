@@ -161,13 +161,28 @@ func TestDocumentCRUDVerbs_RoundTrip(t *testing.T) {
 		t.Errorf("skill contract_binding = %q, want %q", got, contractID)
 	}
 
-	// 6. document_list filtered by type=principle returns the seeded one.
+	// 6. document_list filtered by type=principle includes the
+	// test-principle alongside the system-seeded principles
+	// (story_ac3dc4d0 added config/seed/principles/ — 9 system rows
+	// land at boot). Assert the test row is present rather than a
+	// literal count.
 	plistArr := callToolArray(t, ctx, mcpURL, "key_crud", "document_list", map[string]any{
 		"type":  "principle",
 		"scope": "system",
 	})
-	if len(plistArr) != 1 {
-		t.Errorf("document_list(type=principle, scope=system) returned %d rows, want 1", len(plistArr))
+	foundTestPrinciple := false
+	for _, row := range plistArr {
+		m, _ := row.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if name, _ := m["name"].(string); name == "test-principle" {
+			foundTestPrinciple = true
+			break
+		}
+	}
+	if !foundTestPrinciple {
+		t.Errorf("document_list(type=principle, scope=system) did not include test-principle; got %d rows", len(plistArr))
 	}
 
 	// 7. document_get by id round-trips.

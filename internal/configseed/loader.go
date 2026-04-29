@@ -97,6 +97,8 @@ func kindSubdir(kind Kind) string {
 		return "workflows"
 	case KindConfiguration:
 		return "configurations"
+	case KindPrinciple:
+		return "principles"
 	case KindHelp:
 		// Help docs live at the seed-dir root rather than under a
 		// subdirectory — see HelpDir wiring in runner.go.
@@ -114,6 +116,8 @@ func buildInput(kind Kind, fm Frontmatter, body []byte, workspaceID, actor strin
 		return contractToInput(fm, body, workspaceID, actor)
 	case KindWorkflow:
 		return workflowToInput(fm, body, workspaceID, actor)
+	case KindPrinciple:
+		return principleToInput(fm, body, workspaceID, actor)
 	case KindHelp:
 		return helpToInput(fm, body, workspaceID, actor)
 	}
