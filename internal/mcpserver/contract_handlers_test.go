@@ -92,6 +92,21 @@ func newContractFixture(t *testing.T) *contractFixture {
 		ContractStore:    contractStore,
 	})
 
+	// Seed plan-approved by default — handleWorkflowClaim's precondition
+	// (story_a5826137) requires it. Tests that exercise the precondition
+	// itself construct fixtures that skip this seed via a dedicated path.
+	if _, err := ledStore.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: ws.ID,
+		ProjectID:   proj.ID,
+		StoryID:     ledger.StringPtr(parent.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{planApprovedKind, planApprovedPhase},
+		Content:     "fixture pre-approved plan",
+		CreatedBy:   "user_alice",
+	}, now); err != nil {
+		t.Fatalf("seed plan-approved: %v", err)
+	}
+
 	return &contractFixture{
 		t:         t,
 		ctx:       ctx,
@@ -106,6 +121,25 @@ func newContractFixture(t *testing.T) *contractFixture {
 
 func (f *contractFixture) callerCtx() context.Context {
 	return withCaller(f.ctx, f.caller)
+}
+
+// seedPlanApproved writes a kind:plan-approved ledger row scoped to the
+// fixture's story so handleWorkflowClaim's plan-approval precondition
+// (story_a5826137) is satisfied. Tests that exercise the workflow_claim
+// path call this before the claim.
+func (f *contractFixture) seedPlanApproved(t *testing.T) {
+	t.Helper()
+	if _, err := f.server.ledger.Append(f.ctx, ledger.LedgerEntry{
+		WorkspaceID: f.wsID,
+		ProjectID:   f.projectID,
+		StoryID:     ledger.StringPtr(f.storyID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{planApprovedKind, planApprovedPhase},
+		Content:     "test fixture pre-approved plan",
+		CreatedBy:   f.caller.UserID,
+	}, f.now); err != nil {
+		t.Fatalf("seedPlanApproved: %v", err)
+	}
 }
 
 func TestProjectWorkflowSpec_Default(t *testing.T) {

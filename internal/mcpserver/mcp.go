@@ -681,6 +681,22 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("agent_overrides", mcpgo.Description("Optional JSON object mapping contract_name -> agent_ref (document id) when the caller wants to pin a non-default agent for a specific slot.")),
 		)
 		s.mcp.AddTool(composeTool, s.handleOrchestratorComposePlan)
+
+		// Story_a5826137 (epic:configuration-over-code-mandate): plan-approval loop.
+		// Submits the orchestrator's proposed plan to the story_reviewer
+		// rubric (Gemini-backed in production); returns a verdict that
+		// drives the loop. On accepted, writes a kind:plan-approved row;
+		// workflow_claim's precondition then lets the rest of the
+		// lifecycle proceed. Iteration cap resolved via KV
+		// (plan_review_max_iterations, default 5).
+		submitPlanTool := mcpgo.NewTool("orchestrator_submit_plan",
+			mcpgo.WithDescription("Submit the orchestrator's proposed plan for review. Returns {verdict, rationale, principles_cited, review_questions, iteration, max_iterations}. On verdict=accepted, writes a kind:plan-approved ledger row and returns plan_approved_ledger_id; workflow_claim then accepts the story. Loop on needs_more by re-submitting with iteration+1; iteration > KV plan_review_max_iterations (default 5) returns plan_review_iteration_cap_exceeded. Story_a5826137."),
+			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story whose plan is being reviewed.")),
+			mcpgo.WithString("plan_markdown", mcpgo.Required(), mcpgo.Description("The plan markdown the orchestrator composed; passed to the reviewer as evidence.")),
+			mcpgo.WithArray("proposed_contracts", mcpgo.Description("Ordered list of contract names in the proposed plan (informational on the verdict request).")),
+			mcpgo.WithNumber("iteration", mcpgo.Description("1-based iteration counter the orchestrator increments on each resubmit. Default 1.")),
+		)
+		s.mcp.AddTool(submitPlanTool, s.handleOrchestratorSubmitPlan)
 	}
 
 	if s.repos != nil {

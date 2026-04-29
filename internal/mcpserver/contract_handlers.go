@@ -127,6 +127,21 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
 
+	// Plan-approval precondition (story_a5826137): the orchestrator must
+	// have submitted the plan and received an accepted verdict from the
+	// story_reviewer (Gemini-backed in prod, AcceptAll in dev/tests)
+	// before workflow_claim instantiates CIs. The accepted verdict
+	// writes a kind:plan-approved ledger row scoped to the story; the
+	// row's existence is the precondition.
+	if !s.hasPlanApprovedRow(ctx, st.ProjectID, storyID, memberships) {
+		body, _ := json.Marshal(map[string]any{
+			"error":    "plan_not_approved",
+			"story_id": storyID,
+			"message":  "story has no kind:plan-approved ledger row; call satellites_orchestrator_submit_plan first",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+
 	spec, err := s.loadResolvedWorkflowSpec(ctx, st.WorkspaceID, st.ProjectID, caller.UserID, memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil

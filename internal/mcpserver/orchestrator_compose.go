@@ -151,6 +151,31 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		}
 	}
 
+	// Plan-approval precondition (story_a5826137): handleWorkflowClaim
+	// requires a kind:plan-approved ledger row scoped to the story. The
+	// orchestrator-compose path is the legacy single-shot entry point —
+	// it writes the row inline so its existing callers continue to
+	// work. The new entry point (satellites_orchestrator_submit_plan)
+	// is preferred for new stories because it runs the
+	// reviewer-approval loop instead of auto-approving.
+	planApprovedPayload, _ := json.Marshal(map[string]any{
+		"iteration":          1,
+		"proposed_contracts": proposed,
+		"source":             "orchestrator_compose_plan",
+	})
+	if _, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: st.WorkspaceID,
+		ProjectID:   st.ProjectID,
+		StoryID:     ledger.StringPtr(storyID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{planApprovedKind, planApprovedPhase},
+		Content:     "auto-approved via orchestrator_compose_plan",
+		Structured:  planApprovedPayload,
+		CreatedBy:   caller.UserID,
+	}, now); err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("plan-approved ledger append: %v", err)), nil
+	}
+
 	// Now claim the workflow — this writes the kind:workflow-claim row
 	// + creates the CIs.
 	claimMD := fmt.Sprintf("orchestrator-composed plan for %s", storyID)
