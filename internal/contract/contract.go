@@ -31,7 +31,6 @@ type ContractInstance struct {
 	StoryID            string    `json:"story_id"`
 	ContractID         string    `json:"contract_id"`
 	ContractName       string    `json:"contract_name"`
-	Phase              string    `json:"phase"`
 	Sequence           int       `json:"sequence"`
 	Status             string    `json:"status"`
 	ClaimedViaGrantID  string    `json:"claimed_via_grant_id,omitempty"`
