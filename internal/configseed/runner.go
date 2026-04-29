@@ -86,17 +86,10 @@ func Run(ctx context.Context, docs document.Store, seedDir, workspaceID, actor s
 		}
 	}
 	// Principle phase — runs after the agents/contracts/workflows main
-	// loop and before the configuration phase so the configuration
-	// phase's principle_refs resolve against just-seeded principle
-	// docs. Principles have no refs of their own; the standard
+	// loop. Principles have no refs of their own; the standard
 	// LoadDir+Upsert path carries the work. story_ac3dc4d0.
 	prSummary := runPrinciplePhase(ctx, docs, seedDir, workspaceID, actor, now)
 	summary.Add(prSummary)
-	// Configuration phase — runs after the prior phases so contract /
-	// skill / principle name→ID lookups resolve against the just-seeded
-	// docs. story_764726d3.
-	cfgSummary := runConfigurationPhase(ctx, docs, seedDir, workspaceID, actor, now)
-	summary.Add(cfgSummary)
 	return summary, nil
 }
 
@@ -119,79 +112,6 @@ func runPrinciplePhase(ctx context.Context, docs document.Store, seedDir, worksp
 				Path:   string(KindPrinciple) + "/" + in.Name,
 				Reason: err.Error(),
 			})
-			continue
-		}
-		switch {
-		case res.Created:
-			summary.Created++
-		case res.Changed:
-			summary.Updated++
-		default:
-			summary.Skipped++
-		}
-	}
-	return summary
-}
-
-// runConfigurationPhase loads `configurations/*.md` and upserts each as
-// a scope=system type=configuration document. Refs are resolved by name
-// against the doc store (which the agent/contract/workflow phases have
-// already populated).
-func runConfigurationPhase(ctx context.Context, docs document.Store, seedDir, workspaceID, actor string, now time.Time) Summary {
-	summary := Summary{}
-	subdir := filepath.Join(seedDir, kindSubdir(KindConfiguration))
-	entries, err := os.ReadDir(subdir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return summary
-		}
-		summary.Errors = append(summary.Errors, ErrorEntry{Path: subdir, Reason: fmt.Sprintf("read dir: %v", err)})
-		return summary
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-
-	resolveBy := func(docType string) func(name string) (string, bool) {
-		return func(name string) (string, bool) {
-			rows, err := docs.List(ctx, document.ListOptions{Type: docType, Scope: document.ScopeSystem, Limit: 500}, nil)
-			if err != nil {
-				return "", false
-			}
-			for _, r := range rows {
-				if r.Name == name && r.Status == document.StatusActive {
-					return r.ID, true
-				}
-			}
-			return "", false
-		}
-	}
-	resolveContract := resolveBy(document.TypeContract)
-	resolveSkill := resolveBy(document.TypeSkill)
-	resolvePrinciple := resolveBy(document.TypePrinciple)
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(subdir, entry.Name())
-		content, err := os.ReadFile(path)
-		if err != nil {
-			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: fmt.Sprintf("read: %v", err)})
-			continue
-		}
-		fm, body, err := Parse(content)
-		if err != nil {
-			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: fmt.Sprintf("parse: %v", err)})
-			continue
-		}
-		input, err := configurationToInput(fm, body, resolveContract, resolveSkill, resolvePrinciple, workspaceID, actor)
-		if err != nil {
-			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: err.Error()})
-			continue
-		}
-		summary.Loaded++
-		res, err := docs.Upsert(ctx, input, now)
-		if err != nil {
-			summary.Errors = append(summary.Errors, ErrorEntry{Path: path, Reason: err.Error()})
 			continue
 		}
 		switch {

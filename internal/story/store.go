@@ -20,24 +20,10 @@ const LedgerEntryType = "story.status_change"
 // ErrNotFound is returned when a story lookup misses.
 var ErrNotFound = errors.New("story: not found")
 
-// ErrDanglingConfigurationID is returned when a write references a
-// ConfigurationID that does not resolve to an active type=configuration
-// document inside the same workspace visibility. The handler edge runs
-// the lookup; the store returns this sentinel for callers that want to
-// dispatch on it. story_4ca6cb1b.
-var ErrDanglingConfigurationID = errors.New("story: configuration_id does not resolve to an active type=configuration document")
-
 // UpdateFields names the per-call mutable subset for Update. Nil-valued
-// fields mean "leave alone"; non-nil means "set to this value". For
-// ConfigurationID, a non-nil pointer to an empty string clears the
-// assignment; a non-nil pointer to a non-empty string sets it.
-//
-// story_4ca6cb1b: Update is intentionally narrow — only ConfigurationID
-// for now. Future stories may widen the surface explicitly per
-// pr_no_unrequested_compat.
-type UpdateFields struct {
-	ConfigurationID *string
-}
+// fields mean "leave alone"; non-nil means "set to this value". The
+// struct is intentionally narrow; widen explicitly per pr_no_unrequested_compat.
+type UpdateFields struct{}
 
 // ListOptions filters a List call.
 type ListOptions struct {
@@ -69,25 +55,18 @@ func (o ListOptions) normalised() ListOptions {
 // pr_no_unrequested_compat.
 type Store interface {
 	Create(ctx context.Context, s Story, now time.Time) (Story, error)
-	// GetByID / List / UpdateStatus / Update / ListByConfigurationID all
-	// take a memberships slice: nil = no scoping, empty = deny-all,
-	// non-empty = workspace_id IN memberships. See docs/architecture.md §8.
+	// GetByID / List / UpdateStatus / Update all take a memberships
+	// slice: nil = no scoping, empty = deny-all, non-empty = workspace_id
+	// IN memberships. See docs/architecture.md §8.
 	GetByID(ctx context.Context, id string, memberships []string) (Story, error)
 	List(ctx context.Context, projectID string, opts ListOptions, memberships []string) ([]Story, error)
 	UpdateStatus(ctx context.Context, id, newStatus, actor string, now time.Time, memberships []string) (Story, error)
 
 	// Update applies fields to the story with the given id. Fields whose
 	// pointer is nil are left untouched. Status, immutable identity
-	// fields (id, project_id, workspace_id, title), and timestamps are
-	// not eligible — UpdateStatus owns status; identity is set at Create.
-	// story_4ca6cb1b.
+	// fields, and timestamps are not eligible — UpdateStatus owns status;
+	// identity is set at Create.
 	Update(ctx context.Context, id string, fields UpdateFields, actor string, now time.Time, memberships []string) (Story, error)
-
-	// ListByConfigurationID returns stories whose ConfigurationID
-	// matches. Empty `id` returns nil (no caller benefits from the
-	// "configuration_id IS NULL" set; that's covered by List). The
-	// caller filters by status as needed. story_4ca6cb1b.
-	ListByConfigurationID(ctx context.Context, id string, memberships []string) ([]Story, error)
 
 	// BackfillWorkspaceID stamps workspaceID on every row with ProjectID ==
 	// projectID whose workspace_id is empty. Returns the number of rows
@@ -261,38 +240,10 @@ func (m *MemoryStore) Update(ctx context.Context, id string, fields UpdateFields
 	if !inStoryMemberships(s.WorkspaceID, memberships) {
 		return Story{}, ErrNotFound
 	}
-	if fields.ConfigurationID != nil {
-		if *fields.ConfigurationID == "" {
-			s.ConfigurationID = nil
-		} else {
-			v := *fields.ConfigurationID
-			s.ConfigurationID = &v
-		}
-	}
+	_ = fields
 	s.UpdatedAt = now
 	m.rows[id] = s
 	return s, nil
-}
-
-// ListByConfigurationID implements Store for MemoryStore.
-func (m *MemoryStore) ListByConfigurationID(ctx context.Context, id string, memberships []string) ([]Story, error) {
-	if id == "" {
-		return nil, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]Story, 0)
-	for _, s := range m.rows {
-		if s.ConfigurationID == nil || *s.ConfigurationID != id {
-			continue
-		}
-		if !inStoryMemberships(s.WorkspaceID, memberships) {
-			continue
-		}
-		out = append(out, s)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	return out, nil
 }
 
 // BackfillWorkspaceID implements Store for MemoryStore.

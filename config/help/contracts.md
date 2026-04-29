@@ -38,6 +38,7 @@ structured payload (`permitted_actions`, `evidence_required`,
 
 - Contract order is enforced server-side. A story cannot skip
   preplan, even when the change appears trivial.
-- Contracts cannot be redefined per-story. If a story needs a new
-  shape, file a `type=configuration` document for that project and
-  reference it from the story.
+- Contracts cannot be redefined per-story. If a story needs a
+  different workflow shape, the orchestrator agent passes
+  `proposed_contracts` to `satellites_story_workflow_claim` to override
+  the project default.

@@ -231,11 +231,11 @@ func TestValidate_TypeEnum(t *testing.T) {
 		{TypeSkill, false},
 		{TypeAgent, false},
 		{TypeRole, false},
-		{TypeConfiguration, false},
 		{TypeWorkflow, false},
 		{TypeHelp, false},
 		{"", true},
 		{"architecture", true},
+		{"configuration", true},
 		{"random", true},
 	}
 	for _, tc := range cases {
@@ -257,13 +257,6 @@ func TestValidate_TypeEnum(t *testing.T) {
 		if tc.typ == TypeSkill || tc.typ == TypeReviewer {
 			d.ContractBinding = StringPtr("doc_contract")
 		}
-		// Configuration requires non-empty Structured per its Validate
-		// branch; supply a minimal payload so the type-enum check passes
-		// for the happy-path row (FK validation runs at the store layer,
-		// not in Document.Validate).
-		if tc.typ == TypeConfiguration {
-			d.Structured = []byte(`{"contract_refs":[],"skill_refs":[],"principle_refs":[]}`)
-		}
 		// type=help is system-scope and requires a body. story_cc5c67a9.
 		if tc.typ == TypeHelp {
 			d.Scope = ScopeSystem
@@ -283,49 +276,6 @@ func TestValidate_TypeEnum(t *testing.T) {
 		if !tc.wantErr && err != nil {
 			t.Errorf("Validate(type=%q) rejected: %v", tc.typ, err)
 		}
-	}
-}
-
-func TestValidate_ConfigurationShape(t *testing.T) {
-	t.Parallel()
-	good := []byte(`{"contract_refs":[],"skill_refs":[],"principle_refs":[]}`)
-	cases := []struct {
-		name       string
-		scope      string
-		structured []byte
-		binding    *string
-		wantErr    bool
-	}{
-		{"happy", ScopeProject, good, nil, false},
-		// story_764726d3 — system-scope Configurations are now accepted so
-		// configseed can ship a default Configuration operators clone.
-		{"scope=system accepted", ScopeSystem, good, nil, false},
-		{"scope=workspace rejected", ScopeWorkspace, good, nil, true},
-		{"empty structured rejected", ScopeProject, nil, nil, true},
-		{"contract_binding rejected", ScopeProject, good, StringPtr("doc_x"), true},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			d := Document{
-				Type:            TypeConfiguration,
-				Scope:           tc.scope,
-				Name:            "frontend",
-				Structured:      tc.structured,
-				ContractBinding: tc.binding,
-			}
-			if tc.scope == ScopeProject {
-				d.ProjectID = StringPtr("proj_x")
-			}
-			err := d.Validate()
-			if tc.wantErr && err == nil {
-				t.Errorf("Validate accepted; want rejection")
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("Validate rejected: %v", err)
-			}
-		})
 	}
 }
 

@@ -14,12 +14,6 @@ import (
 // Story is the unit of deliverable work. Tags carry epic membership via
 // the `epic:<slug>` convention. WorkspaceID cascades from the parent
 // project at write time per docs/architecture.md §8.
-//
-// ConfigurationID, when non-nil, names a `type=configuration` document
-// (story_d371f155 substrate) whose ContractRefs / SkillRefs /
-// PrincipleRefs override the implicit project default at workflow_claim
-// time. Nil means "use the project default" — pre-existing behaviour
-// (story_4ca6cb1b).
 type Story struct {
 	ID                 string    `json:"id"`
 	WorkspaceID        string    `json:"workspace_id"`
@@ -31,7 +25,6 @@ type Story struct {
 	Priority           string    `json:"priority"`
 	Category           string    `json:"category"`
 	Tags               []string  `json:"tags"`
-	ConfigurationID    *string   `json:"configuration_id,omitempty"`
 	CreatedBy          string    `json:"created_by"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`

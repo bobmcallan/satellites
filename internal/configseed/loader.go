@@ -95,8 +95,6 @@ func kindSubdir(kind Kind) string {
 		return "contracts"
 	case KindWorkflow:
 		return "workflows"
-	case KindConfiguration:
-		return "configurations"
 	case KindPrinciple:
 		return "principles"
 	case KindHelp:

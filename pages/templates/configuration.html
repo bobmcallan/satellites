@@ -12,148 +12,14 @@
       <header class="panel-header">
         <h1>configuration</h1>
       </header>
-      {{if .Composite.Configurations}}
       <div class="panel-body">
-        <form method="get" action="/config" class="config-selector-form">
-          <label>
-            <span>configuration</span>
-            <select name="id" data-testid="config-selector"
-                    onchange="this.form.submit()">
-              {{range .Composite.Configurations}}
-              <option value="{{.ID}}"{{if eq .ID $.Composite.SelectedID}} selected{{end}}>{{.Name}}</option>
-              {{end}}
-            </select>
-          </label>
-          <noscript><button type="submit" class="btn-secondary">apply</button></noscript>
-        </form>
         <p class="muted">
-          New Configurations are authored as <code>type=configuration</code>
-          documents — open the <a href="/documents" data-testid="config-new">documents browser</a>
-          to create one, or visit a project's
-          <a href="/projects">configuration page</a>.
+          The orchestrator agent composes a per-story plan dynamically from the
+          system catalog below — there is no stored configuration to select.
+          See <a href="/help">help</a> for the orchestrator-driven model.
         </p>
       </div>
-      {{else}}
-      <div class="panel-body panel-body-compact" data-testid="config-empty-banner">
-        <span class="muted" data-testid="config-empty">No Configurations yet.</span>
-        <a href="/documents" class="btn-secondary" data-testid="config-empty-cta">Create your first Configuration</a>
-      </div>
-      {{end}}
     </section>
-
-    {{if .Composite.SelectedID}}
-    <section class="panel-headed" data-testid="config-workflow-panel">
-      <header class="panel-header">
-        <h2>workflow</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-workflow-count">({{len .Composite.Workflow}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        {{if not .Composite.Workflow}}
-          <p class="muted" data-testid="config-workflow-empty">No phases</p>
-        {{else}}
-          <ol class="document-cards" data-testid="config-workflow-list">
-            {{range .Composite.Workflow}}
-            <li data-testid="config-workflow-{{.ID}}">
-              <a href="/documents/{{.ID}}" class="document-card-link">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ol>
-        {{end}}
-      </div>
-    </section>
-
-    <section class="panel-headed" data-testid="config-contracts-panel">
-      <header class="panel-header">
-        <h2>contracts</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-contracts-count">({{len .Composite.Contracts}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        {{if not .Composite.Contracts}}
-          <p class="muted" data-testid="config-contracts-empty">No contracts</p>
-        {{else}}
-          <ul class="document-cards" data-testid="config-contracts-list">
-            {{range .Composite.Contracts}}
-            <li data-testid="config-contract-{{.ID}}">
-              <a href="/documents/{{.ID}}" class="document-card-link">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ul>
-        {{end}}
-      </div>
-    </section>
-
-    <section class="panel-headed" data-testid="config-skills-panel">
-      <header class="panel-header">
-        <h2>skills</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-skills-count">({{len .Composite.Skills}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        {{if not .Composite.Skills}}
-          <p class="muted" data-testid="config-skills-empty">No skills</p>
-        {{else}}
-          <ul class="document-cards" data-testid="config-skills-list">
-            {{range .Composite.Skills}}
-            <li data-testid="config-skill-{{.ID}}">
-              <a href="/documents/{{.ID}}" class="document-card-link">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ul>
-        {{end}}
-      </div>
-    </section>
-
-    <section class="panel-headed" data-testid="config-principles-panel">
-      <header class="panel-header">
-        <h2>principles</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-principles-count">({{len .Composite.Principles}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        {{if not .Composite.Principles}}
-          <p class="muted" data-testid="config-principles-empty">No principles</p>
-        {{else}}
-          <ul class="document-cards" data-testid="config-principles-list">
-            {{range .Composite.Principles}}
-            <li data-testid="config-principle-{{.ID}}">
-              <a href="/documents/{{.ID}}" class="document-card-link">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ul>
-        {{end}}
-      </div>
-    </section>
-    {{end}}
 
     {{if .Composite.SystemContracts}}
     <section class="panel-headed" data-testid="config-system-contracts-panel">
@@ -346,6 +212,66 @@
     </section>
     {{end}}
 
+    {{if .Composite.SystemPrinciples}}
+    <section class="panel-headed" data-testid="config-system-principles-panel">
+      <header class="panel-header">
+        <h2>system principles</h2>
+        <span class="panel-header-meta">
+          <code data-testid="config-system-principles-count">({{len .Composite.SystemPrinciples}})</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        <p class="muted">Active principles seeded from <code>config/seed/principles/</code>. Read-only — edit the seed file and reseed to change.</p>
+        <table class="data-table system-doc-table" data-testid="config-system-principles-list" x-data="{ open: null }">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>project</th>
+              <th>category</th>
+              <th>scope</th>
+              <th>status</th>
+              <th>phase</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Composite.SystemPrinciples}}
+            <tr class="system-doc-row" data-testid="config-system-principle-{{.ID}}"
+                @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
+              <td><strong>{{.Name}}</strong></td>
+              <td><span class="muted">—</span></td>
+              <td><code class="category-pill">principle</code></td>
+              <td><code class="scope-pill">{{.Scope}}</code></td>
+              <td><code class="status-pill">{{.Status}}</code></td>
+              <td><span class="muted">—</span></td>
+            </tr>
+            <tr class="system-doc-expansion" x-show="open === '{{.ID}}'" x-cloak>
+              <td colspan="6">
+                {{if .Body}}
+                <div class="system-doc-section">
+                  <pre class="system-doc-body">{{.Body}}</pre>
+                </div>
+                {{end}}
+                {{if .Tags}}
+                <div class="system-doc-section">
+                  <span class="muted">Tags:</span>
+                  {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+                </div>
+                {{end}}
+                <div class="system-doc-meta">
+                  <code class="muted">{{.ID}}</code>
+                  <span class="muted">v{{.Version}}</span>
+                  <span class="muted">created <time>{{.CreatedAt}}</time></span>
+                  <span class="muted">updated <time>{{.UpdatedAt}}</time></span>
+                </div>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {{end}}
+
     <section class="panel-headed" data-testid="config-agents-panel">
       <header class="panel-header">
         <h2>agents</h2>
@@ -392,50 +318,6 @@
         {{end}}
       </div>
     </section>
-
-    {{if .Composite.SelectedID}}
-    {{if .Composite.PerPhaseAllocation}}
-    <section class="panel-headed" data-testid="config-allocation-panel">
-      <header class="panel-header">
-        <h2>per-phase allocation</h2>
-        <span class="panel-header-meta">
-          <code data-testid="config-allocation-count">({{len .Composite.PerPhaseAllocation}})</code>
-        </span>
-      </header>
-      <div class="panel-body">
-        <p class="muted">
-          Agent allocation for stories that use the selected Configuration's workflow.
-        </p>
-        <table class="data-table" data-testid="config-allocation-list">
-          <thead>
-            <tr><th>contract</th><th>agent</th><th>story</th></tr>
-          </thead>
-          <tbody>
-            {{range .Composite.PerPhaseAllocation}}
-            <tr data-testid="config-allocation-{{.ContractID}}">
-              <td><code>{{.ContractName}}</code></td>
-              <td>
-                {{if .AgentID}}
-                  <a href="{{.AgentHref}}" data-testid="config-allocation-agent"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
-                {{else}}
-                  <span class="muted">unallocated</span>
-                {{end}}
-              </td>
-              <td>
-                {{if .StoryID}}
-                  <a href="{{.StoryHref}}"><code>{{.StoryID}}</code></a>
-                {{else}}
-                  <span class="muted">—</span>
-                {{end}}
-              </td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-    </section>
-    {{end}}
-    {{end}}
   </main>
   {{template "footer.html" .}}
 </body>

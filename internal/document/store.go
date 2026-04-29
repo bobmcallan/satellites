@@ -26,18 +26,6 @@ var ErrImmutableField = errors.New("document: field is immutable")
 // inside the same workspace visibility.
 var ErrDanglingBinding = errors.New("document: contract_binding does not resolve to an active type=contract document")
 
-// ErrDanglingConfigurationRef is returned when a type=configuration write
-// references a contract/skill/principle id that does not resolve to an
-// active document of the expected type within the same workspace
-// visibility. story_d371f155.
-var ErrDanglingConfigurationRef = errors.New("document: configuration references an id that does not resolve to an active document of the expected type")
-
-// ErrDanglingAgentDefaultConfigurationID is returned when a type=agent
-// write carries a Structured payload whose default_configuration_id
-// does not resolve to an active type=configuration document in the
-// same workspace visibility. story_fb600b97.
-var ErrDanglingAgentDefaultConfigurationID = errors.New("document: agent default_configuration_id does not resolve to an active type=configuration document")
-
 // UpsertResult is the outcome of Upsert. Changed==false means the body
 // matched the existing hash, so version and body were left untouched.
 type UpsertResult struct {
@@ -169,15 +157,6 @@ type Store interface {
 	// the same memberships predicate as the other read paths via
 	// GetByID; an empty memberships slice denies all.
 	ListVersions(ctx context.Context, documentID string, memberships []string) ([]DocumentVersion, error)
-
-	// ListAgentsByDefaultConfigurationID returns active type=agent
-	// documents whose Structured payload references the supplied
-	// configuration id. Used by the reverse-FK gate in
-	// handleDocumentDelete to refuse deletion of a Configuration that
-	// any agent has registered as its default. Empty configurationID
-	// returns nil; no caller benefits from "agents with no default"
-	// here (that's covered by List). story_fb600b97.
-	ListAgentsByDefaultConfigurationID(ctx context.Context, configurationID string, memberships []string) ([]Document, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -254,85 +233,6 @@ func (m *MemoryStore) validateBindingLocked(binding *string) error {
 	return nil
 }
 
-// validateConfigurationRefsLocked enforces FK integrity for a
-// type=configuration write — every id in the payload's contract_refs /
-// skill_refs / principle_refs must resolve to an active document of the
-// matching type inside the candidate's workspace. workspaceID is the
-// candidate document's WorkspaceID (refs cannot cross workspaces per
-// pr_0779e5af). Caller must hold m.mu. Returns a wrapped
-// ErrDanglingConfigurationRef whose message names the first failing id +
-// the expected type so the caller can surface a precise reason.
-// story_d371f155.
-func (m *MemoryStore) validateConfigurationRefsLocked(structured []byte, workspaceID string) error {
-	cfg, err := UnmarshalConfiguration(structured)
-	if err != nil {
-		return err
-	}
-	check := func(refs []string, wantType string) error {
-		for _, id := range refs {
-			if id == "" {
-				return fmt.Errorf("%w: empty %s ref", ErrDanglingConfigurationRef, wantType)
-			}
-			target, ok := m.rows[id]
-			if !ok {
-				return fmt.Errorf("%w: %s id %q not found", ErrDanglingConfigurationRef, wantType, id)
-			}
-			if target.Type != wantType {
-				return fmt.Errorf("%w: id %q is type=%s, want type=%s", ErrDanglingConfigurationRef, id, target.Type, wantType)
-			}
-			if target.Status != StatusActive {
-				return fmt.Errorf("%w: %s id %q is not active", ErrDanglingConfigurationRef, wantType, id)
-			}
-			if workspaceID != "" && target.WorkspaceID != "" && target.WorkspaceID != workspaceID {
-				return fmt.Errorf("%w: %s id %q is in a different workspace", ErrDanglingConfigurationRef, wantType, id)
-			}
-		}
-		return nil
-	}
-	if err := check(cfg.ContractRefs, TypeContract); err != nil {
-		return err
-	}
-	if err := check(cfg.SkillRefs, TypeSkill); err != nil {
-		return err
-	}
-	if err := check(cfg.PrincipleRefs, TypePrinciple); err != nil {
-		return err
-	}
-	return nil
-}
-
-// validateAgentSettingsLocked enforces FK integrity for a type=agent
-// write — when the Structured payload contains a default_configuration_id,
-// the id must resolve to an active type=configuration document in the
-// same workspace. Caller must hold m.mu. story_fb600b97.
-func (m *MemoryStore) validateAgentSettingsLocked(structured []byte, workspaceID string) error {
-	if len(structured) == 0 {
-		return nil
-	}
-	settings, err := UnmarshalAgentSettings(structured)
-	if err != nil {
-		return err
-	}
-	if settings.DefaultConfigurationID == nil || *settings.DefaultConfigurationID == "" {
-		return nil
-	}
-	id := *settings.DefaultConfigurationID
-	target, ok := m.rows[id]
-	if !ok {
-		return fmt.Errorf("%w: id %q not found", ErrDanglingAgentDefaultConfigurationID, id)
-	}
-	if target.Type != TypeConfiguration {
-		return fmt.Errorf("%w: id %q is type=%s, want type=%s", ErrDanglingAgentDefaultConfigurationID, id, target.Type, TypeConfiguration)
-	}
-	if target.Status != StatusActive {
-		return fmt.Errorf("%w: id %q is not active", ErrDanglingAgentDefaultConfigurationID, id)
-	}
-	if workspaceID != "" && target.WorkspaceID != "" && target.WorkspaceID != workspaceID {
-		return fmt.Errorf("%w: id %q is in a different workspace", ErrDanglingAgentDefaultConfigurationID, id)
-	}
-	return nil
-}
-
 // Upsert implements Store for MemoryStore.
 func (m *MemoryStore) Upsert(ctx context.Context, in UpsertInput, now time.Time) (UpsertResult, error) {
 	m.mu.Lock()
@@ -360,16 +260,6 @@ func (m *MemoryStore) Upsert(ctx context.Context, in UpsertInput, now time.Time)
 	}
 	if err := m.validateBindingLocked(in.ContractBinding); err != nil {
 		return UpsertResult{}, err
-	}
-	if in.Type == TypeConfiguration {
-		if err := m.validateConfigurationRefsLocked(in.Structured, in.WorkspaceID); err != nil {
-			return UpsertResult{}, err
-		}
-	}
-	if in.Type == TypeAgent {
-		if err := m.validateAgentSettingsLocked(in.Structured, in.WorkspaceID); err != nil {
-			return UpsertResult{}, err
-		}
 	}
 	if existing, ok := m.findByName(projectID, in.Name); ok {
 		// Body-hash match short-circuits unless the type has drifted —
@@ -417,16 +307,6 @@ func (m *MemoryStore) Create(ctx context.Context, doc Document, now time.Time) (
 	}
 	if err := m.validateBindingLocked(doc.ContractBinding); err != nil {
 		return Document{}, err
-	}
-	if doc.Type == TypeConfiguration {
-		if err := m.validateConfigurationRefsLocked(doc.Structured, doc.WorkspaceID); err != nil {
-			return Document{}, err
-		}
-	}
-	if doc.Type == TypeAgent {
-		if err := m.validateAgentSettingsLocked(doc.Structured, doc.WorkspaceID); err != nil {
-			return Document{}, err
-		}
 	}
 	if doc.ID == "" {
 		doc.ID = NewID()
@@ -481,16 +361,6 @@ func (m *MemoryStore) Update(ctx context.Context, id string, fields UpdateFields
 	}
 	if err := doc.Validate(); err != nil {
 		return Document{}, err
-	}
-	if doc.Type == TypeConfiguration && fields.Structured != nil {
-		if err := m.validateConfigurationRefsLocked(doc.Structured, doc.WorkspaceID); err != nil {
-			return Document{}, err
-		}
-	}
-	if doc.Type == TypeAgent && fields.Structured != nil {
-		if err := m.validateAgentSettingsLocked(doc.Structured, doc.WorkspaceID); err != nil {
-			return Document{}, err
-		}
 	}
 	doc.UpdatedAt = now
 	doc.UpdatedBy = actor
@@ -727,35 +597,6 @@ func (m *MemoryStore) Count(ctx context.Context, projectID string, memberships [
 		n++
 	}
 	return n, nil
-}
-
-// ListAgentsByDefaultConfigurationID implements Store for MemoryStore.
-// story_fb600b97.
-func (m *MemoryStore) ListAgentsByDefaultConfigurationID(ctx context.Context, configurationID string, memberships []string) ([]Document, error) {
-	if configurationID == "" {
-		return nil, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]Document, 0)
-	for _, d := range m.rows {
-		if d.Type != TypeAgent || d.Status != StatusActive {
-			continue
-		}
-		if !inDocMemberships(d.WorkspaceID, memberships) {
-			continue
-		}
-		settings, err := UnmarshalAgentSettings(d.Structured)
-		if err != nil {
-			continue
-		}
-		if settings.DefaultConfigurationID == nil || *settings.DefaultConfigurationID != configurationID {
-			continue
-		}
-		out = append(out, d)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
-	return out, nil
 }
 
 // inDocMemberships is the shared membership predicate. nil = no filter,

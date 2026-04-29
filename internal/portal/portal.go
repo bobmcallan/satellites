@@ -1685,7 +1685,7 @@ func (p *Portal) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
-	composite := buildConfigComposite(r.Context(), p.documents, p.contracts, p.stories, memberships, r.URL.Query().Get("id"))
+	composite := buildConfigComposite(r.Context(), p.documents, memberships)
 	data := configPageData{
 		Title:           buildPageTitle(active, "", "config"),
 		Version:         config.Version,
