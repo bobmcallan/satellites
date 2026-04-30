@@ -70,8 +70,9 @@ func TestPortal_AuthedWalk(t *testing.T) {
 		t.Errorf("workspace switcher menu has %d children; expected ≥1 (placeholder OR switch target) — story_690b8f5c regression guard", menuChildren)
 	}
 
-	// Step 3 — click PROJECTS link; assert ≥1 row in the data table
-	// (covers story_0f415ab3 regression).
+	// Step 3 — click PROJECTS link; assert the harness project renders.
+	// sty_c975ebeb removed the production auto-Default seed; the harness
+	// creates HarnessProjectName so this assertion still has data.
 	var projectRows int
 	var projectsBody string
 	if err := chromedp.Run(browserCtx,
@@ -83,10 +84,10 @@ func TestPortal_AuthedWalk(t *testing.T) {
 		t.Fatalf("/projects navigate: %v", err)
 	}
 	if projectRows < 1 {
-		t.Errorf("/projects rendered %d project rows; expected ≥1 (per-user default seed) — story_0f415ab3 regression guard\nbody=%s", projectRows, projectsBody)
+		t.Errorf("/projects rendered %d project rows; expected ≥1 (harness project)\nbody=%s", projectRows, projectsBody)
 	}
 	if strings.Contains(projectsBody, "You don't own any projects yet") {
-		t.Errorf("/projects shows empty-state copy after dev signin — bodyText=%s", projectsBody)
+		t.Errorf("/projects shows empty-state copy when harness project should be visible — bodyText=%s", projectsBody)
 	}
 
 	// Step 4 — click TASKS link; the panel must render. Empty-state copy

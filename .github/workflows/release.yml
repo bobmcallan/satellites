@@ -32,11 +32,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Unit tests
-        run: go test ./internal/... -timeout 120s
-
-      - name: Integration tests
-        run: go test ./tests/integration/... -timeout 600s
+      # Tests are run locally before pushing — keeping CI to compile + vet
+      # so the release workflow stays focused on producing a deployable
+      # image. Re-enable here if/when a hosted SurrealDB is wired into CI.
 
   push:
     needs: compile

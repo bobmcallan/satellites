@@ -54,6 +54,12 @@ import (
 // Harness owns the in-process satellites server plus the test-only knobs
 // (DisableWS / EnableWS, PublishEvent) the chromedp tests use to simulate
 // outage and inject observable hub events.
+
+// HarnessProjectName is the explicit project the portalui harness creates
+// after seeding its dev user. Tests assert visibility against this name
+// (rather than the legacy "Default" auto-seed string) — sty_c975ebeb.
+const HarnessProjectName = "harness-test"
+
 type Harness struct {
 	Server      *httptest.Server
 	BaseURL     string
@@ -135,10 +141,12 @@ func StartHarness(t *testing.T) *Harness {
 	ledgerStore := ledger.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledgerStore)
 	projectStore := project.NewMemoryStore()
-	// Mirror the production OnUserCreated hook so the dev-user lands on a
-	// non-empty /projects panel without driving the full login flow.
-	if _, err := project.EnsureDefault(context.Background(), projectStore, logger, user.ID, ws.ID, now); err != nil {
-		t.Fatalf("seed default project: %v", err)
+	// Production no longer auto-seeds a per-user Default project on first
+	// login (sty_c975ebeb). The harness creates one explicit project so
+	// tests still have something to render against; assertions reference
+	// this name rather than the legacy "Default" literal.
+	if _, err := projectStore.Create(context.Background(), user.ID, ws.ID, HarnessProjectName, now); err != nil {
+		t.Fatalf("seed harness project: %v", err)
 	}
 	docStore := document.NewMemoryStore()
 	contractStore := contract.NewMemoryStore(docStore, storyStore)

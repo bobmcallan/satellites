@@ -10,11 +10,12 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestProjects_DevUserSeesDefaultProject covers AC2+AC3 of story_0f415ab3:
-// after dev-signin the /projects panel renders at least one project row
-// (the per-user default seeded by project.EnsureDefault) instead of the
-// empty-state copy.
-func TestProjects_DevUserSeesDefaultProject(t *testing.T) {
+// TestProjects_DevUserSeesHarnessProject covers the post-sty_c975ebeb
+// shape: production no longer auto-seeds a per-user Default project, but
+// the portalui harness creates one explicit project (HarnessProjectName)
+// so the SSR list view still has data to render. The test asserts the
+// harness project appears and the empty-state copy does not.
+func TestProjects_DevUserSeesHarnessProject(t *testing.T) {
 	h := StartHarness(t)
 
 	parent, cancel := withTimeout(context.Background(), browserDeadline)
@@ -38,9 +39,12 @@ func TestProjects_DevUserSeesDefaultProject(t *testing.T) {
 	}
 
 	if rowCount < 1 {
-		t.Errorf("/projects rendered %d rows; want ≥1 (per-user default seed)", rowCount)
+		t.Errorf("/projects rendered %d rows; want ≥1 (harness project)", rowCount)
+	}
+	if !strings.Contains(bodyText, HarnessProjectName) {
+		t.Errorf("/projects missing harness project %q; bodyText=%s", HarnessProjectName, bodyText)
 	}
 	if strings.Contains(bodyText, "You don't own any projects yet") {
-		t.Errorf("/projects shows empty-state copy for dev-user; bodyText=%s", bodyText)
+		t.Errorf("/projects shows empty-state copy when harness project should be visible; bodyText=%s", bodyText)
 	}
 }
