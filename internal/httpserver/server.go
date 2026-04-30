@@ -70,6 +70,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, registra
 		mux:       http.NewServeMux(),
 	}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
+	// Alias for the v3-era /api/health probe. The Fly app's existing
+	// machine config (carried over from v3) checks /api/health; keeping
+	// the alias avoids a Fly-config rebuild for every v4 deploy.
+	s.mux.HandleFunc("GET /api/health", s.healthz)
 	for _, r := range registrars {
 		r.Register(s.mux)
 	}
