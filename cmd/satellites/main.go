@@ -143,15 +143,36 @@ func main() {
 		// db-available block so the !DBDSN path skips it entirely (the
 		// fallback warning lives in the bearerValidator block below).
 		oauthStore := auth.NewSurrealOAuthStore(conn, logger)
+		// resolveSessionUser closes over the SessionStore + UserStore so
+		// the OAuth-AS shortcircuit at /oauth/authorize can detect an
+		// already-logged-in browser session and skip the mcp_session_id
+		// bridge entirely. Returns "" when no cookie / invalid session,
+		// causing the AS to fall through to the bridge dance.
+		resolveSessionUser := func(r *http.Request) string {
+			id := auth.ReadCookie(r)
+			if id == "" {
+				return ""
+			}
+			sess, err := sessions.Get(id)
+			if err != nil {
+				return ""
+			}
+			user, err := users.GetByID(sess.UserID)
+			if err != nil {
+				return ""
+			}
+			return user.ID
+		}
 		oauthServer = auth.NewOAuthServer(auth.OAuthServerConfig{
-			JWTSecret:       cfg.JWTSecret,
-			Issuer:          cfg.OAuthIssuer,
-			AccessTokenTTL:  cfg.OAuthAccessTokenTTL,
-			RefreshTokenTTL: cfg.OAuthRefreshTokenTTL,
-			CodeTTL:         cfg.OAuthCodeTTL,
-			Store:           oauthStore,
-			Logger:          logger,
-			DevMode:         cfg.DevMode,
+			JWTSecret:          cfg.JWTSecret,
+			Issuer:             cfg.OAuthIssuer,
+			AccessTokenTTL:     cfg.OAuthAccessTokenTTL,
+			RefreshTokenTTL:    cfg.OAuthRefreshTokenTTL,
+			CodeTTL:            cfg.OAuthCodeTTL,
+			Store:              oauthStore,
+			Logger:             logger,
+			DevMode:            cfg.DevMode,
+			ResolveSessionUser: resolveSessionUser,
 		})
 		authHandlers.OAuthServer = oauthServer
 
@@ -341,6 +362,13 @@ func main() {
 	if err != nil {
 		logger.Error().Str("error", err.Error()).Msg("portal init failed")
 		os.Exit(1)
+	}
+	if oauthServer != nil {
+		// Defense-in-depth: when the AS shortcircuit at /oauth/authorize
+		// doesn't fire (e.g. user not yet logged in) the browser bounces
+		// through /?mcp_session=… and the portal landing must complete
+		// the flow if the user is already authenticated.
+		portalHandlers.SetOAuthServer(oauthServer)
 	}
 
 	// Websocket hub (slice 10.1) + workspace-aware AuthHub (slice 10.2) +

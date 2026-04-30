@@ -52,6 +52,15 @@ type Portal struct {
 	workspaces        workspace.Store
 	startedAt         time.Time
 	globalAdminEmails map[string]struct{}
+	oauthServer       *auth.OAuthServer
+}
+
+// SetOAuthServer wires the MCP-spec OAuth Authorization Server so the
+// portal landing handler can complete a pending OAuth flow when the
+// user arrives at /?mcp_session=… already authenticated. nil disables
+// the bridge — used by tests that don't construct an OAuthServer.
+func (p *Portal) SetOAuthServer(srv *auth.OAuthServer) {
+	p.oauthServer = srv
 }
 
 // New constructs the Portal handler set. Template parsing errors return
@@ -358,6 +367,32 @@ func (p *Portal) handleLanding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		p.renderLanding(w, r)
 		return
+	}
+	// MCP OAuth bridge: when an already-logged-in user lands here with
+	// the mcp_session_id cookie set (e.g. /oauth/authorize redirected
+	// here without short-circuiting, or the AS shortcircuit failed mid-
+	// flight), complete the pending OAuth flow and redirect to the MCP
+	// client's redirect_uri instead of rendering the dashboard. The
+	// bridge cookie is cleared on every attempt.
+	if p.oauthServer != nil {
+		if c, err := r.Cookie("mcp_session_id"); err == nil && c.Value != "" {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "mcp_session_id",
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   p.cfg.Env == "prod",
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   -1,
+			})
+			redirectURL, err := p.oauthServer.CompleteAuthorization(r.Context(), c.Value, user.ID)
+			if err == nil {
+				p.logger.Info().Str("user_id", user.ID).Msg("oauth: completed authorization via portal landing bridge")
+				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+				return
+			}
+			p.logger.Warn().Str("error", err.Error()).Msg("oauth: portal landing bridge complete failed; rendering dashboard")
+		}
 	}
 	active, chips, memberships := p.activeWorkspace(r, user)
 	data := landingData{

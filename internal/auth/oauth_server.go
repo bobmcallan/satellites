@@ -57,6 +57,14 @@ type OAuthServerConfig struct {
 	// DevMode disables Secure on the mcp_session_id cookie so local
 	// http://localhost browser flows work.
 	DevMode bool
+	// ResolveSessionUser inspects an incoming /oauth/authorize request and
+	// returns the already-logged-in user id (or "" when not). When non-nil
+	// AND it returns a user id, /oauth/authorize short-circuits straight
+	// into CompleteAuthorization, skipping the mcp_session_id cookie +
+	// portal-bounce dance. Wired from main() with the V4 SessionStore +
+	// UserStore — the V3 JWT-cookie shortcut doesn't apply here because
+	// V4 session cookies are opaque UUIDs.
+	ResolveSessionUser func(r *http.Request) string
 }
 
 // OAuthServer is the MCP-spec OAuth 2.1 Authorization Server. Long-lived;
@@ -393,18 +401,15 @@ func (s *OAuthServer) setSessionCookieAndRedirect(w http.ResponseWriter, r *http
 	http.Redirect(w, r, "/?mcp_session="+sessionID, http.StatusFound)
 }
 
-// extractSessionUserID resolves the satellites_session cookie to a user
-// id when the JWT validates. Empty when no cookie / invalid JWT.
+// extractSessionUserID consults the operator-supplied ResolveSessionUser
+// callback. Empty when the callback is unwired or returns "" (no
+// already-logged-in user). Replaces the V3 JWT-cookie shortcut, which
+// doesn't apply to V4's opaque-UUID session model.
 func (s *OAuthServer) extractSessionUserID(r *http.Request) string {
-	c, err := r.Cookie("satellites_session")
-	if err != nil || c.Value == "" {
+	if s.cfg.ResolveSessionUser == nil {
 		return ""
 	}
-	claims, err := ValidateJWT(c.Value, s.JWTSecretBytes())
-	if err != nil {
-		return ""
-	}
-	return claims.Sub
+	return s.cfg.ResolveSessionUser(r)
 }
 
 // CompleteAuthorization is called by auth.Handlers.Login when it detects
