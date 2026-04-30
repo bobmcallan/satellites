@@ -76,11 +76,13 @@ func TestBuildProviderSet_BothEnabled(t *testing.T) {
 	if set.Google == nil || set.GitHub == nil {
 		t.Fatalf("both providers must be enabled; got %+v", set)
 	}
-	if !strings.HasSuffix(set.Google.OAuth2.RedirectURL, "/auth/google/callback") {
-		t.Errorf("Google redirect = %q", set.Google.OAuth2.RedirectURL)
+	// Story_40e3bd27: redirect URLs flipped to the v3-aligned path so a
+	// single OAuth client serves both pprod versions during cutover.
+	if got, want := set.Google.OAuth2.RedirectURL, "https://x/api/auth/callback/google"; got != want {
+		t.Errorf("Google redirect = %q, want %q", got, want)
 	}
-	if !strings.HasSuffix(set.GitHub.OAuth2.RedirectURL, "/auth/github/callback") {
-		t.Errorf("GitHub redirect = %q", set.GitHub.OAuth2.RedirectURL)
+	if got, want := set.GitHub.OAuth2.RedirectURL, "https://x/api/auth/callback/github"; got != want {
+		t.Errorf("GitHub redirect = %q, want %q", got, want)
 	}
 }
 
@@ -331,6 +333,78 @@ func TestOAuth_StartRedirect_Github(t *testing.T) {
 	for _, want := range []string{"client_id=gh-id", "scope=user%3Aemail", "state="} {
 		if !strings.Contains(loc, want) {
 			t.Errorf("Location = %q, missing %q", loc, want)
+		}
+	}
+}
+
+// TestOAuth_V3AlignedPaths_RegisterAlongsideLegacy covers story_40e3bd27:
+// the same handler is reachable via BOTH the legacy `/auth/<provider>/start`
+// and the v3-aligned `/api/auth/login/<provider>` paths so a single OAuth
+// client can serve v3 (current pprod) + v4 (incoming) during cutover. The
+// callback paths get the same dual-registration. Both forms must emit
+// equivalent 303 redirects to the provider's AuthURL.
+func TestOAuth_V3AlignedPaths_RegisterAlongsideLegacy(t *testing.T) {
+	t.Parallel()
+	users := NewMemoryUserStore()
+	sessions := NewMemorySessionStore()
+	states := NewStateStore(time.Minute)
+	providers := &ProviderSet{
+		Google: &Provider{
+			Name: "google",
+			OAuth2: &oauth2.Config{
+				ClientID:     "gid",
+				ClientSecret: "gs",
+				RedirectURL:  "http://localhost:8080/api/auth/callback/google",
+				Scopes:       []string{"openid", "email", "profile"},
+				Endpoint: oauth2.Endpoint{
+					AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+					TokenURL: "https://oauth2.googleapis.com/token",
+				},
+			},
+		},
+	}
+	h := &Handlers{
+		Users:     users,
+		Sessions:  sessions,
+		Logger:    satarbor.New("info"),
+		Cfg:       &config.Config{Env: "dev"},
+		Providers: providers,
+		States:    states,
+	}
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	for _, path := range []string{"/auth/google/start", "/api/auth/login/google"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("path %s: status = %d, want 303", path, rec.Code)
+		}
+		loc := rec.Header().Get("Location")
+		if !strings.HasPrefix(loc, "https://accounts.google.com/o/oauth2/v2/auth?") {
+			t.Fatalf("path %s: Location = %q, want google auth url prefix", path, loc)
+		}
+		// redirect_uri must be the v3-aligned callback regardless of which
+		// start path was used — that's the property that makes one OAuth
+		// client serve both.
+		if !strings.Contains(loc, "redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fapi%2Fauth%2Fcallback%2Fgoogle") {
+			t.Errorf("path %s: Location = %q, missing v3-aligned redirect_uri", path, loc)
+		}
+	}
+
+	// Both callback paths must be wired — direct probe for path
+	// existence (a missing route returns 404 from the mux). We use a
+	// state we deliberately don't mint so the handler short-circuits
+	// early; the meaningful signal is "not 404", proving the mux
+	// resolves the route to the handler.
+	for _, path := range []string{"/auth/google/callback", "/api/auth/callback/google"} {
+		req := httptest.NewRequest(http.MethodGet, path+"?state=missing&code=x", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound {
+			t.Errorf("path %s: route not registered (got 404)", path)
 		}
 	}
 }

@@ -107,13 +107,20 @@ func (s *StateStore) Consume(id string) error {
 func BuildProviderSet(cfg *config.Config) *ProviderSet {
 	base := cfg.OAuthRedirectBaseURL
 	set := &ProviderSet{}
+	// RedirectURL points at the v3-aligned `/api/auth/callback/<provider>`
+	// path so a single OAuth client (one Authorized redirect URI) can
+	// serve both v3 (current pprod) and v4 (incoming pprod) during the
+	// cutover window. The legacy `/auth/<provider>/callback` route is
+	// still registered (RegisterOAuth, below) but Google/GitHub no longer
+	// redirects there because the redirect_uri parameter on every auth
+	// request now uses the `/api/...` form. Story_40e3bd27.
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" && base != "" {
 		set.Google = &Provider{
 			Name: "google",
 			OAuth2: &oauth2.Config{
 				ClientID:     cfg.GoogleClientID,
 				ClientSecret: cfg.GoogleClientSecret,
-				RedirectURL:  base + "/auth/google/callback",
+				RedirectURL:  base + "/api/auth/callback/google",
 				Scopes:       []string{"openid", "email", "profile"},
 				Endpoint: oauth2.Endpoint{
 					AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
@@ -129,7 +136,7 @@ func BuildProviderSet(cfg *config.Config) *ProviderSet {
 			OAuth2: &oauth2.Config{
 				ClientID:     cfg.GithubClientID,
 				ClientSecret: cfg.GithubClientSecret,
-				RedirectURL:  base + "/auth/github/callback",
+				RedirectURL:  base + "/api/auth/callback/github",
 				Scopes:       []string{"user:email"},
 				Endpoint: oauth2.Endpoint{
 					AuthURL:  "https://github.com/login/oauth/authorize",
@@ -145,18 +152,36 @@ func BuildProviderSet(cfg *config.Config) *ProviderSet {
 // RegisterOAuth attaches per-provider /start + /callback routes on mux. Only
 // enabled providers register; callers of disabled providers get 404 from the
 // mux itself.
+//
+// As of story_40e3bd27 each provider gets two URL shapes registered for the
+// pprod cutover compat window (per pr_no_unrequested_compat — explicit AC):
+//   - legacy v4 path: GET /auth/<provider>/start + GET /auth/<provider>/callback
+//   - v3-aligned path: GET /api/auth/login/<provider> + GET /api/auth/callback/<provider>
+//
+// Both paths delegate to the same oauthStart / oauthCallback handlers. The
+// provider's RedirectURL (set in BuildProviderSet) points at the v3-aligned
+// callback path so OAuth flows always round-trip through it; the legacy
+// callback remains addressable for any caller that hits it directly.
+// Once pprod cutover completes the legacy paths can be removed in a
+// follow-up; both forms are kept active during the transition window.
 func (h *Handlers) RegisterOAuth(mux *http.ServeMux) {
 	if h.Providers == nil {
 		return
 	}
 	for _, p := range h.Providers.Enabled() {
 		provider := p // capture
-		mux.HandleFunc("GET /auth/"+provider.Name+"/start", func(w http.ResponseWriter, r *http.Request) {
+		startHandler := func(w http.ResponseWriter, r *http.Request) {
 			h.oauthStart(w, r, provider)
-		})
-		mux.HandleFunc("GET /auth/"+provider.Name+"/callback", func(w http.ResponseWriter, r *http.Request) {
+		}
+		callbackHandler := func(w http.ResponseWriter, r *http.Request) {
 			h.oauthCallback(w, r, provider)
-		})
+		}
+		// Legacy v4 paths.
+		mux.HandleFunc("GET /auth/"+provider.Name+"/start", startHandler)
+		mux.HandleFunc("GET /auth/"+provider.Name+"/callback", callbackHandler)
+		// v3-aligned paths (cutover compat).
+		mux.HandleFunc("GET /api/auth/login/"+provider.Name, startHandler)
+		mux.HandleFunc("GET /api/auth/callback/"+provider.Name, callbackHandler)
 	}
 }
 

@@ -75,6 +75,20 @@ func main() {
 	var sessions auth.SessionStore = auth.NewMemorySessionStore()
 	providers := auth.BuildProviderSet(cfg)
 	states := auth.NewStateStore(10 * time.Minute)
+	for _, p := range providers.Enabled() {
+		// Story_40e3bd27: dual-route registration is the cutover compat
+		// layer per pr_no_unrequested_compat. Surface both forms in the
+		// boot log so operators can verify the OAuth client config has
+		// both Authorized redirect URIs registered.
+		logger.Info().
+			Str("provider", p.Name).
+			Str("legacy_start", "/auth/"+p.Name+"/start").
+			Str("legacy_callback", "/auth/"+p.Name+"/callback").
+			Str("v3_aligned_login", "/api/auth/login/"+p.Name).
+			Str("v3_aligned_callback", "/api/auth/callback/"+p.Name).
+			Str("redirect_url", p.OAuth2.RedirectURL).
+			Msg("oauth: routes registered (legacy + v3-aligned for cutover)")
+	}
 	authHandlers := &auth.Handlers{
 		Users:        users,
 		Sessions:     sessions,
