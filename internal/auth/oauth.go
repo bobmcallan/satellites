@@ -262,6 +262,14 @@ func (h *Handlers) oauthCallback(w http.ResponseWriter, r *http.Request, p *Prov
 		Str("provider", p.Name).
 		Str("user_id", user.ID).
 		Msg("oauth callback success")
+
+	// MCP OAuth bridge: if the user arrived here from /oauth/authorize
+	// (provider login chosen as the IdP for an MCP client), complete the
+	// pending authorization and redirect to the client redirect_uri
+	// instead of falling back to "/".
+	if h.tryCompleteMCPAuthorization(w, r, user.ID) {
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

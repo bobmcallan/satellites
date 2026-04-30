@@ -106,36 +106,50 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		Str("session_id", sess.ID).
 		Msg("auth login success")
 
-	// MCP OAuth bridge: when the user arrived from /oauth/authorize the
-	// browser carries an mcp_session_id cookie. Complete the pending
-	// OAuth authorization, clear the bridge cookie, redirect to the MCP
-	// client's redirect_uri instead of `next`. The OAuthServer hand-off
-	// is optional — nil server skips the bridge silently.
-	if h.OAuthServer != nil {
-		if c, err := r.Cookie("mcp_session_id"); err == nil && c.Value != "" {
-			redirectURL, err := h.OAuthServer.CompleteAuthorization(r.Context(), c.Value, user.ID)
-			// Always clear the bridge cookie so a stale value doesn't
-			// trail the user across subsequent logins.
-			http.SetCookie(w, &http.Cookie{
-				Name:     "mcp_session_id",
-				Value:    "",
-				Path:     "/",
-				HttpOnly: true,
-				Secure:   !h.Cfg.DevMode,
-				SameSite: http.SameSiteLaxMode,
-				MaxAge:   -1,
-			})
-			if err != nil {
-				h.Logger.Warn().Str("error", err.Error()).Msg("oauth: complete authorization failed; falling back to default redirect")
-			} else {
-				h.Logger.Info().Str("user_id", user.ID).Msg("oauth: completed authorization via login bridge")
-				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
-				return
-			}
-		}
+	if h.tryCompleteMCPAuthorization(w, r, user.ID) {
+		return
 	}
-
 	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// tryCompleteMCPAuthorization handles the mcp_session_id bridge cookie
+// dropped by OAuthServer.HandleAuthorize. When the cookie is present and
+// OAuthServer is wired, it completes the pending OAuth authorization
+// (mints a code, deletes the OAuthSession) and writes a 303 redirect to
+// the MCP client's redirect_uri with ?code=…&state=…. Returns true when
+// it wrote a response (caller must NOT write its own redirect).
+//
+// Called from both the username/password Login path and the OAuth
+// provider callback so the bridge works regardless of how the user
+// authenticated. The bridge cookie is cleared on every call so a stale
+// value never leaks into a subsequent login.
+func (h *Handlers) tryCompleteMCPAuthorization(w http.ResponseWriter, r *http.Request, userID string) bool {
+	if h.OAuthServer == nil {
+		return false
+	}
+	c, err := r.Cookie("mcp_session_id")
+	if err != nil || c.Value == "" {
+		return false
+	}
+	// Always clear the bridge cookie up front — a stale value must not
+	// trail the user into the next login attempt.
+	http.SetCookie(w, &http.Cookie{
+		Name:     "mcp_session_id",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   !h.Cfg.DevMode,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	redirectURL, err := h.OAuthServer.CompleteAuthorization(r.Context(), c.Value, userID)
+	if err != nil {
+		h.Logger.Warn().Str("error", err.Error()).Msg("oauth: complete authorization failed; falling back to default redirect")
+		return false
+	}
+	h.Logger.Info().Str("user_id", userID).Msg("oauth: completed authorization via login bridge")
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+	return true
 }
 
 // Logout clears the session cookie and the backing store row, then redirects
