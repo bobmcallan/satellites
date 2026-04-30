@@ -2,6 +2,8 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -329,28 +331,110 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	// because needs_more responses don't include llm_usage_ledger_id
 	// in their JSON envelope (only the accepted-path response does).
 	if requireGemini {
+		expectedModel := os.Getenv("GEMINI_REVIEW_MODEL")
+		if expectedModel == "" {
+			expectedModel = "gemini-2.5-flash"
+		}
+
 		ledgerRows := callToolArray(t, ctx, mcpURL, "key_e2e", "ledger_list", map[string]any{
 			"project_id": projectID,
 			"story_id":   storyID,
 		})
-		hasLLMUsage := false
+
+		// AC1/AC2 — at least one kind:llm-usage row exists AND its
+		// structured payload validates: model matches the resolved
+		// model, tokens are non-zero. AcceptAll cannot produce these
+		// rows (writeLLMUsageRow at internal/mcpserver/close_handlers.go:667
+		// skips zero-token usage), so a passing assertion is unambiguous
+		// proof Gemini was invoked.
+		var (
+			usageRowIDs    []string
+			matchedUsageOK bool
+			lastUsageDiag  string
+		)
 		for _, raw := range ledgerRows {
 			row, _ := raw.(map[string]any)
 			tags, _ := row["tags"].([]any)
+			isUsage := false
 			for _, tg := range tags {
 				if s, _ := tg.(string); s == "kind:llm-usage" {
-					hasLLMUsage = true
-					content, _ := row["structured"].(string)
-					t.Logf("AC6: kind:llm-usage row %v: %s",
-						row["id"], truncate(content, 200))
+					isUsage = true
+					break
 				}
 			}
+			if !isUsage {
+				continue
+			}
+			rowID, _ := row["id"].(string)
+			usageRowIDs = append(usageRowIDs, rowID)
+
+			structured := decodeBase64String(asString(row["structured"]))
+			t.Logf("AC2: kind:llm-usage row %s decoded structured: %s",
+				rowID, truncate(structured, 300))
+
+			var payload struct {
+				InputTokens  int     `json:"input_tokens"`
+				OutputTokens int     `json:"output_tokens"`
+				Model        string  `json:"model"`
+				CostUSD      float64 `json:"cost_usd"`
+			}
+			if err := json.Unmarshal([]byte(structured), &payload); err != nil {
+				lastUsageDiag = "row " + rowID + " structured decode failed: " + err.Error()
+				continue
+			}
+			if payload.Model != expectedModel || payload.InputTokens == 0 || payload.OutputTokens == 0 {
+				lastUsageDiag = fmt.Sprintf(
+					"row %s payload mismatch: model=%q (want %q) input_tokens=%d output_tokens=%d",
+					rowID, payload.Model, expectedModel, payload.InputTokens, payload.OutputTokens)
+				continue
+			}
+			matchedUsageOK = true
 		}
-		assert.True(t, hasLLMUsage,
-			"AC6: SATELLITES_E2E_REQUIRE_GEMINI=1 but no kind:llm-usage ledger row was written — Gemini was not invoked or AcceptAll fired silently")
+
+		assert.NotEmpty(t, usageRowIDs,
+			"AC1: SATELLITES_E2E_REQUIRE_GEMINI=1 but no kind:llm-usage ledger row was written — "+
+				"reviewer dispatcher (internal/mcpserver/close_handlers.go::runReviewer) did not fire. "+
+				"Suspect: validation_mode mis-seeded (agent mode bypasses reviewer) OR GEMINI_API_KEY not propagated to container.")
+		assert.True(t, matchedUsageOK,
+			"AC2: kind:llm-usage rows exist but none validate: expected model=%q, non-zero tokens. "+
+				"Last diag: %s. Suspect: GEMINI_REVIEW_MODEL env override mismatched, or reviewer returned a stub UsageCost.",
+			expectedModel, lastUsageDiag)
+
+		// AC1 (negative branch) — AcceptAll's signature verdict text
+		// must NOT appear in any verdict row when REQUIRE_GEMINI=1.
+		// The literal "accepted (default AcceptAll reviewer)" is the
+		// rationale AcceptAll always emits (internal/reviewer/reviewer.go:103).
+		const acceptAllSignature = "accepted (default AcceptAll reviewer)"
+		var acceptAllRowIDs []string
+		for _, raw := range ledgerRows {
+			row, _ := raw.(map[string]any)
+			tags, _ := row["tags"].([]any)
+			isVerdict := false
+			for _, tg := range tags {
+				if s, _ := tg.(string); s == "kind:verdict" {
+					isVerdict = true
+					break
+				}
+			}
+			if !isVerdict {
+				continue
+			}
+			content := asString(row["content"])
+			structured := decodeBase64String(asString(row["structured"]))
+			if strings.Contains(content, acceptAllSignature) || strings.Contains(structured, acceptAllSignature) {
+				rowID, _ := row["id"].(string)
+				acceptAllRowIDs = append(acceptAllRowIDs, rowID)
+			}
+		}
+		assert.Empty(t, acceptAllRowIDs,
+			"AC1: SATELLITES_E2E_REQUIRE_GEMINI=1 but verdict rows %v carry AcceptAll's signature %q — "+
+				"reviewer dispatcher routed to AcceptAll instead of Gemini. "+
+				"Suspect: reviewer.NewGeminiReviewer not wired in cmd/satellites/main.go, or GEMINI_API_KEY empty inside the container.",
+			acceptAllRowIDs, acceptAllSignature)
+
 		_ = gotLLMUsage // close-response observation kept for diagnostics; ledger query is authoritative
 	} else {
-		t.Logf("AC6: SATELLITES_E2E_REQUIRE_GEMINI not set; skipping kind:llm-usage assertion (AcceptAll mode is acceptable). gotLLMUsage from close responses = %v", gotLLMUsage)
+		t.Logf("AC6: SATELLITES_E2E_REQUIRE_GEMINI not set; strict assertions skipped (AcceptAll mode is acceptable). gotLLMUsage from close responses = %v", gotLLMUsage)
 	}
 
 	// AC4 — end-state assertions.
@@ -479,6 +563,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// asString coerces an interface to string, returning "" when the
+// underlying value isn't a string (or when v is nil).
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // lookupAgentByName resolves a system-scope type=agent document by
