@@ -1,5 +1,6 @@
-# Claude Code per-machine settings (contains satellites hook token)
-.claude/settings.local.json
+# Claude Code per-machine settings (contains satellites hook token).
+# Whole directory is per-machine — never commit any of its contents.
+.claude/
 
 # Local .env files (gitignored at any depth). Use README "Server
 # configuration" for the repo-root variables and tests/.env.example
