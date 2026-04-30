@@ -66,8 +66,15 @@ package init loader (story_7f6e0f4e) walks up from its source location
 to the nearest `tests/` ancestor, reads `.env` from there, and
 propagates a whitelist of keys (`GEMINI_API_KEY`,
 `GEMINI_REVIEW_MODEL`, `EMBEDDINGS_API_KEY`, `EMBEDDINGS_PROVIDER`,
-`EMBEDDINGS_MODEL`) into the test process env. Host-exported values
+`EMBEDDINGS_MODEL`) into the **test process** env. Host-exported values
 always win.
+
+After story_b218cb81 those credentials are first-class Config fields,
+so the per-test TOML carries them into the container. `tests/.env`
+remains the host-side carrier (the loader populates `os.Getenv` for
+the test, the test reads from there and writes the TOML), but the
+canonical credential carrier in the in-container boot path is the
+TOML.
 
 **Do not put test credentials in repo-root `.env`.** That file is
 docker-compose's `env_file` and lives outside the test isolation
@@ -99,11 +106,14 @@ invisible. The new helper makes TOML the default test-config carrier.
 
 The schema reference is `tests/satellites.example.toml` — it mirrors
 the production `satellites.example.toml` so contributors can see at a
-glance which keys travel via TOML. (Note: a few env vars —
-`EMBEDDINGS_*`, `GEMINI_API_KEY`, `GEMINI_REVIEW_MODEL` — are read
-directly via `os.Getenv` in their respective packages and are not
-part of `internal/config.Config`. Migrating them into Config is a
-follow-up.)
+glance which keys travel via TOML. As of story_b218cb81, every
+production env var (including credentials — `gemini_api_key`,
+`gemini_review_model`, `embeddings_*`) lives on
+`internal/config.Config`, so the TOML can carry the entire boot
+state. The `tests/common` dotenv loader still propagates host-side
+secrets from `tests/.env` into the test process env so tests can
+read them via `os.Getenv` and write them into the per-test TOML —
+no path forwards env vars directly into the container.
 
 ### Helpers
 

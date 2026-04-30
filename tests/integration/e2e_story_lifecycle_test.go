@@ -67,39 +67,43 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 
 	docsHost := filepath.Join(repoRoot(t), "docs")
 
-	// TOML-driven boot: every shaped value lives in the TOML; only
-	// secrets and per-test overrides flow via ENV. Per
-	// project_test_env_isolation, no path here reads repo-root .env —
-	// secrets come from process env (host export or tests/.env via
-	// tests/common loader, when wired).
-	tomlPath := writeTestTOML(t, map[string]any{
-		"port":      8080,
-		"env":       "dev",
-		"log_level": "info",
-		"dev_mode":  true,
-		"docs_dir":  "/app/docs",
-	})
-
-	containerEnv := map[string]string{
-		"DB_DSN":               "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
-		"SATELLITES_API_KEYS":  "key_e2e",
-		"EMBEDDINGS_PROVIDER":  "stub",
-		"EMBEDDINGS_DIMENSION": "16",
-	}
+	// Story_b218cb81: every shaped value AND every credential lives in
+	// the TOML now. The container Env map shrinks to per-run overrides
+	// only — DB_DSN (sibling container, can't be in a checked-in TOML)
+	// and SATELLITES_API_KEYS (test-issued bearer). Credentials still
+	// originate from tests/.env via the tests/common loader (process
+	// env), but the test READS them from os.Getenv and WRITES them into
+	// the per-test TOML — no env pass-through into the container.
 	requireGemini := os.Getenv("SATELLITES_E2E_REQUIRE_GEMINI") == "1"
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if requireGemini && apiKey == "" {
 		t.Fatal("SATELLITES_E2E_REQUIRE_GEMINI=1 but GEMINI_API_KEY is empty — populate tests/.env " +
 			"(see tests/README.md 'Rotating credentials'). PASS-by-AcceptAll is rejected under this flag.")
 	}
+
+	tomlConfig := map[string]any{
+		"port":                 8080,
+		"env":                  "dev",
+		"log_level":            "info",
+		"dev_mode":             true,
+		"docs_dir":             "/app/docs",
+		"embeddings_provider":  "stub",
+		"embeddings_dimension": 16,
+	}
 	if apiKey != "" {
-		containerEnv["GEMINI_API_KEY"] = apiKey
+		tomlConfig["gemini_api_key"] = apiKey
 		if m := os.Getenv("GEMINI_REVIEW_MODEL"); m != "" {
-			containerEnv["GEMINI_REVIEW_MODEL"] = m
+			tomlConfig["gemini_review_model"] = m
 		}
-		t.Log("e2e: GEMINI_API_KEY passed through — in-container reviewer wires Gemini")
+		t.Log("e2e: GEMINI_API_KEY written into per-test TOML — in-container reviewer wires Gemini")
 	} else {
 		t.Log("e2e: GEMINI_API_KEY not set — in-container reviewer falls back to AcceptAll")
+	}
+	tomlPath := writeTestTOML(t, tomlConfig)
+
+	containerEnv := map[string]string{
+		"DB_DSN":              "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+		"SATELLITES_API_KEYS": "key_e2e",
 	}
 
 	baseURL, logs, stop := startServerWithTOML(t, ctx, startOptions{

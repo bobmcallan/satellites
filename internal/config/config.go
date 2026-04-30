@@ -116,6 +116,45 @@ type Config struct {
 	// verb allowlist covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
 	GrantsEnforced bool `toml:"grants_enforced"`
 
+	// GeminiAPIKey is the Google AI Studio key used by the close-time
+	// reviewer (cmd/satellites/main.go::buildReviewer). Empty disables
+	// the Gemini reviewer and falls back to AcceptAll. Never logged.
+	// Env override: GEMINI_API_KEY.
+	GeminiAPIKey string `toml:"gemini_api_key"`
+
+	// GeminiReviewModel names the model the Gemini reviewer calls. Empty
+	// resolves to internal/reviewer.DefaultGeminiReviewModel
+	// ("gemini-2.5-flash"). Env override: GEMINI_REVIEW_MODEL.
+	GeminiReviewModel string `toml:"gemini_review_model"`
+
+	// EmbeddingsProvider selects the embeddings backend. Canonical values:
+	// "gemini", "stub", "none" (default). Empty resolves to "none" inside
+	// embeddings.New, which disables semantic search.
+	// Env override: EMBEDDINGS_PROVIDER.
+	EmbeddingsProvider string `toml:"embeddings_provider"`
+
+	// EmbeddingsModel is the provider-specific model id (e.g.
+	// "text-embedding-004" for gemini). Empty leaves the provider's
+	// default. Env override: EMBEDDINGS_MODEL.
+	EmbeddingsModel string `toml:"embeddings_model"`
+
+	// EmbeddingsAPIKey is the provider's API key. Required when
+	// EmbeddingsProvider == "gemini"; empty under "stub"/"none". Never
+	// logged. Env override: EMBEDDINGS_API_KEY.
+	EmbeddingsAPIKey string `toml:"embeddings_api_key"`
+
+	// EmbeddingsBaseURL overrides the embeddings provider's HTTP base
+	// URL. Empty uses the provider's canonical endpoint. Tests use this
+	// to point the gemini embedder at an httptest server.
+	// Env override: EMBEDDINGS_BASE_URL.
+	EmbeddingsBaseURL string `toml:"embeddings_base_url"`
+
+	// EmbeddingsDimension is an optional override for the vector
+	// dimensionality. Used by the stub embedder; the gemini embedder
+	// reads it as a request parameter. Zero leaves the provider's
+	// default. Env override: EMBEDDINGS_DIMENSION.
+	EmbeddingsDimension int `toml:"embeddings_dimension"`
+
 	// loadedTOMLPath is set by Load() to the absolute path of the TOML
 	// file that was actually read (empty when defaults+env supplied the
 	// whole config). Read via the LoadedTOMLPath() accessor — the field
@@ -169,6 +208,13 @@ var describeTable = []FieldDoc{
 	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", Description: "Bearer tokens accepted on /mcp. TOML: native array. Env: comma-separated."},
 	{Field: "DocsDir", Env: "DOCS_DIR", Default: "/app/docs", Description: "Container-side docs volume path read by document_ingest_file."},
 	{Field: "GrantsEnforced", Env: "SATELLITES_GRANTS_ENFORCED", Default: "false", Description: "When true, MCP verbs outside the bootstrap allowlist require a covering role-grant."},
+	{Field: "GeminiAPIKey", Env: "GEMINI_API_KEY", Default: "(empty — reviewer falls back to AcceptAll)", Description: "Google AI Studio key used by the close-time reviewer. Never logged."},
+	{Field: "GeminiReviewModel", Env: "GEMINI_REVIEW_MODEL", Default: "gemini-2.5-flash", Description: "Gemini model id for the close-time reviewer. Empty resolves to the package default."},
+	{Field: "EmbeddingsProvider", Env: "EMBEDDINGS_PROVIDER", Default: "(empty — none, semantic search disabled)", Description: "Embeddings backend selector: gemini, stub, none."},
+	{Field: "EmbeddingsModel", Env: "EMBEDDINGS_MODEL", Default: "(empty — provider default)", Description: "Provider-specific embeddings model id."},
+	{Field: "EmbeddingsAPIKey", Env: "EMBEDDINGS_API_KEY", Default: "(empty — required for provider=gemini)", Description: "Embeddings provider API key. Never logged."},
+	{Field: "EmbeddingsBaseURL", Env: "EMBEDDINGS_BASE_URL", Default: "(empty — provider canonical endpoint)", Description: "Embeddings provider HTTP base URL override."},
+	{Field: "EmbeddingsDimension", Env: "EMBEDDINGS_DIMENSION", Default: "0 (provider default)", Description: "Optional embeddings vector dimensionality override."},
 }
 
 // Describe returns the canonical (Field, Env, Default, ProdRequired,
@@ -286,6 +332,13 @@ type tomlOverlay struct {
 	APIKeys              []string  `toml:"api_keys"`
 	DocsDir              *string   `toml:"docs_dir"`
 	GrantsEnforced       *bool     `toml:"grants_enforced"`
+	GeminiAPIKey         *string   `toml:"gemini_api_key"`
+	GeminiReviewModel    *string   `toml:"gemini_review_model"`
+	EmbeddingsProvider   *string   `toml:"embeddings_provider"`
+	EmbeddingsModel      *string   `toml:"embeddings_model"`
+	EmbeddingsAPIKey     *string   `toml:"embeddings_api_key"`
+	EmbeddingsBaseURL    *string   `toml:"embeddings_base_url"`
+	EmbeddingsDimension  *int      `toml:"embeddings_dimension"`
 }
 
 // applyTo copies overlay values into cfg for every non-nil field. Returns
@@ -344,6 +397,27 @@ func (o tomlOverlay) applyTo(cfg *Config) bool {
 	}
 	if o.GrantsEnforced != nil {
 		cfg.GrantsEnforced = *o.GrantsEnforced
+	}
+	if o.GeminiAPIKey != nil {
+		cfg.GeminiAPIKey = *o.GeminiAPIKey
+	}
+	if o.GeminiReviewModel != nil {
+		cfg.GeminiReviewModel = *o.GeminiReviewModel
+	}
+	if o.EmbeddingsProvider != nil {
+		cfg.EmbeddingsProvider = *o.EmbeddingsProvider
+	}
+	if o.EmbeddingsModel != nil {
+		cfg.EmbeddingsModel = *o.EmbeddingsModel
+	}
+	if o.EmbeddingsAPIKey != nil {
+		cfg.EmbeddingsAPIKey = *o.EmbeddingsAPIKey
+	}
+	if o.EmbeddingsBaseURL != nil {
+		cfg.EmbeddingsBaseURL = *o.EmbeddingsBaseURL
+	}
+	if o.EmbeddingsDimension != nil {
+		cfg.EmbeddingsDimension = *o.EmbeddingsDimension
 	}
 	return devModeSet
 }
@@ -470,6 +544,31 @@ func applyEnvOverrides(cfg *Config) error {
 			return fmt.Errorf("invalid SATELLITES_GRANTS_ENFORCED %q: %w", v, err)
 		}
 		cfg.GrantsEnforced = b
+	}
+	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
+		cfg.GeminiAPIKey = v
+	}
+	if v := os.Getenv("GEMINI_REVIEW_MODEL"); v != "" {
+		cfg.GeminiReviewModel = v
+	}
+	if v := os.Getenv("EMBEDDINGS_PROVIDER"); v != "" {
+		cfg.EmbeddingsProvider = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("EMBEDDINGS_MODEL"); v != "" {
+		cfg.EmbeddingsModel = v
+	}
+	if v := os.Getenv("EMBEDDINGS_API_KEY"); v != "" {
+		cfg.EmbeddingsAPIKey = v
+	}
+	if v := os.Getenv("EMBEDDINGS_BASE_URL"); v != "" {
+		cfg.EmbeddingsBaseURL = v
+	}
+	if v := os.Getenv("EMBEDDINGS_DIMENSION"); v != "" {
+		d, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid EMBEDDINGS_DIMENSION %q: %w", v, err)
+		}
+		cfg.EmbeddingsDimension = d
 	}
 	return nil
 }

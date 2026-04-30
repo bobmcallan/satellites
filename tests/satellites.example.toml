@@ -46,14 +46,17 @@ docs_dir = "/app/docs"
 # uses a native array; tests usually set this via env.
 # api_keys = ["key-test"]
 
-# NOTE: EMBEDDINGS_PROVIDER, EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL,
-# EMBEDDINGS_API_KEY, EMBEDDINGS_BASE_URL are read directly via
-# os.Getenv in internal/embeddings/config.go — they are NOT part of
-# internal/config.Config and cannot be carried by TOML today.
-#
-# Same for GEMINI_API_KEY and GEMINI_REVIEW_MODEL (read in
-# cmd/satellites/main.go::buildReviewer). Migrating these into Config
-# is a follow-up story.
+# Embeddings worker config (story_b218cb81 migrated these from env-only
+# into config.Config; tests carry them via TOML now).
+# embeddings_provider = "stub"      # gemini | stub | none (default)
+# embeddings_model = ""             # provider-specific model id
+# embeddings_api_key = ""           # required when provider=gemini
+# embeddings_base_url = ""          # provider canonical endpoint when empty
+# embeddings_dimension = 0          # provider default when 0
+
+# Reviewer (Gemini) — also migrated to config.Config in story_b218cb81.
+# gemini_api_key = ""               # empty disables Gemini, falls back to AcceptAll
+# gemini_review_model = ""          # empty resolves to gemini-2.5-flash
 
 # When true, MCP verbs outside the bootstrap allowlist are rejected
 # unless the caller holds a role-grant whose effective verb allowlist

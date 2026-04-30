@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/bobmcallan/satellites/internal/config"
 )
 
 // Provider names accepted in EMBEDDINGS_PROVIDER. The `none` value is the
@@ -27,8 +29,32 @@ type Config struct {
 	BaseURL   string
 }
 
+// FromConfig projects the embeddings-relevant fields of *config.Config
+// into the package-local Config. Story_b218cb81 made these knobs
+// first-class on config.Config so production resolution flows through
+// the shared env→TOML→default chain. Callers that previously used
+// LoadFromEnv switch to this function with the resolved *config.Config.
+func FromConfig(cfg *config.Config) Config {
+	out := Config{
+		Provider:  strings.ToLower(strings.TrimSpace(cfg.EmbeddingsProvider)),
+		Model:     cfg.EmbeddingsModel,
+		APIKey:    cfg.EmbeddingsAPIKey,
+		BaseURL:   cfg.EmbeddingsBaseURL,
+		Dimension: cfg.EmbeddingsDimension,
+	}
+	if out.Provider == "" {
+		out.Provider = ProviderNone
+	}
+	return out
+}
+
 // LoadFromEnv reads the EMBEDDINGS_* env vars into a Config. Empty env
 // → Config{Provider:"none"}, which produces a nil Embedder from New().
+//
+// Deprecated: prefer FromConfig with a resolved *config.Config so the
+// embeddings boot path participates in the shared env→TOML→default
+// chain (story_b218cb81). LoadFromEnv is retained for tests that
+// build Config directly without a full config.Config.
 func LoadFromEnv() (Config, error) {
 	cfg := Config{
 		Provider: strings.ToLower(strings.TrimSpace(os.Getenv("EMBEDDINGS_PROVIDER"))),

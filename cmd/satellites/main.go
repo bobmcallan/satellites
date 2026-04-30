@@ -382,7 +382,7 @@ func main() {
 		srv.SetHealthCheck(dbPing)
 	}
 
-	rev := buildReviewer(logger)
+	rev := buildReviewer(logger, cfg)
 
 	mcp := mcpserver.New(cfg, logger, startedAt, mcpserver.Deps{
 		DocStore:         docStore,
@@ -442,10 +442,8 @@ func main() {
 	// worker is not started; document_search and ledger_search fall
 	// back to filter-only Search via the verb-layer ErrSemanticUnavailable
 	// path.
-	embedCfg, err := embeddings.LoadFromEnv()
-	if err != nil {
-		logger.Warn().Str("error", err.Error()).Msg("embeddings config invalid; semantic search disabled")
-	} else if taskStore != nil && surrealDocChunks != nil && surrealLedgerChunks != nil {
+	embedCfg := embeddings.FromConfig(cfg)
+	if taskStore != nil && surrealDocChunks != nil && surrealLedgerChunks != nil {
 		embedder, err := embeddings.New(embedCfg)
 		if err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("embeddings provider construction failed; semantic search disabled")
@@ -703,23 +701,26 @@ func addRequiredRoleIfMissing(raw []byte, roleName string) ([]byte, bool) {
 }
 
 // buildReviewer wires the production Reviewer for the MCP server.
-// When GEMINI_API_KEY is set, returns a Gemini-backed reviewer using
-// GEMINI_REVIEW_MODEL (default gemini-2.5-flash). When unset, returns
+// When cfg.GeminiAPIKey is set, returns a Gemini-backed reviewer using
+// cfg.GeminiReviewModel (default gemini-2.5-flash). When unset, returns
 // AcceptAll with a warning log so test/dev boots stay green but the
 // operator knows the review path is a stub.
-func buildReviewer(logger arbor.ILogger) reviewer.Reviewer {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
+//
+// Story_b218cb81 migrated the credentials from os.Getenv reads to the
+// shared *config.Config so production resolution stays env→TOML→default
+// and tests can carry the values via mounted TOML.
+func buildReviewer(logger arbor.ILogger, cfg *config.Config) reviewer.Reviewer {
+	if cfg.GeminiAPIKey == "" {
 		logger.Warn().Msg("GEMINI_API_KEY not set — reviewer falls back to AcceptAll (validation_mode=llm closes auto-accepted)")
 		return reviewer.AcceptAll{}
 	}
-	model := os.Getenv("GEMINI_REVIEW_MODEL")
+	model := cfg.GeminiReviewModel
 	if model == "" {
 		model = reviewer.DefaultGeminiReviewModel
 	}
 	logger.Info().Str("model", model).Msg("gemini reviewer wired")
 	return reviewer.NewGeminiReviewer(reviewer.GeminiConfig{
-		APIKey: apiKey,
+		APIKey: cfg.GeminiAPIKey,
 		Model:  model,
 	})
 }
