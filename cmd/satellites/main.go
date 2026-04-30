@@ -341,20 +341,25 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("workspace backfill failed")
 		}
 
-		// Wire user-creation → EnsureDefault once the workspace store is up.
-		// New DevMode / OAuth users will get a personal workspace AND a
-		// default project on first login so /projects renders a non-empty
-		// panel out of the box (story_0f415ab3). Idempotent per user.
+		// Wire user-creation → workspace.EnsureDefault. Each new user gets
+		// a personal workspace on first login. Project creation is now an
+		// explicit action — sty_c975ebeb removed the auto-seeded "Default"
+		// project because it conflated multi-repo scopes with single-repo
+		// stories. Users land on /projects with an empty-state panel until
+		// they create a project (typically via project_create with a
+		// git_remote, or via the portal).
 		authHandlers.OnUserCreated = func(hookCtx context.Context, userID string) {
 			now := time.Now().UTC()
-			wsID, err := workspace.EnsureDefault(hookCtx, wsStore, logger, userID, now)
-			if err != nil {
+			if _, err := workspace.EnsureDefault(hookCtx, wsStore, logger, userID, now); err != nil {
 				logger.Warn().Str("user_id", userID).Str("error", err.Error()).Msg("default workspace seed for user failed")
-				return
 			}
-			if _, err := project.EnsureDefault(hookCtx, projStore, logger, userID, wsID, now); err != nil {
-				logger.Warn().Str("user_id", userID).Str("workspace_id", wsID).Str("error", err.Error()).Msg("default project seed for user failed")
-			}
+		}
+
+		// One-shot migration: archive legacy per-user "Default" projects
+		// that the old EnsureDefault hook minted on first login. Idempotent
+		// — a second invocation finds none active. sty_c975ebeb.
+		if _, err := project.ArchiveLegacyDefaults(ctx, projStore, logger, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("archive legacy defaults failed")
 		}
 	}
 

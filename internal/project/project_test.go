@@ -159,54 +159,89 @@ func TestMemoryStore_OwnerIsolation(t *testing.T) {
 	}
 }
 
-// TestEnsureDefault_Idempotent covers AC5 of story_0f415ab3: a second
-// EnsureDefault call for the same (owner, workspace) returns the same
-// project id and does not create a duplicate row.
-func TestEnsureDefault_Idempotent(t *testing.T) {
+// TestCreateWithRemote_DedupesGitRemote covers sty_c975ebeb AC1: a second
+// CreateWithRemote with the same (workspace_id, git_remote) tuple
+// returns ErrDuplicateGitRemote.
+func TestCreateWithRemote_DedupesGitRemote(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := NewMemoryStore()
-	logger := arbor.GetLogger().WithLevelFromString("warn")
-	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 
-	first, err := EnsureDefault(ctx, store, logger, "user_alice", "wksp_alice", now)
+	first, err := store.CreateWithRemote(ctx, "user_alice", "wksp_alice", "satellites", "git@github.com:foo/bar.git", now)
 	if err != nil {
-		t.Fatalf("first EnsureDefault: %v", err)
+		t.Fatalf("first create: %v", err)
 	}
-	second, err := EnsureDefault(ctx, store, logger, "user_alice", "wksp_alice", now.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("second EnsureDefault: %v", err)
+	if first.GitRemote != "git@github.com:foo/bar.git" {
+		t.Errorf("git_remote = %q, want git@github.com:foo/bar.git", first.GitRemote)
 	}
-	if first != second {
-		t.Errorf("EnsureDefault not idempotent: first=%q second=%q", first, second)
+	if _, err := store.CreateWithRemote(ctx, "user_alice", "wksp_alice", "satellites-dup", "git@github.com:foo/bar.git", now); err != ErrDuplicateGitRemote {
+		t.Errorf("duplicate create err = %v, want ErrDuplicateGitRemote", err)
 	}
-	rows, _ := store.ListByOwner(ctx, "user_alice", nil)
-	if len(rows) != 1 {
-		t.Errorf("EnsureDefault created %d rows, want 1", len(rows))
+	// Different workspace must succeed — uniqueness is per workspace.
+	if _, err := store.CreateWithRemote(ctx, "user_bob", "wksp_bob", "satellites", "git@github.com:foo/bar.git", now); err != nil {
+		t.Errorf("cross-workspace duplicate rejected: %v", err)
 	}
 }
 
-// TestEnsureDefault_PerUser confirms two users get distinct projects in
-// their own workspaces — covers the per-user shape that the OnUserCreated
-// hook relies on.
-func TestEnsureDefault_PerUser(t *testing.T) {
+// TestGetByGitRemote_ActiveOnly covers the remote→project lookup the MCP
+// handler uses to dedupe: archived rows must not match.
+func TestGetByGitRemote_ActiveOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemoryStore()
+	now := time.Now().UTC()
+
+	p, _ := store.CreateWithRemote(ctx, "user_a", "wksp_a", "satellites", "git@github.com:foo/bar.git", now)
+	if got, err := store.GetByGitRemote(ctx, "wksp_a", "git@github.com:foo/bar.git"); err != nil || got.ID != p.ID {
+		t.Fatalf("active GetByGitRemote = (%+v, %v), want hit", got, err)
+	}
+	if _, err := store.SetStatus(ctx, p.ID, StatusArchived, now); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if _, err := store.GetByGitRemote(ctx, "wksp_a", "git@github.com:foo/bar.git"); err != ErrNotFound {
+		t.Errorf("archived GetByGitRemote err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestArchiveLegacyDefaults_Idempotent covers sty_c975ebeb AC5: legacy
+// per-user "Default" projects are archived once and re-running is a
+// no-op. System-owned rows are untouched.
+func TestArchiveLegacyDefaults_Idempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := NewMemoryStore()
 	logger := arbor.GetLogger().WithLevelFromString("warn")
 	now := time.Now().UTC()
 
-	a, _ := EnsureDefault(ctx, store, logger, "user_a", "wksp_a", now)
-	b, _ := EnsureDefault(ctx, store, logger, "user_b", "wksp_b", now)
-	if a == b {
-		t.Errorf("per-user projects collided: %q == %q", a, b)
+	user1, _ := store.Create(ctx, "user_a", "wksp_a", PerUserDefaultName, now)
+	user2, _ := store.Create(ctx, "user_b", "wksp_b", PerUserDefaultName, now)
+	system, _ := store.Create(ctx, DefaultOwnerUserID, "wksp_sys", DefaultProjectName, now)
+	keeper, _ := store.Create(ctx, "user_a", "wksp_a", "satellites", now)
+
+	n, err := ArchiveLegacyDefaults(ctx, store, logger, now)
+	if err != nil {
+		t.Fatalf("first archive: %v", err)
 	}
-	pa, _ := store.GetByID(ctx, a, []string{"wksp_a"})
-	if pa.OwnerUserID != "user_a" || pa.WorkspaceID != "wksp_a" {
-		t.Errorf("user_a project mis-stamped: %+v", pa)
+	if n != 2 {
+		t.Errorf("first archive count = %d, want 2 (user_a + user_b Defaults)", n)
 	}
-	hidden, err := store.GetByID(ctx, b, []string{"wksp_a"})
-	if err == nil {
-		t.Errorf("cross-workspace lookup returned %+v, want ErrNotFound (membership filter)", hidden)
+
+	for _, id := range []string{user1.ID, user2.ID} {
+		row, _ := store.GetByID(ctx, id, nil)
+		if row.Status != StatusArchived {
+			t.Errorf("project %s status = %q, want %q", id, row.Status, StatusArchived)
+		}
+	}
+	for _, id := range []string{system.ID, keeper.ID} {
+		row, _ := store.GetByID(ctx, id, nil)
+		if row.Status != StatusActive {
+			t.Errorf("non-legacy project %s archived: status = %q", id, row.Status)
+		}
+	}
+
+	n, _ = ArchiveLegacyDefaults(ctx, store, logger, now)
+	if n != 0 {
+		t.Errorf("second archive count = %d, want 0 (idempotent)", n)
 	}
 }

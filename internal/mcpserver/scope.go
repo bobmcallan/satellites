@@ -1,0 +1,45 @@
+package mcpserver
+
+import "context"
+
+// scopedProjectKey is the context key under which Server.ServeHTTP stores
+// the URL-scoped project_id (when the MCP request was made against a URL
+// like `/mcp?project_id=proj_xxx`). Distinct from userKey — the scope is
+// per-request transport state, not caller identity.
+const scopedProjectKey ctxKey = 1
+
+// withScopedProjectID returns a child context carrying id as the
+// URL-scoped project. Empty id is a no-op.
+func withScopedProjectID(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, scopedProjectKey, id)
+}
+
+// ScopedProjectIDFrom returns the URL-scoped project_id attached by
+// Server.ServeHTTP, or "" when the request was made against the
+// unscoped `/mcp` URL. Tools that take project_id as a parameter must
+// reject mismatches via enforceScopedProject.
+func ScopedProjectIDFrom(ctx context.Context) string {
+	v, _ := ctx.Value(scopedProjectKey).(string)
+	return v
+}
+
+// enforceScopedProject checks that candidate is compatible with the
+// URL-scoped project_id. Returns the effective project_id to use:
+//   - "" scope, "" candidate → "" (caller must supply or fall back)
+//   - "" scope, "X" candidate → "X" (no scoping; passthrough)
+//   - "X" scope, "" candidate → "X" (scope wins; tool didn't supply one)
+//   - "X" scope, "X" candidate → "X" (match)
+//   - "X" scope, "Y" candidate → "", false (mismatch — caller should reject)
+func enforceScopedProject(ctx context.Context, candidate string) (string, bool) {
+	scoped := ScopedProjectIDFrom(ctx)
+	if scoped == "" {
+		return candidate, true
+	}
+	if candidate == "" || candidate == scoped {
+		return scoped, true
+	}
+	return "", false
+}

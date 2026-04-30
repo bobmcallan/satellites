@@ -22,10 +22,15 @@ const (
 // primitive row carries a ProjectID scoping back to one of these rows, and
 // every Project row carries a WorkspaceID scoping back to the tenant
 // boundary (docs/architecture.md §8).
+//
+// GitRemote is the canonical identity for a code-backed project: one
+// project per remote per workspace. Empty when the project predates the
+// schema change or when the project intentionally tracks no remote.
 type Project struct {
 	ID          string    `json:"id"`
 	WorkspaceID string    `json:"workspace_id"`
 	Name        string    `json:"name"`
+	GitRemote   string    `json:"git_remote,omitempty"`
 	OwnerUserID string    `json:"owner_user_id"`
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`

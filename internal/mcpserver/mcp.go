@@ -234,16 +234,19 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.projects != nil {
 		createTool := mcpgo.NewTool("project_create",
-			mcpgo.WithDescription("Create a new project owned by the caller."),
+			mcpgo.WithDescription("Create a new project owned by the caller. Pass git_remote to key the project to a specific repo (canonical identity); duplicates within the workspace are rejected."),
 			mcpgo.WithString("name",
 				mcpgo.Required(),
 				mcpgo.Description("Project display name."),
+			),
+			mcpgo.WithString("git_remote",
+				mcpgo.Description("Optional git remote URL (e.g. git@github.com:owner/repo.git). When set, makes the project the canonical home for that remote in this workspace."),
 			),
 		)
 		s.mcp.AddTool(createTool, s.handleProjectCreate)
 
 		getProjTool := mcpgo.NewTool("project_get",
-			mcpgo.WithDescription("Return a project the caller owns. Cross-owner access returns not-found."),
+			mcpgo.WithDescription("Return a project the caller owns. Cross-owner access returns not-found. Response includes mcp_url and mcp_config — paste-ready snippets that scope an MCP client to this project via ?project_id=."),
 			mcpgo.WithString("id",
 				mcpgo.Required(),
 				mcpgo.Description("Project id (proj_<8hex>)."),
@@ -255,6 +258,20 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithDescription("List the caller's projects, newest-first."),
 		)
 		s.mcp.AddTool(listProjTool, s.handleProjectList)
+
+		updateProjTool := mcpgo.NewTool("project_update",
+			mcpgo.WithDescription("Update a project's name and/or git_remote. Owner-only. Duplicate (workspace, git_remote) is rejected."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Project id (proj_<8hex>).")),
+			mcpgo.WithString("name", mcpgo.Description("New display name. Empty to leave unchanged.")),
+			mcpgo.WithString("git_remote", mcpgo.Description("New git remote URL. Empty string clears the remote (caller must explicitly pass empty to clear; absent leaves unchanged).")),
+		)
+		s.mcp.AddTool(updateProjTool, s.handleProjectUpdate)
+
+		deleteProjTool := mcpgo.NewTool("project_delete",
+			mcpgo.WithDescription("Archive a project (soft delete — flips status to archived, rows are not physically removed). Owner-only."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Project id (proj_<8hex>).")),
+		)
+		s.mcp.AddTool(deleteProjTool, s.handleProjectDelete)
 	}
 
 	if s.ledger != nil {
@@ -767,8 +784,16 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 }
 
 // ServeHTTP implements http.Handler. AuthMiddleware is responsible for
-// establishing the user context before this handler runs.
+// establishing the user context before this handler runs. ServeHTTP also
+// extracts an optional ?project_id=<id> from the request URL and stores
+// it on the context as the URL-scoped project. Tool handlers consult
+// ScopedProjectIDFrom (or use enforceScopedProject) to reject any tool
+// call that names a different project — V3-style project-scoped MCP
+// endpoints, so .mcp.json can pin a single project per server entry.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if scoped := r.URL.Query().Get("project_id"); scoped != "" {
+		r = r.WithContext(withScopedProjectID(r.Context(), scoped))
+	}
 	s.streamable.ServeHTTP(w, r)
 }
 
@@ -811,11 +836,19 @@ func (s *Server) nowUTC() time.Time {
 }
 
 // resolveProjectID picks the document-operation project scope for the
-// caller. Rules: (1) if req supplies project_id, the caller must own that
-// project or it must be the system default; cross-project access returns
-// an error. (2) otherwise, fall back to the caller's first owned project.
-// (3) otherwise, fall back to the system default.
+// caller. Rules: (1) if the request URL carries ?project_id= scoping,
+// any explicit `requested` must match it (cross-project tool calls are
+// rejected); when `requested` is empty, the URL-scoped value is used.
+// (2) if req supplies project_id, the caller must own that project or
+// it must be the system default; cross-project access returns an error.
+// (3) otherwise, fall back to the caller's first owned project.
+// (4) otherwise, fall back to the system default.
 func (s *Server) resolveProjectID(ctx context.Context, requested string, caller CallerIdentity, memberships []string) (string, error) {
+	effective, ok := enforceScopedProject(ctx, requested)
+	if !ok {
+		return "", errors.New("project_id parameter does not match the URL-scoped project_id")
+	}
+	requested = effective
 	if requested != "" {
 		if requested == s.defaultProjectID {
 			return requested, nil
@@ -1269,6 +1302,41 @@ func (s *Server) handleDocumentDelete(ctx context.Context, req mcpgo.CallToolReq
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
+// projectView is the JSON-marshalled response shape for project_create /
+// project_get / project_update. It embeds the durable project.Project row
+// and adds two computed fields — `mcp_url` and `mcp_config` — derived
+// from the configured public base URL. These let `.mcp.json` be written
+// directly from project_get's output without the operator constructing a
+// URL by hand. project_list intentionally returns plain Project rows so
+// listings stay lightweight.
+type projectView struct {
+	project.Project
+	MCPURL    string         `json:"mcp_url,omitempty"`
+	MCPConfig map[string]any `json:"mcp_config,omitempty"`
+}
+
+func (s *Server) buildProjectView(p project.Project) projectView {
+	pv := projectView{Project: p}
+	base := s.cfg.OAuthRedirectBaseURL
+	if base == "" {
+		return pv
+	}
+	for len(base) > 0 && base[len(base)-1] == '/' {
+		base = base[:len(base)-1]
+	}
+	url := base + "/mcp?project_id=" + p.ID
+	pv.MCPURL = url
+	pv.MCPConfig = map[string]any{
+		"mcpServers": map[string]any{
+			"satellites": map[string]any{
+				"type": "http",
+				"url":  url,
+			},
+		},
+	}
+	return pv
+}
+
 func (s *Server) handleProjectCreate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
@@ -1279,16 +1347,21 @@ func (s *Server) handleProjectCreate(ctx context.Context, req mcpgo.CallToolRequ
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
+	gitRemote := req.GetString("git_remote", "")
 	wsID := s.resolveCallerWorkspaceID(ctx, caller)
-	p, err := s.projects.Create(ctx, caller.UserID, wsID, name, time.Now().UTC())
+	p, err := s.projects.CreateWithRemote(ctx, caller.UserID, wsID, name, gitRemote, time.Now().UTC())
 	if err != nil {
+		if errors.Is(err, project.ErrDuplicateGitRemote) {
+			return mcpgo.NewToolResultError("project with that git_remote already exists in this workspace"), nil
+		}
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(p)
+	body, _ := json.Marshal(s.buildProjectView(p))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "project_create").
 		Str("project_id", p.ID).
+		Str("git_remote", p.GitRemote).
 		Str("owner_user_id", p.OwnerUserID).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
@@ -1303,14 +1376,98 @@ func (s *Server) handleProjectGet(ctx context.Context, req mcpgo.CallToolRequest
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
+	if _, ok := enforceScopedProject(ctx, id); !ok {
+		return mcpgo.NewToolResultError("project id does not match the URL-scoped project_id"), nil
+	}
 	p, err := s.projects.GetByID(ctx, id, memberships)
 	if err != nil || p.OwnerUserID != caller.UserID {
 		return mcpgo.NewToolResultError("project not found"), nil
 	}
-	body, _ := json.Marshal(p)
+	body, _ := json.Marshal(s.buildProjectView(p))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "project_get").
+		Str("project_id", id).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleProjectUpdate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if _, ok := enforceScopedProject(ctx, id); !ok {
+		return mcpgo.NewToolResultError("project id does not match the URL-scoped project_id"), nil
+	}
+	existing, err := s.projects.GetByID(ctx, id, memberships)
+	if err != nil || existing.OwnerUserID != caller.UserID {
+		return mcpgo.NewToolResultError("project not found"), nil
+	}
+	now := time.Now().UTC()
+	updated := existing
+	if name := req.GetString("name", ""); name != "" && name != existing.Name {
+		var renameErr error
+		updated, renameErr = s.projects.UpdateName(ctx, id, name, now)
+		if renameErr != nil {
+			return mcpgo.NewToolResultError(renameErr.Error()), nil
+		}
+	}
+	// git_remote is updated only when the param is present in the request.
+	// req.GetString returns "" for both absent and explicitly-empty; we
+	// treat any present value (including "") as intentional. mcp-go does
+	// not currently distinguish "absent" from "empty", so callers wanting
+	// to clear a remote must call project_update with git_remote="".
+	if remote, ok := req.GetArguments()["git_remote"]; ok {
+		remoteStr, _ := remote.(string)
+		if remoteStr != updated.GitRemote {
+			next, remoteErr := s.projects.SetGitRemote(ctx, id, remoteStr, now)
+			if remoteErr != nil {
+				if errors.Is(remoteErr, project.ErrDuplicateGitRemote) {
+					return mcpgo.NewToolResultError("project with that git_remote already exists in this workspace"), nil
+				}
+				return mcpgo.NewToolResultError(remoteErr.Error()), nil
+			}
+			updated = next
+		}
+	}
+	body, _ := json.Marshal(s.buildProjectView(updated))
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "project_update").
+		Str("project_id", id).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+func (s *Server) handleProjectDelete(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if _, ok := enforceScopedProject(ctx, id); !ok {
+		return mcpgo.NewToolResultError("project id does not match the URL-scoped project_id"), nil
+	}
+	existing, err := s.projects.GetByID(ctx, id, memberships)
+	if err != nil || existing.OwnerUserID != caller.UserID {
+		return mcpgo.NewToolResultError("project not found"), nil
+	}
+	updated, err := s.projects.SetStatus(ctx, id, project.StatusArchived, time.Now().UTC())
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(updated)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "project_delete").
 		Str("project_id", id).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
