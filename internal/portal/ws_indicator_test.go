@@ -39,13 +39,17 @@ func TestPortal_ConnectionIndicator_Rendered(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	// Widget container + Alpine binding.
+	// Widget container + Alpine binding. CSP-strict (@alpinejs/csp) requires
+	// bare-name x-data + getter-style :class bindings — no inline expressions.
+	// See story_739823eb.
 	assert.Contains(t, body, `class="ws-indicator"`, "widget container present")
-	assert.Contains(t, body, `x-data="wsIndicator()"`, "Alpine component bound")
-	assert.Contains(t, body, `:class="'ws-indicator-' + status"`, "status class bound")
-	// Retry button: gated by status==='disconnected'.
-	assert.Contains(t, body, `x-show="status === 'disconnected'"`, "retry visibility bound")
-	assert.Contains(t, body, `@click="retry()"`, "retry click handler bound")
+	assert.Contains(t, body, `x-data="wsIndicator"`, "Alpine component bound (bare-name, CSP-strict)")
+	assert.Contains(t, body, `:class="indicatorClass"`, "status class bound via getter")
+	// Retry button: visibility gated by the isDisconnected getter via a
+	// class-toggle CSP workaround (x-show takes an inline expression and is
+	// disallowed by @alpinejs/csp).
+	assert.Contains(t, body, `:class="hiddenWhenIsDisconnected"`, "retry visibility bound via class-toggle")
+	assert.Contains(t, body, `@click="retry"`, "retry click handler bound (method ref, CSP-strict)")
 	// Three status CSS classes referenced in stylesheet — widget depends on them.
 	// We don't load portal.css here (go test doesn't serve static), but the
 	// class names must appear in the rendered template for Alpine to bind.
@@ -146,8 +150,11 @@ func TestPortal_WSJSAsset(t *testing.T) {
 		"zero-flicker threshold constant (production value)")
 	// transition dispatcher exists.
 	assert.Contains(t, body, "transition(next)", "central transition dispatcher")
-	// Alpine component factory exposed.
-	assert.Contains(t, body, "window.wsIndicator", "Alpine factory globally exposed")
+	// Alpine component factory registered through Alpine.data so the
+	// bare-name x-data="wsIndicator" binding works under @alpinejs/csp
+	// (story_739823eb). Pre-CSP versions exposed window.wsIndicator;
+	// the CSP build forbids that path.
+	assert.Contains(t, body, `Alpine.data('wsIndicator', wsIndicator)`, "Alpine factory registered via Alpine.data")
 	// Class exposed for external use.
 	assert.Contains(t, body, "window.SatellitesWS", "SatellitesWS globally exposed")
 }
