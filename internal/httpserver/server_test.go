@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,67 @@ func TestHealthzShape(t *testing.T) {
 	if uptime, ok := body["uptime_seconds"].(float64); !ok || uptime < 1 {
 		t.Errorf("uptime_seconds = %v, want >=1", body["uptime_seconds"])
 	}
+}
+
+// TestHealthzDBCheck verifies that an attached HealthCheck flips both the
+// JSON payload and the HTTP status: a healthy ping keeps 200 + db_ok:true,
+// a failing ping returns 503 + db_ok:false + db_error. Fly's /api/health
+// probe relies on the status code to replace machines holding stale
+// SurrealDB sockets — a 200-on-failure response masks the outage.
+func TestHealthzDBCheck(t *testing.T) {
+	t.Parallel()
+
+	t.Run("healthy ping returns 200", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{Port: 0, Env: "dev", LogLevel: "info", DevMode: true}
+		s := New(cfg, satarbor.New("info"), time.Now())
+		s.SetHealthCheck(func(context.Context) error { return nil })
+
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		rec := httptest.NewRecorder()
+		s.http.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("json decode: %v", err)
+		}
+		if got, ok := body["db_ok"].(bool); !ok || !got {
+			t.Errorf("db_ok = %v, want true", body["db_ok"])
+		}
+		if _, present := body["db_error"]; present {
+			t.Errorf("db_error must be absent on healthy ping; got %v", body["db_error"])
+		}
+	})
+
+	t.Run("failing ping returns 503", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.Config{Port: 0, Env: "dev", LogLevel: "info", DevMode: true}
+		s := New(cfg, satarbor.New("info"), time.Now())
+		s.SetHealthCheck(func(context.Context) error {
+			return errors.New("db: ping: write: broken pipe")
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		rec := httptest.NewRecorder()
+		s.http.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("json decode: %v", err)
+		}
+		if got, ok := body["db_ok"].(bool); !ok || got {
+			t.Errorf("db_ok = %v, want false", body["db_ok"])
+		}
+		if msg, _ := body["db_error"].(string); !strings.Contains(msg, "broken pipe") {
+			t.Errorf("db_error = %q, want substring 'broken pipe'", msg)
+		}
+	})
 }
 
 // TestSecurityHeaders_AllPresent covers AC1+AC2 of story_d5652302.

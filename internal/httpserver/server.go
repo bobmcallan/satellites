@@ -125,7 +125,9 @@ func (s *Server) Start(ctx context.Context) error {
 // healthz returns the process's liveness + identity metadata as JSON. Uptime
 // is computed against s.startedAt — the caller's notion of "process start",
 // not "server bind time". When a HealthCheck is attached, the payload also
-// carries db_ok (+ db_error on failure).
+// carries db_ok (+ db_error on failure), and a failing check flips the HTTP
+// status to 503 so Fly's machine probe can replace the instance instead of
+// holding a stale SurrealDB socket forever.
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{
 		"version":        config.Version,
@@ -134,17 +136,19 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		"started_at":     s.startedAt.UTC().Format(time.RFC3339),
 		"uptime_seconds": int64(time.Since(s.startedAt).Seconds()),
 	}
+	status := http.StatusOK
 	if hc := s.healthCheck.Load(); hc != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := (*hc)(ctx); err != nil {
 			payload["db_ok"] = false
 			payload["db_error"] = err.Error()
+			status = http.StatusServiceUnavailable
 		} else {
 			payload["db_ok"] = true
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
