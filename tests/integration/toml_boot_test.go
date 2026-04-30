@@ -69,11 +69,11 @@ func startServerWithTOML(
 	root := repoRoot(t)
 
 	env := map[string]string{
-		"PORT":              "8080",
-		"ENV":               "dev",
-		"LOG_LEVEL":         "info",
-		"DEV_MODE":          "true",
-		"SATELLITES_CONFIG": containerTOMLPath,
+		"SATELLITES_PORT":      "8080",
+		"SATELLITES_ENV":       "dev",
+		"SATELLITES_LOG_LEVEL": "info",
+		"SATELLITES_DEV_MODE":  "true",
+		"SATELLITES_CONFIG":    containerTOMLPath,
 	}
 	for k, v := range opts.Env {
 		env[k] = v

@@ -1,19 +1,25 @@
 // Package config exposes the runtime configuration for satellites-v4
 // binaries. Load() resolves config from three layered sources — code
-// defaults, an optional TOML file, and process env vars — validates the
-// resulting Config for the selected environment, and returns it.
+// defaults, an optional TOML file, and process env vars — and returns
+// the resulting Config alongside a slice of operator-facing warnings.
 //
 // Resolution order (highest to lowest precedence):
 //
-//  1. Process env var.
+//  1. Process env var (all prefixed with SATELLITES_).
 //  2. TOML file (path resolved via SATELLITES_CONFIG, else ./satellites.toml).
 //  3. Code default (set in defaults()).
 //
-// Every exported field on Config has a default assigned in defaults() (so
-// the binary boots in dev with zero env vars and no TOML file) or an
-// explicit prod-required validation in validate(). The single source of
-// truth for the (field, env override, default, prod-required) mapping is
-// the slice returned by Describe().
+// The service ALWAYS boots. Malformed env values, out-of-range numbers,
+// missing-but-required prod secrets — every problem degrades to a
+// warning string and the affected field falls back to its code default.
+// Callers iterate the returned warnings and log them via arbor; nothing
+// in this package logs directly, so config stays free of an arbor
+// import cycle.
+//
+// Every exported field on Config has a default assigned in defaults() so
+// the binary boots in prod with zero env vars and no TOML file. The
+// single source of truth for the (field, env override, default,
+// prod-recommended) mapping is the slice returned by Describe().
 package config
 
 import (
@@ -26,133 +32,137 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
-// Config is the validated runtime configuration for a satellites binary.
+// Config is the runtime configuration for a satellites binary.
 //
 // Every exported field maps to one TOML key (via the `toml` struct tag)
-// and one env var override. Run Describe() for the canonical (field, env,
-// default, prod_required) table.
+// and one SATELLITES_-prefixed env var override. Run Describe() for the
+// canonical (field, env, default, prod_recommended) table.
 type Config struct {
-	// Port is the HTTP listen port. Default 8080.
-	// Env override: PORT (also SATELLITES_PORT).
+	// Port is the HTTP listen port. Default 8080. Out-of-range values
+	// fall back to the default with a warning.
+	// Env override: SATELLITES_PORT.
 	Port int `toml:"port"`
 
 	// Env is the deployment environment. Canonical values: "dev" or "prod".
-	// Env override: ENV. Default "dev".
+	// Default "prod". Env override: SATELLITES_ENV. Unknown values fall
+	// back to the default with a warning.
 	Env string `toml:"env"`
 
 	// LogLevel is the arbor log level ("trace", "debug", "info", "warn",
-	// "error"). Env override: LOG_LEVEL. Default "info".
+	// "error"). Default "info". Env override: SATELLITES_LOG_LEVEL.
 	LogLevel string `toml:"log_level"`
 
 	// DevMode relaxes production-only gates (required secrets, strict CORS)
 	// and turns on the dev-mode quick-signin and DEV portal affordances.
-	// Defaults true when Env=="dev". Env override: DEV_MODE.
+	// Default false. Env override: SATELLITES_DEV_MODE.
 	DevMode bool `toml:"dev_mode"`
 
-	// DBDSN is the SurrealDB connection string. Required when Env=="prod"; in
-	// dev an empty value boots the server without DB-backed verbs.
-	// Env override: DB_DSN.
+	// DBDSN is the SurrealDB connection string. Recommended in prod; the
+	// service boots with DB-backed verbs disabled when empty (a warning is
+	// logged in prod). Env override: SATELLITES_DB_DSN.
 	DBDSN string `toml:"db_dsn"`
 
-	// FlyMachineID is injected by Fly.io at container start. Empty off-Fly.
-	// Env override: FLY_MACHINE_ID.
-	FlyMachineID string `toml:"fly_machine_id"`
-
-	// DevUsername is the fixed credential allowed when DevMode is active. In
-	// dev defaults to "dev@satellites.local" so the dev-mode quick-signin
-	// works without any env vars. Empty in prod. Env override: DEV_USERNAME.
+	// DevUsername is the fixed credential allowed when DevMode is active.
+	// In dev defaults to "dev@satellites.local" so the dev-mode quick-signin
+	// works without any env vars. Empty in prod.
+	// Env override: SATELLITES_DEV_USERNAME.
 	DevUsername string `toml:"dev_username"`
 
 	// DevPassword is the fixed DevMode password. In dev defaults to "dev123".
-	// Never logged. Empty in prod. Env override: DEV_PASSWORD.
+	// Never logged. Empty in prod. Env override: SATELLITES_DEV_PASSWORD.
 	DevPassword string `toml:"dev_password"`
 
-	// GoogleClientID is the OAuth 2.0 client id. Env override: GOOGLE_CLIENT_ID.
-	// Empty disables the provider. Must be paired with GoogleClientSecret —
-	// half a credential is rejected by validate().
+	// GoogleClientID is the OAuth 2.0 client id. Empty disables the provider.
+	// Env override: SATELLITES_GOOGLE_CLIENT_ID. A half-set credential
+	// (id without secret, or vice versa) disables the provider with a
+	// warning rather than failing boot.
 	GoogleClientID string `toml:"google_client_id"`
 
 	// GoogleClientSecret is the OAuth 2.0 client secret. Never logged.
-	// Env override: GOOGLE_CLIENT_SECRET.
+	// Env override: SATELLITES_GOOGLE_CLIENT_SECRET.
 	GoogleClientSecret string `toml:"google_client_secret"`
 
 	// GithubClientID is the OAuth 2.0 client id for the GitHub provider.
-	// Env override: GITHUB_CLIENT_ID. Empty disables the provider; must be
-	// paired with GithubClientSecret.
+	// Empty disables the provider; half-set degrades to disabled with a
+	// warning. Env override: SATELLITES_GITHUB_CLIENT_ID.
 	GithubClientID string `toml:"github_client_id"`
 
 	// GithubClientSecret is the GitHub OAuth client secret. Never logged.
-	// Env override: GITHUB_CLIENT_SECRET.
+	// Env override: SATELLITES_GITHUB_CLIENT_SECRET.
 	GithubClientSecret string `toml:"github_client_secret"`
 
 	// OAuthRedirectBaseURL is the absolute base URL the auth handlers append
 	// the per-provider callback path to. In dev defaults to
 	// "http://localhost:<Port>" so OAuth works on `go run` with zero env
-	// vars. Required (non-empty) in prod when any provider is configured.
-	// Env override: OAUTH_REDIRECT_BASE_URL.
+	// vars. Recommended in prod when any provider is configured; empty in
+	// prod logs a warning if OAuth is enabled.
+	// Env override: SATELLITES_OAUTH_REDIRECT_BASE_URL.
 	OAuthRedirectBaseURL string `toml:"oauth_redirect_base_url"`
 
 	// OAuthTokenCacheTTL is how long the MCP-side OAuth token validator
-	// caches a successful provider lookup. Default 5m. Range 1s..1h.
-	// Env override: OAUTH_TOKEN_CACHE_TTL (Go duration: "5m", "30s", "1h").
+	// caches a successful provider lookup. Default 4h. Out-of-range or
+	// unparseable values fall back to the default with a warning.
+	// Env override: SATELLITES_OAUTH_TOKEN_CACHE_TTL (Go duration:
+	// "5m", "30s", "1h").
 	OAuthTokenCacheTTL time.Duration `toml:"oauth_token_cache_ttl"`
 
 	// APIKeys are Bearer tokens accepted on /mcp when a session cookie is
 	// absent. Typical use: CI agents + the local Claude harness. In TOML use
 	// a native array (api_keys = ["k1","k2"]); in env use the comma-separated
-	// form. Empty disables Bearer-API-key auth.
+	// form. Empty disables Bearer-API-key auth (a warning is logged in prod).
 	// Env override: SATELLITES_API_KEYS (comma-separated).
 	APIKeys []string `toml:"api_keys"`
 
 	// DocsDir is the container-side path containing the mounted docs
 	// volume that document_ingest_file reads from. Defaults to /app/docs.
-	// Env override: DOCS_DIR.
+	// Env override: SATELLITES_DOCS_DIR.
 	DocsDir string `toml:"docs_dir"`
 
 	// GrantsEnforced toggles the mcpserver grant middleware's enforcement
 	// mode. When false (the current default), the middleware is a
 	// pass-through. When true, MCP verbs outside the bootstrap allowlist
 	// are rejected unless the caller holds a role-grant whose effective
-	// verb allowlist covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
+	// verb allowlist covers the tool.
+	// Env override: SATELLITES_GRANTS_ENFORCED.
 	GrantsEnforced bool `toml:"grants_enforced"`
 
 	// GeminiAPIKey is the Google AI Studio key used by the close-time
 	// reviewer (cmd/satellites/main.go::buildReviewer). Empty disables
 	// the Gemini reviewer and falls back to AcceptAll. Never logged.
-	// Env override: GEMINI_API_KEY.
+	// Env override: SATELLITES_GEMINI_API_KEY.
 	GeminiAPIKey string `toml:"gemini_api_key"`
 
 	// GeminiReviewModel names the model the Gemini reviewer calls. Empty
 	// resolves to internal/reviewer.DefaultGeminiReviewModel
-	// ("gemini-2.5-flash"). Env override: GEMINI_REVIEW_MODEL.
+	// ("gemini-2.5-flash"). Env override: SATELLITES_GEMINI_REVIEW_MODEL.
 	GeminiReviewModel string `toml:"gemini_review_model"`
 
 	// EmbeddingsProvider selects the embeddings backend. Canonical values:
 	// "gemini", "stub", "none" (default). Empty resolves to "none" inside
 	// embeddings.New, which disables semantic search.
-	// Env override: EMBEDDINGS_PROVIDER.
+	// Env override: SATELLITES_EMBEDDINGS_PROVIDER.
 	EmbeddingsProvider string `toml:"embeddings_provider"`
 
 	// EmbeddingsModel is the provider-specific model id (e.g.
 	// "text-embedding-004" for gemini). Empty leaves the provider's
-	// default. Env override: EMBEDDINGS_MODEL.
+	// default. Env override: SATELLITES_EMBEDDINGS_MODEL.
 	EmbeddingsModel string `toml:"embeddings_model"`
 
-	// EmbeddingsAPIKey is the provider's API key. Required when
+	// EmbeddingsAPIKey is the provider's API key. Recommended when
 	// EmbeddingsProvider == "gemini"; empty under "stub"/"none". Never
-	// logged. Env override: EMBEDDINGS_API_KEY.
+	// logged. Env override: SATELLITES_EMBEDDINGS_API_KEY.
 	EmbeddingsAPIKey string `toml:"embeddings_api_key"`
 
 	// EmbeddingsBaseURL overrides the embeddings provider's HTTP base
 	// URL. Empty uses the provider's canonical endpoint. Tests use this
 	// to point the gemini embedder at an httptest server.
-	// Env override: EMBEDDINGS_BASE_URL.
+	// Env override: SATELLITES_EMBEDDINGS_BASE_URL.
 	EmbeddingsBaseURL string `toml:"embeddings_base_url"`
 
 	// EmbeddingsDimension is an optional override for the vector
 	// dimensionality. Used by the stub embedder; the gemini embedder
 	// reads it as a request parameter. Zero leaves the provider's
-	// default. Env override: EMBEDDINGS_DIMENSION.
+	// default. Env override: SATELLITES_EMBEDDINGS_DIMENSION.
 	EmbeddingsDimension int `toml:"embeddings_dimension"`
 
 	// loadedTOMLPath is set by Load() to the absolute path of the TOML
@@ -172,17 +182,19 @@ func (c *Config) LoadedTOMLPath() string {
 }
 
 // FieldDoc is one entry in the Describe() table — the single source of truth
-// for the (config field, env var, default, prod-required) mapping.
+// for the (config field, env var, default, prod-recommended) mapping.
 type FieldDoc struct {
 	// Field is the exported Go field name on Config.
 	Field string
 	// Env is the env var name read by Load() as an override on top of TOML
 	// values and code defaults.
 	Env string
-	// Default is a human-readable rendering of the dev-mode default.
+	// Default is a human-readable rendering of the default.
 	Default string
-	// ProdRequired is true when validate() rejects the empty value in prod.
-	ProdRequired bool
+	// ProdRecommended is true when an empty value triggers a startup
+	// warning under ENV=prod (e.g. DBDSN, APIKeys). The service still
+	// boots; the warning surfaces the operator-fixable gap.
+	ProdRecommended bool
 	// Description is a one-line summary suitable for an --env-help dump.
 	Description string
 }
@@ -191,33 +203,32 @@ type FieldDoc struct {
 // exported field to Config without adding an entry here trips the
 // reflection-based doc-coverage test in config_test.go.
 var describeTable = []FieldDoc{
-	{Field: "Port", Env: "PORT", Default: "8080", Description: "HTTP listen port (1..65535). SATELLITES_PORT also accepted."},
-	{Field: "Env", Env: "ENV", Default: "dev", Description: "Deployment environment: dev or prod."},
-	{Field: "LogLevel", Env: "LOG_LEVEL", Default: "info", Description: "Arbor log level: trace, debug, info, warn, error."},
-	{Field: "DevMode", Env: "DEV_MODE", Default: "true (when ENV=dev) / false (when ENV=prod)", Description: "Enables dev-mode quick-signin and DEV portal affordances."},
-	{Field: "DBDSN", Env: "DB_DSN", Default: "(empty in dev — DB-backed verbs disabled)", ProdRequired: true, Description: "SurrealDB connection string. Required in prod."},
-	{Field: "FlyMachineID", Env: "FLY_MACHINE_ID", Default: "(injected by Fly.io at container start; empty off-Fly)", Description: "Fly.io machine identifier; passes through to /healthz and logs."},
-	{Field: "DevUsername", Env: "DEV_USERNAME", Default: "dev@satellites.local (dev) / (empty) (prod)", Description: "Fixed credential username for DevMode signin."},
-	{Field: "DevPassword", Env: "DEV_PASSWORD", Default: "dev123 (dev) / (empty) (prod)", Description: "Fixed credential password for DevMode signin. Never logged."},
-	{Field: "GoogleClientID", Env: "GOOGLE_CLIENT_ID", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client id for Google. Pair with GOOGLE_CLIENT_SECRET."},
-	{Field: "GoogleClientSecret", Env: "GOOGLE_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for Google. Never logged."},
-	{Field: "GithubClientID", Env: "GITHUB_CLIENT_ID", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client id for GitHub. Pair with GITHUB_CLIENT_SECRET."},
-	{Field: "GithubClientSecret", Env: "GITHUB_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for GitHub. Never logged."},
-	{Field: "OAuthRedirectBaseURL", Env: "OAUTH_REDIRECT_BASE_URL", Default: "http://localhost:<Port> (dev) / (empty) (prod)", Description: "Base URL for OAuth callback redirects. Required in prod when any provider is configured."},
-	{Field: "OAuthTokenCacheTTL", Env: "OAUTH_TOKEN_CACHE_TTL", Default: "5m", Description: "How long the MCP-side OAuth token validator caches a successful provider lookup."},
-	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", Description: "Bearer tokens accepted on /mcp. TOML: native array. Env: comma-separated."},
-	{Field: "DocsDir", Env: "DOCS_DIR", Default: "/app/docs", Description: "Container-side docs volume path read by document_ingest_file."},
+	{Field: "Port", Env: "SATELLITES_PORT", Default: "8080", Description: "HTTP listen port (1..65535)."},
+	{Field: "Env", Env: "SATELLITES_ENV", Default: "prod", Description: "Deployment environment: dev or prod."},
+	{Field: "LogLevel", Env: "SATELLITES_LOG_LEVEL", Default: "info", Description: "Arbor log level: trace, debug, info, warn, error."},
+	{Field: "DevMode", Env: "SATELLITES_DEV_MODE", Default: "false", Description: "Enables dev-mode quick-signin and DEV portal affordances."},
+	{Field: "DBDSN", Env: "SATELLITES_DB_DSN", Default: "(empty — DB-backed verbs disabled)", ProdRecommended: true, Description: "SurrealDB connection string. Recommended in prod."},
+	{Field: "DevUsername", Env: "SATELLITES_DEV_USERNAME", Default: "dev@satellites.local (when DevMode=true) / (empty)", Description: "Fixed credential username for DevMode signin."},
+	{Field: "DevPassword", Env: "SATELLITES_DEV_PASSWORD", Default: "dev123 (when DevMode=true) / (empty)", Description: "Fixed credential password for DevMode signin. Never logged."},
+	{Field: "GoogleClientID", Env: "SATELLITES_GOOGLE_CLIENT_ID", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client id for Google. Pair with SATELLITES_GOOGLE_CLIENT_SECRET."},
+	{Field: "GoogleClientSecret", Env: "SATELLITES_GOOGLE_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for Google. Never logged."},
+	{Field: "GithubClientID", Env: "SATELLITES_GITHUB_CLIENT_ID", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client id for GitHub. Pair with SATELLITES_GITHUB_CLIENT_SECRET."},
+	{Field: "GithubClientSecret", Env: "SATELLITES_GITHUB_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for GitHub. Never logged."},
+	{Field: "OAuthRedirectBaseURL", Env: "SATELLITES_OAUTH_REDIRECT_BASE_URL", Default: "http://localhost:<Port> (DevMode=true) / (empty)", ProdRecommended: true, Description: "Base URL for OAuth callback redirects. Recommended in prod when any provider is configured."},
+	{Field: "OAuthTokenCacheTTL", Env: "SATELLITES_OAUTH_TOKEN_CACHE_TTL", Default: "4h", Description: "How long the MCP-side OAuth token validator caches a successful provider lookup."},
+	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", ProdRecommended: true, Description: "Bearer tokens accepted on /mcp. TOML: native array. Env: comma-separated."},
+	{Field: "DocsDir", Env: "SATELLITES_DOCS_DIR", Default: "/app/docs", Description: "Container-side docs volume path read by document_ingest_file."},
 	{Field: "GrantsEnforced", Env: "SATELLITES_GRANTS_ENFORCED", Default: "false", Description: "When true, MCP verbs outside the bootstrap allowlist require a covering role-grant."},
-	{Field: "GeminiAPIKey", Env: "GEMINI_API_KEY", Default: "(empty — reviewer falls back to AcceptAll)", Description: "Google AI Studio key used by the close-time reviewer. Never logged."},
-	{Field: "GeminiReviewModel", Env: "GEMINI_REVIEW_MODEL", Default: "gemini-2.5-flash", Description: "Gemini model id for the close-time reviewer. Empty resolves to the package default."},
-	{Field: "EmbeddingsProvider", Env: "EMBEDDINGS_PROVIDER", Default: "(empty — none, semantic search disabled)", Description: "Embeddings backend selector: gemini, stub, none."},
-	{Field: "EmbeddingsModel", Env: "EMBEDDINGS_MODEL", Default: "(empty — provider default)", Description: "Provider-specific embeddings model id."},
-	{Field: "EmbeddingsAPIKey", Env: "EMBEDDINGS_API_KEY", Default: "(empty — required for provider=gemini)", Description: "Embeddings provider API key. Never logged."},
-	{Field: "EmbeddingsBaseURL", Env: "EMBEDDINGS_BASE_URL", Default: "(empty — provider canonical endpoint)", Description: "Embeddings provider HTTP base URL override."},
-	{Field: "EmbeddingsDimension", Env: "EMBEDDINGS_DIMENSION", Default: "0 (provider default)", Description: "Optional embeddings vector dimensionality override."},
+	{Field: "GeminiAPIKey", Env: "SATELLITES_GEMINI_API_KEY", Default: "(empty — reviewer falls back to AcceptAll)", Description: "Google AI Studio key used by the close-time reviewer. Never logged."},
+	{Field: "GeminiReviewModel", Env: "SATELLITES_GEMINI_REVIEW_MODEL", Default: "gemini-2.5-flash", Description: "Gemini model id for the close-time reviewer. Empty resolves to the package default."},
+	{Field: "EmbeddingsProvider", Env: "SATELLITES_EMBEDDINGS_PROVIDER", Default: "(empty — none, semantic search disabled)", Description: "Embeddings backend selector: gemini, stub, none."},
+	{Field: "EmbeddingsModel", Env: "SATELLITES_EMBEDDINGS_MODEL", Default: "(empty — provider default)", Description: "Provider-specific embeddings model id."},
+	{Field: "EmbeddingsAPIKey", Env: "SATELLITES_EMBEDDINGS_API_KEY", Default: "(empty — required for provider=gemini)", Description: "Embeddings provider API key. Never logged."},
+	{Field: "EmbeddingsBaseURL", Env: "SATELLITES_EMBEDDINGS_BASE_URL", Default: "(empty — provider canonical endpoint)", Description: "Embeddings provider HTTP base URL override."},
+	{Field: "EmbeddingsDimension", Env: "SATELLITES_EMBEDDINGS_DIMENSION", Default: "0 (provider default)", Description: "Optional embeddings vector dimensionality override."},
 }
 
-// Describe returns the canonical (Field, Env, Default, ProdRequired,
+// Describe returns the canonical (Field, Env, Default, ProdRecommended,
 // Description) table for the Config type. Use this in admin / --env-help
 // surfaces; do not duplicate the mapping elsewhere.
 func Describe() []FieldDoc {
@@ -232,39 +243,47 @@ var validLogLevels = map[string]struct{}{
 }
 
 // configPathEnv names the env var operators set to point at an explicit
-// TOML file. When set and unreadable, Load() fails — explicit asks must
-// resolve. Unset falls back to ./satellites.toml (silent if absent).
+// TOML file. When set and unreadable, Load() emits a warning and falls
+// through to defaults+env (the service still boots).
 const configPathEnv = "SATELLITES_CONFIG"
 
 // defaultConfigFile is the file the loader checks when SATELLITES_CONFIG
 // is unset. Absence is silent — operators can run on env+defaults alone.
 const defaultConfigFile = "satellites.toml"
 
-// Load resolves Config from defaults → TOML → env, validates, and returns.
-// Missing required fields (e.g. DB_DSN in prod) return a structured error;
-// callers should log via arbor and exit non-zero.
-func Load() (*Config, error) {
+// Load resolves Config from defaults → TOML → env and returns the
+// resulting Config alongside a slice of operator-facing warnings. The
+// service ALWAYS boots: malformed values, parse errors, missing-but-
+// recommended prod secrets — all degrade to a warning and the field
+// falls back to its code default. Callers iterate the warnings and log
+// them via arbor.
+func Load() (*Config, []string) {
 	cfg := defaults()
+	var warnings []string
 
-	overlay, tomlPath, err := readTOMLOverlay()
-	if err != nil {
-		return nil, err
-	}
+	overlay, tomlPath, tomlWarnings := readTOMLOverlay()
+	warnings = append(warnings, tomlWarnings...)
 	cfg.loadedTOMLPath = tomlPath
-	envSetDevMode := overlay.applyTo(cfg)
+	envSetDevMode := overlay.applyTo(cfg, &warnings)
 
 	// Env / DevMode resolution must settle before the dev-mode default
 	// block so the right shape applies.
-	if v := os.Getenv("ENV"); v != "" {
-		cfg.Env = normaliseEnv(v)
+	if v := os.Getenv("SATELLITES_ENV"); v != "" {
+		normalised := normaliseEnv(v)
+		if normalised != "dev" && normalised != "prod" {
+			warnings = append(warnings, fmt.Sprintf("SATELLITES_ENV=%q invalid (want dev|prod) — falling back to default %q", v, cfg.Env))
+		} else {
+			cfg.Env = normalised
+		}
 	}
-	if v := os.Getenv("DEV_MODE"); v != "" {
+	if v := os.Getenv("SATELLITES_DEV_MODE"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid DEV_MODE %q: %w", v, err)
+			warnings = append(warnings, fmt.Sprintf("SATELLITES_DEV_MODE=%q unparseable as bool — falling back to default %t", v, cfg.DevMode))
+		} else {
+			cfg.DevMode = b
+			envSetDevMode = true
 		}
-		cfg.DevMode = b
-		envSetDevMode = true
 	}
 	if !envSetDevMode {
 		cfg.DevMode = cfg.Env == "dev"
@@ -285,14 +304,9 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if err := applyEnvOverrides(cfg); err != nil {
-		return nil, err
-	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+	applyEnvOverrides(cfg, &warnings)
+	warnings = append(warnings, cfg.collectWarnings()...)
+	return cfg, warnings
 }
 
 // duration wraps time.Duration with a TextUnmarshaler so go-toml/v2 can
@@ -320,7 +334,6 @@ type tomlOverlay struct {
 	LogLevel             *string   `toml:"log_level"`
 	DevMode              *bool     `toml:"dev_mode"`
 	DBDSN                *string   `toml:"db_dsn"`
-	FlyMachineID         *string   `toml:"fly_machine_id"`
 	DevUsername          *string   `toml:"dev_username"`
 	DevPassword          *string   `toml:"dev_password"`
 	GoogleClientID       *string   `toml:"google_client_id"`
@@ -343,16 +356,32 @@ type tomlOverlay struct {
 
 // applyTo copies overlay values into cfg for every non-nil field. Returns
 // true when the overlay supplied a DevMode value so the caller can skip
-// the env-derived default.
-func (o tomlOverlay) applyTo(cfg *Config) bool {
+// the env-derived default. Invalid TOML values (out-of-range port,
+// unknown env, etc.) append to warnings and leave the field at its
+// prior value.
+func (o tomlOverlay) applyTo(cfg *Config, warnings *[]string) bool {
 	if o.Port != nil {
-		cfg.Port = *o.Port
+		if *o.Port < 1 || *o.Port > 65535 {
+			*warnings = append(*warnings, fmt.Sprintf("toml port=%d out of range — keeping %d", *o.Port, cfg.Port))
+		} else {
+			cfg.Port = *o.Port
+		}
 	}
 	if o.Env != nil {
-		cfg.Env = normaliseEnv(*o.Env)
+		normalised := normaliseEnv(*o.Env)
+		if normalised != "dev" && normalised != "prod" {
+			*warnings = append(*warnings, fmt.Sprintf("toml env=%q invalid (want dev|prod) — keeping %q", *o.Env, cfg.Env))
+		} else {
+			cfg.Env = normalised
+		}
 	}
 	if o.LogLevel != nil {
-		cfg.LogLevel = strings.ToLower(*o.LogLevel)
+		lvl := strings.ToLower(*o.LogLevel)
+		if _, ok := validLogLevels[lvl]; !ok {
+			*warnings = append(*warnings, fmt.Sprintf("toml log_level=%q invalid — keeping %q", *o.LogLevel, cfg.LogLevel))
+		} else {
+			cfg.LogLevel = lvl
+		}
 	}
 	devModeSet := false
 	if o.DevMode != nil {
@@ -361,9 +390,6 @@ func (o tomlOverlay) applyTo(cfg *Config) bool {
 	}
 	if o.DBDSN != nil {
 		cfg.DBDSN = *o.DBDSN
-	}
-	if o.FlyMachineID != nil {
-		cfg.FlyMachineID = *o.FlyMachineID
 	}
 	if o.DevUsername != nil {
 		cfg.DevUsername = *o.DevUsername
@@ -387,7 +413,12 @@ func (o tomlOverlay) applyTo(cfg *Config) bool {
 		cfg.OAuthRedirectBaseURL = *o.OAuthRedirectBaseURL
 	}
 	if o.OAuthTokenCacheTTL != nil {
-		cfg.OAuthTokenCacheTTL = time.Duration(*o.OAuthTokenCacheTTL)
+		d := time.Duration(*o.OAuthTokenCacheTTL)
+		if d < time.Second || d > 24*time.Hour {
+			*warnings = append(*warnings, fmt.Sprintf("toml oauth_token_cache_ttl=%s out of range (1s..24h) — keeping %s", d, cfg.OAuthTokenCacheTTL))
+		} else {
+			cfg.OAuthTokenCacheTTL = d
+		}
 	}
 	if o.APIKeys != nil {
 		cfg.APIKeys = append([]string(nil), o.APIKeys...)
@@ -423,108 +454,125 @@ func (o tomlOverlay) applyTo(cfg *Config) bool {
 }
 
 // readTOMLOverlay resolves the TOML path, parses the file if present, and
-// returns the overlay alongside the path that was actually read. An empty
-// path means no TOML was loaded (the silent-when-absent default-config
-// case); callers stamp this onto Config.loadedTOMLPath so the boot log
-// can prove the loader ran.
-func readTOMLOverlay() (tomlOverlay, string, error) {
+// returns the overlay alongside the path that was actually read and any
+// warnings generated. An empty path means no TOML was loaded (the
+// silent-when-absent default-config case); callers stamp this onto
+// Config.loadedTOMLPath so the boot log can prove the loader ran.
+//
+// Failure modes (missing explicit file, parse error) emit a warning and
+// return an empty overlay — the service still boots on defaults+env.
+func readTOMLOverlay() (tomlOverlay, string, []string) {
 	var overlay tomlOverlay
-	path, explicit, err := resolveConfigPath()
-	if err != nil {
-		return overlay, "", err
-	}
+	var warnings []string
+	path, explicit := resolveConfigPath()
 	if path == "" {
-		return overlay, "", nil
+		return overlay, "", warnings
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if !explicit && os.IsNotExist(err) {
-			return overlay, "", nil
+		if os.IsNotExist(err) && !explicit {
+			return overlay, "", warnings
 		}
-		return overlay, "", fmt.Errorf("read config %s: %w", path, err)
+		warnings = append(warnings, fmt.Sprintf("config file %s unreadable: %v — falling back to defaults+env", path, err))
+		return overlay, "", warnings
 	}
 	if err := toml.Unmarshal(raw, &overlay); err != nil {
-		return overlay, "", fmt.Errorf("parse config %s: %w", path, err)
+		warnings = append(warnings, fmt.Sprintf("config file %s parse failed: %v — falling back to defaults+env", path, err))
+		return tomlOverlay{}, "", warnings
 	}
-	return overlay, path, nil
+	return overlay, path, warnings
 }
 
 // defaults builds the in-code default Config. This is the lowest-precedence
-// layer; TOML and env vars override it.
+// layer; TOML and env vars override it. Defaults are tuned for prod so a
+// zero-config boot is safe in production; dev runs supply ENV=dev (or use
+// the bundled dev TOML) to flip on quick-signin and the dev affordances.
 func defaults() *Config {
 	return &Config{
 		Port:               8080,
-		Env:                "dev",
+		Env:                "prod",
 		LogLevel:           "info",
-		DevMode:            true,
+		DevMode:            false,
 		DBDSN:              "",
-		FlyMachineID:       "",
 		DocsDir:            "/app/docs",
-		OAuthTokenCacheTTL: 5 * time.Minute,
+		OAuthTokenCacheTTL: 4 * time.Hour,
+		GeminiReviewModel:  "gemini-2.5-flash",
+		EmbeddingsProvider: "none",
 	}
 }
 
-// resolveConfigPath returns (path, explicit, err). When SATELLITES_CONFIG
-// is set, the path is explicit and a missing file is an error. Otherwise
-// the loader looks for ./satellites.toml; an absent default file returns
-// path="" with no error.
-func resolveConfigPath() (string, bool, error) {
+// resolveConfigPath returns (path, explicit). When SATELLITES_CONFIG is
+// set, the path is explicit. Otherwise the loader looks for
+// ./satellites.toml; an absent default file returns path="".
+func resolveConfigPath() (string, bool) {
 	if p := strings.TrimSpace(os.Getenv(configPathEnv)); p != "" {
-		return p, true, nil
+		return p, true
 	}
 	if _, err := os.Stat(defaultConfigFile); err == nil {
-		return defaultConfigFile, false, nil
+		return defaultConfigFile, false
 	}
-	return "", false, nil
+	return "", false
 }
 
 // applyEnvOverrides mutates cfg in place with values from the process env.
 // Each override is gated on a non-empty env var; empty (or unset) leaves
-// the prior value intact.
-func applyEnvOverrides(cfg *Config) error {
-	if v := firstNonEmpty(os.Getenv("PORT"), os.Getenv("SATELLITES_PORT")); v != "" {
+// the prior value intact. Parse errors and out-of-range values append to
+// warnings and leave the field at its prior value — Load() never returns
+// a fatal error.
+func applyEnvOverrides(cfg *Config, warnings *[]string) {
+	if v := os.Getenv("SATELLITES_PORT"); v != "" {
 		p, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("invalid PORT %q: %w", v, err)
+		switch {
+		case err != nil:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_PORT=%q unparseable as int — keeping %d", v, cfg.Port))
+		case p < 1 || p > 65535:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_PORT=%d out of range (1..65535) — keeping %d", p, cfg.Port))
+		default:
+			cfg.Port = p
 		}
-		cfg.Port = p
 	}
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		cfg.LogLevel = strings.ToLower(v)
+	if v := os.Getenv("SATELLITES_LOG_LEVEL"); v != "" {
+		lvl := strings.ToLower(v)
+		if _, ok := validLogLevels[lvl]; !ok {
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_LOG_LEVEL=%q invalid — keeping %q", v, cfg.LogLevel))
+		} else {
+			cfg.LogLevel = lvl
+		}
 	}
-	if v := os.Getenv("DB_DSN"); v != "" {
+	if v := os.Getenv("SATELLITES_DB_DSN"); v != "" {
 		cfg.DBDSN = v
 	}
-	if v := os.Getenv("FLY_MACHINE_ID"); v != "" {
-		cfg.FlyMachineID = v
-	}
-	if v := os.Getenv("DEV_USERNAME"); v != "" {
+	if v := os.Getenv("SATELLITES_DEV_USERNAME"); v != "" {
 		cfg.DevUsername = v
 	}
-	if v := os.Getenv("DEV_PASSWORD"); v != "" {
+	if v := os.Getenv("SATELLITES_DEV_PASSWORD"); v != "" {
 		cfg.DevPassword = v
 	}
-	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
+	if v := os.Getenv("SATELLITES_GOOGLE_CLIENT_ID"); v != "" {
 		cfg.GoogleClientID = v
 	}
-	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
+	if v := os.Getenv("SATELLITES_GOOGLE_CLIENT_SECRET"); v != "" {
 		cfg.GoogleClientSecret = v
 	}
-	if v := os.Getenv("GITHUB_CLIENT_ID"); v != "" {
+	if v := os.Getenv("SATELLITES_GITHUB_CLIENT_ID"); v != "" {
 		cfg.GithubClientID = v
 	}
-	if v := os.Getenv("GITHUB_CLIENT_SECRET"); v != "" {
+	if v := os.Getenv("SATELLITES_GITHUB_CLIENT_SECRET"); v != "" {
 		cfg.GithubClientSecret = v
 	}
-	if v := os.Getenv("OAUTH_REDIRECT_BASE_URL"); v != "" {
+	if v := os.Getenv("SATELLITES_OAUTH_REDIRECT_BASE_URL"); v != "" {
 		cfg.OAuthRedirectBaseURL = v
 	}
-	if v := os.Getenv("OAUTH_TOKEN_CACHE_TTL"); v != "" {
+	if v := os.Getenv("SATELLITES_OAUTH_TOKEN_CACHE_TTL"); v != "" {
 		d, err := time.ParseDuration(v)
-		if err != nil {
-			return fmt.Errorf("invalid OAUTH_TOKEN_CACHE_TTL %q: %w", v, err)
+		switch {
+		case err != nil:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_TOKEN_CACHE_TTL=%q unparseable as duration — keeping %s", v, cfg.OAuthTokenCacheTTL))
+		case d < time.Second || d > 24*time.Hour:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_TOKEN_CACHE_TTL=%s out of range (1s..24h) — keeping %s", d, cfg.OAuthTokenCacheTTL))
+		default:
+			cfg.OAuthTokenCacheTTL = d
 		}
-		cfg.OAuthTokenCacheTTL = d
 	}
 	if v := os.Getenv("SATELLITES_API_KEYS"); v != "" {
 		var keys []string
@@ -535,71 +583,71 @@ func applyEnvOverrides(cfg *Config) error {
 		}
 		cfg.APIKeys = keys
 	}
-	if v := os.Getenv("DOCS_DIR"); v != "" {
+	if v := os.Getenv("SATELLITES_DOCS_DIR"); v != "" {
 		cfg.DocsDir = v
 	}
 	if v := os.Getenv("SATELLITES_GRANTS_ENFORCED"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("invalid SATELLITES_GRANTS_ENFORCED %q: %w", v, err)
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_GRANTS_ENFORCED=%q unparseable as bool — keeping %t", v, cfg.GrantsEnforced))
+		} else {
+			cfg.GrantsEnforced = b
 		}
-		cfg.GrantsEnforced = b
 	}
-	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
+	if v := os.Getenv("SATELLITES_GEMINI_API_KEY"); v != "" {
 		cfg.GeminiAPIKey = v
 	}
-	if v := os.Getenv("GEMINI_REVIEW_MODEL"); v != "" {
+	if v := os.Getenv("SATELLITES_GEMINI_REVIEW_MODEL"); v != "" {
 		cfg.GeminiReviewModel = v
 	}
-	if v := os.Getenv("EMBEDDINGS_PROVIDER"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_PROVIDER"); v != "" {
 		cfg.EmbeddingsProvider = strings.ToLower(strings.TrimSpace(v))
 	}
-	if v := os.Getenv("EMBEDDINGS_MODEL"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_MODEL"); v != "" {
 		cfg.EmbeddingsModel = v
 	}
-	if v := os.Getenv("EMBEDDINGS_API_KEY"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_API_KEY"); v != "" {
 		cfg.EmbeddingsAPIKey = v
 	}
-	if v := os.Getenv("EMBEDDINGS_BASE_URL"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_BASE_URL"); v != "" {
 		cfg.EmbeddingsBaseURL = v
 	}
-	if v := os.Getenv("EMBEDDINGS_DIMENSION"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_DIMENSION"); v != "" {
 		d, err := strconv.Atoi(v)
 		if err != nil {
-			return fmt.Errorf("invalid EMBEDDINGS_DIMENSION %q: %w", v, err)
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_EMBEDDINGS_DIMENSION=%q unparseable as int — keeping %d", v, cfg.EmbeddingsDimension))
+		} else {
+			cfg.EmbeddingsDimension = d
 		}
-		cfg.EmbeddingsDimension = d
 	}
-	return nil
 }
 
-func (c *Config) validate() error {
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("port out of range: %d (must be 1..65535)", c.Port)
-	}
-	if c.Env != "dev" && c.Env != "prod" {
-		return fmt.Errorf("invalid ENV %q (must be dev or prod)", c.Env)
-	}
-	if _, ok := validLogLevels[c.LogLevel]; !ok {
-		return fmt.Errorf("invalid LOG_LEVEL %q (must be trace, debug, info, warn, or error)", c.LogLevel)
-	}
-	if c.OAuthTokenCacheTTL < time.Second || c.OAuthTokenCacheTTL > time.Hour {
-		return fmt.Errorf("OAUTH_TOKEN_CACHE_TTL out of range: %s (must be 1s..1h)", c.OAuthTokenCacheTTL)
-	}
+// collectWarnings inspects the resolved Config and appends one warning
+// per missing-but-recommended prod knob. OAuth pair mismatches disable
+// the affected provider and warn rather than failing boot.
+func (c *Config) collectWarnings() []string {
+	var out []string
 	if c.Env == "prod" && strings.TrimSpace(c.DBDSN) == "" {
-		return fmt.Errorf("DB_DSN is required when ENV=prod")
+		out = append(out, "SATELLITES_DB_DSN empty under ENV=prod — DB-backed verbs disabled (no story persistence)")
+	}
+	if c.Env == "prod" && len(c.APIKeys) == 0 {
+		out = append(out, "SATELLITES_API_KEYS empty under ENV=prod — Bearer-API-key auth disabled on /mcp")
 	}
 	if (c.GoogleClientID == "") != (c.GoogleClientSecret == "") {
-		return fmt.Errorf("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together (got id=%t, secret=%t)", c.GoogleClientID != "", c.GoogleClientSecret != "")
+		out = append(out, fmt.Sprintf("Google OAuth half-set (id=%t, secret=%t) — provider disabled", c.GoogleClientID != "", c.GoogleClientSecret != ""))
+		c.GoogleClientID = ""
+		c.GoogleClientSecret = ""
 	}
 	if (c.GithubClientID == "") != (c.GithubClientSecret == "") {
-		return fmt.Errorf("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together (got id=%t, secret=%t)", c.GithubClientID != "", c.GithubClientSecret != "")
+		out = append(out, fmt.Sprintf("GitHub OAuth half-set (id=%t, secret=%t) — provider disabled", c.GithubClientID != "", c.GithubClientSecret != ""))
+		c.GithubClientID = ""
+		c.GithubClientSecret = ""
 	}
 	hasOAuth := c.GoogleClientID != "" || c.GithubClientID != ""
 	if c.Env == "prod" && hasOAuth && strings.TrimSpace(c.OAuthRedirectBaseURL) == "" {
-		return fmt.Errorf("OAUTH_REDIRECT_BASE_URL is required when ENV=prod and any OAuth provider is configured")
+		out = append(out, "SATELLITES_OAUTH_REDIRECT_BASE_URL empty under ENV=prod with OAuth configured — callbacks will fail until set")
 	}
-	return nil
+	return out
 }
 
 func normaliseEnv(v string) string {
@@ -611,13 +659,4 @@ func normaliseEnv(v string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(v))
 	}
-}
-
-func firstNonEmpty(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

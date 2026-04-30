@@ -18,7 +18,7 @@ const GeminiBaseURL = "https://generativelanguage.googleapis.com"
 
 // DefaultGeminiReviewModel is the default Gemini model used for reviews.
 // gemini-2.5-flash gives a good cost/latency tradeoff for the rubric
-// volumes we expect; the operator can override via GEMINI_REVIEW_MODEL.
+// volumes we expect; the operator can override via SATELLITES_GEMINI_REVIEW_MODEL.
 const DefaultGeminiReviewModel = "gemini-2.5-flash"
 
 const (

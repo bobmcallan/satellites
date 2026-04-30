@@ -30,8 +30,8 @@ func TestLoginFlowSetsAndClearsSession(t *testing.T) {
 	defer cancel()
 
 	baseURL, stop := startServerContainerWithEnv(t, ctx, map[string]string{
-		"DEV_USERNAME": "dev@local",
-		"DEV_PASSWORD": "letmein",
+		"SATELLITES_DEV_USERNAME": "dev@local",
+		"SATELLITES_DEV_PASSWORD": "letmein",
 	})
 	defer stop()
 
@@ -132,11 +132,11 @@ func TestPortalProjectsPages(t *testing.T) {
 	baseURL, stop := startServerContainerWithOptions(t, ctx, startOptions{
 		Network: net.Name,
 		Env: map[string]string{
-			"DB_DSN":              "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
-			"SATELLITES_API_KEYS": "key_portal",
-			"DOCS_DIR":            "/app/docs",
-			"DEV_USERNAME":        "dev@local",
-			"DEV_PASSWORD":        "letmein",
+			"SATELLITES_DB_DSN":       "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+			"SATELLITES_API_KEYS":     "key_portal",
+			"SATELLITES_DOCS_DIR":     "/app/docs",
+			"SATELLITES_DEV_USERNAME": "dev@local",
+			"SATELLITES_DEV_PASSWORD": "letmein",
 		},
 		Mounts: []mount.Mount{{
 			Type:     mount.TypeBind,

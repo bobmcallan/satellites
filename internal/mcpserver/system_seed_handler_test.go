@@ -123,4 +123,3 @@ func TestSystemSeedRun_AdminSucceedsAndWritesLedger(t *testing.T) {
 		t.Errorf("CreatedBy = %q, want %q", rows[0].CreatedBy, "u_bob")
 	}
 }
-

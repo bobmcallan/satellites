@@ -115,8 +115,8 @@ func TestSelectArrow_DarkThemeNoTile(t *testing.T) {
 	r, g, b, _ := img.At(cx, cy).RGBA()
 	pix := [3]int{int(r >> 8), int(g >> 8), int(b >> 8)}
 
-	const formBgR, formBgG, formBgB = 17, 17, 17                // #111
-	const arrowR, arrowG, arrowB = 0xe0, 0xe0, 0xe0             // #e0e0e0
+	const formBgR, formBgG, formBgB = 17, 17, 17    // #111
+	const arrowR, arrowG, arrowB = 0xe0, 0xe0, 0xe0 // #e0e0e0
 	if !pixelClose(pix, [3]int{formBgR, formBgG, formBgB}, 16) {
 		t.Errorf("AC2: pixel at centre of select (%d,%d) = %v, want close to #111 (form bg). If close to #%02x%02x%02x the caret is tiling. background-repeat=%q",
 			cx, cy, pix, arrowR, arrowG, arrowB, probeResult.BackgroundRepeat)

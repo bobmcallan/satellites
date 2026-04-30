@@ -77,10 +77,10 @@ func startServerContainerWithEnv(t *testing.T, ctx context.Context, extraEnv map
 	t.Helper()
 	root := repoRoot(t)
 	env := map[string]string{
-		"PORT":      "8080",
-		"ENV":       "dev",
-		"LOG_LEVEL": "info",
-		"DEV_MODE":  "true",
+		"SATELLITES_PORT":      "8080",
+		"SATELLITES_ENV":       "dev",
+		"SATELLITES_LOG_LEVEL": "info",
+		"SATELLITES_DEV_MODE":  "true",
 	}
 	for k, v := range extraEnv {
 		env[k] = v

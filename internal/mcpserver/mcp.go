@@ -145,10 +145,10 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.docs != nil {
 		ingestTool := mcpgo.NewTool("document_ingest_file",
-			mcpgo.WithDescription("Ingest a file from the server's DOCS_DIR into the document store. Path is repo-relative; server reads the file and upserts by (project_id, name). If project_id is omitted, defaults to the caller's first owned project or the system default."),
+			mcpgo.WithDescription("Ingest a file from the server's docs volume (SATELLITES_DOCS_DIR) into the document store. Path is repo-relative; server reads the file and upserts by (project_id, name). If project_id is omitted, defaults to the caller's first owned project or the system default."),
 			mcpgo.WithString("path",
 				mcpgo.Required(),
-				mcpgo.Description("Repo-relative path inside DOCS_DIR."),
+				mcpgo.Description("Repo-relative path inside SATELLITES_DOCS_DIR."),
 			),
 			mcpgo.WithString("project_id",
 				mcpgo.Description("Optional project scope. Defaults to caller's first owned project or the system default."),
@@ -1095,7 +1095,7 @@ func (s *Server) handleDocumentCreate(ctx context.Context, req mcpgo.CallToolReq
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 	// Story_8b06a100: enqueue an embed-document task so the production
-	// embed worker (when EMBEDDINGS_PROVIDER is set) chunks + embeds the
+	// embed worker (when SATELLITES_EMBEDDINGS_PROVIDER is set) chunks + embeds the
 	// new row. Returns nil + nil when bodies are too short or the
 	// taskStore isn't wired (dev/no-DB), so the success path is unaffected.
 	if _, err := document.EnqueueIngest(ctx, s.tasks, created, now); err != nil {

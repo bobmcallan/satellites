@@ -57,9 +57,9 @@ func TestDocumentIngestAndGetRoundTrip(t *testing.T) {
 	baseURL, stop := startServerContainerWithOptions(t, ctx, startOptions{
 		Network: net.Name,
 		Env: map[string]string{
-			"DB_DSN":              "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+			"SATELLITES_DB_DSN":   "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
 			"SATELLITES_API_KEYS": "key_doc",
-			"DOCS_DIR":            "/app/docs",
+			"SATELLITES_DOCS_DIR": "/app/docs",
 		},
 		Mounts: []mount.Mount{{
 			Type:     mount.TypeBind,
@@ -193,10 +193,10 @@ func startServerContainerWithOptions(t *testing.T, ctx context.Context, opts sta
 	t.Helper()
 	root := repoRoot(t)
 	env := map[string]string{
-		"PORT":      "8080",
-		"ENV":       "dev",
-		"LOG_LEVEL": "info",
-		"DEV_MODE":  "true",
+		"SATELLITES_PORT":      "8080",
+		"SATELLITES_ENV":       "dev",
+		"SATELLITES_LOG_LEVEL": "info",
+		"SATELLITES_DEV_MODE":  "true",
 	}
 	for k, v := range opts.Env {
 		env[k] = v

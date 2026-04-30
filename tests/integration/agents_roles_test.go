@@ -60,9 +60,9 @@ func TestAgentsRoles_Wrappers_Registered_AndCreateHappyPaths(t *testing.T) {
 	baseURL, stop := startServerContainerWithOptions(t, ctx, startOptions{
 		Network: net.Name,
 		Env: map[string]string{
-			"DB_DSN":              "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+			"SATELLITES_DB_DSN":   "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
 			"SATELLITES_API_KEYS": "key_ar",
-			"DOCS_DIR":            "/app/docs",
+			"SATELLITES_DOCS_DIR": "/app/docs",
 		},
 		Mounts: []mount.Mount{{
 			Type:     mount.TypeBind,

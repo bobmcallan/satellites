@@ -15,14 +15,14 @@ import (
 
 // resolveFixture wires the four memory stores the resolver needs.
 type resolveFixture struct {
-	r       *Resolver
-	ctx     context.Context
-	now     time.Time
-	userID  string
-	sessID  string
-	wsID    string
-	docs    document.Store
-	ledger  ledger.Store
+	r         *Resolver
+	ctx       context.Context
+	now       time.Time
+	userID    string
+	sessID    string
+	wsID      string
+	docs      document.Store
+	ledger    ledger.Store
 	contracts contract.Store
 }
 

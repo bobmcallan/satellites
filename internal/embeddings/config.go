@@ -9,9 +9,9 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 )
 
-// Provider names accepted in EMBEDDINGS_PROVIDER. The `none` value is the
-// idiomatic way to disable embeddings entirely (production deploy without
-// a key, dev without internet) — store layer falls back to
+// Provider names accepted in SATELLITES_EMBEDDINGS_PROVIDER. The `none`
+// value is the idiomatic way to disable embeddings entirely (production
+// deploy without a key, dev without internet) — store layer falls back to
 // ErrSemanticUnavailable.
 const (
 	ProviderGemini = "gemini"
@@ -48,8 +48,9 @@ func FromConfig(cfg *config.Config) Config {
 	return out
 }
 
-// LoadFromEnv reads the EMBEDDINGS_* env vars into a Config. Empty env
-// → Config{Provider:"none"}, which produces a nil Embedder from New().
+// LoadFromEnv reads the SATELLITES_EMBEDDINGS_* env vars into a Config.
+// Empty env → Config{Provider:"none"}, which produces a nil Embedder
+// from New().
 //
 // Deprecated: prefer FromConfig with a resolved *config.Config so the
 // embeddings boot path participates in the shared env→TOML→default
@@ -57,18 +58,18 @@ func FromConfig(cfg *config.Config) Config {
 // build Config directly without a full config.Config.
 func LoadFromEnv() (Config, error) {
 	cfg := Config{
-		Provider: strings.ToLower(strings.TrimSpace(os.Getenv("EMBEDDINGS_PROVIDER"))),
-		Model:    os.Getenv("EMBEDDINGS_MODEL"),
-		APIKey:   os.Getenv("EMBEDDINGS_API_KEY"),
-		BaseURL:  os.Getenv("EMBEDDINGS_BASE_URL"),
+		Provider: strings.ToLower(strings.TrimSpace(os.Getenv("SATELLITES_EMBEDDINGS_PROVIDER"))),
+		Model:    os.Getenv("SATELLITES_EMBEDDINGS_MODEL"),
+		APIKey:   os.Getenv("SATELLITES_EMBEDDINGS_API_KEY"),
+		BaseURL:  os.Getenv("SATELLITES_EMBEDDINGS_BASE_URL"),
 	}
 	if cfg.Provider == "" {
 		cfg.Provider = ProviderNone
 	}
-	if v := os.Getenv("EMBEDDINGS_DIMENSION"); v != "" {
+	if v := os.Getenv("SATELLITES_EMBEDDINGS_DIMENSION"); v != "" {
 		d, err := strconv.Atoi(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("invalid EMBEDDINGS_DIMENSION %q: %w", v, err)
+			return Config{}, fmt.Errorf("invalid SATELLITES_EMBEDDINGS_DIMENSION %q: %w", v, err)
 		}
 		cfg.Dimension = d
 	}
@@ -86,7 +87,7 @@ func New(cfg Config) (Embedder, error) {
 		return NewStubEmbedder(cfg.Dimension), nil
 	case ProviderGemini:
 		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("embeddings: EMBEDDINGS_API_KEY required for provider=gemini")
+			return nil, fmt.Errorf("embeddings: SATELLITES_EMBEDDINGS_API_KEY required for provider=gemini")
 		}
 		return NewGeminiEmbedder(cfg), nil
 	default:

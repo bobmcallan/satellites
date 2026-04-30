@@ -16,13 +16,13 @@ import (
 // ledger row. Mirrors configseed.Summary so the audit trail and the
 // caller see the same shape. story_33e1a323.
 type SystemSeedRunResult struct {
-	Loaded    int                   `json:"loaded"`
-	Created   int                   `json:"created"`
-	Updated   int                   `json:"updated"`
-	Skipped   int                   `json:"skipped"`
+	Loaded    int                     `json:"loaded"`
+	Created   int                     `json:"created"`
+	Updated   int                     `json:"updated"`
+	Skipped   int                     `json:"skipped"`
 	Errors    []configseed.ErrorEntry `json:"errors,omitempty"`
-	LedgerID  string                `json:"ledger_id,omitempty"`
-	StartedAt time.Time             `json:"started_at"`
+	LedgerID  string                  `json:"ledger_id,omitempty"`
+	StartedAt time.Time               `json:"started_at"`
 }
 
 // handleSystemSeedRun re-invokes configseed.RunAll and records the

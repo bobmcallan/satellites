@@ -55,10 +55,10 @@ func TestEmbedWorker_StubProvider_ChunksDocument(t *testing.T) {
 	baseURL, stop := startServerContainerWithOptions(t, ctx, startOptions{
 		Network: net.Name,
 		Env: map[string]string{
-			"DB_DSN":               "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
-			"SATELLITES_API_KEYS":  "key_embed",
-			"EMBEDDINGS_PROVIDER":  "stub",
-			"EMBEDDINGS_DIMENSION": "16",
+			"SATELLITES_DB_DSN":               "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+			"SATELLITES_API_KEYS":             "key_embed",
+			"SATELLITES_EMBEDDINGS_PROVIDER":  "stub",
+			"SATELLITES_EMBEDDINGS_DIMENSION": "16",
 		},
 	})
 	defer stop()

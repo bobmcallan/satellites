@@ -117,7 +117,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
 // the password.
 func (h *Handlers) authenticate(username, password string) (User, bool) {
 	// DevMode is gated on cfg.DevMode AND cfg.Env != "prod" — prod is a
-	// hard deny regardless of DEV_MODE env.
+	// hard deny regardless of SATELLITES_DEV_MODE env.
 	if h.Cfg.Env != "prod" && h.Cfg.DevMode && h.Cfg.DevUsername != "" && username == h.Cfg.DevUsername {
 		if password != "" && password == h.Cfg.DevPassword {
 			u := User{
@@ -143,7 +143,7 @@ func (h *Handlers) authenticate(username, password string) (User, bool) {
 		return User{}, false
 	}
 	if h.Cfg.Env == "prod" && h.Cfg.DevMode {
-		// In prod, DevMode is disabled even when DEV_MODE=true was mis-set.
+		// In prod, DevMode is disabled even when SATELLITES_DEV_MODE=true was mis-set.
 		// Fall through to bcrypt only.
 	}
 	user, err := h.Users.GetByEmail(username)

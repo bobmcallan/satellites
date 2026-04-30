@@ -11,11 +11,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		satarbor.Default().Error().Str("error", err.Error()).Msg("config load failed")
-		os.Exit(1)
-	}
+	cfg, cfgWarnings := config.Load()
 
 	logger := satarbor.New(cfg.LogLevel)
 	logger.Info().
@@ -24,6 +20,10 @@ func main() {
 		Str("build", config.Build).
 		Str("commit", config.GitCommit).
 		Str("env", cfg.Env).
-		Str("fly_machine_id", cfg.FlyMachineID).
+		Str("fly_machine_id", os.Getenv("FLY_MACHINE_ID")).
 		Msgf("satellites-agent %s", config.GetFullVersion())
+
+	for _, w := range cfgWarnings {
+		logger.Warn().Str("warning", w).Msg("config: startup warning")
+	}
 }

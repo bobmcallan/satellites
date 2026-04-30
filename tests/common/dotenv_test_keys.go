@@ -27,11 +27,11 @@ import (
 // push into the process environment from tests/.env. Anything outside the
 // list is silently ignored even if present in the file.
 var whitelistedDotenvKeys = map[string]struct{}{
-	"GEMINI_API_KEY":      {},
-	"GEMINI_REVIEW_MODEL": {},
-	"EMBEDDINGS_API_KEY":  {},
-	"EMBEDDINGS_PROVIDER": {},
-	"EMBEDDINGS_MODEL":    {},
+	"SATELLITES_GEMINI_API_KEY":      {},
+	"SATELLITES_GEMINI_REVIEW_MODEL": {},
+	"SATELLITES_EMBEDDINGS_API_KEY":  {},
+	"SATELLITES_EMBEDDINGS_PROVIDER": {},
+	"SATELLITES_EMBEDDINGS_MODEL":    {},
 }
 
 func init() {

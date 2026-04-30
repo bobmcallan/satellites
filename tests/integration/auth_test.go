@@ -21,8 +21,8 @@ func TestLoginSetsCookieAndLogoutClears(t *testing.T) {
 	defer cancel()
 
 	baseURL, stop := startServerContainerWithEnv(t, ctx, map[string]string{
-		"DEV_USERNAME": "dev@local",
-		"DEV_PASSWORD": "letmein",
+		"SATELLITES_DEV_USERNAME": "dev@local",
+		"SATELLITES_DEV_PASSWORD": "letmein",
 	})
 	defer stop()
 

@@ -48,11 +48,7 @@ import (
 func main() {
 	startedAt := time.Now()
 
-	cfg, err := config.Load()
-	if err != nil {
-		satarbor.Default().Error().Str("error", err.Error()).Msg("config load failed")
-		os.Exit(1)
-	}
+	cfg, cfgWarnings := config.Load()
 
 	logger := satarbor.New(cfg.LogLevel)
 	logger.Info().
@@ -61,11 +57,15 @@ func main() {
 		Str("build", config.Build).
 		Str("commit", config.GitCommit).
 		Str("env", cfg.Env).
-		Str("fly_machine_id", cfg.FlyMachineID).
+		Str("fly_machine_id", os.Getenv("FLY_MACHINE_ID")).
 		Msgf("satellites-server %s", config.GetFullVersion())
 
 	if path := cfg.LoadedTOMLPath(); path != "" {
 		logger.Info().Str("path", path).Msg("config: loaded TOML")
+	}
+
+	for _, w := range cfgWarnings {
+		logger.Warn().Str("warning", w).Msg("config: startup warning")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -102,7 +102,7 @@ func main() {
 	// authHandlers.OnUserCreated to seed each new user's default workspace.
 
 	// Optional SurrealDB connection + document/project surfaces. When
-	// DB_DSN is empty we keep booting (tests, dev without Surreal) but the
+	// SATELLITES_DB_DSN is empty we keep booting (tests, dev without Surreal) but the
 	// MCP doc/project tools are disabled and /healthz omits db_ok.
 	var (
 		docStore         document.Store
@@ -149,7 +149,7 @@ func main() {
 		contractStore = contract.NewSurrealStore(conn, docStore, storyStore)
 		sessionStore = session.NewSurrealStore(conn)
 		// story_0ab83f82: replace MemorySessionStore with the durable
-		// Surreal-backed implementation when DB_DSN is set so cookie
+		// Surreal-backed implementation when SATELLITES_DB_DSN is set so cookie
 		// sessions survive Fly rolling restarts.
 		sessions = auth.NewSurrealSessionStore(conn)
 		authHandlers.Sessions = sessions
@@ -411,7 +411,7 @@ func main() {
 
 	// Dispatch watchdog: scans for expired claims and reclaims them
 	// into the queue. Story_b4513c8c. Runs only when the task store is
-	// wired (DB_DSN present).
+	// wired (SATELLITES_DB_DSN present).
 	if taskStore != nil {
 		disp := dispatcher.New(taskStore, ledgerStore, logger, dispatcher.Options{})
 		if err := disp.Start(ctx); err != nil {
@@ -437,8 +437,8 @@ func main() {
 	}
 
 	// Embedding ingestion worker (story_5abfe61c). Boots only when an
-	// embeddings provider is configured AND DB_DSN is set so the Surreal
-	// chunk stores are available. EMBEDDINGS_PROVIDER=none / unset → the
+	// embeddings provider is configured AND SATELLITES_DB_DSN is set so the Surreal
+	// chunk stores are available. SATELLITES_EMBEDDINGS_PROVIDER=none / unset → the
 	// worker is not started; document_search and ledger_search fall
 	// back to filter-only Search via the verb-layer ErrSemanticUnavailable
 	// path.
@@ -711,7 +711,7 @@ func addRequiredRoleIfMissing(raw []byte, roleName string) ([]byte, bool) {
 // and tests can carry the values via mounted TOML.
 func buildReviewer(logger arbor.ILogger, cfg *config.Config) reviewer.Reviewer {
 	if cfg.GeminiAPIKey == "" {
-		logger.Warn().Msg("GEMINI_API_KEY not set — reviewer falls back to AcceptAll (validation_mode=llm closes auto-accepted)")
+		logger.Warn().Msg("SATELLITES_GEMINI_API_KEY not set — reviewer falls back to AcceptAll (validation_mode=llm closes auto-accepted)")
 		return reviewer.AcceptAll{}
 	}
 	model := cfg.GeminiReviewModel

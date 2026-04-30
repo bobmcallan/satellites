@@ -41,7 +41,7 @@ func TestConfig_ENVOverridesTOML(t *testing.T) {
 	docsHost := filepath.Join(repoRoot(t), "docs")
 	baseURL, logs, stop := startServerWithTOML(t, ctx, startOptions{
 		Env: map[string]string{
-			"PORT": "8080",
+			"SATELLITES_PORT": "8080",
 		},
 		Mounts: []mount.Mount{{
 			Type:     mount.TypeBind,

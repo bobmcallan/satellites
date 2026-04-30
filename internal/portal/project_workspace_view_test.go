@@ -342,4 +342,3 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 		}
 	}
 }
-

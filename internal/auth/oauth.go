@@ -33,7 +33,7 @@ type Provider struct {
 }
 
 // ProviderSet holds the enabled providers. Missing provider configs (e.g.
-// GOOGLE_CLIENT_ID=="") leave the provider nil, which disables its routes.
+// SATELLITES_GOOGLE_CLIENT_ID=="") leave the provider nil, which disables its routes.
 type ProviderSet struct {
 	Google *Provider
 	GitHub *Provider

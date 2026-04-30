@@ -75,7 +75,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	// env), but the test READS them from os.Getenv and WRITES them into
 	// the per-test TOML — no env pass-through into the container.
 	requireGemini := os.Getenv("SATELLITES_E2E_REQUIRE_GEMINI") == "1"
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	apiKey := os.Getenv("SATELLITES_GEMINI_API_KEY")
 	if requireGemini && apiKey == "" {
 		t.Fatal("SATELLITES_E2E_REQUIRE_GEMINI=1 but GEMINI_API_KEY is empty — populate tests/.env " +
 			"(see tests/README.md 'Rotating credentials'). PASS-by-AcceptAll is rejected under this flag.")
@@ -92,7 +92,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	}
 	if apiKey != "" {
 		tomlConfig["gemini_api_key"] = apiKey
-		if m := os.Getenv("GEMINI_REVIEW_MODEL"); m != "" {
+		if m := os.Getenv("SATELLITES_GEMINI_REVIEW_MODEL"); m != "" {
 			tomlConfig["gemini_review_model"] = m
 		}
 		t.Log("e2e: GEMINI_API_KEY written into per-test TOML — in-container reviewer wires Gemini")
@@ -102,7 +102,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	tomlPath := writeTestTOML(t, tomlConfig)
 
 	containerEnv := map[string]string{
-		"DB_DSN":              "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
+		"SATELLITES_DB_DSN":   "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
 		"SATELLITES_API_KEYS": "key_e2e",
 	}
 
@@ -335,7 +335,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	// because needs_more responses don't include llm_usage_ledger_id
 	// in their JSON envelope (only the accepted-path response does).
 	if requireGemini {
-		expectedModel := os.Getenv("GEMINI_REVIEW_MODEL")
+		expectedModel := os.Getenv("SATELLITES_GEMINI_REVIEW_MODEL")
 		if expectedModel == "" {
 			expectedModel = "gemini-2.5-flash"
 		}

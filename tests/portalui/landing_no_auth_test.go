@@ -45,9 +45,9 @@ func TestLanding_NoAuthBanner_VisibleWhenNoProviders(t *testing.T) {
 
 	for _, want := range []string{
 		"No sign-in providers configured",
-		"GOOGLE_CLIENT_ID",
-		"GITHUB_CLIENT_ID",
-		"DEV_MODE",
+		"SATELLITES_GOOGLE_CLIENT_ID",
+		"SATELLITES_GITHUB_CLIENT_ID",
+		"SATELLITES_DEV_MODE",
 	} {
 		if !strings.Contains(bannerText, want) {
 			t.Errorf("no-auth banner missing %q\nbanner=%s", want, bannerText)

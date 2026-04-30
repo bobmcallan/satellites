@@ -39,13 +39,13 @@ func TestGeminiReviewer_Live(t *testing.T) {
 	// excludes this file. Under -tags=live, an empty key is a hard fail,
 	// not a skip: PASS-by-skip hides Gemini-side regressions, which is
 	// the workaround pattern story_d21436a4 explicitly removes.
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	apiKey := os.Getenv("SATELLITES_GEMINI_API_KEY")
 	if apiKey == "" {
-		t.Fatal("GEMINI_API_KEY not set — populate tests/.env (see tests/README.md 'Rotating credentials'). " +
+		t.Fatal("SATELLITES_GEMINI_API_KEY not set — populate tests/.env (see tests/README.md 'Rotating credentials'). " +
 			"PASS-by-skip is rejected under -tags=live.")
 	}
 
-	model := os.Getenv("GEMINI_REVIEW_MODEL")
+	model := os.Getenv("SATELLITES_GEMINI_REVIEW_MODEL")
 	if model == "" {
 		model = reviewer.DefaultGeminiReviewModel
 	}
