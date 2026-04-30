@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -112,12 +113,30 @@ func AuthMiddleware(deps AuthDeps) func(http.Handler) http.Handler {
 					}
 				}
 			}
-			w.Header().Set("WWW-Authenticate", `Bearer realm="satellites"`)
+			// RFC 9728: point clients at the protected-resource metadata
+			// endpoint so the MCP SDK can discover the authorization server
+			// without operator-pasted bearer tokens.
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(
+				`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`,
+				schemeAndHost(r),
+			))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"authentication required"}`))
 		})
 	}
+}
+
+// schemeAndHost reconstructs the absolute base URL from the request,
+// honouring X-Forwarded-Proto so requests reaching the binary over Fly's
+// edge TLS resolve to https rather than the plaintext scheme the binary
+// itself terminates.
+func schemeAndHost(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 func bearerToken(r *http.Request) string {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -123,6 +124,8 @@ func main() {
 		surrealLedgerChunks ledger.ChunkStore
 		surrealDocsTyped    *document.SurrealStore
 		surrealLedgerTyped  *ledger.SurrealStore
+
+		oauthServer *auth.OAuthServer
 	)
 	if cfg.DBDSN != "" {
 		dbCfg, err := db.ParseDSN(cfg.DBDSN)
@@ -135,6 +138,23 @@ func main() {
 			logger.Error().Str("error", err.Error()).Msg("db connect failed")
 			os.Exit(1)
 		}
+		// MCP OAuth 2.1 Authorization Server — needs Surreal for client/
+		// session/code/refresh-token persistence. Wired here inside the
+		// db-available block so the !DBDSN path skips it entirely (the
+		// fallback warning lives in the bearerValidator block below).
+		oauthStore := auth.NewSurrealOAuthStore(conn, logger)
+		oauthServer = auth.NewOAuthServer(auth.OAuthServerConfig{
+			JWTSecret:       cfg.JWTSecret,
+			Issuer:          cfg.OAuthIssuer,
+			AccessTokenTTL:  cfg.OAuthAccessTokenTTL,
+			RefreshTokenTTL: cfg.OAuthRefreshTokenTTL,
+			CodeTTL:         cfg.OAuthCodeTTL,
+			Store:           oauthStore,
+			Logger:          logger,
+			DevMode:         cfg.DevMode,
+		})
+		authHandlers.OAuthServer = oauthServer
+
 		surrealDocs := document.NewSurrealStore(conn)
 		docStore = surrealDocs
 		surrealDocsTyped = surrealDocs
@@ -351,8 +371,13 @@ func main() {
 	}
 
 	bearerValidator := auth.NewBearerValidator(auth.BearerValidatorConfig{
-		CacheTTL: cfg.OAuthTokenCacheTTL,
+		CacheTTL:  cfg.OAuthTokenCacheTTL,
+		JWTSecret: []byte(cfg.JWTSecret),
 	})
+
+	if oauthServer == nil {
+		logger.Warn().Msg("oauth: DB unavailable — MCP OAuth 2.1 endpoints disabled (clients must use SATELLITES_API_KEYS bearer or session cookie)")
+	}
 	tokenExchange := &auth.TokenExchange{
 		Sessions:  sessions,
 		Users:     users,
@@ -361,6 +386,9 @@ func main() {
 	registrars := []httpserver.RouteRegistrar{authHandlers, portalHandlers, tokenExchange}
 	if wsHandlers != nil {
 		registrars = append(registrars, wsHandlers)
+	}
+	if oauthServer != nil {
+		registrars = append(registrars, &oauthRoutes{srv: oauthServer})
 	}
 	// story_c08856b2: /hooks/enforce HTTP handler resolves a tool
 	// call's allow/deny via the active CI's allocated agent (or the
@@ -723,4 +751,18 @@ func buildReviewer(logger arbor.ILogger, cfg *config.Config) reviewer.Reviewer {
 		APIKey: cfg.GeminiAPIKey,
 		Model:  model,
 	})
+}
+
+// oauthRoutes adapts auth.OAuthServer to the httpserver.RouteRegistrar
+// interface. The five route bindings are the surface the MCP-spec OAuth
+// 2.1 chain (RFC 9728 / 8414 / 7591 + PKCE) requires from any compliant
+// authorization server.
+type oauthRoutes struct{ srv *auth.OAuthServer }
+
+func (o *oauthRoutes) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", o.srv.HandleAuthorizationServer)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", o.srv.HandleProtectedResource)
+	mux.HandleFunc("POST /oauth/register", o.srv.HandleRegister)
+	mux.HandleFunc("/oauth/authorize", o.srv.HandleAuthorize)
+	mux.HandleFunc("POST /oauth/token", o.srv.HandleToken)
 }

@@ -53,6 +53,11 @@ type BearerValidatorConfig struct {
 	// for tests. Empty → production defaults.
 	GoogleUserinfoURL string
 	GithubUserURL     string
+	// JWTSecret enables local validation of satellites-issued OAuth
+	// access tokens (HS256 JWTs minted by OAuthServer at /oauth/token).
+	// Empty disables the JWT branch — bearers are then only checked
+	// against the sat_ registry and the third-party provider endpoints.
+	JWTSecret []byte
 }
 
 // BearerValidator caches successful token validations and routes lookups
@@ -132,6 +137,21 @@ func (b *BearerValidator) Validate(ctx context.Context, token string) (BearerInf
 		delete(b.cache, token)
 	}
 	b.mu.Unlock()
+
+	// Satellites-issued OAuth access JWT (HS256). Cheap local check; runs
+	// before the network calls below so a typical MCP request avoids
+	// userinfo round-trips. Skipped when JWTSecret is unset.
+	if len(b.cfg.JWTSecret) > 0 && LooksLikeJWT(token) {
+		if claims, err := ValidateJWT(token, b.cfg.JWTSecret); err == nil {
+			info := BearerInfo{
+				UserID:   claims.Sub,
+				Email:    claims.Email,
+				Provider: "satellites",
+			}
+			b.cachePut(token, info)
+			return info, nil
+		}
+	}
 
 	// Try Google then GitHub. First success wins.
 	if info, err := b.validateGoogle(ctx, token); err == nil {

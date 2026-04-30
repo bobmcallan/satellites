@@ -23,6 +23,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -106,6 +108,35 @@ type Config struct {
 	// "5m", "30s", "1h").
 	OAuthTokenCacheTTL time.Duration `toml:"oauth_token_cache_ttl"`
 
+	// JWTSecret signs satellites-issued OAuth access tokens (RFC 9728 /
+	// 8414 / 7591 chain on /oauth/*). Empty triggers a startup warning
+	// and a per-boot random key — every restart invalidates outstanding
+	// MCP access tokens. Set a stable value in prod.
+	// Env override: SATELLITES_JWT_SECRET.
+	JWTSecret string `toml:"jwt_secret"`
+
+	// OAuthIssuer is the absolute base URL the OAuth-AS announces in its
+	// discovery metadata and JWT iss claim. Empty derives the issuer
+	// from each request's host + X-Forwarded-Proto, which is correct for
+	// most deployments behind Fly's edge. Set when fronted by an opaque
+	// proxy. Env override: SATELLITES_OAUTH_ISSUER.
+	OAuthIssuer string `toml:"oauth_issuer"`
+
+	// OAuthAccessTokenTTL bounds the lifetime of MCP access JWTs minted
+	// at /oauth/token. Default 1h. Range 1m..24h.
+	// Env override: SATELLITES_OAUTH_ACCESS_TOKEN_TTL.
+	OAuthAccessTokenTTL time.Duration `toml:"oauth_access_token_ttl"`
+
+	// OAuthRefreshTokenTTL bounds the lifetime of refresh tokens issued
+	// alongside access tokens. Default 168h (7d). Range 1h..30d.
+	// Env override: SATELLITES_OAUTH_REFRESH_TOKEN_TTL.
+	OAuthRefreshTokenTTL time.Duration `toml:"oauth_refresh_token_ttl"`
+
+	// OAuthCodeTTL bounds the lifetime of single-use authorization codes
+	// minted at /oauth/authorize. Default 10m. Spec recommends ≤10m.
+	// Env override: SATELLITES_OAUTH_CODE_TTL.
+	OAuthCodeTTL time.Duration `toml:"oauth_code_ttl"`
+
 	// APIKeys are Bearer tokens accepted on /mcp when a session cookie is
 	// absent. Typical use: CI agents + the local Claude harness. In TOML use
 	// a native array (api_keys = ["k1","k2"]); in env use the comma-separated
@@ -170,6 +201,12 @@ type Config struct {
 	// whole config). Read via the LoadedTOMLPath() accessor — the field
 	// is unexported so it doesn't show up in Describe()/TOML serialisation.
 	loadedTOMLPath string
+
+	// jwtSecretGenerated is true when Load() filled JWTSecret with a
+	// random per-boot value because env+TOML supplied none. collectWarnings
+	// uses this to emit a prod-mode warning that restarts will invalidate
+	// every minted MCP access token.
+	jwtSecretGenerated bool
 }
 
 // LoadedTOMLPath returns the absolute path of the TOML file that the
@@ -216,6 +253,11 @@ var describeTable = []FieldDoc{
 	{Field: "GithubClientSecret", Env: "SATELLITES_GITHUB_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for GitHub. Never logged."},
 	{Field: "OAuthRedirectBaseURL", Env: "SATELLITES_OAUTH_REDIRECT_BASE_URL", Default: "http://localhost:<Port> (DevMode=true) / (empty)", ProdRecommended: true, Description: "Base URL for OAuth callback redirects. Recommended in prod when any provider is configured."},
 	{Field: "OAuthTokenCacheTTL", Env: "SATELLITES_OAUTH_TOKEN_CACHE_TTL", Default: "4h", Description: "How long the MCP-side OAuth token validator caches a successful provider lookup."},
+	{Field: "JWTSecret", Env: "SATELLITES_JWT_SECRET", Default: "(empty — random per-boot, all MCP tokens invalidate on restart)", ProdRecommended: true, Description: "HMAC-SHA256 key signing satellites-issued OAuth access JWTs. Set a stable value in prod."},
+	{Field: "OAuthIssuer", Env: "SATELLITES_OAUTH_ISSUER", Default: "(empty — derived from request host)", Description: "Absolute base URL announced in OAuth discovery metadata and JWT iss claim. Set when fronted by an opaque proxy."},
+	{Field: "OAuthAccessTokenTTL", Env: "SATELLITES_OAUTH_ACCESS_TOKEN_TTL", Default: "1h", Description: "Lifetime of MCP access JWTs minted at /oauth/token. Range 1m..24h."},
+	{Field: "OAuthRefreshTokenTTL", Env: "SATELLITES_OAUTH_REFRESH_TOKEN_TTL", Default: "168h (7d)", Description: "Lifetime of refresh tokens issued alongside access tokens. Range 1h..30d."},
+	{Field: "OAuthCodeTTL", Env: "SATELLITES_OAUTH_CODE_TTL", Default: "10m", Description: "Lifetime of single-use authorization codes minted at /oauth/authorize."},
 	{Field: "APIKeys", Env: "SATELLITES_API_KEYS", Default: "(empty — Bearer-API-key auth disabled)", ProdRecommended: true, Description: "Bearer tokens accepted on /mcp. TOML: native array. Env: comma-separated."},
 	{Field: "DocsDir", Env: "SATELLITES_DOCS_DIR", Default: "/app/docs", Description: "Container-side docs volume path read by document_ingest_file."},
 	{Field: "GrantsEnforced", Env: "SATELLITES_GRANTS_ENFORCED", Default: "false", Description: "When true, MCP verbs outside the bootstrap allowlist require a covering role-grant."},
@@ -305,8 +347,32 @@ func Load() (*Config, []string) {
 	}
 
 	applyEnvOverrides(cfg, &warnings)
+
+	// JWT secret has a special degrade-to-default: empty after env+TOML
+	// resolution → generate a random 32-byte hex key per boot. The
+	// service stays up but every restart invalidates outstanding MCP
+	// access tokens. collectWarnings emits a prod-mode warning below.
+	if cfg.JWTSecret == "" {
+		if random, err := generateRandomJWTSecret(); err == nil {
+			cfg.JWTSecret = random
+			cfg.jwtSecretGenerated = true
+		}
+	}
+
 	warnings = append(warnings, cfg.collectWarnings()...)
 	return cfg, warnings
+}
+
+// generateRandomJWTSecret returns a 32-byte random secret encoded as hex.
+// Used as the volatile fallback when SATELLITES_JWT_SECRET is unset so
+// the OAuth-AS can mint tokens out-of-the-box; collectWarnings flags
+// this state in prod since restarts invalidate every minted token.
+func generateRandomJWTSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // duration wraps time.Duration with a TextUnmarshaler so go-toml/v2 can
@@ -342,6 +408,11 @@ type tomlOverlay struct {
 	GithubClientSecret   *string   `toml:"github_client_secret"`
 	OAuthRedirectBaseURL *string   `toml:"oauth_redirect_base_url"`
 	OAuthTokenCacheTTL   *duration `toml:"oauth_token_cache_ttl"`
+	JWTSecret            *string   `toml:"jwt_secret"`
+	OAuthIssuer          *string   `toml:"oauth_issuer"`
+	OAuthAccessTokenTTL  *duration `toml:"oauth_access_token_ttl"`
+	OAuthRefreshTokenTTL *duration `toml:"oauth_refresh_token_ttl"`
+	OAuthCodeTTL         *duration `toml:"oauth_code_ttl"`
 	APIKeys              []string  `toml:"api_keys"`
 	DocsDir              *string   `toml:"docs_dir"`
 	GrantsEnforced       *bool     `toml:"grants_enforced"`
@@ -420,6 +491,36 @@ func (o tomlOverlay) applyTo(cfg *Config, warnings *[]string) bool {
 			cfg.OAuthTokenCacheTTL = d
 		}
 	}
+	if o.JWTSecret != nil {
+		cfg.JWTSecret = *o.JWTSecret
+	}
+	if o.OAuthIssuer != nil {
+		cfg.OAuthIssuer = *o.OAuthIssuer
+	}
+	if o.OAuthAccessTokenTTL != nil {
+		d := time.Duration(*o.OAuthAccessTokenTTL)
+		if d < time.Minute || d > 24*time.Hour {
+			*warnings = append(*warnings, fmt.Sprintf("toml oauth_access_token_ttl=%s out of range (1m..24h) — keeping %s", d, cfg.OAuthAccessTokenTTL))
+		} else {
+			cfg.OAuthAccessTokenTTL = d
+		}
+	}
+	if o.OAuthRefreshTokenTTL != nil {
+		d := time.Duration(*o.OAuthRefreshTokenTTL)
+		if d < time.Hour || d > 30*24*time.Hour {
+			*warnings = append(*warnings, fmt.Sprintf("toml oauth_refresh_token_ttl=%s out of range (1h..30d) — keeping %s", d, cfg.OAuthRefreshTokenTTL))
+		} else {
+			cfg.OAuthRefreshTokenTTL = d
+		}
+	}
+	if o.OAuthCodeTTL != nil {
+		d := time.Duration(*o.OAuthCodeTTL)
+		if d < 30*time.Second || d > 30*time.Minute {
+			*warnings = append(*warnings, fmt.Sprintf("toml oauth_code_ttl=%s out of range (30s..30m) — keeping %s", d, cfg.OAuthCodeTTL))
+		} else {
+			cfg.OAuthCodeTTL = d
+		}
+	}
 	if o.APIKeys != nil {
 		cfg.APIKeys = append([]string(nil), o.APIKeys...)
 	}
@@ -489,15 +590,18 @@ func readTOMLOverlay() (tomlOverlay, string, []string) {
 // the bundled dev TOML) to flip on quick-signin and the dev affordances.
 func defaults() *Config {
 	return &Config{
-		Port:               8080,
-		Env:                "prod",
-		LogLevel:           "info",
-		DevMode:            false,
-		DBDSN:              "",
-		DocsDir:            "/app/docs",
-		OAuthTokenCacheTTL: 4 * time.Hour,
-		GeminiReviewModel:  "gemini-2.5-flash",
-		EmbeddingsProvider: "none",
+		Port:                 8080,
+		Env:                  "prod",
+		LogLevel:             "info",
+		DevMode:              false,
+		DBDSN:                "",
+		DocsDir:              "/app/docs",
+		OAuthTokenCacheTTL:   4 * time.Hour,
+		OAuthAccessTokenTTL:  1 * time.Hour,
+		OAuthRefreshTokenTTL: 7 * 24 * time.Hour,
+		OAuthCodeTTL:         10 * time.Minute,
+		GeminiReviewModel:    "gemini-2.5-flash",
+		EmbeddingsProvider:   "none",
 	}
 }
 
@@ -574,6 +678,45 @@ func applyEnvOverrides(cfg *Config, warnings *[]string) {
 			cfg.OAuthTokenCacheTTL = d
 		}
 	}
+	if v := os.Getenv("SATELLITES_JWT_SECRET"); v != "" {
+		cfg.JWTSecret = v
+	}
+	if v := os.Getenv("SATELLITES_OAUTH_ISSUER"); v != "" {
+		cfg.OAuthIssuer = v
+	}
+	if v := os.Getenv("SATELLITES_OAUTH_ACCESS_TOKEN_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_ACCESS_TOKEN_TTL=%q unparseable as duration — keeping %s", v, cfg.OAuthAccessTokenTTL))
+		case d < time.Minute || d > 24*time.Hour:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_ACCESS_TOKEN_TTL=%s out of range (1m..24h) — keeping %s", d, cfg.OAuthAccessTokenTTL))
+		default:
+			cfg.OAuthAccessTokenTTL = d
+		}
+	}
+	if v := os.Getenv("SATELLITES_OAUTH_REFRESH_TOKEN_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_REFRESH_TOKEN_TTL=%q unparseable as duration — keeping %s", v, cfg.OAuthRefreshTokenTTL))
+		case d < time.Hour || d > 30*24*time.Hour:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_REFRESH_TOKEN_TTL=%s out of range (1h..30d) — keeping %s", d, cfg.OAuthRefreshTokenTTL))
+		default:
+			cfg.OAuthRefreshTokenTTL = d
+		}
+	}
+	if v := os.Getenv("SATELLITES_OAUTH_CODE_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_CODE_TTL=%q unparseable as duration — keeping %s", v, cfg.OAuthCodeTTL))
+		case d < 30*time.Second || d > 30*time.Minute:
+			*warnings = append(*warnings, fmt.Sprintf("SATELLITES_OAUTH_CODE_TTL=%s out of range (30s..30m) — keeping %s", d, cfg.OAuthCodeTTL))
+		default:
+			cfg.OAuthCodeTTL = d
+		}
+	}
 	if v := os.Getenv("SATELLITES_API_KEYS"); v != "" {
 		var keys []string
 		for _, part := range strings.Split(v, ",") {
@@ -632,6 +775,9 @@ func (c *Config) collectWarnings() []string {
 	}
 	if c.Env == "prod" && len(c.APIKeys) == 0 {
 		out = append(out, "SATELLITES_API_KEYS empty under ENV=prod — Bearer-API-key auth disabled on /mcp")
+	}
+	if c.Env == "prod" && c.jwtSecretGenerated {
+		out = append(out, "SATELLITES_JWT_SECRET unset under ENV=prod — generated random per-boot key; MCP access tokens will be invalidated on every restart")
 	}
 	if (c.GoogleClientID == "") != (c.GoogleClientSecret == "") {
 		out = append(out, fmt.Sprintf("Google OAuth half-set (id=%t, secret=%t) — provider disabled", c.GoogleClientID != "", c.GoogleClientSecret != ""))

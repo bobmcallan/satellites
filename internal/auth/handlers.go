@@ -30,6 +30,13 @@ type Handlers struct {
 	// /auth/login. Optional — nil disables the gate (test default).
 	// story_d5652302 wires the live limiter from main().
 	LoginLimiter LoginLimiter
+
+	// OAuthServer is the MCP-spec OAuth 2.1 Authorization Server. When
+	// non-nil and the inbound request carries an mcp_session_id cookie,
+	// Login completes the pending OAuth authorization and redirects to
+	// the requesting MCP client's redirect_uri instead of `next`.
+	// Optional — nil disables the bridge.
+	OAuthServer *OAuthServer
 }
 
 // LoginLimiter is the narrow surface auth.Handlers consumes from
@@ -98,6 +105,36 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		Str("user_id", user.ID).
 		Str("session_id", sess.ID).
 		Msg("auth login success")
+
+	// MCP OAuth bridge: when the user arrived from /oauth/authorize the
+	// browser carries an mcp_session_id cookie. Complete the pending
+	// OAuth authorization, clear the bridge cookie, redirect to the MCP
+	// client's redirect_uri instead of `next`. The OAuthServer hand-off
+	// is optional — nil server skips the bridge silently.
+	if h.OAuthServer != nil {
+		if c, err := r.Cookie("mcp_session_id"); err == nil && c.Value != "" {
+			redirectURL, err := h.OAuthServer.CompleteAuthorization(r.Context(), c.Value, user.ID)
+			// Always clear the bridge cookie so a stale value doesn't
+			// trail the user across subsequent logins.
+			http.SetCookie(w, &http.Cookie{
+				Name:     "mcp_session_id",
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   !h.Cfg.DevMode,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   -1,
+			})
+			if err != nil {
+				h.Logger.Warn().Str("error", err.Error()).Msg("oauth: complete authorization failed; falling back to default redirect")
+			} else {
+				h.Logger.Info().Str("user_id", user.ID).Msg("oauth: completed authorization via login bridge")
+				http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+				return
+			}
+		}
+	}
+
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
