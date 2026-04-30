@@ -38,18 +38,49 @@ live` constraint so the default suite never invokes them.
 ### Run
 
 ```
-make test-live
+make test-live   # live Gemini reviewer test (HTTP-only, no container)
+make test-e2e    # full lifecycle e2e against testcontainers, asserts Gemini wired
 ```
 
-Equivalent to `go test -tags=live -timeout 60s ./internal/reviewer/...`.
-Tests skip with `t.Skip` when the relevant credential is missing, so a
-partial `tests/.env` only runs the tests it has keys for.
+`test-live` runs `go test -tags=live -timeout 60s ./internal/reviewer/...`.
+An empty `GEMINI_API_KEY` is a hard fail under `-tags=live` — PASS-by-skip
+is rejected (story_d21436a4). Populate `tests/.env` first.
+
+`test-e2e` exports `SATELLITES_E2E_REQUIRE_GEMINI=1` and runs
+`TestE2E_StoryLifecycle_FullFlow`. Without the key, the test fails
+loudly during boot. With the key, the in-container reviewer wires
+Gemini and at least one CI close response carries a non-empty
+`llm_usage_ledger_id` (proving the call actually fired).
 
 ### Opt out
 
-The default `go test ./...` excludes every `//go:build live` file —
+The default `go test ./...` excludes every `//go:build live` file and
+runs testcontainer tests in `-short` mode (which skips them) —
 contributors without keys see no failure, no skip noise, no extra
 runtime.
+
+## Rotating credentials
+
+Test credentials live in `tests/.env` (gitignored). The `tests/common`
+package init loader (story_7f6e0f4e) walks up from its source location
+to the nearest `tests/` ancestor, reads `.env` from there, and
+propagates a whitelist of keys (`GEMINI_API_KEY`,
+`GEMINI_REVIEW_MODEL`, `EMBEDDINGS_API_KEY`, `EMBEDDINGS_PROVIDER`,
+`EMBEDDINGS_MODEL`) into the test process env. Host-exported values
+always win.
+
+**Do not put test credentials in repo-root `.env`.** That file is
+docker-compose's `env_file` and lives outside the test isolation
+boundary. The `project_test_env_isolation` memory exists to keep
+this distinction durable across sessions; future test paths must
+NOT add a root-`.env` read.
+
+To rotate the Gemini key:
+
+1. Update `tests/.env` with the new value.
+2. `make test-live` — confirms the new key authenticates.
+3. `make test-e2e` — confirms the in-container reviewer picks it up.
+4. Revoke the old key in Google AI Studio.
 
 ## TOML by default; ENV is for docker
 

@@ -83,8 +83,14 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 		"EMBEDDINGS_PROVIDER":  "stub",
 		"EMBEDDINGS_DIMENSION": "16",
 	}
-	if k := os.Getenv("GEMINI_API_KEY"); k != "" {
-		containerEnv["GEMINI_API_KEY"] = k
+	requireGemini := os.Getenv("SATELLITES_E2E_REQUIRE_GEMINI") == "1"
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if requireGemini && apiKey == "" {
+		t.Fatal("SATELLITES_E2E_REQUIRE_GEMINI=1 but GEMINI_API_KEY is empty — populate tests/.env " +
+			"(see tests/README.md 'Rotating credentials'). PASS-by-AcceptAll is rejected under this flag.")
+	}
+	if apiKey != "" {
+		containerEnv["GEMINI_API_KEY"] = apiKey
 		if m := os.Getenv("GEMINI_REVIEW_MODEL"); m != "" {
 			containerEnv["GEMINI_REVIEW_MODEL"] = m
 		}
@@ -145,6 +151,12 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
+	// Story 2 scope: validation_mode=agent keeps the lifecycle deterministic
+	// (CIs close immediately) while the secret migration + skip→fatal
+	// patterns are verified separately via the live Gemini test. Routing
+	// these closes through the LLM reviewer + handling Gemini's needs_more
+	// is story_af5c2a0b's scope; that story will switch to validation_mode=llm
+	// AND add the contract_respond + close-retry loop.
 	requiredRoleJSON := `{"category":"lifecycle","required_for_close":true,"validation_mode":"agent","required_role":"` + roleID + `"}`
 	contractDocs := callToolArray(t, ctx, mcpURL, "key_e2e", "document_list", map[string]any{
 		"type":  "contract",
@@ -319,14 +331,18 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	assert.True(t, hasPlanRow, "AC4d: a kind:plan row must exist")
 	assert.True(t, hasWorkflowClaim, "AC4d: a kind:workflow-claim row must exist")
 
-	// AC4d — ordering: kind:plan precedes kind:plan-approved precedes kind:workflow-claim.
-	if hasPlanRow && hasApproved {
-		assert.False(t, planTime.After(approvedTime),
-			"AC4d: kind:plan must precede kind:plan-approved")
+	// AC4d — ordering: kind:plan precedes kind:plan-approved precedes
+	// kind:workflow-claim. The orchestrator_compose path (verified at
+	// internal/mcpserver/orchestrator_compose.go:105-185) writes these
+	// in source order under a single `now` snapshot, so timestamps are
+	// frequently equal. Treat equal timestamps as ordered (the
+	// substrate's append order is the source of truth at sub-tick
+	// resolution); only flag a strict reversal as a violation.
+	if hasPlanRow && hasApproved && approvedTime.Sub(planTime) < 0 {
+		t.Errorf("AC4d: kind:plan-approved (%s) must not precede kind:plan (%s)", approvedTime, planTime)
 	}
-	if hasApproved && hasWorkflowClaim {
-		assert.False(t, approvedTime.After(claimTime),
-			"AC4d: kind:plan-approved must precede kind:workflow-claim")
+	if hasApproved && hasWorkflowClaim && claimTime.Sub(approvedTime) < 0 {
+		t.Errorf("AC4d: kind:workflow-claim (%s) must not precede kind:plan-approved (%s)", claimTime, approvedTime)
 	}
 
 	// AC4b/c — required CIs all passed; story rolls to done.

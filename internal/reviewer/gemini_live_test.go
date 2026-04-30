@@ -35,9 +35,14 @@ import (
 // see — e.g. a future release renaming usageMetadata fields, swapping
 // candidates structure, or tightening JSON-mode behaviour.
 func TestGeminiReviewer_Live(t *testing.T) {
+	// Build-tag-gated test (//go:build live) — default `go test ./...`
+	// excludes this file. Under -tags=live, an empty key is a hard fail,
+	// not a skip: PASS-by-skip hides Gemini-side regressions, which is
+	// the workaround pattern story_d21436a4 explicitly removes.
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		t.Skip("GEMINI_API_KEY not set — skipping live Gemini reviewer test (export the key or populate tests/.env)")
+		t.Fatal("GEMINI_API_KEY not set — populate tests/.env (see tests/README.md 'Rotating credentials'). " +
+			"PASS-by-skip is rejected under -tags=live.")
 	}
 
 	model := os.Getenv("GEMINI_REVIEW_MODEL")
