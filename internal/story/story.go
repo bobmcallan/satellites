@@ -14,20 +14,28 @@ import (
 // Story is the unit of deliverable work. Tags carry epic membership via
 // the `epic:<slug>` convention. WorkspaceID cascades from the parent
 // project at write time per docs/architecture.md §8.
+//
+// Fields holds per-category template values — repro action sequence,
+// fix_commit, regression_test_path, etc. — keyed by the field names the
+// matching story_template document declares. Sty_d2a03cea: the template
+// is the schema; the Story carries arbitrary string-keyed values that
+// the template's lifecycle hooks reference. Empty / unset fields mean
+// "not yet captured" — never "absent from the schema."
 type Story struct {
-	ID                 string    `json:"id"`
-	WorkspaceID        string    `json:"workspace_id"`
-	ProjectID          string    `json:"project_id"`
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	AcceptanceCriteria string    `json:"acceptance_criteria"`
-	Status             string    `json:"status"`
-	Priority           string    `json:"priority"`
-	Category           string    `json:"category"`
-	Tags               []string  `json:"tags"`
-	CreatedBy          string    `json:"created_by"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspace_id"`
+	ProjectID          string         `json:"project_id"`
+	Title              string         `json:"title"`
+	Description        string         `json:"description"`
+	AcceptanceCriteria string         `json:"acceptance_criteria"`
+	Status             string         `json:"status"`
+	Priority           string         `json:"priority"`
+	Category           string         `json:"category"`
+	Tags               []string       `json:"tags"`
+	Fields             map[string]any `json:"fields,omitempty"`
+	CreatedBy          string         `json:"created_by"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // NewID returns a fresh story id in the canonical `sty_<8hex>` form.

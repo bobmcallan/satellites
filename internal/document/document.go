@@ -31,6 +31,15 @@ const (
 	// /help routes. Seeded from config/help/*.md by configseed.
 	// story_cc5c67a9.
 	TypeHelp = "help"
+	// TypeStoryTemplate names a system-scope document declaring the
+	// shape, lifecycle hooks, and natural-language field prompts for a
+	// story category (bug, feature, improvement, infrastructure,
+	// documentation). One template per category. Seeded from
+	// config/seed/story_templates/*.md by configseed. The template's
+	// structured payload carries `category`, `fields[]`, and
+	// `hooks{<status>: { structured: [...], natural_language: [...]}}`.
+	// Story_d2a03cea.
+	TypeStoryTemplate = "story_template"
 )
 
 // Scope enum values per docs/architecture.md §2.
@@ -52,15 +61,16 @@ const (
 )
 
 var validTypes = map[string]struct{}{
-	TypeArtifact:  {},
-	TypeContract:  {},
-	TypeSkill:     {},
-	TypePrinciple: {},
-	TypeReviewer:  {},
-	TypeAgent:     {},
-	TypeRole:      {},
-	TypeWorkflow:  {},
-	TypeHelp:      {},
+	TypeArtifact:      {},
+	TypeContract:      {},
+	TypeSkill:         {},
+	TypePrinciple:     {},
+	TypeReviewer:      {},
+	TypeAgent:         {},
+	TypeRole:          {},
+	TypeWorkflow:      {},
+	TypeHelp:          {},
+	TypeStoryTemplate: {},
 }
 
 var validScopes = map[string]struct{}{

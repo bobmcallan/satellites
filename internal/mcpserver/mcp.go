@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -380,11 +382,30 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(listStoryTool, s.handleStoryList)
 
 		updateStatusTool := mcpgo.NewTool("story_update_status",
-			mcpgo.WithDescription("Transition a story to a new status. Emits a story.status_change ledger row. Valid transitions: backlog→ready→in_progress→done, or ←→cancelled from any non-terminal."),
+			mcpgo.WithDescription("Transition a story to a new status. Emits a story.status_change ledger row. Valid transitions: backlog→ready→in_progress→done, or ←→cancelled from any non-terminal. The story's category template (if registered) gates the transition — failed structured hooks are returned as a natural-language explanation."),
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Story id.")),
 			mcpgo.WithString("status", mcpgo.Required(), mcpgo.Description("Target status: ready | in_progress | done | cancelled.")),
 		)
 		s.mcp.AddTool(updateStatusTool, s.handleStoryUpdateStatus)
+
+		fieldSetTool := mcpgo.NewTool("story_field_set",
+			mcpgo.WithDescription("Set a single template-defined field on a story (e.g. repro, fix_commit, root_cause). The field must be declared by the story's category template; unknown fields are rejected. Pass an empty value to clear a field."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Story id (sty_<8hex>).")),
+			mcpgo.WithString("field", mcpgo.Required(), mcpgo.Description("Field name as declared by the category template.")),
+			mcpgo.WithString("value", mcpgo.Description("Field value. Empty string clears the field.")),
+		)
+		s.mcp.AddTool(fieldSetTool, s.handleStoryFieldSet)
+
+		templateGetTool := mcpgo.NewTool("story_template_get",
+			mcpgo.WithDescription("Return the parsed story template for a given category. Convenience over document_get with type=story_template."),
+			mcpgo.WithString("category", mcpgo.Required(), mcpgo.Description("Category name: bug | feature | improvement | infrastructure | documentation.")),
+		)
+		s.mcp.AddTool(templateGetTool, s.handleStoryTemplateGet)
+
+		templateListTool := mcpgo.NewTool("story_template_list",
+			mcpgo.WithDescription("List every registered story template. Convenience over document_list with type=story_template."),
+		)
+		s.mcp.AddTool(templateListTool, s.handleStoryTemplateList)
 	}
 
 	if s.contracts != nil && s.stories != nil && s.ledger != nil && s.docs != nil && s.projects != nil {
@@ -1776,7 +1797,12 @@ func (s *Server) handleStoryGet(ctx context.Context, req mcpgo.CallToolRequest) 
 	if _, err := s.resolveProjectID(ctx, st.ProjectID, caller, memberships); err != nil {
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
-	body, _ := json.Marshal(st)
+	// Sty_d2a03cea: attach recent ledger evidence (newest-first, capped at
+	// 10) and the resolved template (if any). The view is what callers
+	// actually want — story + what's been recorded against it + the
+	// schema describing what should be recorded next.
+	view := s.buildStoryView(ctx, st, memberships)
+	body, _ := json.Marshal(view)
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "story_get").
@@ -1784,6 +1810,59 @@ func (s *Server) handleStoryGet(ctx context.Context, req mcpgo.CallToolRequest) 
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// storyView is the JSON-marshalled response shape for story_get. Embeds
+// the durable Story row and adds two computed sections: recent ledger
+// evidence (cap 10, newest-first) and the resolved category template
+// (so callers see the field prompts and lifecycle hooks alongside the
+// story). Sty_d2a03cea.
+type storyView struct {
+	story.Story
+	RecentEvidence []ledger.LedgerEntry `json:"recent_evidence,omitempty"`
+	Template       *story.Template      `json:"template,omitempty"`
+}
+
+func (s *Server) buildStoryView(ctx context.Context, st story.Story, memberships []string) storyView {
+	view := storyView{Story: st}
+	if s.ledger != nil {
+		entries, err := s.ledger.List(ctx, st.ProjectID, ledger.ListOptions{
+			StoryID: st.ID,
+			Limit:   10,
+		}, memberships)
+		if err == nil && len(entries) > 0 {
+			view.RecentEvidence = entries
+		}
+	}
+	if t, ok := s.loadStoryTemplate(ctx, st.Category); ok {
+		view.Template = &t
+	}
+	return view
+}
+
+// loadStoryTemplate resolves a category → story.Template by reading the
+// system-scope document with type=story_template + name=category. Sets
+// the lookup is best-effort: missing or malformed templates return
+// (zero, false), which the caller treats as "no hooks for this
+// category". Sty_d2a03cea.
+func (s *Server) loadStoryTemplate(ctx context.Context, category string) (story.Template, bool) {
+	if s.docs == nil || category == "" {
+		return story.Template{}, false
+	}
+	// nil memberships → see system-scope rows regardless of caller's
+	// workspace. Templates are global by design.
+	doc, err := s.docs.GetByName(ctx, "", category, nil)
+	if err != nil {
+		return story.Template{}, false
+	}
+	if doc.Type != document.TypeStoryTemplate {
+		return story.Template{}, false
+	}
+	t, err := story.LoadTemplate(doc)
+	if err != nil {
+		return story.Template{}, false
+	}
+	return t, true
 }
 
 func (s *Server) handleStoryList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -1838,6 +1917,22 @@ func (s *Server) handleStoryUpdateStatus(ctx context.Context, req mcpgo.CallTool
 	if _, err := s.resolveProjectID(ctx, existing.ProjectID, caller, memberships); err != nil {
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
+	// Sty_d2a03cea: consult the category's story_template (if any) and
+	// evaluate its lifecycle hooks for the target status. Failed
+	// structured checks block the transition with a natural-language
+	// explanation so callers know exactly what to fix. Missing template
+	// = no hooks = pass-through (forward-compat for categories without
+	// a template yet).
+	if t, ok := s.loadStoryTemplate(ctx, existing.Category); ok {
+		ev := story.EvaluationContext{
+			LedgerEntriesForStory: func(ctx context.Context, storyID string) ([]ledger.LedgerEntry, error) {
+				return s.ledger.List(ctx, existing.ProjectID, ledger.ListOptions{StoryID: storyID, Limit: 50}, memberships)
+			},
+		}
+		if failures := t.EvaluateTransition(ctx, status, existing, ev); len(failures) > 0 {
+			return mcpgo.NewToolResultError("transition blocked by " + existing.Category + " story template:\n  - " + strings.Join(failures, "\n  - ")), nil
+		}
+	}
 	updated, err := s.stories.UpdateStatus(ctx, id, status, caller.UserID, time.Now().UTC(), memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -1848,6 +1943,118 @@ func (s *Server) handleStoryUpdateStatus(ctx context.Context, req mcpgo.CallTool
 		Str("tool", "story_update_status").
 		Str("story_id", id).
 		Str("new_status", status).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// handleStoryFieldSet writes a single template-defined value onto a
+// story. Validates the field name against the resolved category
+// template — fields not declared by the template are rejected with a
+// list of what the template does declare. Sty_d2a03cea.
+func (s *Server) handleStoryFieldSet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	field, err := req.RequireString("field")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	value := req.GetString("value", "")
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	existing, err := s.stories.GetByID(ctx, id, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError("story not found"), nil
+	}
+	if _, err := s.resolveProjectID(ctx, existing.ProjectID, caller, memberships); err != nil {
+		return mcpgo.NewToolResultError("story not found"), nil
+	}
+	if t, ok := s.loadStoryTemplate(ctx, existing.Category); ok {
+		known := false
+		names := make([]string, 0, len(t.Fields))
+		for _, f := range t.Fields {
+			names = append(names, f.Name)
+			if f.Name == field {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return mcpgo.NewToolResultError(fmt.Sprintf("field %q is not declared by the %q story template (declared: %s)", field, existing.Category, strings.Join(names, ", "))), nil
+		}
+	}
+	updated, err := s.stories.SetField(ctx, id, field, value, caller.UserID, time.Now().UTC(), memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	body, _ := json.Marshal(updated)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "story_field_set").
+		Str("story_id", id).
+		Str("field", field).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// handleStoryTemplateGet returns the parsed Template for the given
+// category. Convenience over document_get with name=category +
+// type=story_template filter. Sty_d2a03cea.
+func (s *Server) handleStoryTemplateGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	category, err := req.RequireString("category")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	t, ok := s.loadStoryTemplate(ctx, category)
+	if !ok {
+		return mcpgo.NewToolResultError(fmt.Sprintf("no story template registered for category %q", category)), nil
+	}
+	body, _ := json.Marshal(t)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "story_template_get").
+		Str("category", category).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// handleStoryTemplateList returns every system-scope story_template
+// document parsed into Template form. Convenience over document_list
+// with type=story_template filter. Sty_d2a03cea.
+func (s *Server) handleStoryTemplateList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	if s.docs == nil {
+		body, _ := json.Marshal([]story.Template{})
+		return mcpgo.NewToolResultText(string(body)), nil
+	}
+	docs, err := s.docs.List(ctx, document.ListOptions{
+		Type:  document.TypeStoryTemplate,
+		Scope: document.ScopeSystem,
+		Limit: 100,
+	}, nil)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	out := make([]story.Template, 0, len(docs))
+	for _, d := range docs {
+		t, err := story.LoadTemplate(d)
+		if err != nil {
+			s.logger.Warn().Str("document_id", d.ID).Str("error", err.Error()).Msg("story_template parse failed; skipping")
+			continue
+		}
+		out = append(out, t)
+	}
+	body, _ := json.Marshal(out)
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "story_template_list").
+		Int("count", len(out)).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil

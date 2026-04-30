@@ -13,11 +13,12 @@ package configseed
 type Kind string
 
 const (
-	KindAgent     Kind = "agent"
-	KindContract  Kind = "contract"
-	KindWorkflow  Kind = "workflow"
-	KindHelp      Kind = "help"
-	KindPrinciple Kind = "principle"
+	KindAgent         Kind = "agent"
+	KindContract      Kind = "contract"
+	KindWorkflow      Kind = "workflow"
+	KindHelp          Kind = "help"
+	KindPrinciple     Kind = "principle"
+	KindStoryTemplate Kind = "story_template"
 )
 
 // Summary captures the per-kind result counts a Run pass produces.

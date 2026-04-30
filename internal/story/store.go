@@ -68,6 +68,12 @@ type Store interface {
 	// identity is set at Create.
 	Update(ctx context.Context, id string, fields UpdateFields, actor string, now time.Time, memberships []string) (Story, error)
 
+	// SetField writes a single template-defined value onto the story's
+	// Fields map. Empty value clears the key. Returns ErrNotFound when
+	// the story doesn't exist or workspace scoping rejects it.
+	// Sty_d2a03cea.
+	SetField(ctx context.Context, id, field string, value any, actor string, now time.Time, memberships []string) (Story, error)
+
 	// BackfillWorkspaceID stamps workspaceID on every row with ProjectID ==
 	// projectID whose workspace_id is empty. Returns the number of rows
 	// touched. Boot-time backfill for feature-order:2.
@@ -244,6 +250,38 @@ func (m *MemoryStore) Update(ctx context.Context, id string, fields UpdateFields
 	s.UpdatedAt = now
 	m.rows[id] = s
 	return s, nil
+}
+
+// SetField implements Store for MemoryStore.
+func (m *MemoryStore) SetField(ctx context.Context, id, field string, value any, actor string, now time.Time, memberships []string) (Story, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.rows[id]
+	if !ok {
+		return Story{}, ErrNotFound
+	}
+	if !inStoryMemberships(s.WorkspaceID, memberships) {
+		return Story{}, ErrNotFound
+	}
+	if s.Fields == nil {
+		s.Fields = make(map[string]any)
+	}
+	if value == nil || isEmptyString(value) {
+		delete(s.Fields, field)
+	} else {
+		s.Fields[field] = value
+	}
+	s.UpdatedAt = now
+	m.rows[id] = s
+	return s, nil
+}
+
+// isEmptyString reports whether v is the literal empty string. Used by
+// SetField to interpret value="" as "clear the field" — so a caller can
+// erase a value with the same shape as setting it.
+func isEmptyString(v any) bool {
+	s, ok := v.(string)
+	return ok && s == ""
 }
 
 // BackfillWorkspaceID implements Store for MemoryStore.

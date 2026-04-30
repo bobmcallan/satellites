@@ -135,6 +135,117 @@ func principleToInput(fm Frontmatter, body []byte, workspaceID, actor string) (d
 	}, nil
 }
 
+// storyTemplateToInput builds a document.UpsertInput for a
+// kind=story_template file. The frontmatter declares the per-category
+// schema (name, fields, hooks); the parser walks it into a structured
+// JSON payload the story package consumes via story.LoadTemplate.
+//
+// One template per category. The `category` frontmatter key is the
+// canonical identity; `name` mirrors it for the document's name column
+// (Document.Name is the dedup key on Upsert). Sty_d2a03cea.
+func storyTemplateToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
+	category := fm.String("category")
+	if category == "" {
+		return document.UpsertInput{}, fmt.Errorf("story_template: category required")
+	}
+	name := fm.String("name")
+	if name == "" {
+		name = category
+	}
+	payload := map[string]any{
+		"category": category,
+		"fields":   storyTemplateFields(fm["fields"]),
+		"hooks":    storyTemplateHooks(fm["hooks"]),
+	}
+	structured, err := json.Marshal(payload)
+	if err != nil {
+		return document.UpsertInput{}, fmt.Errorf("story_template %q: marshal: %w", category, err)
+	}
+	return document.UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypeStoryTemplate,
+		Name:        name,
+		Body:        body,
+		Structured:  structured,
+		Scope:       document.ScopeSystem,
+		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed", "story-template"),
+		Actor:       actor,
+	}, nil
+}
+
+// storyTemplateFields normalises the `fields:` frontmatter array into
+// the canonical per-field shape: name, type, required, prompt. Unknown
+// or malformed entries are skipped (per configseed's fail-loud-on-file
+// pattern; structural error is what would matter, not field shape).
+func storyTemplateFields(raw any) []map[string]any {
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, entry := range list {
+		m := asMap(entry)
+		if m == nil {
+			continue
+		}
+		name := stringOf(m["name"])
+		if name == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"name":     name,
+			"type":     stringOf(m["type"]),
+			"required": boolOf(m["required"]),
+			"prompt":   stringOf(m["prompt"]),
+		})
+	}
+	return out
+}
+
+// storyTemplateHooks normalises the `hooks:` frontmatter into a
+// per-status object carrying `structured` (machine-evaluable checks)
+// and `natural_language` (free-text instructions). Both branches are
+// preserved verbatim so the structured branch can drive enforcement
+// while the natural-language branch surfaces in story_get for agents
+// and humans.
+func storyTemplateHooks(raw any) map[string]any {
+	source := asMap(raw)
+	if source == nil {
+		return nil
+	}
+	out := make(map[string]any, len(source))
+	for status, v := range source {
+		entry := asMap(v)
+		if entry == nil {
+			continue
+		}
+		structured := []map[string]any{}
+		if list, ok := entry["structured"].([]any); ok {
+			for _, item := range list {
+				m := asMap(item)
+				if m == nil {
+					continue
+				}
+				structured = append(structured, m)
+			}
+		}
+		natural := []string{}
+		if list, ok := entry["natural_language"].([]any); ok {
+			for _, item := range list {
+				if s, ok := item.(string); ok && s != "" {
+					natural = append(natural, s)
+				}
+			}
+		}
+		out[status] = map[string]any{
+			"structured":       structured,
+			"natural_language": natural,
+		}
+	}
+	return out
+}
+
 // helpToInput builds a document.UpsertInput for a kind=help file.
 // Sibling story_cc5c67a9 owns the type=help discriminator + portal
 // surface; the loader entry point lives here so the runner stays

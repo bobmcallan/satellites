@@ -302,6 +302,62 @@ func TestRun_BadFileRecordedAsError(t *testing.T) {
 	}
 }
 
+// TestRun_StoryTemplatesLoadFromRealSeed covers sty_d2a03cea: every
+// markdown file under config/seed/story_templates/ parses into a
+// type=story_template document whose Structured payload carries
+// `category`, `fields[]`, and per-status `hooks` with both
+// `structured` and `natural_language` branches preserved verbatim.
+// One template per category — tested by listing the resulting docs.
+func TestRun_StoryTemplatesLoadFromRealSeed(t *testing.T) {
+	t.Parallel()
+	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
+	if err != nil {
+		t.Fatalf("abs seed dir: %v", err)
+	}
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := Run(context.Background(), docs, seedDir, "wksp_sys", "system", now); err != nil {
+		t.Fatalf("Run real seed: %v", err)
+	}
+	for _, category := range []string{"bug", "feature", "improvement", "infrastructure", "documentation"} {
+		doc, err := docs.GetByName(context.Background(), "", category, nil)
+		if err != nil {
+			t.Errorf("GetByName story_template %q: %v", category, err)
+			continue
+		}
+		if doc.Type != document.TypeStoryTemplate {
+			t.Errorf("%s: type = %q, want story_template", category, doc.Type)
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(doc.Structured, &payload); err != nil {
+			t.Errorf("%s: decode Structured: %v", category, err)
+			continue
+		}
+		if got, _ := payload["category"].(string); got != category {
+			t.Errorf("%s: payload.category = %q, want %q", category, got, category)
+		}
+		fields, ok := payload["fields"].([]any)
+		if !ok || len(fields) == 0 {
+			t.Errorf("%s: fields missing or empty: %v", category, payload["fields"])
+		}
+		hooks, ok := payload["hooks"].(map[string]any)
+		if !ok || len(hooks) == 0 {
+			t.Errorf("%s: hooks missing or empty: %v", category, payload["hooks"])
+		}
+	}
+
+	// Bug template specifically must declare the canonical fields the
+	// post-deploy methodology relies on.
+	bugDoc, _ := docs.GetByName(context.Background(), "", "bug", nil)
+	body := string(bugDoc.Structured)
+	for _, name := range []string{"repro", "observed", "expected", "root_cause", "fix_commit", "regression_test_path", "post_deploy_check"} {
+		if !strings.Contains(body, name) {
+			t.Errorf("bug template structured payload missing %q field", name)
+		}
+	}
+}
+
 // TestResolveSeedDir_EnvOverride covers AC5: SATELLITES_SEED_DIR
 // overrides the default path.
 func TestResolveSeedDir_EnvOverride(t *testing.T) {

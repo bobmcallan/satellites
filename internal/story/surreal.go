@@ -39,7 +39,7 @@ func NewSurrealStore(db *surrealdb.DB, led ledger.Store) *SurrealStore {
 }
 
 // selectCols preserves the string id (see project/surreal.go note).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, title, description, acceptance_criteria, status, priority, category, tags, created_by, created_at, updated_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, title, description, acceptance_criteria, status, priority, category, tags, fields, created_by, created_at, updated_at"
 
 func (s *SurrealStore) Create(ctx context.Context, st Story, now time.Time) (Story, error) {
 	if st.Status == "" {
@@ -174,6 +174,27 @@ func (s *SurrealStore) Update(ctx context.Context, id string, fields UpdateField
 		return Story{}, err
 	}
 	_ = fields
+	current.UpdatedAt = now
+	if err := s.write(ctx, current); err != nil {
+		return Story{}, err
+	}
+	return current, nil
+}
+
+// SetField implements Store for SurrealStore. Sty_d2a03cea.
+func (s *SurrealStore) SetField(ctx context.Context, id, field string, value any, actor string, now time.Time, memberships []string) (Story, error) {
+	current, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return Story{}, err
+	}
+	if current.Fields == nil {
+		current.Fields = make(map[string]any)
+	}
+	if value == nil || isEmptyString(value) {
+		delete(current.Fields, field)
+	} else {
+		current.Fields[field] = value
+	}
 	current.UpdatedAt = now
 	if err := s.write(ctx, current); err != nil {
 		return Story{}, err
