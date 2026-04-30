@@ -105,3 +105,61 @@ jobs:
             docker push "$tag"
             echo "::endgroup::"
           done <<< "$TAGS"
+
+  deploy:
+    needs: push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-satellites
+      cancel-in-progress: false
+
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to Fly registry
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl auth docker
+          docker pull ${{ env.REGISTRY }}/${{ github.repository }}:latest
+          docker tag ${{ env.REGISTRY }}/${{ github.repository }}:latest registry.fly.io/satellites-pprod:latest
+          docker push registry.fly.io/satellites-pprod:latest
+
+      - name: Pre-deploy machine check
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          stuck=$(flyctl machines list --app satellites-pprod --json \
+            | jq '[.[] | select(.state == "replacing" or .state == "destroying")] | length')
+          if [ "$stuck" -gt 0 ]; then
+            echo "::warning::Found $stuck stuck machine(s) — forcing cleanup"
+            flyctl machines list --app satellites-pprod --json \
+              | jq -r '.[] | select(.state == "replacing" or .state == "destroying") | .id' \
+              | xargs -I{} flyctl machines destroy {} --app satellites-pprod --force
+            sleep 5
+          fi
+
+      - name: Deploy to Fly.io
+        uses: nick-fields/retry@v3
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_wait_seconds: 30
+          command: |
+            flyctl deploy \
+              --app satellites-pprod \
+              --image registry.fly.io/satellites-pprod:latest \
+              --strategy rolling \
+              --wait-timeout 300 \
+              --yes
