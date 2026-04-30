@@ -44,7 +44,7 @@ func TestSatellitesBoots_NoEnvVars(t *testing.T) {
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
-		"PORT=" + strconv.Itoa(port),
+		"SATELLITES_PORT=" + strconv.Itoa(port),
 	}
 	stdout := &lineBuffer{}
 	cmd.Stdout = stdout

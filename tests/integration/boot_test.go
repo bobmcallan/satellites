@@ -37,10 +37,10 @@ func TestServerBootsWithVersionLine(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, bin)
 	cmd.Env = append(cmd.Env,
-		"PORT="+port,
-		"ENV=dev",
-		"LOG_LEVEL=info",
-		"DEV_MODE=true",
+		"SATELLITES_PORT="+port,
+		"SATELLITES_ENV=dev",
+		"SATELLITES_LOG_LEVEL=info",
+		"SATELLITES_DEV_MODE=true",
 		"PATH=/usr/bin:/bin",
 	)
 	if err := cmd.Start(); err != nil {
