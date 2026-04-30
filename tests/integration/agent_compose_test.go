@@ -78,12 +78,15 @@ func TestAgentCompose_FullStack(t *testing.T) {
 	})
 	projectID, _ := project["id"].(string)
 
-	// Seed a project-scope contract document.
+	// Seed a project-scope contract document. The contract_create wrapper
+	// (internal/mcpserver/wrappers.go) requires a structured payload with
+	// category + required_for_close + validation_mode.
 	contractDoc := callTool(t, ctx, mcpURL, "key_agentcompose", "contract_create", map[string]any{
 		"scope":      "project",
 		"project_id": projectID,
 		"name":       "develop",
 		"body":       "develop contract for agent_compose test",
+		"structured": `{"category":"develop","required_for_close":true,"validation_mode":"agent"}`,
 	})
 	contractID, _ := contractDoc["id"].(string)
 

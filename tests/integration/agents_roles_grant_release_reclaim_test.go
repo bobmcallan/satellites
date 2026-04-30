@@ -108,8 +108,14 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 
 	// Seed the 4 lifecycle contract docs the workflow_claim will
 	// instantiate against. Each carries required_role so the claim gate
-	// exercises the full grant-based path.
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	// exercises the full grant-based path. Unique names ("grctest_*")
+	// avoid colliding with the system-seeded contract docs (preplan,
+	// plan, develop, story_close) — those carry required_role as a
+	// name string ("role_orchestrator") which won't match the doc-id
+	// the grant stores on session_register, so the test owns its full
+	// contract set with doc-id required_role for a deterministic claim.
+	contractNames := []string{"grctest_preplan", "grctest_plan", "grctest_develop", "grctest_story_close"}
+	for _, name := range contractNames {
 		_ = callTool(t, ctx, mcpURL, "key_grc", "contract_create", map[string]any{
 			"scope":      "system",
 			"name":       name,
@@ -136,10 +142,23 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	storyID, _ := story["id"].(string)
 	require.NotEmpty(t, storyID)
 
+	// workflow_claim's plan-approval precondition (story_a5826137) requires
+	// a kind:plan-approved ledger row scoped to the story. Production runs
+	// land that row via orchestrator_submit_plan / orchestrator_compose_plan;
+	// this test exercises workflow_claim directly, so we write the row
+	// ourselves to satisfy the gate.
+	_ = callTool(t, ctx, mcpURL, "key_grc", "ledger_append", map[string]any{
+		"project_id": projID,
+		"story_id":   storyID,
+		"type":       "decision",
+		"content":    "test fixture pre-approved plan",
+		"tags":       []any{"kind:plan-approved", "phase:plan-approval"},
+	})
+
 	// Instantiate the workflow — the 4-slot shape the system contracts seed.
 	wf := callTool(t, ctx, mcpURL, "key_grc", "workflow_claim", map[string]any{
 		"story_id":           storyID,
-		"proposed_contracts": []any{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []any{contractNames[0], contractNames[1], contractNames[2], contractNames[3]},
 		"claim_markdown":     "standard shape",
 	})
 	cisRaw, _ := wf["contract_instances"].([]any)
@@ -174,7 +193,7 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 		"contract_instance_id": ciIDs[0],
 		"close_markdown":       "preplan done",
 		"evidence_markdown":    "baseline evidence",
-		"proposed_workflow":    []any{"preplan", "plan", "develop", "story_close"},
+		"proposed_workflow":    []any{contractNames[0], contractNames[1], contractNames[2], contractNames[3]},
 	})
 
 	// Step 3: release session A's grant.
@@ -219,14 +238,15 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 
 // lookupSystemAgentID resolves a system-scope type=agent document by
 // name via the document_list MCP verb. Used by tests that need to pass
-// agent_id to contract_claim (story_cc55e093).
+// agent_id to contract_claim (story_cc55e093). document_list returns a
+// bare JSON array (not the wrapped {documents:[...]} shape), so we
+// decode it via callToolArray.
 func lookupSystemAgentID(t *testing.T, ctx context.Context, mcpURL, apiKey, name string) string {
 	t.Helper()
-	res := callTool(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
+	docs := callToolArray(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
 		"type":  "agent",
 		"scope": "system",
 	})
-	docs, _ := res["documents"].([]any)
 	for _, raw := range docs {
 		m, _ := raw.(map[string]any)
 		if n, _ := m["name"].(string); n == name {

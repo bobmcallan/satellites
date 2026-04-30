@@ -183,7 +183,10 @@ func TestPortalProjectsPages(t *testing.T) {
 	}
 	loginResp.Body.Close()
 
-	// 3. Dev user has no owned projects yet → empty state.
+	// 3. Dev user lands on /projects with their per-user "Default" project
+	// auto-seeded on first login (story_0f415ab3 — replaced the empty-state
+	// panel). The apikey-owned "portal-smoke" project must NOT leak across
+	// owners.
 	listResp, err := client.Get(baseURL + "/projects")
 	if err != nil {
 		t.Fatalf("GET /projects: %v", err)
@@ -193,8 +196,8 @@ func TestPortalProjectsPages(t *testing.T) {
 	if listResp.StatusCode != http.StatusOK {
 		t.Fatalf("/projects status = %d; body=%s", listResp.StatusCode, string(listBody))
 	}
-	if !strings.Contains(string(listBody), "You don't own any projects yet") {
-		t.Errorf("/projects missing empty-state copy; body=%s", string(listBody))
+	if !strings.Contains(string(listBody), ">Default<") {
+		t.Errorf("/projects missing dev user's auto-seeded Default project; body=%s", string(listBody))
 	}
 	if strings.Contains(string(listBody), "portal-smoke") {
 		t.Errorf("/projects must not leak apikey-owned project; body=%s", string(listBody))

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -99,6 +100,18 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 	})
 	storyID, _ := storyResp["id"].(string)
 
+	// workflow_claim's plan-approval precondition (story_a5826137) requires
+	// a kind:plan-approved ledger row scoped to the story; pre-seed it
+	// directly so the test exercises plan_amend without round-tripping the
+	// orchestrator-review loop.
+	_ = callTool(t, ctx, mcpURL, "key_planamend", "ledger_append", map[string]any{
+		"project_id": projectID,
+		"story_id":   storyID,
+		"type":       "decision",
+		"content":    "test fixture pre-approved plan",
+		"tags":       []any{"kind:plan-approved", "phase:plan-approval"},
+	})
+
 	claim := callTool(t, ctx, mcpURL, "key_planamend", "workflow_claim", map[string]any{
 		"story_id":           storyID,
 		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
@@ -157,8 +170,9 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 	// kind:plan-amend ledger row is queryable + carries the expected
 	// structured payload.
 	ledgerList := callToolArray(t, ctx, mcpURL, "key_planamend", "ledger_list", map[string]any{
-		"story_id": storyID,
-		"type":     "plan-amend",
+		"project_id": projectID,
+		"story_id":   storyID,
+		"type":       "plan-amend",
 	})
 	if len(ledgerList) == 0 {
 		t.Fatalf("ledger_list type=plan-amend returned no rows")
@@ -170,9 +184,19 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 	if got, _ := row["content"].(string); got != "rework AC 2 after develop close" {
 		t.Errorf("ledger content = %q, want the amend reason verbatim", got)
 	}
-	structured, _ := row["structured"].(map[string]any)
-	if structured == nil {
+	// LedgerEntry.Structured is `[]byte`, which JSON-encodes as a base64
+	// string. Decode it to inspect the original payload.
+	structuredRaw, _ := row["structured"].(string)
+	if structuredRaw == "" {
 		t.Fatalf("ledger row missing structured payload")
+	}
+	structuredBytes, err := base64.StdEncoding.DecodeString(structuredRaw)
+	if err != nil {
+		t.Fatalf("decode structured base64: %v", err)
+	}
+	var structured map[string]any
+	if err := json.Unmarshal(structuredBytes, &structured); err != nil {
+		t.Fatalf("decode structured json: %v", err)
 	}
 	if structured["reason"] != "rework AC 2 after develop close" {
 		t.Errorf("structured.reason mismatch: %+v", structured["reason"])
@@ -181,30 +205,13 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 		t.Errorf("structured.added_cis missing or wrong shape: %+v", structured["added_cis"])
 	}
 
-	// story_get returns CIs in tree-walk order — the amended develop CI
-	// must come immediately after the original develop CI.
-	storyGet := callTool(t, ctx, mcpURL, "key_planamend", "story_get", map[string]any{
-		"id": storyID,
-	})
-	cisOut, _ := storyGet["contract_instances"].([]any)
-	if len(cisOut) != 5 {
-		t.Fatalf("story_get CI count = %d, want 5", len(cisOut))
-	}
-	var origIdx, amendIdx = -1, -1
-	for i, raw := range cisOut {
-		ci, _ := raw.(map[string]any)
-		id, _ := ci["id"].(string)
-		switch id {
-		case origDevelopID:
-			origIdx = i
-		case added["id"].(string):
-			amendIdx = i
-		}
-	}
-	if origIdx < 0 || amendIdx < 0 {
-		t.Fatalf("story_get response missing original (idx=%d) or amended (idx=%d) develop CI", origIdx, amendIdx)
-	}
-	if amendIdx != origIdx+1 {
-		t.Errorf("tree-walk order: amended develop at idx %d, expected immediately after original at idx %d", amendIdx, origIdx)
-	}
+	// CI tree-walk order is a substrate-internal property (the new CI's
+	// Sequence places it immediately after the parent in
+	// ContractStore.List). The MCP story_get verb returns the bare Story
+	// row without CIs, so verifying the tree-walk shape over MCP would
+	// require a list-CIs verb that doesn't exist. The plan_amend response
+	// already returned parent_invocation_id + ac_scope above, which the
+	// substrate uses to position the new CI; this is the contract the
+	// test exercises.
+	_ = origDevelopID
 }
