@@ -64,6 +64,10 @@ func main() {
 		Str("fly_machine_id", cfg.FlyMachineID).
 		Msgf("satellites-server %s", config.GetFullVersion())
 
+	if path := cfg.LoadedTOMLPath(); path != "" {
+		logger.Info().Str("path", path).Msg("config: loaded TOML")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

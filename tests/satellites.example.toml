@@ -1,0 +1,61 @@
+# tests/satellites.example.toml — schema reference for integration tests.
+#
+# Per-test TOML files are written by `tests/integration/writeTestTOML`
+# at runtime; this file is the human-readable schema. It mirrors the
+# repo-root `satellites.example.toml` so contributors can see at a
+# glance which keys are available inside the test container.
+#
+# Resolution order (highest precedence first):
+#   1. Process env var (passed via container `Env:` map)
+#   2. This TOML file (mounted at /app/satellites.toml)
+#   3. In-code default (internal/config/config.go::defaults)
+#
+# In tests:
+# - TOML carries every shaped value (port, env, log_level, embeddings_*,
+#   docs_dir, dev_mode, oauth_*, api_keys, grants_enforced).
+# - ENV carries ONLY secrets (GEMINI_API_KEY, SATELLITES_API_KEYS) and
+#   things that change per test run (DB_DSN that points at the surreal
+#   sibling container).
+# - One test (TestConfig_ENVOverridesTOML) deliberately sets BOTH a TOML
+#   value AND an env override for the same key to prove the resolution
+#   order holds.
+
+# HTTP listen port (1..65535). Env override: PORT (or SATELLITES_PORT).
+port = 8080
+
+# Deployment environment: "dev" or "prod". Env override: ENV.
+env = "dev"
+
+# Arbor log level: trace, debug, info, warn, error. Env override: LOG_LEVEL.
+log_level = "info"
+
+# Enables dev-mode quick-signin and DEV portal affordances.
+# Env override: DEV_MODE.
+dev_mode = true
+
+# SurrealDB connection string. Tests pass DB_DSN via env to point at the
+# per-test surreal sibling container; leave blank in TOML so the env
+# override always wins.
+db_dsn = ""
+
+# Container-side path containing the mounted docs volume read by
+# document_ingest_file. Env override: DOCS_DIR.
+docs_dir = "/app/docs"
+
+# Bearer tokens accepted on /mcp when a session cookie is absent. TOML
+# uses a native array; tests usually set this via env.
+# api_keys = ["key-test"]
+
+# NOTE: EMBEDDINGS_PROVIDER, EMBEDDINGS_DIMENSION, EMBEDDINGS_MODEL,
+# EMBEDDINGS_API_KEY, EMBEDDINGS_BASE_URL are read directly via
+# os.Getenv in internal/embeddings/config.go — they are NOT part of
+# internal/config.Config and cannot be carried by TOML today.
+#
+# Same for GEMINI_API_KEY and GEMINI_REVIEW_MODEL (read in
+# cmd/satellites/main.go::buildReviewer). Migrating these into Config
+# is a follow-up story.
+
+# When true, MCP verbs outside the bootstrap allowlist are rejected
+# unless the caller holds a role-grant whose effective verb allowlist
+# covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
+# grants_enforced = false

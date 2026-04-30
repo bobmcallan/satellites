@@ -7,6 +7,13 @@
 // The blank import of tests/common triggers the dotenv loader's package
 // init so GEMINI_API_KEY / GEMINI_REVIEW_MODEL set in tests/.env land in
 // the test process env. Host-exported values still win.
+//
+// This test does not boot a satellites container — it talks to Gemini
+// directly. A future variant that exercises the in-container reviewer
+// dispatch path should pair tests/common with the TOML harness in
+// tests/integration/toml_boot.go (writeTestTOML + startServerWithTOML)
+// so the container loads its config from a mounted /app/satellites.toml,
+// matching the production config-resolution order.
 
 package reviewer_test
 

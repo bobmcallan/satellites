@@ -115,6 +115,21 @@ type Config struct {
 	// are rejected unless the caller holds a role-grant whose effective
 	// verb allowlist covers the tool. Env override: SATELLITES_GRANTS_ENFORCED.
 	GrantsEnforced bool `toml:"grants_enforced"`
+
+	// loadedTOMLPath is set by Load() to the absolute path of the TOML
+	// file that was actually read (empty when defaults+env supplied the
+	// whole config). Read via the LoadedTOMLPath() accessor — the field
+	// is unexported so it doesn't show up in Describe()/TOML serialisation.
+	loadedTOMLPath string
+}
+
+// LoadedTOMLPath returns the absolute path of the TOML file that the
+// last Load() call actually read, or "" when the config came from
+// defaults+env alone. Used at boot to log proof that the operator's
+// TOML file was picked up; tests that mount a TOML at /app/satellites.toml
+// assert on this in container.Logs to verify the loader path actually ran.
+func (c *Config) LoadedTOMLPath() string {
+	return c.loadedTOMLPath
 }
 
 // FieldDoc is one entry in the Describe() table — the single source of truth
@@ -185,10 +200,11 @@ const defaultConfigFile = "satellites.toml"
 func Load() (*Config, error) {
 	cfg := defaults()
 
-	overlay, err := readTOMLOverlay()
+	overlay, tomlPath, err := readTOMLOverlay()
 	if err != nil {
 		return nil, err
 	}
+	cfg.loadedTOMLPath = tomlPath
 	envSetDevMode := overlay.applyTo(cfg)
 
 	// Env / DevMode resolution must settle before the dev-mode default
@@ -333,28 +349,30 @@ func (o tomlOverlay) applyTo(cfg *Config) bool {
 }
 
 // readTOMLOverlay resolves the TOML path, parses the file if present, and
-// returns the overlay. An empty overlay (zero pointers) means no file was
-// loaded.
-func readTOMLOverlay() (tomlOverlay, error) {
+// returns the overlay alongside the path that was actually read. An empty
+// path means no TOML was loaded (the silent-when-absent default-config
+// case); callers stamp this onto Config.loadedTOMLPath so the boot log
+// can prove the loader ran.
+func readTOMLOverlay() (tomlOverlay, string, error) {
 	var overlay tomlOverlay
 	path, explicit, err := resolveConfigPath()
 	if err != nil {
-		return overlay, err
+		return overlay, "", err
 	}
 	if path == "" {
-		return overlay, nil
+		return overlay, "", nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if !explicit && os.IsNotExist(err) {
-			return overlay, nil
+			return overlay, "", nil
 		}
-		return overlay, fmt.Errorf("read config %s: %w", path, err)
+		return overlay, "", fmt.Errorf("read config %s: %w", path, err)
 	}
 	if err := toml.Unmarshal(raw, &overlay); err != nil {
-		return overlay, fmt.Errorf("parse config %s: %w", path, err)
+		return overlay, "", fmt.Errorf("parse config %s: %w", path, err)
 	}
-	return overlay, nil
+	return overlay, path, nil
 }
 
 // defaults builds the in-code default Config. This is the lowest-precedence

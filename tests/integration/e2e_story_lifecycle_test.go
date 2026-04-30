@@ -64,13 +64,22 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 
 	docsHost := filepath.Join(repoRoot(t), "docs")
 
-	// EMBEDDINGS_PROVIDER=stub keeps embeddings deterministic and offline.
-	// GEMINI_API_KEY pass-through is conditional — when empty the
-	// in-container reviewer falls back to AcceptAll (warns at boot).
+	// TOML-driven boot: every shaped value lives in the TOML; only
+	// secrets and per-test overrides flow via ENV. Per
+	// project_test_env_isolation, no path here reads repo-root .env —
+	// secrets come from process env (host export or tests/.env via
+	// tests/common loader, when wired).
+	tomlPath := writeTestTOML(t, map[string]any{
+		"port":      8080,
+		"env":       "dev",
+		"log_level": "info",
+		"dev_mode":  true,
+		"docs_dir":  "/app/docs",
+	})
+
 	containerEnv := map[string]string{
 		"DB_DSN":               "ws://root:root@surrealdb:8000/rpc/satellites/satellites",
 		"SATELLITES_API_KEYS":  "key_e2e",
-		"DOCS_DIR":             "/app/docs",
 		"EMBEDDINGS_PROVIDER":  "stub",
 		"EMBEDDINGS_DIMENSION": "16",
 	}
@@ -84,7 +93,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 		t.Log("e2e: GEMINI_API_KEY not set — in-container reviewer falls back to AcceptAll")
 	}
 
-	baseURL, stop := startServerContainerWithOptions(t, ctx, startOptions{
+	baseURL, logs, stop := startServerWithTOML(t, ctx, startOptions{
 		Network: net.Name,
 		Env:     containerEnv,
 		Mounts: []mount.Mount{{
@@ -93,8 +102,15 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 			Target:   "/app/docs",
 			ReadOnly: true,
 		}},
-	})
+	}, tomlPath)
 	defer stop()
+
+	// AC9 — assert the binary actually loaded the mounted TOML.
+	bootLogs := logs()
+	require.Contains(t, bootLogs, "config: loaded TOML",
+		"boot log must include the TOML-loaded line proving SATELLITES_CONFIG was honoured")
+	require.Contains(t, bootLogs, containerTOMLPath,
+		"boot log must cite the in-container TOML path")
 
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_e2e")
