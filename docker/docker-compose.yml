@@ -22,8 +22,13 @@ services:
       - "8080:8080"
     env_file:
       - ../.env
+    environment:
+      # Story_b7b705dd: TOML is the canonical local-dev config carrier;
+      # .env above remains the runtime override surface.
+      SATELLITES_CONFIG: /app/satellites.toml
     volumes:
       - ../docs:/app/docs:ro
+      - ../scripts/satellites.toml:/app/satellites.toml:ro
     depends_on:
       surrealdb:
         condition: service_healthy

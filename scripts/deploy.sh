@@ -1,27 +1,40 @@
 #!/usr/bin/env bash
 # Local deployment helper for the satellites docker stack. Wraps `docker
-# compose` with the repo's compose file + a mandatory .env file so the
-# operator invocation stays short. Subcommands: up (default), down, logs,
-# restart.
+# compose` with the repo's compose file + a mandatory .env file + a
+# mandatory scripts/satellites.toml so the operator invocation stays
+# short. Subcommands: up (default), down, logs, restart.
 #
-# Populate .env first using the env-var reference in README.md
-# ("Server configuration" section):
+# First-run setup:
 #
-#   $EDITOR .env   # set DEV_USERNAME / DEV_PASSWORD / OAuth creds / etc.
+#   cp scripts/satellites.example.toml scripts/satellites.toml
+#   $EDITOR scripts/satellites.toml      # set TOML config (story_b7b705dd)
+#   $EDITOR .env                         # set runtime overrides (rare)
 #   ./scripts/deploy.sh up
 #
-# .env is gitignored — treat it as machine-local.
+# Both files are gitignored — treat them as machine-local. TOML is the
+# canonical config carrier; .env is the override surface.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 COMPOSE_FILE="docker/docker-compose.yml"
 ENV_FILE=".env"
+TOML_FILE="scripts/satellites.toml"
+TOML_EXAMPLE="scripts/satellites.example.toml"
 
 require_env_file() {
   if [ ! -f "$ENV_FILE" ]; then
     echo "error: $ENV_FILE not found" >&2
     echo "hint:  create $ENV_FILE — see README.md \"Server configuration\" for the env-var reference" >&2
+    exit 1
+  fi
+}
+
+require_toml_file() {
+  if [ ! -f "$TOML_FILE" ]; then
+    echo "error: $TOML_FILE not found" >&2
+    echo "hint:  cp $TOML_EXAMPLE $TOML_FILE && edit before re-running" >&2
+    echo "       (TOML is the canonical local-dev config carrier — story_b7b705dd)" >&2
     exit 1
   fi
 }
@@ -43,6 +56,7 @@ compose() {
 
 cmd_up() {
   require_env_file
+  require_toml_file
   require_compose
   compose up -d --build
   compose ps
@@ -55,6 +69,7 @@ cmd_down() {
 
 cmd_restart() {
   require_env_file
+  require_toml_file
   require_compose
   compose down
   compose up -d --build
@@ -77,9 +92,13 @@ Commands:
   logs      Tail combined logs (follow, last 100 lines).
 
 Requires:
-  docker    with the compose plugin (`docker compose`).
-  .env      create at repo root (gitignored). See README.md
-            "Server configuration" for the env-var reference.
+  docker                       with the compose plugin (`docker compose`).
+  scripts/satellites.toml      copy from scripts/satellites.example.toml
+                               and customise. Canonical config carrier
+                               (story_b7b705dd).
+  .env                         create at repo root (gitignored). Runtime
+                               override surface; see README.md
+                               "Server configuration".
 
 The wrapped invocation is:
   docker compose -f docker/docker-compose.yml --env-file .env <subcommand>

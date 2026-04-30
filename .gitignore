@@ -7,8 +7,9 @@
 .env
 tests/.env
 
-# Local TOML config (use satellites.example.toml as the committed template)
-satellites.toml
+# Local TOML config (use scripts/satellites.example.toml as the committed
+# template; copy to scripts/satellites.toml and customise — story_b7b705dd).
+scripts/satellites.toml
 
 # Go build output
 /satellites

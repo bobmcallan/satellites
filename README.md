@@ -11,8 +11,10 @@ satellites-v4 is the substrate Claude (and other narrow MCP-driven agents) plug 
 ## Quickstart (local dev)
 
 ```
-$EDITOR .env               # create .env (gitignored) — see "Server configuration" below
-./scripts/deploy.sh up     # boot satellites + SurrealDB via docker compose
+cp scripts/satellites.example.toml scripts/satellites.toml   # canonical config carrier (gitignored)
+$EDITOR scripts/satellites.toml                              # customise port / OAuth / Gemini / etc.
+$EDITOR .env                                                 # optional runtime overrides (gitignored)
+./scripts/deploy.sh up                                       # boot satellites + SurrealDB via docker compose
 open http://localhost:8080
 ```
 
@@ -47,22 +49,21 @@ Plain `go build ./...` also works and produces `dev`-stamped binaries with build
 
 ## Deploy locally
 
-The local docker stack (satellites + SurrealDB) is driven by `docker/docker-compose.yml`. Use `scripts/deploy.sh` as the single operator entry point — it wraps `docker compose` with the compose file + a mandatory `.env`.
+The local docker stack (satellites + SurrealDB) is driven by `docker/docker-compose.yml`. Use `scripts/deploy.sh` as the single operator entry point — it wraps `docker compose` with the compose file + a mandatory `scripts/satellites.toml` + an optional `.env` for runtime overrides.
 
 ```
-$EDITOR .env               # create .env (gitignored) — see "Server configuration" below
-./scripts/deploy.sh up     # build + start the stack (default subcommand)
-./scripts/deploy.sh logs   # tail combined logs
+cp scripts/satellites.example.toml scripts/satellites.toml   # canonical config carrier
+$EDITOR scripts/satellites.toml                              # customise
+$EDITOR .env                                                 # optional runtime overrides
+./scripts/deploy.sh up                                       # build + start the stack (default subcommand)
+./scripts/deploy.sh logs                                     # tail combined logs
 ./scripts/deploy.sh restart
 ./scripts/deploy.sh down
 ```
 
-`.env` is gitignored — treat it as machine-local. The full env-var
-reference lives in [Server configuration](#server-configuration) below;
-docker-compose's `env_file` directive picks the keys up at boot, and the
-Go binary reads them via `os.Getenv` directly (no dotenv import).
+`scripts/satellites.toml` is mounted into the container at `/app/satellites.toml` and the binary boots from it via `SATELLITES_CONFIG=/app/satellites.toml`. Both `scripts/satellites.toml` and `.env` are gitignored — treat them as machine-local. The full env-var reference lives in [Server configuration](#server-configuration) below; the same keys can be set in TOML (canonical) or via `.env` (override).
 
-Config is layered: TOML is the canonical source, env vars are overrides, and every key has an in-code default. Resolution order (highest first) is **process env var → TOML file → code default**. The loader looks for `./satellites.toml` by default, or an explicit path via `SATELLITES_CONFIG=/path/to/file` (missing-explicit-file is an error). `satellites.example.toml` at the repo root lists every key with its default — copy to `satellites.toml` (gitignored) and customise. Defaults live in `internal/config/config.go::defaults`; prod-required gaps are named by `validate()`. OAuth providers are gated on `google_client_id` / `google_client_secret` (env override: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and the GitHub equivalents; absent values hide the corresponding landing button and surface the no-auth diagnostic banner.
+Config is layered: TOML is the canonical source, env vars are overrides, and every key has an in-code default. Resolution order (highest first) is **process env var → TOML file → code default**. Production reads via `SATELLITES_CONFIG=/path/to/file` (missing-explicit-file is an error). `scripts/satellites.example.toml` lists every key with its default — copy to `scripts/satellites.toml` and customise. Defaults live in `internal/config/config.go::defaults`; prod-required gaps are named by `validate()`. OAuth providers are gated on `google_client_id` / `google_client_secret` (env override: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and the GitHub equivalents; absent values hide the corresponding landing button and surface the no-auth diagnostic banner.
 
 ## Run
 
