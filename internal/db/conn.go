@@ -7,11 +7,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
+	"github.com/surrealdb/surrealdb.go/contrib/rews"
+	"github.com/surrealdb/surrealdb.go/pkg/connection"
+	"github.com/surrealdb/surrealdb.go/pkg/connection/gws"
+	"github.com/surrealdb/surrealdb.go/pkg/logger"
 )
 
 // Config bundles the fields required to open a SurrealDB connection. Built
@@ -69,31 +75,48 @@ func ParseDSN(dsn string) (Config, error) {
 	return cfg, nil
 }
 
-// Connect opens a SurrealDB connection, signs in, and selects ns/db. The
-// returned *surrealdb.DB is safe for concurrent use (the driver owns
-// multiplexing).
+// Connect opens a SurrealDB connection via the SDK's reconnecting WebSocket
+// (contrib/rews), signs in, and selects ns/db. The returned *surrealdb.DB is
+// safe for concurrent use, and the rews layer transparently re-establishes
+// the underlying socket — replaying SignIn + Use — when Fly's network drops
+// the idle TCP connection. Without rews, a single broken pipe wedges every
+// subsequent query against the same dead socket forever (see commit history
+// for the 0.0.157 outage).
 //
-// Retries the initial dial up to 30 times with a 1 s backoff — tolerates the
-// common docker-compose race where the satellites container starts before
-// surrealdb's websocket is listening.
+// Initial dial uses an exponential backoff retryer with infinite retries;
+// the caller's context is the upper bound. This tolerates the docker-compose
+// race where the satellites container starts before surrealdb's websocket is
+// listening, and accommodates Fly cold starts where SurrealDB may need a few
+// seconds to be reachable.
 func Connect(ctx context.Context, cfg Config) (*surrealdb.DB, error) {
-	var (
-		db      *surrealdb.DB
-		lastErr error
-	)
-	for attempt := 1; attempt <= 30; attempt++ {
-		db, lastErr = surrealdb.FromEndpointURLString(ctx, cfg.DSN)
-		if lastErr == nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("db: connect (ctx cancelled after %d attempts): %w", attempt, ctx.Err())
-		case <-time.After(time.Second):
-		}
+	u, err := url.Parse(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse DSN: %w", err)
 	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("db: connect (30 attempts): %w", lastErr)
+
+	conf := connection.NewConfig(u)
+	// The SDK's default logger writes WARN/ERROR to stdout in a format that
+	// doesn't match arbor; silence it. Reconnect events are surfaced via the
+	// /api/health probe (db_ok) and the SurrealDB ping in dispatcher loops.
+	conf.Logger = logger.New(slog.NewTextHandler(io.Discard, nil))
+
+	rconn := rews.New(
+		func(ctx context.Context) (*gws.Connection, error) {
+			return gws.New(conf), nil
+		},
+		15*time.Second, // reconnect check interval
+		conf.Unmarshaler,
+		conf.Logger,
+	)
+	rconn.Retryer = rews.NewExponentialBackoffRetryer()
+
+	if err := rconn.Connect(ctx); err != nil {
+		return nil, fmt.Errorf("db: connect: %w", err)
+	}
+
+	db, err := surrealdb.FromConnection(ctx, rconn)
+	if err != nil {
+		return nil, fmt.Errorf("db: from connection: %w", err)
 	}
 	if _, err := db.SignIn(ctx, &surrealdb.Auth{Username: cfg.Username, Password: cfg.Password}); err != nil {
 		return nil, fmt.Errorf("db: signin: %w", err)
