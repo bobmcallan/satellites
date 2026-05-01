@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/contract"
@@ -46,6 +47,7 @@ type Portal struct {
 	tasks             task.Store
 	documents         document.Store
 	repos             repo.Store
+	changelog         changelog.Store
 	indexer           codeindex.Indexer
 	grants            rolegrant.Store
 	workspaces        workspace.Store
@@ -60,6 +62,13 @@ type Portal struct {
 // the bridge — used by tests that don't construct an OAuthServer.
 func (p *Portal) SetOAuthServer(srv *auth.OAuthServer) {
 	p.oauthServer = srv
+}
+
+// SetChangelogStore wires the optional changelog store (sty_12af0bdc).
+// nil disables the changelog panel on the project page — the panel
+// still appears but renders empty.
+func (p *Portal) SetChangelogStore(s changelog.Store) {
+	p.changelog = s
 }
 
 // New constructs the Portal handler set. Template parsing errors return
@@ -522,7 +531,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	filters := parseProjectWorkspaceFilters(r)
 	isAdmin := p.isWorkspaceAdmin(r.Context(), active.ID, user.ID)
-	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.repos, p.ledger, pr.ID, filters, memberships, isAdmin)
+	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.repos, p.ledger, p.changelog, pr.ID, filters, memberships, isAdmin)
 	data := projectDetailData{
 		Title:           buildPageTitle(active, pr.Name, ""),
 		Version:         config.Version,

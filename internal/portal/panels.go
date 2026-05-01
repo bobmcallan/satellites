@@ -25,6 +25,7 @@ func defaultPanels() []panel {
 		{ID: "contracts", Title: "contracts", DefaultExpanded: false},
 		{ID: "configuration", Title: "configuration", DefaultExpanded: false},
 		{ID: "repo", Title: "repo", DefaultExpanded: false},
+		{ID: "changelog", Title: "changelog", DefaultExpanded: false},
 		{ID: "ledger", Title: "ledger", DefaultExpanded: false},
 	}
 }

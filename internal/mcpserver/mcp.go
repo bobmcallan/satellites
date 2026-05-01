@@ -17,6 +17,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/ternarybob/arbor"
 
+	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/contract"
@@ -54,6 +55,7 @@ type Server struct {
 	grants           rolegrant.Store
 	tasks            task.Store
 	repos            repo.Store
+	changelog        changelog.Store
 	indexer          codeindex.Indexer
 	replicateVocab   *portalreplicate.Vocabulary
 	replicateRunner  func(ctx context.Context, opts portalreplicate.RunOptions, actions []portalreplicate.Action) ([]portalreplicate.Result, portalreplicate.Summary, error)
@@ -83,6 +85,9 @@ type Deps struct {
 	// RepoStore is optional; nil disables the repo_* MCP verbs.
 	// Story_970ddfa1.
 	RepoStore repo.Store
+	// ChangelogStore is optional; nil disables the changelog_* MCP verbs
+	// and the project-page changelog panel renders empty (sty_12af0bdc).
+	ChangelogStore changelog.Store
 	// Indexer is the satellites-native code indexer used by repo_*
 	// search/get verbs and the reindex worker. Nil falls back to
 	// codeindex.NewStub() which returns a structured
@@ -119,6 +124,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		grants:           deps.RoleGrantStore,
 		tasks:            deps.TaskStore,
 		repos:            deps.RepoStore,
+		changelog:        deps.ChangelogStore,
 		indexer:          deps.Indexer,
 		nowFunc:          deps.NowFunc,
 	}
@@ -806,6 +812,53 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("path", mcpgo.Required(), mcpgo.Description("Repo-relative file path.")),
 		)
 		s.mcp.AddTool(outlineTool, s.handleRepoGetOutline)
+	}
+
+	// changelog_*: V3 parity port (sty_12af0bdc). All five verbs honour
+	// the `?project_id=` URL scope; cross-project access returns
+	// not-found. Service is a free-form discriminator (satellites,
+	// satellites-agent, plus future binaries).
+	if s.changelog != nil {
+		addChangelogTool := mcpgo.NewTool("changelog_add",
+			mcpgo.WithDescription("Append a changelog row for one binary in a project. Newest-first ordering on List. Service is free-form; conventions: satellites, satellites-agent, plus future binaries."),
+			mcpgo.WithString("project_id", mcpgo.Description("Project scope. Defaults to caller's first owned project.")),
+			mcpgo.WithString("service", mcpgo.Required(), mcpgo.Description("Binary the row describes (e.g. satellites, satellites-agent).")),
+			mcpgo.WithString("version_from", mcpgo.Description("Prior version (e.g. 0.0.165).")),
+			mcpgo.WithString("version_to", mcpgo.Description("New version (e.g. 0.0.166).")),
+			mcpgo.WithString("content", mcpgo.Required(), mcpgo.Description("Markdown body. The first line is treated as the heading by the portal panel.")),
+			mcpgo.WithString("effective_date", mcpgo.Description("RFC3339 timestamp. Defaults to now.")),
+		)
+		s.mcp.AddTool(addChangelogTool, s.handleChangelogAdd)
+
+		getChangelogTool := mcpgo.NewTool("changelog_get",
+			mcpgo.WithDescription("Return a changelog row by id. Workspace-scoped — cross-workspace returns not-found."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Changelog id (chg_<8hex>).")),
+		)
+		s.mcp.AddTool(getChangelogTool, s.handleChangelogGet)
+
+		listChangelogTool := mcpgo.NewTool("changelog_list",
+			mcpgo.WithDescription("List changelog rows in a project. Newest-first by created_at. Filter by service when set."),
+			mcpgo.WithString("project_id", mcpgo.Description("Project scope. Defaults to caller's first owned project.")),
+			mcpgo.WithString("service", mcpgo.Description("Optional service filter.")),
+			mcpgo.WithNumber("limit", mcpgo.Description("Max rows (default 50, max 500).")),
+		)
+		s.mcp.AddTool(listChangelogTool, s.handleChangelogList)
+
+		updateChangelogTool := mcpgo.NewTool("changelog_update",
+			mcpgo.WithDescription("Edit a changelog row. Service / project / workspace identity is set at create and not editable here. Pass only the fields you want to change."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Changelog id.")),
+			mcpgo.WithString("version_from", mcpgo.Description("New prior version.")),
+			mcpgo.WithString("version_to", mcpgo.Description("New version_to.")),
+			mcpgo.WithString("content", mcpgo.Description("New markdown body.")),
+			mcpgo.WithString("effective_date", mcpgo.Description("New RFC3339 effective date.")),
+		)
+		s.mcp.AddTool(updateChangelogTool, s.handleChangelogUpdate)
+
+		deleteChangelogTool := mcpgo.NewTool("changelog_delete",
+			mcpgo.WithDescription("Delete a changelog row. Workspace-scoped — cross-workspace returns not-found."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Changelog id.")),
+		)
+		s.mcp.AddTool(deleteChangelogTool, s.handleChangelogDelete)
 	}
 
 	// portal_replicate: chromedp-driven UI replication, story-scoped.

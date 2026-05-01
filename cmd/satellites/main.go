@@ -20,6 +20,7 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/configseed"
@@ -117,6 +118,7 @@ func main() {
 		grantStore       rolegrant.Store
 		taskStore        task.Store
 		repoStore        repo.Store
+		changelogStore   changelog.Store
 		repoIndexer      codeindex.Indexer
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
@@ -203,6 +205,7 @@ func main() {
 		grantStore = rolegrant.NewSurrealStore(conn, docStore)
 		taskStore = task.NewSurrealStore(conn)
 		repoStore = repo.NewSurrealStore(conn)
+		changelogStore = changelog.NewSurrealStore(conn)
 		repoIndexer = codeindex.NewLocalIndexer(filepath.Join(os.TempDir(), "satellites-repos"))
 		dbPing = func(hcCtx context.Context) error { return db.Ping(hcCtx, conn) }
 
@@ -376,6 +379,7 @@ func main() {
 		// the flow if the user is already authenticated.
 		portalHandlers.SetOAuthServer(oauthServer)
 	}
+	portalHandlers.SetChangelogStore(changelogStore)
 
 	// Websocket hub (slice 10.1) + workspace-aware AuthHub (slice 10.2) +
 	// store-layer emit hooks (slice 10.3). One hub instance per process.
@@ -460,6 +464,7 @@ func main() {
 		RoleGrantStore:   grantStore,
 		TaskStore:        taskStore,
 		RepoStore:        repoStore,
+		ChangelogStore:   changelogStore,
 		Indexer:          repoIndexer,
 		Reviewer:         rev,
 	})

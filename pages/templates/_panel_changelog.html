@@ -1,0 +1,21 @@
+{{define "_panel_changelog.html"}}
+<div data-testid="panel-changelog-body">
+  {{if not .Composite.Changelogs}}
+    <p class="muted" data-testid="panel-changelog-empty">No changelog entries.</p>
+  {{else}}
+    <ul class="changelog-list" data-testid="panel-changelog-list">
+      {{range .Composite.Changelogs}}
+      <li class="changelog-row" data-testid="panel-changelog-row-{{.ID}}">
+        <header class="changelog-row-header">
+          <code class="changelog-service">{{.Service}}</code>
+          {{if or .VersionFrom .VersionTo}}<code class="changelog-version">{{if .VersionFrom}}{{.VersionFrom}}{{else}}—{{end}} → {{if .VersionTo}}{{.VersionTo}}{{else}}—{{end}}</code>{{end}}
+          {{if .EffectiveDate}}<span class="muted changelog-date">{{.EffectiveDate}}</span>{{end}}
+        </header>
+        {{if .Heading}}<h4 class="changelog-heading">{{.Heading}}</h4>{{end}}
+        {{if .Content}}<pre class="changelog-content">{{.Content}}</pre>{{end}}
+      </li>
+      {{end}}
+    </ul>
+  {{end}}
+</div>
+{{end}}

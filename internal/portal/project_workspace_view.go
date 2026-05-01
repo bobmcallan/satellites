@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/repo"
@@ -30,18 +31,34 @@ const (
 // projectWorkspaceComposite is the view-model for the project_detail page.
 // Each field maps to a panel in the panel registry.
 type projectWorkspaceComposite struct {
-	Stories        []storyCard
-	Documents      []documentCard
-	Contracts      []documentCard
-	Repo           repoCard
-	RepoEmpty      bool
-	LedgerRecent   []ledgerRowView
-	LedgerByStory  map[string][]ledgerRowView
-	Filters        projectWorkspaceFilters
-	StoryTotal     int
-	DocTotal       int
-	ContractsTotal int
-	LedgerTotal    int
+	Stories         []storyCard
+	Documents       []documentCard
+	Contracts       []documentCard
+	Repo            repoCard
+	RepoEmpty       bool
+	LedgerRecent    []ledgerRowView
+	LedgerByStory   map[string][]ledgerRowView
+	Changelogs      []changelogCard
+	ChangelogsTotal int
+	Filters         projectWorkspaceFilters
+	StoryTotal      int
+	DocTotal        int
+	ContractsTotal  int
+	LedgerTotal     int
+}
+
+// changelogCard is the per-row view-model for the Changelog panel.
+// The first non-empty line of Content is exposed as Heading so the
+// template can render a deterministic title without parsing markdown.
+type changelogCard struct {
+	ID            string
+	Service       string
+	VersionFrom   string
+	VersionTo     string
+	Heading       string
+	Content       string
+	EffectiveDate string
+	UpdatedAt     string
 }
 
 // storyCard is the per-row view-model for the Stories section. The
@@ -89,7 +106,7 @@ func parseProjectWorkspaceFilters(r *http.Request) projectWorkspaceFilters {
 // gracefully when running without a backing store. Documents are loaded
 // twice (project scope + system scope) and merged so global content
 // (principles, reviewer notes) shows alongside the project's own.
-func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, repos repo.Store, led ledger.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
+func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, repos repo.Store, led ledger.Store, changelogs changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
 	if f.Limit <= 0 {
 		f.Limit = projectWorkspaceDefaultLimit
 	}
@@ -117,7 +134,59 @@ func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, do
 	out.LedgerTotal = len(out.LedgerRecent)
 	out.LedgerByStory = groupLedgerByStory(out.LedgerRecent, ledgerPerStoryCap)
 
+	out.Changelogs = collectChangelogCards(ctx, changelogs, projectID, f, memberships)
+	out.ChangelogsTotal = len(out.Changelogs)
+
 	return out
+}
+
+// collectChangelogCards reads the most recent changelog rows for the
+// project, capped at f.Limit. Returns an empty slice when the store is
+// nil or errors so the page still renders. Sty_12af0bdc.
+func collectChangelogCards(ctx context.Context, store changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string) []changelogCard {
+	if store == nil || projectID == "" {
+		return []changelogCard{}
+	}
+	rows, err := store.List(ctx, changelog.ListOptions{ProjectID: projectID, Limit: f.Limit}, memberships)
+	if err != nil {
+		return []changelogCard{}
+	}
+	out := make([]changelogCard, 0, len(rows))
+	for _, c := range rows {
+		out = append(out, changelogCardFor(c))
+	}
+	return out
+}
+
+func changelogCardFor(c changelog.Changelog) changelogCard {
+	heading := firstLine(c.Content)
+	eff := ""
+	if !c.EffectiveDate.IsZero() {
+		eff = c.EffectiveDate.UTC().Format("2006-01-02")
+	}
+	return changelogCard{
+		ID:            c.ID,
+		Service:       c.Service,
+		VersionFrom:   c.VersionFrom,
+		VersionTo:     c.VersionTo,
+		Heading:       heading,
+		Content:       c.Content,
+		EffectiveDate: eff,
+		UpdatedAt:     c.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
+// firstLine returns the first non-empty trimmed line of s, falling back
+// to the trimmed whole string when there are no newlines. Used to pull
+// a heading out of a markdown content body.
+func firstLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln != "" {
+			return ln
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // ledgerPerStoryCap caps the per-story ledger preview shown in the
