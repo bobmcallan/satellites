@@ -32,7 +32,7 @@ func seedSkill(t *testing.T, f *contractFixture, name, contractID string) string
 }
 
 // firstContractDocID looks up a system contract by name and returns its
-// document id (set up in newContractFixture for preplan/plan/develop/
+// document id (set up in newContractFixture for plan/develop/
 // story_close).
 func firstContractDocID(t *testing.T, f *contractFixture, name string) string {
 	t.Helper()

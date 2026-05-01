@@ -149,18 +149,18 @@ func TestStoryView_CITimelinePopulated(t *testing.T) {
 	// Seed a contract document so contract.MemoryStore.Create can validate
 	// the FK. The doc must have type=contract per validateContractBinding.
 	doc, err := docs.Create(ctx, document.Document{
-		Name:   "preplan",
+		Name:   "plan",
 		Type:   "contract",
 		Scope:  "system",
 		Status: "active",
-		Body:   "preplan contract body",
-		Tags:   []string{"category:preplan"},
+		Body:   "plan contract body",
+		Tags:   []string{"category:plan"},
 	}, now)
 	if err != nil {
 		t.Fatalf("seed contract doc: %v", err)
 	}
 
-	for i, name := range []string{"preplan", "plan", "develop"} {
+	for i, name := range []string{"plan", "develop", "story_close"} {
 		_, err := contracts.Create(ctx, contract.ContractInstance{
 			StoryID:      s.ID,
 			ContractID:   doc.ID,
@@ -180,9 +180,9 @@ func TestStoryView_CITimelinePopulated(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`>preplan</code>`,
 		`>plan</code>`,
 		`>develop</code>`,
+		`>story_close</code>`,
 		`status-ready`,
 	} {
 		if !strings.Contains(body, want) {

@@ -36,7 +36,7 @@ type claimFixture struct {
 	grantID      string
 	cis          []contract.ContractInstance
 	contractDocs map[string]string
-	// agents maps lifecycle phase names ("preplan","plan","develop",
+	// agents maps lifecycle phase names ("plan","develop",
 	// "story_close") to the seeded agent doc id. Tests pass
 	// `agent_id: f.agents[phase]` on contract_claim calls (story_cc55e093).
 	agents map[string]string
@@ -108,7 +108,7 @@ func newClaimFixture(t *testing.T) *claimFixture {
 	}
 
 	contractDocs := make(map[string]string)
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	for _, name := range []string{"plan", "develop", "story_close"} {
 		d, err := docStore.Create(ctx, document.Document{
 			Type:       document.TypeContract,
 			Scope:      document.ScopeSystem,
@@ -132,8 +132,8 @@ func newClaimFixture(t *testing.T) *claimFixture {
 		t.Fatalf("story: %v", err)
 	}
 
-	cis := make([]contract.ContractInstance, 0, 4)
-	for i, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	cis := make([]contract.ContractInstance, 0, 3)
+	for i, name := range []string{"plan", "develop", "story_close"} {
 		ci, err := contractStore.Create(ctx, contract.ContractInstance{
 			StoryID:          parent.ID,
 			ContractID:       contractDocs[name],
@@ -177,7 +177,6 @@ func newClaimFixture(t *testing.T) *claimFixture {
 		roleAgentIDs[name] = d.ID
 	}
 	contractToRole := map[string]string{
-		"preplan":     "developer_agent",
 		"plan":        "developer_agent",
 		"develop":     "developer_agent",
 		"story_close": "story_close_agent",

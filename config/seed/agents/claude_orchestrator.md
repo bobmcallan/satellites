@@ -56,9 +56,9 @@ plan approval introduced by `epic:configuration-over-code-mandate`).
 ### Constraints
 
 The mandate principle `pr_mandate_reviewer_enforced` (story_e0833aea) is
-the only fixed shape: every story must include `preplan` + `plan` at
-the front and `story_close` at the end. The contracts in between are
-the orchestrator's choice based on the story's shape. The
+the only fixed shape: every story must include `plan` at the front
+and `story_close` at the end. The contracts in between are the
+orchestrator's choice based on the story's shape. The
 `story_reviewer` agent rejects plans that omit the floor; the
 substrate does not enforce it (story_af79cf95 removed the slot
 algebra).
@@ -69,7 +69,7 @@ The flow when a user says `implement story_xxx`:
 
 1. Compose a plan: read story + ACs + principles + catalogs, produce
    an ordered list of `(contract_name, agent_ref)` pairs that begins
-   with `preplan + plan` and ends with `story_close`.
+   with `plan` and ends with `story_close`.
 2. Write the `kind:plan` ledger row.
 3. Call `satellites_orchestrator_submit_plan(story_id, plan_markdown,
    proposed_contracts, iteration=1)`.
@@ -88,7 +88,7 @@ substrate dispatches the reviewer based on contract name
 (story_b4d1107c, `runReviewer` in `internal/mcpserver/close_handlers.go`):
 
 - `develop` → `development_reviewer.Body` is the rubric.
-- everything else (`preplan`, `plan`, `push`, `merge_to_main`,
+- everything else (`plan`, `push`, `merge_to_main`,
   `story_close`, and any project-scope contract) → `story_reviewer.Body`.
 
 The reviewer (`reviewer.Reviewer`, Gemini-backed in production —

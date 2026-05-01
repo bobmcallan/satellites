@@ -16,12 +16,11 @@ defines:
 
 ## System contracts
 
-The default lifecycle ships six system contracts:
+The default lifecycle ships five system contracts:
 
 | Contract | Phase | Writes? |
 |---|---|---|
-| `preplan` | readiness gate | ledger only |
-| `plan` | design | ledger only |
+| `plan` | readiness assessment, design, task decomposition | ledger + tasks |
 | `develop` | implementation | code + git commit |
 | `push` | ship to origin | git push |
 | `merge_to_main` | local sync | git merge --ff-only |
@@ -36,8 +35,10 @@ structured payload (`permitted_actions`, `evidence_required`,
 
 ## Limitations
 
-- Contract order is enforced server-side. A story cannot skip
-  preplan, even when the change appears trivial.
+- Contract order is enforced by the reviewer, not the substrate.
+  The mandate principle requires `plan` at the front and
+  `story_close` at the end; the reviewer rejects plans that skip
+  the floor.
 - Contracts cannot be redefined per-story. If a story needs a
   different workflow shape, the orchestrator agent passes
   `proposed_contracts` to `satellites_story_workflow_claim` to override

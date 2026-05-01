@@ -1,8 +1,8 @@
 // Package task is the satellites-v4 task queue primitive per
 // docs/architecture.md §4. A Task is a unit of orchestration work with
-// a single origin (story_stage, scheduled, story_producing,
-// free_preplan, event), a lifecycle (enqueued → claimed → in_flight →
-// closed), and a workspace-scoped audit trail.
+// a single origin (story_stage, scheduled, story_producing, event), a
+// lifecycle (enqueued → claimed → in_flight → closed), and a
+// workspace-scoped audit trail.
 //
 // Principles: pr_75826278 (Tasks are the orchestration queue),
 // pr_c25cc661 (Tasks are one of five primitives), pr_0779e5af
@@ -22,7 +22,6 @@ const (
 	OriginStoryStage     = "story_stage"
 	OriginScheduled      = "scheduled"
 	OriginStoryProducing = "story_producing"
-	OriginFreePreplan    = "free_preplan"
 	OriginEvent          = "event"
 )
 
@@ -51,7 +50,7 @@ const (
 
 var validOrigins = map[string]struct{}{
 	OriginStoryStage: {}, OriginScheduled: {}, OriginStoryProducing: {},
-	OriginFreePreplan: {}, OriginEvent: {},
+	OriginEvent: {},
 }
 
 var validStatuses = map[string]struct{}{

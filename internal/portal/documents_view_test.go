@@ -78,8 +78,8 @@ func TestDocumentsList_TypeTabFilters(t *testing.T) {
 	now := time.Now().UTC()
 	ctx := context.Background()
 	if _, err := docs.Create(ctx, document.Document{
-		Type: "contract", Scope: "system", Name: "preplan", Status: "active",
-		Body: "preplan contract body",
+		Type: "contract", Scope: "system", Name: "plan", Status: "active",
+		Body: "plan contract body",
 	}, now); err != nil {
 		t.Fatalf("seed contract: %v", err)
 	}
@@ -95,8 +95,8 @@ func TestDocumentsList_TypeTabFilters(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "preplan") {
-		t.Errorf("contract tab missing preplan name")
+	if !strings.Contains(body, "plan") {
+		t.Errorf("contract tab missing plan name")
 	}
 	if strings.Contains(body, "no-shortcuts") {
 		t.Errorf("contract tab leaked principle row")

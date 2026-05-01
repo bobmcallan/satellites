@@ -96,7 +96,7 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 	// LLM branch.
 	structured, _ := json.Marshal(map[string]any{"validation_mode": reviewer.ModeLLM})
 	contractDocs := map[string]document.Document{}
-	for _, name := range []string{"develop", "preplan"} {
+	for _, name := range []string{"develop", "plan"} {
 		d, err := docStore.Create(ctx, document.Document{
 			Type:       document.TypeContract,
 			Scope:      document.ScopeSystem,
@@ -121,7 +121,7 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 	}
 
 	cis := map[string]contract.ContractInstance{}
-	for i, name := range []string{"develop", "preplan"} {
+	for i, name := range []string{"develop", "plan"} {
 		ci, err := contractStore.Create(ctx, contract.ContractInstance{
 			StoryID:          parent.ID,
 			ContractID:       contractDocs[name].ID,
@@ -138,7 +138,7 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 
 	// Lifecycle agents (strict-required by claim_handlers).
 	agents := map[string]string{}
-	for _, name := range []string{"develop", "preplan"} {
+	for _, name := range []string{"develop", "plan"} {
 		agentStructured, _ := document.MarshalAgentSettings(document.AgentSettings{
 			PermissionPatterns: []string{"Read:**"},
 		})
@@ -227,11 +227,11 @@ func TestRunReviewer_DispatchDevelopUsesDevelopmentReviewer(t *testing.T) {
 func TestRunReviewer_DispatchNonDevelopUsesStoryReviewer(t *testing.T) {
 	t.Parallel()
 	f := newDispatchFixture(t)
-	f.closeCI(t, "preplan")
+	f.closeCI(t, "plan")
 	if got, want := f.rev.last.ReviewerRubric, "STORY_REVIEWER_RUBRIC_BODY"; got != want {
-		t.Errorf("preplan ReviewerRubric = %q, want %q", got, want)
+		t.Errorf("plan ReviewerRubric = %q, want %q", got, want)
 	}
-	if got, want := f.rev.last.ContractName, "preplan"; got != want {
-		t.Errorf("preplan ContractName = %q, want %q", got, want)
+	if got, want := f.rev.last.ContractName, "plan"; got != want {
+		t.Errorf("plan ContractName = %q, want %q", got, want)
 	}
 }

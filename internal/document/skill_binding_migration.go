@@ -15,13 +15,12 @@ import (
 //
 //  1. Looks up the contract document the binding references and reads
 //     its name (e.g. "develop").
-//  2. Looks up the matching lifecycle agent. After the S8 collapse
-//     (story_87b46d01) the lifecycle is driven by three role agents
-//     — developer_agent (preplan/plan/develop), releaser_agent
-//     (push/merge_to_main), story_close_agent. The migration consults
-//     the role map first; non-lifecycle contracts (project-scope
-//     custom contracts) still fall through to the legacy
-//     `<contract>_agent` name match.
+//  2. Looks up the matching lifecycle agent. The lifecycle is driven
+//     by three role agents — developer_agent (plan/develop),
+//     releaser_agent (push/merge_to_main), story_close_agent. The
+//     migration consults the role map first; non-lifecycle contracts
+//     (project-scope custom contracts) still fall through to the
+//     legacy `<contract>_agent` name match.
 //  3. Merges the skill id into the agent's AgentSettings.SkillRefs
 //     (no-op when already present).
 //  4. Clears the skill's ContractBinding so subsequent reads route
@@ -97,9 +96,8 @@ func MigrateSkillContractBindings(ctx context.Context, store Store, logger arbor
 }
 
 // lifecycleAgentForContract maps a lifecycle contract name to the
-// post-S8 role agent that drives it. Story_87b46d01.
+// role agent that drives it.
 var lifecycleAgentForContract = map[string]string{
-	"preplan":       "developer_agent",
 	"plan":          "developer_agent",
 	"develop":       "developer_agent",
 	"push":          "releaser_agent",

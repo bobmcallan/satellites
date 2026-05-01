@@ -145,40 +145,12 @@ func TestClose_RollsStoryToDone(t *testing.T) {
 	}
 }
 
-func TestClose_PreplanReentryWorkflowClaim(t *testing.T) {
-	t.Parallel()
-	f := newCloseFixture(t)
-	f.claim(t, 0, "")
-	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
-		"contract_instance_id": f.cis[0].ID,
-		"close_markdown":       "preplan done",
-		"proposed_workflow":    []string{"preplan", "plan", "develop", "story_close"},
-	}))
-	if err != nil || res.IsError {
-		t.Fatalf("close: err=%v text=%s", err, firstText(res))
-	}
-	var body struct {
-		WorkflowClaimLedgerID string `json:"workflow_claim_ledger_id"`
-	}
-	_ = json.Unmarshal([]byte(firstText(res)), &body)
-	if body.WorkflowClaimLedgerID == "" {
-		t.Fatalf("expected workflow_claim_ledger_id")
-	}
-	row, err := f.server.ledger.GetByID(f.ctx, body.WorkflowClaimLedgerID, nil)
-	if err != nil {
-		t.Fatalf("load workflow-claim: %v", err)
-	}
-	if row.Type != ledger.TypeWorkflowClaim {
-		t.Fatalf("type: %q", row.Type)
-	}
-}
-
-// TestClose_PreplanWorkflowSpecInvalid deleted by
-// epic:configuration-over-code-mandate (story_af79cf95) — preplan close
-// no longer validates proposed_workflow against a substrate spec; the
-// reviewer (story_reviewer) judges shape during the plan-approval
-// loop. proposed_workflow is informational metadata on the evidence
-// row only.
+// TestClose_PreplanReentryWorkflowClaim and
+// TestClose_PreplanWorkflowSpecInvalid removed under
+// `epic:v4-lifecycle-refactor` (sty_48fdaf8d) — preplan is no longer
+// a contract. The plan agent owns process definition; workflow
+// shape is approved during the plan-review loop, not on contract
+// close. The contract_close verb no longer accepts proposed_workflow.
 
 func TestClose_PlanDeferred(t *testing.T) {
 	t.Parallel()

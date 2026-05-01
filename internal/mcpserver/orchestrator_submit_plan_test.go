@@ -153,7 +153,7 @@ func TestOrchestratorSubmitPlan_Accepted(t *testing.T) {
 	f := newSubmitPlanFixture(t, stub)
 	out, isError := f.submit(t, map[string]any{
 		"plan_markdown":      "PLAN_BODY",
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 		"iteration":          1,
 	})
 	if isError {
@@ -300,7 +300,7 @@ func TestWorkflowClaim_RejectsWhenPlanNotApproved(t *testing.T) {
 
 	ws, _ := wsStore.Create(ctx, "user_alice", "alpha", now)
 	proj, _ := projStore.Create(ctx, "user_alice", ws.ID, "p1", now)
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	for _, name := range []string{"plan", "develop", "story_close"} {
 		_, _ = docStore.Create(ctx, document.Document{
 			Type: document.TypeContract, Scope: document.ScopeSystem,
 			Name: name, Body: "body-" + name, Status: document.StatusActive,
@@ -318,7 +318,7 @@ func TestWorkflowClaim_RejectsWhenPlanNotApproved(t *testing.T) {
 	caller := CallerIdentity{UserID: "user_alice", Source: "session"}
 	res, err := server.handleWorkflowClaim(withCaller(ctx, caller), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           parent.ID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil {
 		t.Fatalf("workflow_claim: %v", err)

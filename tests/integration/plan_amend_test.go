@@ -21,7 +21,7 @@ import (
 //  1. Boot Surreal + satellites server.
 //  2. Create a project + the default contract documents.
 //  3. Create a story with multi-AC acceptance criteria.
-//  4. workflow_claim → 4 initial CIs (preplan/plan/develop/story_close).
+//  4. workflow_claim → 3 initial CIs (plan/develop/story_close).
 //  5. plan_amend appends a develop CI scoped to AC=[2] under the original.
 //  6. Assert: new CI carries ac_scope=[2] + parent_invocation_id =
 //     original-develop-id; kind:plan-amend ledger row visible via
@@ -83,7 +83,7 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 	projectID, _ := project["id"].(string)
 
 	// Seed contract docs at project scope so workflow_claim resolves.
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	for _, name := range []string{"plan", "develop", "story_close"} {
 		_ = callTool(t, ctx, mcpURL, "key_planamend", "document_create", map[string]any{
 			"type":       "contract",
 			"scope":      "project",
@@ -114,12 +114,12 @@ func TestPlanAmend_AppendsCIWithACScope(t *testing.T) {
 
 	claim := callTool(t, ctx, mcpURL, "key_planamend", "workflow_claim", map[string]any{
 		"story_id":           storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 		"claim_markdown":     "initial workflow",
 	})
 	cisRaw, _ := claim["contract_instances"].([]any)
-	if len(cisRaw) != 4 {
-		t.Fatalf("workflow_claim CI count = %d, want 4", len(cisRaw))
+	if len(cisRaw) != 3 {
+		t.Fatalf("workflow_claim CI count = %d, want 3", len(cisRaw))
 	}
 	var origDevelopID string
 	for _, raw := range cisRaw {

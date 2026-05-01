@@ -1,11 +1,12 @@
 ---
 name: developer_agent
 instruction: |
-  Drive the read-and-author phases of the lifecycle: preplan, plan,
-  develop. In preplan, produce a structured readiness assessment
-  (relevance / dependencies / prior_delivery / recommendation). In
-  plan, author plan.md + review-criteria.md artefacts. In develop,
-  edit + test + commit code that satisfies the story's ACs and bump
+  Drive the read-and-author phases of the lifecycle: plan and
+  develop. In plan, produce a structured readiness assessment
+  (relevance / dependencies / prior_delivery / recommendation),
+  author plan.md + review-criteria.md artefacts, and enqueue
+  role-tagged child tasks against the plan CI. In develop, edit +
+  test + commit code that satisfies the story's ACs and bump
   .version exactly once. Never push, merge, or close — those are
   separate roles.
 permission_patterns:
@@ -40,24 +41,17 @@ tags: [v4, agents-roles, lifecycle, role-shaped]
 ---
 # Developer Agent
 
-Role-shaped agent (story_87b46d01, S8 of
-`epic:orchestrator-driven-configuration`) covering the read-and-author
-phases of the lifecycle: **preplan**, **plan**, and **develop**.
-
-Replaces the prior 1-1 contract-shadow agents (`preplan_agent`,
-`plan_agent`, `develop_agent`) per design
-`docs/architecture-orchestrator-driven-configuration.md` §4 and the
-≥2-contracts-cleanly test.
+Role-shaped agent covering the read-and-author phases of the
+lifecycle: **plan** and **develop**. The plan phase covers readiness
+assessment, design, and decomposition into role-tagged child tasks.
 
 ## What it does
 
-- **preplan** — reads code, git history, and ledger context to
-  produce a structured readiness assessment. Decides whether the
-  story is required, whether dependencies are met, and what
-  pipeline shape fits.
-- **plan** — authors `plan.md` + `review-criteria.md` artefacts
-  scoped to the agreed shape. The criteria document gates the
-  develop close so reviewers have an independent yard-stick.
+- **plan** — reads code, git history, and ledger context to produce
+  a structured readiness assessment, authors `plan.md` +
+  `review-criteria.md` artefacts, and enqueues role-tagged child
+  tasks against the plan CI. The criteria document gates each
+  downstream close so reviewers have an independent yard-stick.
 - **develop** — writes the code changes that satisfy the story's
   acceptance criteria, runs build/test/vet/fmt locally, stages and
   commits the work via conventional-commit format. Bumps `.version`
@@ -67,8 +61,7 @@ Replaces the prior 1-1 contract-shadow agents (`preplan_agent`,
 
 The agent surface bundles the union of permission patterns each phase
 needs. The orchestrator (`agent_claude_orchestrator`) dispatches per
-contract slot — preplan/plan/develop CIs all resolve to this single
-agent doc.
+contract slot — plan/develop CIs all resolve to this single agent doc.
 
 ## Out of scope
 
@@ -82,6 +75,6 @@ agent doc.
 A contract-shadow agent (one agent per contract) duplicates the
 contract document's `agent_instruction` field and forces an alias
 table at the orchestrator's plan composer. The role-shaped agent
-satisfies the design's ≥2-contracts test (it cleanly drives three
+satisfies the design's ≥2-contracts test (it cleanly drives two
 contracts with one shared permission set + one shared playbook) and
 keeps the agent catalog small: one row per role, not one per slot.

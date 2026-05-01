@@ -15,9 +15,8 @@ when work needs doing.
 Seeded from `config/seed/agents/*.md`, system agents power the
 lifecycle:
 
-- `preplan_agent` — read-only investigation.
-- `plan_agent` — designs the implementation strategy.
-- `develop_agent` — writes code and commits.
+- `developer_agent` — drives plan (readiness assessment + design +
+  task decomposition) and develop (writes code and commits).
 - `push_agent` — pushes to origin.
 - `merge_agent` — fast-forwards local main.
 - `story_close_agent` — transitions stories to terminal state.

@@ -105,7 +105,7 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		ProjectID:   st.ProjectID,
 		StoryID:     ledger.StringPtr(storyID),
 		Type:        ledger.TypeWorkflowClaim,
-		Tags:        []string{"kind:workflow-claim", "phase:pre-plan"},
+		Tags:        []string{"kind:workflow-claim", "phase:plan"},
 		Content:     claimMarkdown,
 		Structured:  payload,
 		CreatedBy:   caller.UserID,
@@ -461,13 +461,13 @@ type resolvedSlot struct {
 // requiredForCloseFor maps a contract name to its required_for_close
 // flag. Replaces the prior workflow_spec-derived rule (story_af79cf95
 // removed the substrate slot algebra). The rule mirrors the v3 default:
-// pre-close phases (preplan/plan/develop) gate the rollup; post-commit
-// phases and the closer itself (push/merge_to_main/story_close) do not,
-// so the closer can transition the story without waiting on push or
+// pre-close phases (plan/develop) gate the rollup; post-commit phases
+// and the closer itself (push/merge_to_main/story_close) do not, so
+// the closer can transition the story without waiting on push or
 // merge_to_main.
 func requiredForCloseFor(name string) bool {
 	switch name {
-	case "preplan", "plan", "develop":
+	case "plan", "develop":
 		return true
 	default:
 		return false

@@ -89,7 +89,7 @@ func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub
 	})
 
 	contractDocs := map[string]document.Document{}
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	for _, name := range []string{"plan", "develop", "story_close"} {
 		d, err := docStore.Create(ctx, document.Document{
 			Type:       document.TypeContract,
 			Scope:      document.ScopeSystem,
@@ -113,8 +113,8 @@ func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub
 		t.Fatalf("story: %v", err)
 	}
 
-	cis := make([]contract.ContractInstance, 0, 4)
-	for i, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	cis := make([]contract.ContractInstance, 0, 3)
+	for i, name := range []string{"plan", "develop", "story_close"} {
 		ci, err := contractStore.Create(ctx, contract.ContractInstance{
 			StoryID:          parent.ID,
 			ContractID:       contractDocs[name].ID,
@@ -131,7 +131,7 @@ func newReviewerFixture(t *testing.T, mode string, checks []reviewer.Check, stub
 
 	// Seed lifecycle agents (story_cc55e093 strict-required).
 	agents := map[string]string{}
-	for _, name := range []string{"preplan", "plan", "develop", "story_close"} {
+	for _, name := range []string{"plan", "develop", "story_close"} {
 		agentStructured, _ := document.MarshalAgentSettings(document.AgentSettings{
 			PermissionPatterns: []string{"Read:**"},
 		})

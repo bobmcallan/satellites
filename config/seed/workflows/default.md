@@ -11,10 +11,12 @@ substrate no longer enforces the shape.
 
 ## Shape
 
-`preplan → plan → develop → push → merge_to_main → story_close`
+`plan → develop → push → merge_to_main → story_close`
 
-- `preplan` — readiness gate. Confirms the story is required, dependencies are met, and the proposed pipeline shape fits.
-- `plan` — implementation strategy + review criteria.
+- `plan` — implementation strategy + review criteria. The plan agent
+  also assesses readiness (relevance, dependencies, prior delivery)
+  and decomposes the story into role-tagged child tasks the
+  downstream contracts consume.
 - `develop` — code edits + tests + commit. Multiple develop CIs are permitted when a story splits naturally (e.g. backend then frontend), but each is its own CI with its own evidence.
 - `push` — ship to origin.
 - `merge_to_main` — local sync.
@@ -36,7 +38,7 @@ substrate accepts whatever the reviewer approves.
 
 ## Floor
 
-The mandate principle requires `preplan` and `plan` at the front and
-`story_close` at the end of every story. Everything else is the
-orchestrator's choice. Adding a new mandatory contract is an edit to
-the principle text and the reviewer agent rubrics, not a Go change.
+The mandate principle requires `plan` at the front and `story_close`
+at the end of every story. Everything else is the orchestrator's
+choice. Adding a new mandatory contract is an edit to the principle
+text and the reviewer agent rubrics, not a Go change.

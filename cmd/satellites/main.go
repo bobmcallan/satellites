@@ -622,17 +622,13 @@ type lifecycleAgentSpec struct {
 }
 
 // seedLifecycleAgents creates one system-scope `type=agent` document
-// per lifecycle role: **developer_agent** (preplan + plan + develop),
+// per lifecycle role: **developer_agent** (plan + develop),
 // **releaser_agent** (push + merge_to_main), and **story_close_agent**
-// (story_close). Story_87b46d01 (S8 of
-// `epic:orchestrator-driven-configuration`) collapsed the original
-// 1-1 contract-shadow agents into these role-shaped agents per design
-// `docs/architecture-orchestrator-driven-configuration.md` §4. Each
-// agent's `permission_patterns` is the union of the patterns the
-// folded contracts needed, so action_claim resolution stays a simple
-// lookup against the agent doc's structured payload (story_cc55e093).
-// Idempotent — agents already present by name are skipped.
-// story_488b8223.
+// (story_close). Each agent's `permission_patterns` is the union of
+// the patterns the folded contracts need, so action_claim resolution
+// stays a simple lookup against the agent doc's structured payload
+// (story_cc55e093). Idempotent — agents already present by name are
+// skipped.
 func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
 	if docStore == nil {
 		return nil
@@ -640,7 +636,7 @@ func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspace
 	specs := []lifecycleAgentSpec{
 		{
 			Name: "developer_agent",
-			Body: "Role-shaped agent (story_87b46d01) covering preplan + plan + develop. Reads code/git/ledger, authors plan + review-criteria artefacts, edits + tests + commits. Bumps .version exactly once per story.",
+			Body: "Role-shaped agent covering plan + develop. In plan, reads code/git/ledger, authors plan + review-criteria artefacts, and enqueues role-tagged child tasks against the plan CI. In develop, edits + tests + commits and bumps .version exactly once per story.",
 			Patterns: []string{
 				"Read:**", "Edit:**", "Write:**", "MultiEdit:**", "Grep:**", "Glob:**",
 				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",

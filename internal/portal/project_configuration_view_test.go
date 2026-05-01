@@ -47,15 +47,15 @@ func TestProjectConfiguration_SectionsSplitByType(t *testing.T) {
 	docs := document.NewMemoryStore()
 	now := time.Now().UTC()
 
-	contract := seedConfigDoc(t, docs, "proj_a", document.TypeContract, "preplan", "", now)
+	contract := seedConfigDoc(t, docs, "proj_a", document.TypeContract, "plan", "", now)
 	seedConfigDoc(t, docs, "proj_a", document.TypeSkill, "go-style", contract.ID, now)
 	// Artifact must NOT appear in either section — sanity check.
 	seedDoc(t, docs, "proj_a", document.TypeArtifact, "design", "x", now)
 
 	got := buildProjectConfigurationComposite(context.Background(), docs, "proj_a", nil)
 
-	if len(got.Contracts) != 1 || got.Contracts[0].Name != "preplan" {
-		t.Errorf("Contracts = %#v, want exactly preplan", got.Contracts)
+	if len(got.Contracts) != 1 || got.Contracts[0].Name != "plan" {
+		t.Errorf("Contracts = %#v, want exactly plan", got.Contracts)
 	}
 	if len(got.Skills) != 1 || got.Skills[0].Name != "go-style" {
 		t.Errorf("Skills = %#v, want exactly go-style", got.Skills)
@@ -97,7 +97,7 @@ func TestProjectConfiguration_SystemScopeIncluded(t *testing.T) {
 	docs := document.NewMemoryStore()
 	now := time.Now().UTC()
 
-	systemContract := seedConfigDoc(t, docs, "", document.TypeContract, "system-preplan", "", now)
+	systemContract := seedConfigDoc(t, docs, "", document.TypeContract, "system-plan", "", now)
 	seedConfigDoc(t, docs, "proj_a", document.TypeContract, "project-contract", "", now)
 	seedConfigDoc(t, docs, "", document.TypeSkill, "system-skill", systemContract.ID, now)
 
@@ -107,7 +107,7 @@ func TestProjectConfiguration_SystemScopeIncluded(t *testing.T) {
 	for _, c := range got.Contracts {
 		contractNames[c.Name] = true
 	}
-	if !contractNames["system-preplan"] || !contractNames["project-contract"] {
+	if !contractNames["system-plan"] || !contractNames["project-contract"] {
 		t.Errorf("Contracts missing system or project entry: %#v", contractNames)
 	}
 	skillNames := map[string]bool{}
@@ -124,7 +124,7 @@ func TestProjectConfiguration_DenyAllMembershipsReturnsEmpty(t *testing.T) {
 	docs := document.NewMemoryStore()
 	now := time.Now().UTC()
 
-	contract := seedConfigDoc(t, docs, "proj_a", document.TypeContract, "preplan", "", now)
+	contract := seedConfigDoc(t, docs, "proj_a", document.TypeContract, "plan", "", now)
 	seedConfigDoc(t, docs, "proj_a", document.TypeSkill, "go-style", contract.ID, now)
 
 	// Deny-all: empty (non-nil) memberships slice.

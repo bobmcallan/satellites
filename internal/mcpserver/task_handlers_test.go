@@ -245,10 +245,10 @@ func TestTaskClose_StageHandoff_InheritsStoryPriority(t *testing.T) {
 	contractDoc, err := docs.Create(ctx, document.Document{
 		WorkspaceID: "wksp_a",
 		Type:        document.TypeContract,
-		Name:        "preplan-test",
+		Name:        "plan-test",
 		Scope:       document.ScopeSystem,
 		Status:      document.StatusActive,
-		Structured:  []byte(`{"category":"preplan","required_for_close":true,"validation_mode":"llm"}`),
+		Structured:  []byte(`{"category":"plan","required_for_close":true,"validation_mode":"llm"}`),
 	}, now)
 	require.NoError(t, err)
 
@@ -266,14 +266,14 @@ func TestTaskClose_StageHandoff_InheritsStoryPriority(t *testing.T) {
 	ci0, err := contracts.Create(ctx, contract.ContractInstance{
 		StoryID:      storyRow.ID,
 		ContractID:   contractDoc.ID,
-		ContractName: "preplan",
+		ContractName: "plan",
 		Sequence:     0,
 	}, now)
 	require.NoError(t, err)
 	ci1, err := contracts.Create(ctx, contract.ContractInstance{
 		StoryID:      storyRow.ID,
 		ContractID:   contractDoc.ID,
-		ContractName: "plan",
+		ContractName: "develop",
 		Sequence:     1,
 	}, now)
 	require.NoError(t, err)

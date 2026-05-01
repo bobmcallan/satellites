@@ -32,7 +32,7 @@ import (
 // internal/mcpserver/required_role_test.go exercising the exact helper
 // the handler calls; integration coverage of contract_claim with
 // required_role would require the test environment to seed the
-// preplan/plan/develop/story_close contract documents, which no
+// plan/develop/story_close contract documents, which no
 // existing integration test provides. The wrapper-level container test
 // below plus the passive coverage through the full 111s integration
 // suite (every existing workflow-exercising test runs the mutated

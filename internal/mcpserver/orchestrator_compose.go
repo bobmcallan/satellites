@@ -80,12 +80,12 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 
 	// Default contract sequence after story_af79cf95 removed the
 	// substrate slot algebra. The orchestrator agent body documents
-	// the floor (preplan + plan + close per pr_mandate_reviewer_enforced);
+	// the floor (plan + close per pr_mandate_reviewer_enforced);
 	// callers may pass a richer plan by way of agent_overrides /
 	// future verb args. For the legacy single-shot orchestrator_compose
-	// path we keep the v3 default to preserve callers that don't go
+	// path we keep the default to preserve callers that don't go
 	// through orchestrator_submit_plan.
-	proposed := []string{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"}
+	proposed := []string{"plan", "develop", "push", "merge_to_main", "story_close"}
 
 	overrides := parseAgentOverrides(req.GetString("agent_overrides", ""))
 	assignments := make(map[string]string, len(proposed))
@@ -222,15 +222,13 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 }
 
 // agentRoleForContract maps a contract_name to the system role agent
-// that drives it after the S8 collapse (story_87b46d01). Multiple
-// contracts intentionally resolve to the same role agent: the
-// developer_agent drives preplan/plan/develop; the releaser_agent
-// drives push/merge_to_main; the story_close_agent drives
-// story_close. Unknown contract names map to "" (handler then falls
-// back to the legacy <contract>_agent / agent_<contract> name match
-// so project-scope custom contracts still resolve).
+// that drives it. Multiple contracts intentionally resolve to the
+// same role agent: the developer_agent drives plan/develop; the
+// releaser_agent drives push/merge_to_main; the story_close_agent
+// drives story_close. Unknown contract names map to "" (handler then
+// falls back to the legacy <contract>_agent / agent_<contract> name
+// match so project-scope custom contracts still resolve).
 var agentRoleForContract = map[string]string{
-	"preplan":       "developer_agent",
 	"plan":          "developer_agent",
 	"develop":       "developer_agent",
 	"push":          "releaser_agent",

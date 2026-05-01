@@ -263,7 +263,7 @@ func seedCI(t *testing.T, f *fixture, seq int, name string) ContractInstance {
 func TestUpdateStatus_Transitions(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 
 	// ready → claimed (ok)
 	after, err := f.contracts.UpdateStatus(f.ctx, ci.ID, StatusClaimed, "actor", f.now.Add(time.Second), nil)
@@ -299,7 +299,7 @@ func TestUpdateStatus_Transitions(t *testing.T) {
 func TestUpdateStatus_ReadyToPassedRejected(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 	if _, err := f.contracts.UpdateStatus(f.ctx, ci.ID, StatusPassed, "actor", f.now, nil); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("ready→passed: expected ErrInvalidTransition, got %v", err)
 	}
@@ -308,7 +308,7 @@ func TestUpdateStatus_ReadyToPassedRejected(t *testing.T) {
 func TestUpdateStatus_UnknownStatus(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 	if _, err := f.contracts.UpdateStatus(f.ctx, ci.ID, "bogus", "actor", f.now, nil); err == nil {
 		t.Fatalf("expected error for unknown status")
 	}
@@ -318,8 +318,8 @@ func TestList_OrderedBySequence(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	seedCI(t, f, 2, "develop")
-	seedCI(t, f, 0, "preplan")
-	seedCI(t, f, 1, "plan")
+	seedCI(t, f, 0, "plan")
+	seedCI(t, f, 1, "develop")
 
 	out, err := f.contracts.List(f.ctx, f.parentStory.ID, nil)
 	if err != nil {
@@ -338,7 +338,7 @@ func TestList_OrderedBySequence(t *testing.T) {
 func TestList_WorkspaceIsolation(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	seedCI(t, f, 0, "preplan")
+	seedCI(t, f, 0, "plan")
 
 	// Deny-all.
 	out, err := f.contracts.List(f.ctx, f.parentStory.ID, []string{})
@@ -371,7 +371,7 @@ func TestList_WorkspaceIsolation(t *testing.T) {
 func TestGetByID_WorkspaceIsolation(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 
 	if _, err := f.contracts.GetByID(f.ctx, ci.ID, []string{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deny-all: expected ErrNotFound, got %v", err)
@@ -390,7 +390,7 @@ func TestGetByID_WorkspaceIsolation(t *testing.T) {
 func TestUpdateLedgerRefs_PartialUpdate(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 
 	planID := "ldg_plan"
 	updated, err := f.contracts.UpdateLedgerRefs(f.ctx, ci.ID, &planID, nil, "actor", f.now.Add(time.Second), nil)
@@ -420,7 +420,7 @@ func TestUpdateLedgerRefs_PartialUpdate(t *testing.T) {
 func TestBackfillWorkspaceID(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	ci := seedCI(t, f, 0, "preplan")
+	ci := seedCI(t, f, 0, "plan")
 
 	// Zero out workspace_id to simulate a legacy row.
 	f.contracts.mu.Lock()

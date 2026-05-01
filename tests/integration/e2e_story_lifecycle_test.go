@@ -170,7 +170,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 		"scope": "system",
 	})
 	wantContracts := map[string]bool{
-		"preplan": true, "plan": true, "develop": true,
+		"plan": true, "develop": true,
 		"push": true, "merge_to_main": true, "story_close": true,
 	}
 	for _, raw := range contractDocs {
@@ -232,8 +232,8 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	require.NotEmpty(t, cisRaw, "compose_plan must return contract instances")
 
 	// Resolve the lifecycle agent ids the boot-time seed creates.
-	// orchestrator_compose's seedAgentMap maps preplan/plan/develop/push/
-	// merge_to_main → developer_agent, story_close → story_close_agent.
+	// orchestrator_compose's seedAgentMap maps plan/develop → developer_agent,
+	// push/merge_to_main → releaser_agent, story_close → story_close_agent.
 	// document_list returns a bare JSON array (not {documents:[...]}),
 	// so use callToolArray here rather than the existing
 	// lookupSystemAgentID helper which decodes the wrong shape.
@@ -281,10 +281,6 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 			"evidence_markdown": "AC1 satisfied: lifecycle plumbing reached " + ciName +
 				". AC2 satisfied: see ledger row " + planLedgerID + " (plan) and downstream rows.",
 		}
-		if ciName == "preplan" {
-			closeArgs["proposed_workflow"] = []any{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"}
-		}
-
 		// Drive the close, handling reviewer needs_more by escalating
 		// evidence via contract_respond and re-invoking close. Cap at
 		// 4 attempts so a perpetually-strict reviewer fails fast

@@ -60,8 +60,8 @@ func newContractFixture(t *testing.T) *contractFixture {
 		t.Fatalf("project create: %v", err)
 	}
 
-	// Seed contract docs: full 6-slot default workflow, scope=system.
-	for _, name := range []string{"preplan", "plan", "develop", "push", "merge_to_main", "story_close"} {
+	// Seed contract docs: full 5-slot default workflow, scope=system.
+	for _, name := range []string{"plan", "develop", "push", "merge_to_main", "story_close"} {
 		if _, err := docStore.Create(ctx, document.Document{
 			Type:   document.TypeContract,
 			Scope:  document.ScopeSystem,
@@ -152,7 +152,7 @@ func TestWorkflowClaim_HappyPath(t *testing.T) {
 	f := newContractFixture(t)
 	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 		"claim_markdown":     "shape-approved",
 	}))
 	if err != nil {
@@ -171,8 +171,8 @@ func TestWorkflowClaim_HappyPath(t *testing.T) {
 	if body.ClaimLedgerID == "" {
 		t.Fatalf("expected claim_ledger_id")
 	}
-	if len(body.ContractInstances) != 4 {
-		t.Fatalf("CI count: got %d want 4", len(body.ContractInstances))
+	if len(body.ContractInstances) != 3 {
+		t.Fatalf("CI count: got %d want 3", len(body.ContractInstances))
 	}
 	for i, ci := range body.ContractInstances {
 		if ci.Sequence != i {
@@ -195,7 +195,7 @@ func TestWorkflowClaim_UnknownContract(t *testing.T) {
 	f := newContractFixture(t)
 	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "bogus", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "bogus", "develop", "story_close"},
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -209,7 +209,7 @@ func TestWorkflowClaim_UnknownContract(t *testing.T) {
 func TestWorkflowClaim_Idempotent(t *testing.T) {
 	t.Parallel()
 	f := newContractFixture(t)
-	proposed := []string{"preplan", "plan", "develop", "story_close"}
+	proposed := []string{"plan", "develop", "story_close"}
 	first, _ := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
 		"proposed_contracts": proposed,
@@ -262,7 +262,7 @@ func TestContractNext_OrderedBySequence(t *testing.T) {
 	f := newContractFixture(t)
 	_, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil {
 		t.Fatalf("claim: %v", err)
@@ -288,8 +288,8 @@ func TestContractNext_OrderedBySequence(t *testing.T) {
 	if body.CI.Sequence != 0 {
 		t.Fatalf("sequence: got %d want 0", body.CI.Sequence)
 	}
-	if body.CI.ContractName != "preplan" {
-		t.Fatalf("name: got %q want %q", body.CI.ContractName, "preplan")
+	if body.CI.ContractName != "plan" {
+		t.Fatalf("name: got %q want %q", body.CI.ContractName, "plan")
 	}
 }
 
@@ -315,7 +315,7 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 	f := newContractFixture(t)
 	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil || claim.IsError {
 		t.Fatalf("claim: err=%v text=%s", err, firstText(claim))
@@ -324,9 +324,9 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 		ContractInstances []contract.ContractInstance `json:"contract_instances"`
 	}
 	_ = json.Unmarshal([]byte(firstText(claim)), &claimBody)
-	preplanContractID := claimBody.ContractInstances[0].ContractID
+	planContractID := claimBody.ContractInstances[0].ContractID
 
-	// Seed a skill doc bound to the preplan contract. WorkspaceID is
+	// Seed a skill doc bound to the plan contract. WorkspaceID is
 	// set so the membership-scoped read path returns it.
 	if _, err := f.server.docs.Create(f.ctx, document.Document{
 		WorkspaceID:     f.wsID,
@@ -335,7 +335,7 @@ func TestContractNext_ReturnsSkills(t *testing.T) {
 		Name:            "test-skill",
 		Body:            "skill body",
 		Status:          document.StatusActive,
-		ContractBinding: document.StringPtr(preplanContractID),
+		ContractBinding: document.StringPtr(planContractID),
 	}, f.now); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestContractNext_SkillsViaAgent(t *testing.T) {
 	f := newContractFixture(t)
 	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil || claim.IsError {
 		t.Fatalf("claim: err=%v text=%s", err, firstText(claim))
@@ -370,7 +370,7 @@ func TestContractNext_SkillsViaAgent(t *testing.T) {
 		ContractInstances []contract.ContractInstance `json:"contract_instances"`
 	}
 	_ = json.Unmarshal([]byte(firstText(claim)), &claimBody)
-	preplanCIID := claimBody.ContractInstances[0].ID
+	planCIID := claimBody.ContractInstances[0].ID
 
 	// Seed an unbound skill (no contract_binding) — only reachable via
 	// the agent path.
@@ -394,7 +394,7 @@ func TestContractNext_SkillsViaAgent(t *testing.T) {
 		WorkspaceID: f.wsID,
 		Type:        document.TypeAgent,
 		Scope:       document.ScopeSystem,
-		Name:        "preplan_agent_test",
+		Name:        "plan_agent_test",
 		Body:        "test agent",
 		Status:      document.StatusActive,
 		Structured:  agentSettings,
@@ -402,7 +402,7 @@ func TestContractNext_SkillsViaAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	if _, err := f.server.contracts.SetAgent(f.ctx, preplanCIID, agentDoc.ID, f.now, []string{f.wsID}); err != nil {
+	if _, err := f.server.contracts.SetAgent(f.ctx, planCIID, agentDoc.ID, f.now, []string{f.wsID}); err != nil {
 		t.Fatalf("set CI agent: %v", err)
 	}
 
@@ -426,7 +426,7 @@ func TestContractNext_SkillsLegacyFallback(t *testing.T) {
 	f := newContractFixture(t)
 	claim, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil || claim.IsError {
 		t.Fatalf("claim: err=%v text=%s", err, firstText(claim))
@@ -435,7 +435,7 @@ func TestContractNext_SkillsLegacyFallback(t *testing.T) {
 		ContractInstances []contract.ContractInstance `json:"contract_instances"`
 	}
 	_ = json.Unmarshal([]byte(firstText(claim)), &claimBody)
-	preplanContractID := claimBody.ContractInstances[0].ContractID
+	planContractID := claimBody.ContractInstances[0].ContractID
 
 	// Legacy skill: contract_binding set, no agent path involved.
 	if _, err := f.server.docs.Create(f.ctx, document.Document{
@@ -445,7 +445,7 @@ func TestContractNext_SkillsLegacyFallback(t *testing.T) {
 		Name:            "legacy-bound-skill",
 		Body:            "legacy skill body",
 		Status:          document.StatusActive,
-		ContractBinding: document.StringPtr(preplanContractID),
+		ContractBinding: document.StringPtr(planContractID),
 	}, f.now); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestWorkflowClaim_StoryNotFound(t *testing.T) {
 	f := newContractFixture(t)
 	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           "sty_ghost",
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)

@@ -26,9 +26,9 @@ func TestDocumentsView_TabFilters(t *testing.T) {
 		WorkspaceID: h.WorkspaceID,
 		Type:        "contract",
 		Scope:       "system",
-		Name:        "preplan",
+		Name:        "plan",
 		Status:      "active",
-		Body:        "preplan contract body",
+		Body:        "plan contract body",
 	}, now); err != nil {
 		t.Fatalf("seed contract: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDocumentsView_TabFilters(t *testing.T) {
 	for _, want := range []string{
 		`data-testid="tab-all"`,
 		`data-testid="tab-principle"`,
-		`>preplan<`,
+		`>plan<`,
 	} {
 		if !strings.Contains(bodyHTML, want) {
 			t.Errorf("documents body missing %q", want)

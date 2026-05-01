@@ -18,13 +18,13 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
 
-	// Use the fixture's seeded role agent for the cis[0] (preplan)
-	// claim. After story_87b46d01 the fixture maps preplan to
-	// developer_agent; the lookup returns its agent doc id.
-	preplanAgentID := f.agentFor(0)
-	agentDoc, err := f.server.docs.GetByID(f.ctx, preplanAgentID, nil)
+	// Use the fixture's seeded role agent for cis[0] (plan).
+	// The fixture maps plan to developer_agent; the lookup returns
+	// its agent doc id.
+	planAgentID := f.agentFor(0)
+	agentDoc, err := f.server.docs.GetByID(f.ctx, planAgentID, nil)
 	if err != nil {
-		t.Fatalf("lookup seeded role agent for preplan: %v", err)
+		t.Fatalf("lookup seeded role agent for plan: %v", err)
 	}
 	settings, err := document.UnmarshalAgentSettings(agentDoc.Structured)
 	if err != nil {
@@ -34,7 +34,7 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,
-		"agent_id":             preplanAgentID,
+		"agent_id":             planAgentID,
 		"plan_markdown":        "claim with agent",
 	}))
 	if err != nil {
@@ -55,8 +55,8 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ci lookup: %v", err)
 	}
-	if ci.AgentID != preplanAgentID {
-		t.Errorf("CI.AgentID = %q, want %q", ci.AgentID, preplanAgentID)
+	if ci.AgentID != planAgentID {
+		t.Errorf("CI.AgentID = %q, want %q", ci.AgentID, planAgentID)
 	}
 
 	rows, err := f.server.ledger.List(f.ctx, f.projectID, ledger.ListOptions{StoryID: f.storyID, Type: ledger.TypeActionClaim}, nil)
@@ -85,8 +85,8 @@ func TestClaim_AgentIDSourcesPatternsFromAgentDoc(t *testing.T) {
 	if !reflect.DeepEqual(payload.PermissionsClaim, settings.PermissionPatterns) {
 		t.Errorf("permissions_claim = %v, want %v (must be sourced from agent doc)", payload.PermissionsClaim, settings.PermissionPatterns)
 	}
-	if payload.AgentID != preplanAgentID {
-		t.Errorf("action_claim.agent_id = %q, want %q", payload.AgentID, preplanAgentID)
+	if payload.AgentID != planAgentID {
+		t.Errorf("action_claim.agent_id = %q, want %q", payload.AgentID, planAgentID)
 	}
 	if payload.Source != "agent_document" {
 		t.Errorf("action_claim.source = %q, want \"agent_document\"", payload.Source)

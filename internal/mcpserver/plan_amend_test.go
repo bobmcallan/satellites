@@ -9,12 +9,12 @@ import (
 )
 
 // claimDefaultWorkflow is a shared helper that locks the default
-// preplan/plan/develop/story_close workflow on the fixture story.
+// plan/develop/story_close workflow on the fixture story.
 func claimDefaultWorkflow(t *testing.T, f *contractFixture) []contract.ContractInstance {
 	t.Helper()
 	res, err := f.server.handleWorkflowClaim(f.callerCtx(), newCallToolReq("workflow_claim", map[string]any{
 		"story_id":           f.storyID,
-		"proposed_contracts": []string{"preplan", "plan", "develop", "story_close"},
+		"proposed_contracts": []string{"plan", "develop", "story_close"},
 		"claim_markdown":     "shape-approved",
 	}))
 	if err != nil || res.IsError {

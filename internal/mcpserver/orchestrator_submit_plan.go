@@ -80,7 +80,7 @@ func (s *Server) handleOrchestratorSubmitPlan(ctx context.Context, req mcpgo.Cal
 	rubric := s.lookupReviewerAgentBody(ctx, "plan", memberships)
 	revReq := reviewer.Request{
 		ContractName:     "plan",
-		AgentInstruction: "Review the orchestrator's proposed plan against the story's acceptance criteria and the active principles. Reject plans missing the preplan/plan front-floor or the story_close end-floor; cite pr_mandate_reviewer_enforced when doing so.",
+		AgentInstruction: "Review the orchestrator's proposed plan against the story's acceptance criteria and the active principles. Reject plans missing the plan front-floor or the story_close end-floor; cite pr_mandate_reviewer_enforced when doing so.",
 		ReviewerRubric:   rubric,
 		EvidenceMarkdown: planMD,
 	}

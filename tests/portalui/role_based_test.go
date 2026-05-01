@@ -131,7 +131,7 @@ func TestConfig_AgentsSectionRender(t *testing.T) {
 		t.Fatalf("/config agents section: %v", err)
 	}
 	if !strings.Contains(body, "developer_agent") {
-		t.Errorf("/config agents panel missing preplan_agent")
+		t.Errorf("/config agents panel missing developer_agent")
 	}
 }
 

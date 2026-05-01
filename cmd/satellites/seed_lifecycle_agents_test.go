@@ -55,7 +55,7 @@ func TestSeedLifecycleAgents_DropsShadowSeeds(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	for _, name := range []string{"preplan_agent", "plan_agent", "develop_agent", "push_agent", "merge_agent"} {
+	for _, name := range []string{"plan_agent", "develop_agent", "push_agent", "merge_agent"} {
 		if _, err := docStore.GetByName(ctx, "", name, nil); err == nil {
 			t.Errorf("removed shadow agent %q still seeded", name)
 		}

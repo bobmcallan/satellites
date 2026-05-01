@@ -48,7 +48,7 @@ Fixture body.
 const fixtureSeedWorkflow = `---
 name: fixture_workflow
 required_slots:
-  - { contract_name: preplan, required: true, min_count: 1, max_count: 1 }
+  - { contract_name: plan, required: true, min_count: 1, max_count: 1 }
   - { contract_name: develop, required: true, min_count: 1, max_count: 5 }
 tags: [fixture]
 ---

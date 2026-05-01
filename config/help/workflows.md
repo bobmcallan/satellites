@@ -12,9 +12,9 @@ shape is recorded as a `type=workflow` document.
 
 ## Default system workflow
 
-Six required slots:
+Five required slots:
 
-`preplan → plan → develop → push → merge_to_main → story_close`
+`plan → develop → push → merge_to_main → story_close`
 
 - `develop` permits 1–10 instances; the others are exactly one
   each.
@@ -29,9 +29,10 @@ created via MCP and visible on the project's Configuration page.
 
 ## Limitations
 
-- Slot count constraints are enforced at `workflow_claim` time;
-  proposed contract lists that miss a required slot are rejected
-  with `missing_required_slot`.
+- Slot constraints are enforced by the reviewer (`story_reviewer`)
+  during plan submission; proposed contract lists that miss the
+  mandated front-floor (`plan`) or end-floor (`story_close`) are
+  rejected with `needs_more`.
 - Reordering slots is not supported. A workflow's order is its
   contract — changing it mid-flight breaks downstream evidence
   expectations.

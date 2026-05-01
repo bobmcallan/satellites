@@ -543,15 +543,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			s.mcp.AddTool(claimTool, s.handleContractClaim)
 
 			closeTool := mcpgo.NewTool("contract_close",
-				mcpgo.WithDescription("Close a contract instance: writes a phase:close kind:close-request row, optional kind:evidence row, flips CI to passed, rolls the story to done when every required CI is terminal. On preplan close, proposed_workflow is validated against the project spec and written as a kind:workflow-claim row."),
+				mcpgo.WithDescription("Close a contract instance: writes a phase:close kind:close-request row, optional kind:evidence row, flips CI to passed, rolls the story to done when every required CI is terminal."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("close_markdown", mcpgo.Description("Close summary markdown.")),
 				mcpgo.WithString("evidence_markdown", mcpgo.Description("Optional evidence markdown; writes a kind:evidence row when non-empty.")),
 				mcpgo.WithArray("evidence_ledger_ids", mcpgo.Description("IDs of prior evidence rows referenced from the close."),
 					mcpgo.Items(map[string]any{"type": "string"})),
 				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — used when the CI was claimed without a plan (deferred plan path).")),
-				mcpgo.WithArray("proposed_workflow", mcpgo.Description("Preplan-only: list of contract_names forming the remainder of the workflow."),
-					mcpgo.Items(map[string]any{"type": "string"})),
 			)
 			s.mcp.AddTool(closeTool, s.handleContractClose)
 
@@ -677,7 +675,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	if s.tasks != nil {
 		enqueueTool := mcpgo.NewTool("task_enqueue",
 			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. Story_a8fee0cc."),
-			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | free_preplan | event")),
+			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),

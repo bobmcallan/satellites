@@ -42,7 +42,7 @@ func makeCI(t *testing.T) (*fixture, string) {
 	ci, err := f.contracts.Create(f.ctx, ContractInstance{
 		StoryID:      f.parentStory.ID,
 		ContractID:   f.contractDoc.ID,
-		ContractName: "preplan",
+		ContractName: "plan",
 		Status:       StatusReady,
 		Sequence:     0,
 	}, f.now)
@@ -65,7 +65,7 @@ func TestContract_UpdateStatus_Publishes(t *testing.T) {
 	assert.Equal(t, wsA, got.workspaceID)
 	payload := got.data.(map[string]any)
 	assert.Equal(t, ci.ID, payload["ci_id"])
-	assert.Equal(t, "preplan", payload["contract_name"])
+	assert.Equal(t, "plan", payload["contract_name"])
 	assert.Equal(t, f.parentStory.ID, payload["story_id"])
 }
 

@@ -39,13 +39,12 @@ func TestTreeWalk(t *testing.T) {
 		{
 			name: "child follows parent",
 			input: []ContractInstance{
-				{ID: "ci_preplan", Sequence: 0},
-				{ID: "ci_plan", Sequence: 1},
-				{ID: "ci_dev1", Sequence: 2},
+				{ID: "ci_plan", Sequence: 0},
+				{ID: "ci_dev1", Sequence: 1},
 				{ID: "ci_dev2", Sequence: 6, ParentInvocationID: "ci_dev1"},
-				{ID: "ci_push", Sequence: 3},
+				{ID: "ci_push", Sequence: 2},
 			},
-			expected: []string{"ci_preplan", "ci_plan", "ci_dev1", "ci_dev2", "ci_push"},
+			expected: []string{"ci_plan", "ci_dev1", "ci_dev2", "ci_push"},
 		},
 		{
 			name: "missing parent stays as root",

@@ -2,11 +2,11 @@
 name: story_reviewer
 instruction: |
   Review the orchestrator's proposed plan and every non-develop contract
-  close (preplan, plan, push, merge_to_main, story_close). Verdict is
+  close (plan, push, merge_to_main, story_close). Verdict is
   one of: accepted | rejected | needs_more. Cite principles in the
   rationale; on needs_more, return concrete review_questions the agent
-  can address. Do not approve a plan that omits the preplan + plan
-  front-floor or the story_close end-floor (cite
+  can address. Do not approve a plan that omits the plan front-floor
+  or the story_close end-floor (cite
   pr_mandate_reviewer_enforced). Do not approve a close whose evidence
   fails to map AC-by-AC to the story's acceptance criteria.
 permission_patterns:
@@ -27,10 +27,10 @@ when `runReviewer` resolves a contract whose name is anything other than
 - **Plan.** When the orchestrator calls
   `satellites_orchestrator_submit_plan`, this agent's body is the
   rubric the Gemini reviewer evaluates the proposed plan against.
-- **preplan close.** Readiness assessment evidence — relevance,
-  dependencies, prior delivery, recommendation.
-- **plan close.** plan.md + review-criteria.md artefacts present and
-  AC-mapped.
+- **plan close.** Readiness assessment (relevance, dependencies,
+  prior delivery), plan.md + review-criteria.md artefacts present
+  and AC-mapped, and at least one role-tagged child task enqueued
+  against the plan CI.
 - **push close.** Commit pushed; no `.version` re-bump; no destructive
   ops.
 - **merge_to_main close.** Fast-forward only; main aligned to origin.
@@ -41,14 +41,14 @@ when `runReviewer` resolves a contract whose name is anything other than
 ### 1. Mandate compliance
 
 Cite **pr_mandate_reviewer_enforced**. The plan must begin with
-`preplan + plan` and end with `story_close`. The orchestrator picks
-contracts in between based on the story's shape; the reviewer accepts
-those middle choices unless they violate other principles or omit a
+`plan` and end with `story_close`. The orchestrator picks contracts
+in between based on the story's shape; the reviewer accepts those
+middle choices unless they violate other principles or omit a
 contract the story's ACs clearly require.
 
-A plan that skips `preplan` or `plan` is rejected with `needs_more` and
-the agent is asked to revise. A plan that omits `story_close` is the
-same — the reviewer cannot accept a story that has no close path.
+A plan that skips `plan` is rejected with `needs_more` and the agent
+is asked to revise. A plan that omits `story_close` is the same —
+the reviewer cannot accept a story that has no close path.
 
 ### 2. AC coverage
 

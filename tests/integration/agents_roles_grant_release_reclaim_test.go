@@ -106,15 +106,15 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
 	requiredRoleJSON := `{"category":"lifecycle","required_for_close":true,"validation_mode":"agent","required_role":"` + roleID + `"}`
 
-	// Seed the 4 lifecycle contract docs the workflow_claim will
+	// Seed the 3 lifecycle contract docs the workflow_claim will
 	// instantiate against. Each carries required_role so the claim gate
 	// exercises the full grant-based path. Unique names ("grctest_*")
-	// avoid colliding with the system-seeded contract docs (preplan,
-	// plan, develop, story_close) — those carry required_role as a
-	// name string ("role_orchestrator") which won't match the doc-id
-	// the grant stores on session_register, so the test owns its full
+	// avoid colliding with the system-seeded contract docs (plan,
+	// develop, story_close) — those carry required_role as a name
+	// string ("role_orchestrator") which won't match the doc-id the
+	// grant stores on session_register, so the test owns its full
 	// contract set with doc-id required_role for a deterministic claim.
-	contractNames := []string{"grctest_preplan", "grctest_plan", "grctest_develop", "grctest_story_close"}
+	contractNames := []string{"grctest_plan", "grctest_develop", "grctest_story_close"}
 	for _, name := range contractNames {
 		_ = callTool(t, ctx, mcpURL, "key_grc", "contract_create", map[string]any{
 			"scope":      "system",
@@ -155,45 +155,42 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 		"tags":       []any{"kind:plan-approved", "phase:plan-approval"},
 	})
 
-	// Instantiate the workflow — the 4-slot shape the system contracts seed.
+	// Instantiate the workflow — the 3-slot shape the system contracts seed.
 	wf := callTool(t, ctx, mcpURL, "key_grc", "workflow_claim", map[string]any{
 		"story_id":           storyID,
-		"proposed_contracts": []any{contractNames[0], contractNames[1], contractNames[2], contractNames[3]},
+		"proposed_contracts": []any{contractNames[0], contractNames[1], contractNames[2]},
 		"claim_markdown":     "standard shape",
 	})
 	cisRaw, _ := wf["contract_instances"].([]any)
-	require.Len(t, cisRaw, 4, "workflow_claim should instantiate 4 CIs")
-	ciIDs := make([]string, 0, 4)
+	require.Len(t, cisRaw, 3, "workflow_claim should instantiate 3 CIs")
+	ciIDs := make([]string, 0, 3)
 	for _, raw := range cisRaw {
 		m, _ := raw.(map[string]any)
 		if id, _ := m["id"].(string); id != "" {
 			ciIDs = append(ciIDs, id)
 		}
 	}
-	require.Len(t, ciIDs, 4)
+	require.Len(t, ciIDs, 3)
 
 	// Look up the lifecycle role agent seeded by seedLifecycleAgents
-	// (the boot-time seed in cmd/satellites/main.go). After the S8
-	// collapse (story_87b46d01), preplan + plan + develop all resolve
-	// to developer_agent.
-	preplanAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "developer_agent")
-	planAgent := preplanAgent
+	// (the boot-time seed in cmd/satellites/main.go). plan + develop
+	// both resolve to developer_agent.
+	planAgent := lookupSystemAgentID(t, ctx, mcpURL, "key_grc", "developer_agent")
 
-	// Step 2: session A claims the preplan CI — succeeds under grant A.
+	// Step 2: session A claims the plan CI — succeeds under grant A.
 	claim1 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[0],
 		"session_id":           sessionA,
-		"agent_id":             preplanAgent,
+		"agent_id":             planAgent,
 	})
 	assert.Equal(t, "claimed", claim1["status"])
 
-	// Close the preplan so the predecessor gate lets us claim the next
+	// Close the plan so the predecessor gate lets us claim the next
 	// CI later.
 	_ = callTool(t, ctx, mcpURL, "key_grc", "contract_close", map[string]any{
 		"contract_instance_id": ciIDs[0],
-		"close_markdown":       "preplan done",
+		"close_markdown":       "plan done",
 		"evidence_markdown":    "baseline evidence",
-		"proposed_workflow":    []any{contractNames[0], contractNames[1], contractNames[2], contractNames[3]},
 	})
 
 	// Step 3: release session A's grant.

@@ -39,11 +39,8 @@ func intEnv(key string, fallback int) int {
 
 // handleContractClose closes a CI. Always writes a phase:close
 // row; when evidence_markdown non-empty also writes a kind:evidence
-// row; optionally writes a plan row on preplan re-entry or deferred
-// plan; flips CI to passed; rolls story to done when all required
-// CIs are terminal. On preplan close with proposed_workflow, the
-// agent's new workflow shape is validated against the project spec
-// and recorded as a kind:workflow-claim row.
+// row; optionally writes a plan row on deferred plan; flips CI to
+// passed; rolls story to done when all required CIs are terminal.
 func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
@@ -55,7 +52,6 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 	evidenceMarkdown := req.GetString("evidence_markdown", "")
 	evidenceIDs := req.GetStringSlice("evidence_ledger_ids", nil)
 	planMarkdown := req.GetString("plan_markdown", "")
-	proposedWorkflow := req.GetStringSlice("proposed_workflow", nil)
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
@@ -69,11 +65,6 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	now := s.nowUTC()
-
-	// Preplan proposed_workflow is informational only after
-	// story_af79cf95 removed the substrate slot algebra. The reviewer
-	// (story_reviewer, Gemini-backed) approves shape during the
-	// plan-approval loop; the substrate no longer validates it here.
 
 	// Deferred plan: CI has no PlanLedgerID yet and caller supplied one.
 	var planRowID string
@@ -144,10 +135,10 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
-	// For ready CIs (preplan re-entry closes pre-claim): transition
-	// ready→claimed before passing, because ValidTransition rejects
-	// ready→passed. grantID is empty here — the CI flips to passed
-	// immediately below so the binding is ephemeral.
+	// For ready CIs (close pre-claim): transition ready→claimed
+	// before passing, because ValidTransition rejects ready→passed.
+	// grantID is empty here — the CI flips to passed immediately below
+	// so the binding is ephemeral.
 	if ci.Status == contract.StatusReady {
 		if _, err := s.contracts.Claim(ctx, ci.ID, "", now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
@@ -182,27 +173,6 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		}
 	}
 
-	// Preplan workflow-claim — written after the CI close so the claim
-	// applies to the next planning pass.
-	var workflowClaimID string
-	if ci.ContractName == "preplan" && len(proposedWorkflow) > 0 {
-		payload, _ := json.Marshal(map[string]any{"proposed_contracts": proposedWorkflow})
-		row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-			WorkspaceID: ci.WorkspaceID,
-			ProjectID:   ci.ProjectID,
-			StoryID:     ledger.StringPtr(ci.StoryID),
-			Type:        ledger.TypeWorkflowClaim,
-			Tags:        []string{"kind:workflow-claim", "phase:pre-plan", "origin:close"},
-			Content:     closeMarkdown,
-			Structured:  payload,
-			CreatedBy:   caller.UserID,
-		}, now)
-		if err != nil {
-			return mcpgo.NewToolResultError(err.Error()), nil
-		}
-		workflowClaimID = row.ID
-	}
-
 	// Story rollup: if every RequiredForClose CI is terminal, flip the
 	// story to done.
 	storyStatus := ""
@@ -226,17 +196,16 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		finalStatus = contract.StatusFailed
 	}
 	body, _ := json.Marshal(map[string]any{
-		"contract_instance_id":     ci.ID,
-		"story_id":                 ci.StoryID,
-		"status":                   finalStatus,
-		"close_ledger_id":          closeRow.ID,
-		"evidence_ledger_id":       evidenceRowID,
-		"plan_ledger_id":           planRowID,
-		"workflow_claim_ledger_id": workflowClaimID,
-		"story_status":             storyStatus,
-		"verdict_ledger_id":        verdictRowID,
-		"llm_usage_ledger_id":      llmUsageRowID,
-		"verdict":                  verdictOutcome,
+		"contract_instance_id": ci.ID,
+		"story_id":             ci.StoryID,
+		"status":               finalStatus,
+		"close_ledger_id":      closeRow.ID,
+		"evidence_ledger_id":   evidenceRowID,
+		"plan_ledger_id":       planRowID,
+		"story_status":         storyStatus,
+		"verdict_ledger_id":    verdictRowID,
+		"llm_usage_ledger_id":  llmUsageRowID,
+		"verdict":              verdictOutcome,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
