@@ -61,6 +61,16 @@ type Store interface {
 	// Exactly one caller wins under concurrency.
 	Claim(ctx context.Context, workerID string, workspaceIDs []string, now time.Time) (Task, error)
 
+	// ClaimByID atomically transitions the task with the given id from
+	// enqueued → claimed and stamps ClaimedBy/ClaimedAt. Returns
+	// ErrNoTaskAvailable when the row is no longer enqueued (already
+	// claimed by another worker, closed, etc.). Used by role-scoped
+	// workers (e.g. the standalone reviewer service) that pick a
+	// specific task via List + a role filter rather than the queue's
+	// generic next-available semantic.
+	// epic:v4-lifecycle-refactor sty_6077711d.
+	ClaimByID(ctx context.Context, id, workerID string, now time.Time, memberships []string) (Task, error)
+
 	// Close transitions a task to Status=closed with the given outcome.
 	// Rejects invalid transitions via ErrInvalidTransition.
 	Close(ctx context.Context, id, outcome string, now time.Time, memberships []string) (Task, error)
@@ -216,6 +226,33 @@ func (m *MemoryStore) Claim(ctx context.Context, workerID string, workspaceIDs [
 	m.mu.Unlock()
 	emitStatus(ctx, pub, picked)
 	return picked, nil
+}
+
+// ClaimByID implements Store for MemoryStore. Mutex-guarded so the
+// concurrent-claim invariant matches the generic Claim path.
+func (m *MemoryStore) ClaimByID(ctx context.Context, id, workerID string, now time.Time, memberships []string) (Task, error) {
+	if workerID == "" {
+		return Task{}, errors.New("task: worker_id required")
+	}
+	m.mu.Lock()
+	t, ok := m.rows[id]
+	if !ok || !workspaceVisible(t.WorkspaceID, memberships) {
+		m.mu.Unlock()
+		return Task{}, ErrNotFound
+	}
+	if t.Status != StatusEnqueued {
+		m.mu.Unlock()
+		return Task{}, ErrNoTaskAvailable
+	}
+	t.Status = StatusClaimed
+	t.ClaimedBy = workerID
+	claimedAt := now
+	t.ClaimedAt = &claimedAt
+	m.rows[id] = t
+	pub := m.publisher
+	m.mu.Unlock()
+	emitStatus(ctx, pub, t)
+	return t, nil
 }
 
 // Close implements Store for MemoryStore.

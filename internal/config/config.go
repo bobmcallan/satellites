@@ -168,6 +168,14 @@ type Config struct {
 	// ("gemini-2.5-flash"). Env override: SATELLITES_GEMINI_REVIEW_MODEL.
 	GeminiReviewModel string `toml:"gemini_review_model"`
 
+	// ReviewerService selects how the standalone reviewer worker is
+	// wired (epic:v4-lifecycle-refactor sty_6077711d / sty_62d4b438).
+	// Canonical values: "embedded" (in-process goroutine, mints a
+	// role_reviewer grant at boot), "external" (separate process,
+	// deferred), "disabled" / "" (legacy inline reviewer only).
+	// Env override: SATELLITES_REVIEWER_SERVICE.
+	ReviewerService string `toml:"reviewer_service"`
+
 	// EmbeddingsProvider selects the embeddings backend. Canonical values:
 	// "gemini", "stub", "none" (default). Empty resolves to "none" inside
 	// embeddings.New, which disables semantic search.
@@ -263,6 +271,7 @@ var describeTable = []FieldDoc{
 	{Field: "GrantsEnforced", Env: "SATELLITES_GRANTS_ENFORCED", Default: "false", Description: "When true, MCP verbs outside the bootstrap allowlist require a covering role-grant."},
 	{Field: "GeminiAPIKey", Env: "SATELLITES_GEMINI_API_KEY", Default: "(empty — reviewer falls back to AcceptAll)", Description: "Google AI Studio key used by the close-time reviewer. Never logged."},
 	{Field: "GeminiReviewModel", Env: "SATELLITES_GEMINI_REVIEW_MODEL", Default: "gemini-2.5-flash", Description: "Gemini model id for the close-time reviewer. Empty resolves to the package default."},
+	{Field: "ReviewerService", Env: "SATELLITES_REVIEWER_SERVICE", Default: "(empty — disabled; legacy inline reviewer only)", Description: "Standalone reviewer wiring: embedded | external | disabled. Embedded mints a role_reviewer grant at boot and runs a goroutine that claims kind:review tasks."},
 	{Field: "EmbeddingsProvider", Env: "SATELLITES_EMBEDDINGS_PROVIDER", Default: "(empty — none, semantic search disabled)", Description: "Embeddings backend selector: gemini, stub, none."},
 	{Field: "EmbeddingsModel", Env: "SATELLITES_EMBEDDINGS_MODEL", Default: "(empty — provider default)", Description: "Provider-specific embeddings model id."},
 	{Field: "EmbeddingsAPIKey", Env: "SATELLITES_EMBEDDINGS_API_KEY", Default: "(empty — required for provider=gemini)", Description: "Embeddings provider API key. Never logged."},
@@ -418,6 +427,7 @@ type tomlOverlay struct {
 	GrantsEnforced       *bool     `toml:"grants_enforced"`
 	GeminiAPIKey         *string   `toml:"gemini_api_key"`
 	GeminiReviewModel    *string   `toml:"gemini_review_model"`
+	ReviewerService      *string   `toml:"reviewer_service"`
 	EmbeddingsProvider   *string   `toml:"embeddings_provider"`
 	EmbeddingsModel      *string   `toml:"embeddings_model"`
 	EmbeddingsAPIKey     *string   `toml:"embeddings_api_key"`
@@ -535,6 +545,9 @@ func (o tomlOverlay) applyTo(cfg *Config, warnings *[]string) bool {
 	}
 	if o.GeminiReviewModel != nil {
 		cfg.GeminiReviewModel = *o.GeminiReviewModel
+	}
+	if o.ReviewerService != nil {
+		cfg.ReviewerService = strings.ToLower(strings.TrimSpace(*o.ReviewerService))
 	}
 	if o.EmbeddingsProvider != nil {
 		cfg.EmbeddingsProvider = *o.EmbeddingsProvider
@@ -742,6 +755,9 @@ func applyEnvOverrides(cfg *Config, warnings *[]string) {
 	}
 	if v := os.Getenv("SATELLITES_GEMINI_REVIEW_MODEL"); v != "" {
 		cfg.GeminiReviewModel = v
+	}
+	if v := os.Getenv("SATELLITES_REVIEWER_SERVICE"); v != "" {
+		cfg.ReviewerService = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v := os.Getenv("SATELLITES_EMBEDDINGS_PROVIDER"); v != "" {
 		cfg.EmbeddingsProvider = strings.ToLower(strings.TrimSpace(v))

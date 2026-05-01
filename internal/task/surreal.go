@@ -203,6 +203,45 @@ func (s *SurrealStore) Claim(ctx context.Context, workerID string, workspaceIDs 
 	return claimed, nil
 }
 
+// ClaimByID implements Store for SurrealStore. Mirrors Claim's
+// conditional UPDATE: the query only transitions when the row is
+// still enqueued, so two callers racing on the same id end with one
+// winner and one ErrNoTaskAvailable.
+func (s *SurrealStore) ClaimByID(ctx context.Context, id, workerID string, now time.Time, memberships []string) (Task, error) {
+	if workerID == "" {
+		return Task{}, fmt.Errorf("task: worker_id required")
+	}
+	if memberships != nil && len(memberships) == 0 {
+		return Task{}, ErrNotFound
+	}
+	conds := []string{"status = $old"}
+	vars := map[string]any{
+		"rid": surrealmodels.NewRecordID("tasks", id),
+		"new": StatusClaimed,
+		"old": StatusEnqueued,
+		"by":  workerID,
+		"at":  now,
+	}
+	if memberships != nil {
+		conds = append(conds, "workspace_id IN $memberships")
+		vars["memberships"] = memberships
+	}
+	updateSQL := fmt.Sprintf(
+		"UPDATE $rid SET status = $new, claimed_by = $by, claimed_at = $at WHERE %s RETURN %s",
+		strings.Join(conds, " AND "), selectCols,
+	)
+	updateRes, err := surrealdb.Query[[]Task](ctx, s.db, updateSQL, vars)
+	if err != nil {
+		return Task{}, fmt.Errorf("task: claim_by_id: %w", err)
+	}
+	if updateRes == nil || len(*updateRes) == 0 || len((*updateRes)[0].Result) == 0 {
+		return Task{}, ErrNoTaskAvailable
+	}
+	claimed := (*updateRes)[0].Result[0]
+	emitStatus(ctx, s.publisher, claimed)
+	return claimed, nil
+}
+
 // Close implements Store for SurrealStore.
 func (s *SurrealStore) Close(ctx context.Context, id, outcome string, now time.Time, memberships []string) (Task, error) {
 	if _, ok := validOutcomes[outcome]; !ok {

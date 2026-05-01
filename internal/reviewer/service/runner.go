@@ -1,0 +1,376 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/ternarybob/arbor"
+
+	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/reviewer"
+	"github.com/bobmcallan/satellites/internal/task"
+)
+
+// CommitFn applies the reviewer's verdict against the substrate.
+// Bound by main.go to mcpserver.Server.CommitReviewVerdict so the
+// service and the MCP-facing contract_review_close handler share one
+// commit code path.
+//
+// The service passes actor=ServiceUserID and memberships=nil — the
+// service is a system-identity worker that operates cross-workspace.
+type CommitFn func(
+	ctx context.Context,
+	ciID, verdict, rationale, reviewTaskID, actor string,
+	now time.Time,
+	memberships []string,
+) error
+
+// Config carries the reviewer service's wiring.
+type Config struct {
+	// PollInterval is the back-off between empty-queue scans. Defaults
+	// to 5 s. Set lower in tests for tight polling.
+	PollInterval time.Duration
+
+	// SessionID is the registry session id the boot-time grant binds
+	// to role_reviewer. Defaults to ServiceSessionID.
+	SessionID string
+
+	// UserID is the system identity that owns SessionID. Defaults to
+	// ServiceUserID.
+	UserID string
+
+	// WorkerID is the value stamped as ClaimedBy on every claimed
+	// task. Defaults to WorkerID (the package constant).
+	WorkerID string
+}
+
+// Service is the embedded reviewer worker. Construct via New, run via
+// Run (blocks until the supplied context is cancelled).
+type Service struct {
+	cfg       Config
+	tasks     task.Store
+	contracts contract.Store
+	docs      document.Store
+	ledger    ledger.Store
+	reviewer  reviewer.Reviewer
+	commit    CommitFn
+	logger    arbor.ILogger
+	nowUTC    func() time.Time
+}
+
+// Deps bundles the service's required collaborators.
+type Deps struct {
+	Tasks     task.Store
+	Contracts contract.Store
+	Docs      document.Store
+	Ledger    ledger.Store
+	Reviewer  reviewer.Reviewer
+	Commit    CommitFn
+	Logger    arbor.ILogger
+	Now       func() time.Time // injectable clock for tests
+}
+
+// DefaultPollInterval is the back-off between empty-queue scans.
+const DefaultPollInterval = 5 * time.Second
+
+// New constructs a Service and validates the deps. Returns an error
+// when a required dep is nil — failures here are fatal at boot, not
+// runtime, so the caller can short-circuit before starting the
+// goroutine.
+func New(cfg Config, deps Deps) (*Service, error) {
+	if deps.Tasks == nil {
+		return nil, errors.New("reviewer/service: tasks store is required")
+	}
+	if deps.Contracts == nil {
+		return nil, errors.New("reviewer/service: contracts store is required")
+	}
+	if deps.Docs == nil {
+		return nil, errors.New("reviewer/service: docs store is required")
+	}
+	if deps.Ledger == nil {
+		return nil, errors.New("reviewer/service: ledger store is required")
+	}
+	if deps.Reviewer == nil {
+		return nil, errors.New("reviewer/service: reviewer is required")
+	}
+	if deps.Commit == nil {
+		return nil, errors.New("reviewer/service: commit fn is required")
+	}
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = DefaultPollInterval
+	}
+	if cfg.SessionID == "" {
+		cfg.SessionID = ServiceSessionID
+	}
+	if cfg.UserID == "" {
+		cfg.UserID = ServiceUserID
+	}
+	if cfg.WorkerID == "" {
+		cfg.WorkerID = WorkerID
+	}
+	now := deps.Now
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
+	return &Service{
+		cfg:       cfg,
+		tasks:     deps.Tasks,
+		contracts: deps.Contracts,
+		docs:      deps.Docs,
+		ledger:    deps.Ledger,
+		reviewer:  deps.Reviewer,
+		commit:    deps.Commit,
+		logger:    deps.Logger,
+		nowUTC:    now,
+	}, nil
+}
+
+// Run drives the service loop until ctx is cancelled. Each iteration:
+//
+//  1. Tick — list enqueued kind:review tasks and claim the head.
+//     Returns true when a task was processed; false on empty queue or
+//     race-loss.
+//  2. On true, loop again immediately to drain the queue.
+//  3. On false, sleep cfg.PollInterval before the next scan.
+//
+// Errors from individual ticks are logged and the loop continues —
+// the service's job is liveness, not perfection. Cancellation
+// returns ctx.Err().
+func (s *Service) Run(ctx context.Context) error {
+	if s.logger != nil {
+		s.logger.Info().
+			Str("session_id", s.cfg.SessionID).
+			Str("worker_id", s.cfg.WorkerID).
+			Dur("poll_interval", s.cfg.PollInterval).
+			Msg("reviewer service starting")
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			if s.logger != nil {
+				s.logger.Info().Msg("reviewer service stopping (context cancelled)")
+			}
+			return ctx.Err()
+		default:
+		}
+		if processed := s.Tick(ctx); processed {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(s.cfg.PollInterval):
+		}
+	}
+}
+
+// Tick performs one scan-claim-process cycle. Returns true when a
+// task was claimed and processed (whether the verdict was accepted or
+// rejected — both count as work done). Exposed so tests can drive
+// the service deterministically without spawning the loop.
+func (s *Service) Tick(ctx context.Context) bool {
+	candidates, err := s.tasks.List(ctx, task.ListOptions{
+		Status:       task.StatusEnqueued,
+		RequiredRole: "reviewer",
+		Limit:        16,
+	}, nil)
+	if err != nil {
+		s.logWarn("reviewer service list failed", err, nil)
+		return false
+	}
+	if len(candidates) == 0 {
+		return false
+	}
+	for _, t := range candidates {
+		claimed, err := s.tasks.ClaimByID(ctx, t.ID, s.cfg.WorkerID, s.nowUTC(), nil)
+		if errors.Is(err, task.ErrNoTaskAvailable) || errors.Is(err, task.ErrNotFound) {
+			// Lost the race or the task disappeared. Try the next
+			// candidate; the queue may carry several reviews in flight.
+			continue
+		}
+		if err != nil {
+			s.logWarn("reviewer service claim failed", err, map[string]string{"task_id": t.ID})
+			continue
+		}
+		s.processClaimed(ctx, claimed)
+		return true
+	}
+	return false
+}
+
+// reviewTaskPayload is the JSON shape close_handlers.go's
+// enqueueReviewTask writes onto the task's Payload field.
+type reviewTaskPayload struct {
+	ContractInstanceID string `json:"contract_instance_id"`
+	ContractName       string `json:"contract_name"`
+	StoryID            string `json:"story_id"`
+	CloseLedgerID      string `json:"close_ledger_id"`
+	EvidenceLedgerID   string `json:"evidence_ledger_id"`
+}
+
+// processClaimed assembles the review packet, runs the reviewer, and
+// commits the verdict via s.commit. Errors are recorded as a rejected
+// verdict carrying the failure rationale so the CI doesn't sit
+// pending_review forever.
+func (s *Service) processClaimed(ctx context.Context, t task.Task) {
+	var payload reviewTaskPayload
+	if len(t.Payload) > 0 {
+		_ = json.Unmarshal(t.Payload, &payload)
+	}
+	if payload.ContractInstanceID == "" {
+		s.commitFailure(ctx, "", "review-task payload missing contract_instance_id", t.ID, "task: payload missing ci id")
+		return
+	}
+	ci, err := s.contracts.GetByID(ctx, payload.ContractInstanceID, nil)
+	if err != nil {
+		s.commitFailure(ctx, payload.ContractInstanceID, fmt.Sprintf("ci %s unresolvable: %v", payload.ContractInstanceID, err), t.ID, "ci lookup failed")
+		return
+	}
+	contractDoc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
+	if err != nil {
+		s.commitFailure(ctx, ci.ID, fmt.Sprintf("contract doc %s unresolvable: %v", ci.ContractID, err), t.ID, "contract doc lookup failed")
+		return
+	}
+
+	evidenceMD := ""
+	if payload.EvidenceLedgerID != "" {
+		if row, err := s.ledger.GetByID(ctx, payload.EvidenceLedgerID, nil); err == nil {
+			evidenceMD = row.Content
+		}
+	}
+	if evidenceMD == "" && payload.CloseLedgerID != "" {
+		// Fall back to the close-request markdown when no separate
+		// evidence row was written.
+		if row, err := s.ledger.GetByID(ctx, payload.CloseLedgerID, nil); err == nil {
+			evidenceMD = row.Content
+		}
+	}
+	rubric := s.lookupReviewerRubric(ctx, ci.ContractName)
+
+	req := reviewer.Request{
+		ContractID:       contractDoc.ID,
+		ContractName:     contractDoc.Name,
+		AgentInstruction: contractDoc.Body,
+		ReviewerRubric:   rubric,
+		EvidenceMarkdown: evidenceMD,
+		ACScope:          ci.ACScope,
+	}
+	verdict, _, err := s.reviewer.Review(ctx, req)
+	if err != nil {
+		s.commitFailure(ctx, ci.ID, fmt.Sprintf("reviewer error: %v", err), t.ID, "reviewer call failed")
+		return
+	}
+	outcome := verdict.Outcome
+	rationale := verdict.Rationale
+	switch outcome {
+	case reviewer.VerdictAccepted, reviewer.VerdictRejected:
+		// pass through
+	case reviewer.VerdictNeedsMore:
+		// The task path doesn't support needs_more — the reviewer must
+		// commit. Treat as rejected with the questions appended to the
+		// rationale so the next iteration carries the context.
+		outcome = reviewer.VerdictRejected
+		if len(verdict.ReviewQuestions) > 0 {
+			rationale = strings.TrimSpace(rationale + "\n\nReview questions:\n- " + strings.Join(verdict.ReviewQuestions, "\n- "))
+		}
+	default:
+		outcome = reviewer.VerdictRejected
+		rationale = fmt.Sprintf("reviewer returned unexpected outcome %q; rejecting (rationale: %s)", verdict.Outcome, rationale)
+	}
+
+	if err := s.commit(ctx, ci.ID, outcome, rationale, t.ID, s.cfg.UserID, s.nowUTC(), nil); err != nil {
+		s.logWarn("reviewer service commit failed", err, map[string]string{
+			"ci_id":   ci.ID,
+			"task_id": t.ID,
+			"verdict": outcome,
+		})
+		return
+	}
+	if s.logger != nil {
+		s.logger.Info().
+			Str("ci_id", ci.ID).
+			Str("task_id", t.ID).
+			Str("verdict", outcome).
+			Str("contract", ci.ContractName).
+			Msg("reviewer service committed verdict")
+	}
+}
+
+// lookupReviewerRubric mirrors close_handlers.go's
+// lookupReviewerAgentBody — develop CIs are reviewed against the
+// development_reviewer body; everything else against story_reviewer.
+// Empty when neither doc resolves.
+func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string) string {
+	agentName := "story_reviewer"
+	if contractName == "develop" {
+		agentName = "development_reviewer"
+	}
+	rows, err := s.docs.List(ctx, document.ListOptions{
+		Type:  document.TypeAgent,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
+		return ""
+	}
+	for _, r := range rows {
+		if r.Status == document.StatusActive && r.Name == agentName {
+			return r.Body
+		}
+	}
+	return ""
+}
+
+// commitFailure rejects the CI with the given rationale and closes
+// the originating task with outcome=failure. Used when the service
+// can't reach a real reviewer verdict (CI gone, contract doc
+// unreadable, gemini error). Tolerant of commit failures — the
+// substrate watchdog will eventually reclaim the task.
+func (s *Service) commitFailure(ctx context.Context, ciID, rationale, taskID, logReason string) {
+	if s.logger != nil {
+		s.logger.Warn().
+			Str("ci_id", ciID).
+			Str("task_id", taskID).
+			Str("reason", logReason).
+			Str("rationale", rationale).
+			Msg("reviewer service rejecting (failure path)")
+	}
+	if ciID == "" {
+		// No CI to reject — close the task as failure so the queue
+		// doesn't loop on it.
+		if s.tasks != nil && taskID != "" {
+			_, _ = s.tasks.Close(ctx, taskID, task.OutcomeFailure, s.nowUTC(), nil)
+		}
+		return
+	}
+	if err := s.commit(ctx, ciID, reviewer.VerdictRejected, rationale, taskID, s.cfg.UserID, s.nowUTC(), nil); err != nil {
+		s.logWarn("reviewer service failure-path commit failed", err, map[string]string{
+			"ci_id":   ciID,
+			"task_id": taskID,
+		})
+		// Best-effort task close so the queue isn't stuck on the
+		// failed-commit task.
+		if s.tasks != nil && taskID != "" {
+			_, _ = s.tasks.Close(ctx, taskID, task.OutcomeFailure, s.nowUTC(), nil)
+		}
+	}
+}
+
+func (s *Service) logWarn(msg string, err error, fields map[string]string) {
+	if s.logger == nil {
+		return
+	}
+	ev := s.logger.Warn()
+	if err != nil {
+		ev = ev.Str("error", err.Error())
+	}
+	for k, v := range fields {
+		ev = ev.Str(k, v)
+	}
+	ev.Msg(msg)
+}

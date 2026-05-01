@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -35,6 +36,21 @@ const (
 	resumeCapStory     = 10
 	reviewIterationCap = 3
 )
+
+// validationModeKVKey is the KV row key the close handler resolves to
+// pick the per-CI validation mode (epic:v4-lifecycle-refactor
+// sty_e20e1537). The system-tier seed at boot writes "task" so the
+// production default goes through the review-task gate; project /
+// user / workspace overrides flip individual CIs back to the legacy
+// inline reviewer modes.
+const validationModeKVKey = "lifecycle.validation_mode"
+
+// DefaultValidationMode is the legacy fallback applied when no KV
+// row resolves AND the contract document carries no validation_mode
+// field. Production defaults to ModeTask via the system-tier KV seed
+// (see configseed in cmd/satellites/main.go); this constant is the
+// "didn't even get the seed" backstop.
+var DefaultValidationMode = reviewer.ModeTask
 
 func intEnv(key string, fallback int) int {
 	if raw := os.Getenv(key); raw != "" {
@@ -172,13 +188,16 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		}
 	}
 
-	// Mode-task path (epic:v4-lifecycle-refactor sty_b6b2de01): when
-	// the contract doc declares validation_mode=task, contract_close
-	// does NOT pass the CI. Instead it creates a kind:review task with
-	// required_role:reviewer and flips the CI to pending_review. A
-	// reviewer-role runtime claims the task and calls
-	// contract_review_close to flip the CI to passed/failed.
-	if ciContractMode(ctx, s, ci) == reviewer.ModeTask && s.tasks != nil {
+	// epic:v4-lifecycle-refactor sty_e20e1537: every close goes through
+	// the review-task gate. resolveValidationMode walks the KV chain
+	// (system → user → project → workspace, default ModeTask) and
+	// falls back to the contract doc's validation_mode field. When the
+	// resolved mode is ModeTask AND a task store is wired, the close
+	// enqueues a kind:review task and flips the CI to pending_review;
+	// a reviewer-role runtime then calls contract_review_close to
+	// commit the verdict.
+	mode := s.resolveValidationMode(ctx, ci, caller.UserID, memberships)
+	if mode == reviewer.ModeTask && s.tasks != nil {
 		reviewTaskID, terr := s.enqueueReviewTask(ctx, ci, closeRow.ID, evidenceRowID, caller.UserID, now)
 		if terr != nil {
 			return mcpgo.NewToolResultError(fmt.Sprintf("review-task enqueue: %v", terr)), nil
@@ -194,6 +213,7 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 			"evidence_ledger_id":   evidenceRowID,
 			"plan_ledger_id":       planRowID,
 			"review_task_id":       reviewTaskID,
+			"validation_mode":      mode,
 		})
 		s.logger.Info().
 			Str("method", "tools/call").
@@ -201,41 +221,24 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 			Str("ci_id", ci.ID).
 			Str("status", contract.StatusPendingReview).
 			Str("review_task_id", reviewTaskID).
+			Str("validation_mode", mode).
 			Int64("duration_ms", time.Since(start).Milliseconds()).
 			Msg("mcp tool call")
 		return mcpgo.NewToolResultText(string(body)), nil
 	}
 
-	// Reviewer branch — consult the contract document's
-	// validation_mode. On needs_more the close is rejected; on
-	// accepted/rejected the CI is transitioned accordingly.
-	verdictOutcome, verdictRowID, llmUsageRowID, err := s.runReviewer(ctx, ci, evidenceMarkdown, evidenceIDs, caller.UserID, now, memberships)
-	if err != nil {
+	// Fallback path (no task store wired, or non-task mode resolved
+	// despite the inline reviewer's removal): auto-pass the CI after
+	// writing the close-request + evidence rows. Per sty_e20e1537 the
+	// inline reviewer (runReviewer) is gone — non-task modes survive
+	// only as a deprecated tag on the contract doc / ledger; the close
+	// path no longer dispatches to gemini in-line. Tests that don't
+	// wire a task store rely on this branch; production always wires
+	// tasks so the task-gate above is the only live path.
+	if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusPassed, caller.UserID, now, memberships); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	switch verdictOutcome {
-	case reviewer.VerdictNeedsMore:
-		// CI stays claimed; structured error names the unresolved
-		// review questions so the agent can call contract_respond
-		// + re-close.
-		body, _ := json.Marshal(map[string]any{
-			"error":             "needs_more",
-			"verdict_ledger_id": verdictRowID,
-			"message":           "reviewer needs more; call contract_respond then re-invoke close",
-		})
-		return mcpgo.NewToolResultError(string(body)), nil
-	case reviewer.VerdictRejected:
-		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusFailed, caller.UserID, now, memberships); err != nil {
-			return mcpgo.NewToolResultError(err.Error()), nil
-		}
-	default: // accepted | skip (no-verdict path for mode=agent)
-		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusPassed, caller.UserID, now, memberships); err != nil {
-			return mcpgo.NewToolResultError(err.Error()), nil
-		}
-	}
 
-	// Story rollup: if every RequiredForClose CI is terminal, flip the
-	// story to done.
 	storyStatus := ""
 	peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
 	allTerminal := true
@@ -252,29 +255,85 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		storyStatus = s.walkStoryToDone(ctx, ci.StoryID, caller.UserID, now, memberships)
 	}
 
-	finalStatus := contract.StatusPassed
-	if verdictOutcome == reviewer.VerdictRejected {
-		finalStatus = contract.StatusFailed
-	}
 	body, _ := json.Marshal(map[string]any{
 		"contract_instance_id": ci.ID,
 		"story_id":             ci.StoryID,
-		"status":               finalStatus,
+		"status":               contract.StatusPassed,
 		"close_ledger_id":      closeRow.ID,
 		"evidence_ledger_id":   evidenceRowID,
 		"plan_ledger_id":       planRowID,
 		"story_status":         storyStatus,
-		"verdict_ledger_id":    verdictRowID,
-		"llm_usage_ledger_id":  llmUsageRowID,
-		"verdict":              verdictOutcome,
+		"validation_mode":      mode,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "contract_close").
 		Str("ci_id", ci.ID).
+		Str("validation_mode", mode).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// resolveValidationMode picks the validation_mode for ci by walking
+// the KV chain in override-friendly order (user → project →
+// workspace → system), then falling back to the contract document's
+// structured `validation_mode` field, then to DefaultValidationMode
+// (ModeTask).
+//
+// The walk order differs from ledger.KVResolveScoped's "system always
+// wins" semantic: per sty_e20e1537 the system seed is the production
+// *default*, but project / user / workspace overrides MUST be able to
+// pin a CI back to the legacy reviewer modes for projects that aren't
+// ready to migrate. epic:v4-lifecycle-refactor sty_e20e1537.
+func (s *Server) resolveValidationMode(ctx context.Context, ci contract.ContractInstance, callerUserID string, memberships []string) string {
+	if s.ledger != nil {
+		// Append the system sentinel so KV system-tier rows
+		// (workspace_id="") are visible to the projection scans below.
+		kvMembers := append([]string{""}, memberships...)
+
+		tiers := []ledger.KVProjectionOptions{}
+		if callerUserID != "" && ci.WorkspaceID != "" {
+			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeUser, WorkspaceID: ci.WorkspaceID, UserID: callerUserID})
+		}
+		if ci.ProjectID != "" {
+			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeProject, WorkspaceID: ci.WorkspaceID, ProjectID: ci.ProjectID})
+		}
+		if ci.WorkspaceID != "" {
+			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeWorkspace, WorkspaceID: ci.WorkspaceID})
+		}
+		tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeSystem})
+
+		for _, tier := range tiers {
+			rows, err := ledger.KVProjectionScoped(ctx, s.ledger, tier, kvMembers)
+			if err != nil {
+				continue
+			}
+			if row, present := rows[validationModeKVKey]; present {
+				if v := strings.TrimSpace(row.Value); v != "" {
+					return v
+				}
+			}
+		}
+	}
+	// Deprecated tier-3 fallback: contract document's structured
+	// validation_mode field (the pre-sty_e20e1537 shape). New seeds
+	// should not carry this; existing rows continue to work until
+	// migrated.
+	if s.docs != nil && ci.ContractID != "" {
+		if doc, err := s.docs.GetByID(ctx, ci.ContractID, nil); err == nil {
+			var payload struct {
+				ValidationMode string `json:"validation_mode"`
+			}
+			if len(doc.Structured) > 0 {
+				_ = json.Unmarshal(doc.Structured, &payload)
+			}
+			if v := strings.TrimSpace(payload.ValidationMode); v != "" {
+				return v
+			}
+		}
+	}
+	return DefaultValidationMode
 }
 
 // handleContractRespond writes a kind:review-response ledger row
@@ -538,130 +597,6 @@ func (s *Server) findLatestReviewQuestion(ctx context.Context, ci contract.Contr
 	return ""
 }
 
-// runReviewer dispatches on the CI's contract document's
-// validation_mode and writes the verdict + (for llm mode) llm-usage
-// rows. Returns the verdict outcome string, the verdict row id, the
-// llm-usage row id, and any error. A verdict outcome of "" means "no
-// reviewer ran" (agent mode or the contract doc is unreadable) and
-// the caller treats that as an accepted-equivalent.
-func (s *Server) runReviewer(
-	ctx context.Context,
-	ci contract.ContractInstance,
-	evidenceMarkdown string,
-	evidenceLedgerIDs []string,
-	actor string,
-	now time.Time,
-	memberships []string,
-) (string, string, string, error) {
-	contractDoc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
-	if err != nil {
-		// Can't read the contract doc → treat as agent mode (no
-		// verdict row). The outer close path still writes evidence +
-		// close-request; this just skips reviewer invocation.
-		return "", "", "", nil
-	}
-	mode, checks := parseContractStructured(contractDoc.Structured)
-	switch mode {
-	case reviewer.ModeCheckBased:
-		input := s.gatherChecksInput(ctx, ci, memberships)
-		verdict, outcomes := reviewer.RunChecks(checks, input)
-		rowID, err := s.writeVerdictRow(ctx, ci, verdict, actor, now, map[string]any{
-			"mode":     reviewer.ModeCheckBased,
-			"outcomes": outcomes,
-		})
-		return verdict.Outcome, rowID, "", err
-	case reviewer.ModeLLM:
-		req := reviewer.Request{
-			ContractID:       contractDoc.ID,
-			ContractName:     contractDoc.Name,
-			AgentInstruction: contractDoc.Body,
-			ReviewerRubric:   s.lookupReviewerAgentBody(ctx, ci.ContractName, memberships),
-			EvidenceMarkdown: evidenceMarkdown,
-			EvidenceRefs:     evidenceLedgerIDs,
-			ACScope:          ci.ACScope,
-		}
-		verdict, usage, err := s.reviewer.Review(ctx, req)
-		if err != nil {
-			return "", "", "", fmt.Errorf("reviewer: %w", err)
-		}
-		var usageRowID string
-		usageRowID, _ = s.writeLLMUsageRow(ctx, ci, usage, actor, now)
-		rowID, err := s.writeVerdictRow(ctx, ci, verdict, actor, now, map[string]any{
-			"mode":             reviewer.ModeLLM,
-			"principles_cited": verdict.PrinciplesCited,
-			"review_questions": verdict.ReviewQuestions,
-			"model":            usage.Model,
-			"cost_usd":         usage.CostUSD,
-		})
-		if err != nil {
-			return "", "", "", err
-		}
-		// On needs_more write one kind:review-question row per item so
-		// contract_respond can target them.
-		if verdict.Outcome == reviewer.VerdictNeedsMore {
-			for _, q := range verdict.ReviewQuestions {
-				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
-					WorkspaceID: ci.WorkspaceID,
-					ProjectID:   ci.ProjectID,
-					StoryID:     ledger.StringPtr(ci.StoryID),
-					ContractID:  ledger.StringPtr(ci.ID),
-					Type:        ledger.TypeDecision,
-					Tags:        []string{"kind:review-question", "phase:" + ci.ContractName},
-					Content:     q,
-					CreatedBy:   actor,
-				}, now)
-			}
-		}
-		return verdict.Outcome, rowID, usageRowID, nil
-	default:
-		// agent mode (or missing). No verdict row; caller proceeds as
-		// accepted.
-		return "", "", "", nil
-	}
-}
-
-// parseContractStructured reads validation_mode + checks from a
-// contract document's structured field. Tolerant of unknown JSON —
-// returns "" when structured is empty or malformed.
-func parseContractStructured(raw []byte) (string, []reviewer.Check) {
-	if len(raw) == 0 {
-		return "", nil
-	}
-	var payload struct {
-		ValidationMode string           `json:"validation_mode"`
-		Checks         []reviewer.Check `json:"checks"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return "", nil
-	}
-	return payload.ValidationMode, payload.Checks
-}
-
-// gatherChecksInput collects the artifact names already present on
-// the CI's ledger. Used by the check-based runner's artifact_exists
-// check.
-func (s *Server) gatherChecksInput(ctx context.Context, ci contract.ContractInstance, memberships []string) reviewer.ChecksInput {
-	input := reviewer.ChecksInput{Artifacts: map[string]bool{}}
-	rows, err := s.ledger.List(ctx, ci.ProjectID, ledger.ListOptions{
-		Type: ledger.TypeArtifact,
-	}, memberships)
-	if err != nil {
-		return input
-	}
-	for _, r := range rows {
-		if r.ContractID == nil || *r.ContractID != ci.ID {
-			continue
-		}
-		for _, tag := range r.Tags {
-			const prefix = "artifact:"
-			if len(tag) > len(prefix) && tag[:len(prefix)] == prefix {
-				input.Artifacts[tag[len(prefix):]] = true
-			}
-		}
-	}
-	return input
-}
-
 // writeVerdictRow appends a kind:verdict ledger row carrying the
 // reviewer's outcome + rationale + structured metadata.
 func (s *Server) writeVerdictRow(ctx context.Context, ci contract.ContractInstance, v reviewer.Verdict, actor string, now time.Time, extra map[string]any) (string, error) {
@@ -681,36 +616,6 @@ func (s *Server) writeVerdictRow(ctx context.Context, ci contract.ContractInstan
 		Type:        ledger.TypeVerdict,
 		Tags:        []string{"kind:verdict", "phase:" + ci.ContractName},
 		Content:     v.Rationale,
-		Structured:  structured,
-		CreatedBy:   actor,
-	}, now)
-	if err != nil {
-		return "", err
-	}
-	return row.ID, nil
-}
-
-// writeLLMUsageRow appends a kind:llm-usage decision row consumed by
-// the CostRollup derivation from slice 7.3. Skipped when usage is
-// zero (no tokens claimed).
-func (s *Server) writeLLMUsageRow(ctx context.Context, ci contract.ContractInstance, usage reviewer.UsageCost, actor string, now time.Time) (string, error) {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CostUSD == 0 {
-		return "", nil
-	}
-	structured, _ := json.Marshal(map[string]any{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
-		"cost_usd":      usage.CostUSD,
-		"model":         usage.Model,
-	})
-	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: ci.WorkspaceID,
-		ProjectID:   ci.ProjectID,
-		StoryID:     ledger.StringPtr(ci.StoryID),
-		ContractID:  ledger.StringPtr(ci.ID),
-		Type:        ledger.TypeDecision,
-		Tags:        []string{"kind:llm-usage", "phase:" + ci.ContractName},
-		Content:     "reviewer llm usage",
 		Structured:  structured,
 		CreatedBy:   actor,
 	}, now)
@@ -755,18 +660,6 @@ func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName strin
 	return ""
 }
 
-// ciContractMode reads the validation_mode field from the CI's
-// contract document. Returns "" when the doc is missing or unreadable
-// (treated as agent mode by callers).
-func ciContractMode(ctx context.Context, s *Server, ci contract.ContractInstance) string {
-	doc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
-	if err != nil {
-		return ""
-	}
-	mode, _ := parseContractStructured(doc.Structured)
-	return mode
-}
-
 // enqueueReviewTask creates a kind:review task targeting the CI being
 // closed. Carries required_role:reviewer so any reviewer-role runtime
 // in the queue's workspace can claim it. Payload references the
@@ -808,23 +701,25 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 	return t.ID, nil
 }
 
-// handleContractReviewClose closes a pending_review CI. Reviewer-role
-// runtimes (gemini today, fresh Claude session tomorrow) call this
-// after claiming a kind:review task, reading the rubric + evidence,
-// and reaching a verdict. The verb:
-//
-//   - validates the CI is in pending_review state.
-//   - writes a kind:verdict ledger row with the reviewer's verdict and
-//     rationale.
-//   - flips the CI to passed (verdict=accepted) or failed
-//     (verdict=rejected). needs_more is rejected — the reviewer has
-//     committed, no further round-trip via contract_respond.
-//   - closes the originating review task (when review_task_id is
-//     supplied) so the queue worker shutdown path is clean.
-//   - on accepted: rolls the story to done when every required CI is
-//     terminal.
-//
-// epic:v4-lifecycle-refactor sty_b6b2de01.
+// ReviewCommitResult is the structured outcome of a verdict commit.
+// The MCP handler renders it as JSON; the embedded reviewer service
+// uses the fields for log + ledger annotations.
+type ReviewCommitResult struct {
+	ContractInstanceID string
+	StoryID            string
+	Status             string
+	Verdict            string
+	VerdictLedgerID    string
+	ReviewTaskID       string
+	StoryStatus        string
+	AppendedCIID       string
+	BlockedReason      string
+}
+
+// handleContractReviewClose is the MCP-facing wrapper around
+// CommitReviewVerdict. It parses the request, resolves the caller's
+// memberships, calls the commit, and renders the structured result as
+// a JSON tool response. epic:v4-lifecycle-refactor sty_b6b2de01.
 func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	caller, _ := UserFrom(ctx)
 	ciID, err := req.RequireString("contract_instance_id")
@@ -835,55 +730,111 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
+	rationale := req.GetString("rationale", "")
+	reviewTaskID := req.GetString("review_task_id", "")
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	res, cerr := s.CommitReviewVerdict(ctx, ciID, verdictArg, rationale, reviewTaskID, caller.UserID, s.nowUTC(), memberships)
+	if cerr != nil {
+		return mcpgo.NewToolResultError(cerr.Error()), nil
+	}
+	body, _ := json.Marshal(map[string]any{
+		"contract_instance_id": res.ContractInstanceID,
+		"story_id":             res.StoryID,
+		"status":               res.Status,
+		"verdict":              res.Verdict,
+		"verdict_ledger_id":    res.VerdictLedgerID,
+		"review_task_id":       res.ReviewTaskID,
+		"story_status":         res.StoryStatus,
+		"appended_ci_id":       res.AppendedCIID,
+		"blocked_reason":       res.BlockedReason,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "contract_review_close").
+		Str("ci_id", res.ContractInstanceID).
+		Str("verdict", res.Verdict).
+		Str("status", res.Status).
+		Str("appended_ci_id", res.AppendedCIID).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// CommitReviewVerdict applies a reviewer's verdict to a pending_review
+// CI. Shared between the MCP handler (handleContractReviewClose) and
+// the embedded reviewer service goroutine (internal/reviewer/service)
+// so both paths produce identical ledger + state transitions.
+//
+// Steps:
+//
+//   - validate the verdict argument (accepted | rejected only).
+//   - look up the CI; reject when not in pending_review.
+//   - write a kind:verdict ledger row carrying outcome + rationale.
+//   - flip the CI to passed (accepted) or failed (rejected).
+//   - close the originating review task when reviewTaskID is non-empty.
+//   - on rejected: append a fresh CI of the same contract type with
+//     PriorCIID set, OR escalate the story to blocked when the
+//     iteration cap is exceeded (sty_bbe732af).
+//   - on accepted: walk the story to done when every required CI is
+//     terminal.
+//
+// memberships scopes the writes; pass nil for system-identity callers
+// (e.g. the embedded reviewer service running cross-workspace).
+//
+// epic:v4-lifecycle-refactor sty_b6b2de01 / sty_6077711d.
+func (s *Server) CommitReviewVerdict(
+	ctx context.Context,
+	ciID, verdictArg, rationale, reviewTaskID, actor string,
+	now time.Time,
+	memberships []string,
+) (ReviewCommitResult, error) {
+	out := ReviewCommitResult{
+		ContractInstanceID: ciID,
+		Verdict:            verdictArg,
+		ReviewTaskID:       reviewTaskID,
+	}
 	if verdictArg != reviewer.VerdictAccepted && verdictArg != reviewer.VerdictRejected {
 		body, _ := json.Marshal(map[string]any{
 			"error":   "invalid_verdict",
 			"verdict": verdictArg,
 			"message": "verdict must be one of: accepted | rejected (needs_more is not valid for review_close — the reviewer must commit)",
 		})
-		return mcpgo.NewToolResultError(string(body)), nil
+		return out, errors.New(string(body))
 	}
-	rationale := req.GetString("rationale", "")
-	reviewTaskID := req.GetString("review_task_id", "")
-
-	memberships := s.resolveCallerMemberships(ctx, caller)
 	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
 	if err != nil {
 		body, _ := json.Marshal(map[string]any{"error": "ci_not_found"})
-		return mcpgo.NewToolResultError(string(body)), nil
+		return out, errors.New(string(body))
 	}
+	out.StoryID = ci.StoryID
 	if ci.Status != contract.StatusPendingReview {
 		body, _ := json.Marshal(map[string]any{
 			"error":  "ci_not_pending_review",
 			"status": ci.Status,
 		})
-		return mcpgo.NewToolResultError(string(body)), nil
+		return out, errors.New(string(body))
 	}
-
-	now := s.nowUTC()
 
 	verdictRow, err := s.writeVerdictRow(ctx, ci, reviewer.Verdict{
 		Outcome:   verdictArg,
 		Rationale: rationale,
-	}, caller.UserID, now, map[string]any{
+	}, actor, now, map[string]any{
 		"mode":           reviewer.ModeTask,
 		"review_task_id": reviewTaskID,
 	})
 	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+		return out, err
 	}
+	out.VerdictLedgerID = verdictRow
 
 	target := contract.StatusPassed
 	if verdictArg == reviewer.VerdictRejected {
 		target = contract.StatusFailed
 	}
-	if _, err := s.contracts.UpdateStatus(ctx, ci.ID, target, caller.UserID, now, memberships); err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
+	if _, err := s.contracts.UpdateStatus(ctx, ci.ID, target, actor, now, memberships); err != nil {
+		return out, err
 	}
+	out.Status = target
 
-	// Close the originating review task when supplied. Tolerant of
-	// missing/already-closed — the verdict + CI flip are the source of
-	// truth.
 	if reviewTaskID != "" && s.tasks != nil {
 		outcome := task.OutcomeSuccess
 		if verdictArg == reviewer.VerdictRejected {
@@ -892,13 +843,6 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 		_, _ = s.tasks.Close(ctx, reviewTaskID, outcome, now, memberships)
 	}
 
-	// Rejection-append (epic:v4-lifecycle-refactor sty_bbe732af): on
-	// verdict=rejected, append a fresh CI of the same contract type
-	// with PriorCIID set so the next claimer inherits the prior
-	// attempt's evidence + the rejection reason via standard ledger
-	// reads. Iteration cap escalates to the user (story → blocked) on
-	// the Nth attempt.
-	var appendedCIID, blockedReason string
 	if verdictArg == reviewer.VerdictRejected {
 		cap := intEnv("SATELLITES_REVIEW_ITERATION_CAP", reviewIterationCap)
 		peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
@@ -909,9 +853,9 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 			}
 		}
 		if sameType >= cap {
-			blockedReason = fmt.Sprintf("review iteration cap %d exceeded for contract %q", cap, ci.ContractName)
+			out.BlockedReason = fmt.Sprintf("review iteration cap %d exceeded for contract %q", cap, ci.ContractName)
 			if s.stories != nil {
-				_, _ = s.stories.UpdateStatus(ctx, ci.StoryID, story.StatusBlocked, caller.UserID, now, memberships)
+				_, _ = s.stories.UpdateStatus(ctx, ci.StoryID, story.StatusBlocked, actor, now, memberships)
 			}
 			_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
 				WorkspaceID: ci.WorkspaceID,
@@ -919,8 +863,8 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 				StoryID:     ledger.StringPtr(ci.StoryID),
 				Type:        ledger.TypeDecision,
 				Tags:        []string{"kind:story-blocked", "phase:" + ci.ContractName, "reason:iteration_cap_exceeded"},
-				Content:     blockedReason,
-				CreatedBy:   caller.UserID,
+				Content:     out.BlockedReason,
+				CreatedBy:   actor,
 			}, now)
 		} else {
 			newCI, cerr := s.contracts.Create(ctx, contract.ContractInstance{
@@ -935,7 +879,7 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 				PriorCIID:        ci.ID,
 			}, now)
 			if cerr == nil {
-				appendedCIID = newCI.ID
+				out.AppendedCIID = newCI.ID
 				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
 					WorkspaceID: ci.WorkspaceID,
 					ProjectID:   ci.ProjectID,
@@ -944,15 +888,12 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 					Type:        ledger.TypeDecision,
 					Tags:        []string{"kind:rejection-append", "phase:" + ci.ContractName, "prior_ci_id:" + ci.ID, "iteration:" + strconv.Itoa(sameType+1)},
 					Content:     fmt.Sprintf("appended fresh %s CI after rejection of %s; reason: %s", ci.ContractName, ci.ID, rationale),
-					CreatedBy:   caller.UserID,
+					CreatedBy:   actor,
 				}, now)
 			}
 		}
 	}
 
-	// Story rollup: if every RequiredForClose CI is terminal, flip the
-	// story to done.
-	storyStatus := ""
 	peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
 	allTerminal := true
 	for _, p := range peers {
@@ -965,29 +906,9 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 		}
 	}
 	if allTerminal && verdictArg == reviewer.VerdictAccepted {
-		storyStatus = s.walkStoryToDone(ctx, ci.StoryID, caller.UserID, now, memberships)
+		out.StoryStatus = s.walkStoryToDone(ctx, ci.StoryID, actor, now, memberships)
 	}
-
-	body, _ := json.Marshal(map[string]any{
-		"contract_instance_id": ci.ID,
-		"story_id":             ci.StoryID,
-		"status":               target,
-		"verdict":              verdictArg,
-		"verdict_ledger_id":    verdictRow,
-		"review_task_id":       reviewTaskID,
-		"story_status":         storyStatus,
-		"appended_ci_id":       appendedCIID,
-		"blocked_reason":       blockedReason,
-	})
-	s.logger.Info().
-		Str("method", "tools/call").
-		Str("tool", "contract_review_close").
-		Str("ci_id", ci.ID).
-		Str("verdict", verdictArg).
-		Str("status", target).
-		Str("appended_ci_id", appendedCIID).
-		Msg("mcp tool call")
-	return mcpgo.NewToolResultText(string(body)), nil
+	return out, nil
 }
 
 // ensureCloseHandlersCompile references the error + fmt packages to

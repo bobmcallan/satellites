@@ -369,6 +369,15 @@ const (
 	SeedAgentOrchestratorName = "agent_claude_orchestrator"
 )
 
+// Reviewer service seed canonical names (epic:v4-lifecycle-refactor
+// sty_62d4b438). main.go's boot sequence creates these system-scope
+// docs and, when SATELLITES_REVIEWER_SERVICE=embedded, mints a grant
+// pinning the embedded reviewer service's session id to role_reviewer.
+const (
+	SeedRoleReviewerName  = "role_reviewer"
+	SeedAgentReviewerName = "agent_gemini_reviewer"
+)
+
 // issueOrchestratorGrant mints a role-grant on behalf of a freshly
 // registered session. Returns the updated session (with
 // OrchestratorGrantID set) on success; ok=false with the unchanged

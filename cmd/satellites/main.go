@@ -40,6 +40,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/ratelimit"
 	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/reviewer"
+	reviewerservice "github.com/bobmcallan/satellites/internal/reviewer/service"
 	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
@@ -259,6 +260,16 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("orchestrator docs seed failed")
 		}
 
+		// Seed the system-scope reviewer role + agent documents the
+		// standalone reviewer service holds when SATELLITES_REVIEWER_SERVICE
+		// is set (epic:v4-lifecycle-refactor sty_62d4b438). The seed runs
+		// unconditionally so an operator flipping the env to embedded on a
+		// later boot finds the docs already in place; the boot-time
+		// grant-mint below is gated on the env value.
+		if err := seedReviewerDocs(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("reviewer docs seed failed")
+		}
+
 		// Seed the system-scope lifecycle agent documents that
 		// story_b39b393f's strict-required follow-up will allocate to
 		// each contract instance at workflow_claim time. Idempotent.
@@ -364,6 +375,35 @@ func main() {
 		// — a second invocation finds none active. sty_c975ebeb.
 		if _, err := project.ArchiveLegacyDefaults(ctx, projStore, logger, time.Now().UTC()); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("archive legacy defaults failed")
+		}
+
+		// epic:v4-lifecycle-refactor sty_e20e1537: seed the system-tier
+		// `lifecycle.validation_mode = task` KV row so production closes
+		// flow through the review-task gate by default. Idempotent —
+		// existing rows (including project / user / workspace overrides)
+		// are left untouched on re-seed.
+		if err := seedSystemValidationMode(ctx, ledgerStore, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("validation_mode KV seed failed")
+		}
+
+		// epic:v4-lifecycle-refactor sty_62d4b438: when the reviewer
+		// service is wired in embedded mode, mint (or reuse) an active
+		// role-grant pinning the service's session id to role_reviewer.
+		// The grant is the prerequisite for the service goroutine —
+		// without it, task_claim and contract_review_close fail the
+		// session-role gate (sty_8490f906).
+		if cfg.ReviewerService == reviewerservice.ModeEmbedded {
+			grantID, err := ensureReviewerServiceGrant(ctx, docStore, grantStore, sessionStore, systemWsID, time.Now().UTC())
+			if err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("reviewer service grant mint failed; service will not start")
+			} else if grantID == "" {
+				logger.Warn().Msg("reviewer service grant skipped: role_reviewer or agent_gemini_reviewer seed missing")
+			} else {
+				logger.Info().
+					Str("grant_id", grantID).
+					Str("session_id", reviewerservice.ServiceSessionID).
+					Msg("reviewer service grant minted")
+			}
 		}
 	}
 
@@ -512,6 +552,55 @@ func main() {
 		}
 	}
 
+	// epic:v4-lifecycle-refactor sty_6077711d: standalone reviewer
+	// service. Runs as an in-process goroutine consuming kind:review
+	// tasks from the queue, invoking the gemini reviewer against the
+	// rubric + evidence, and committing the verdict via
+	// CommitReviewVerdict. Disabled unless SATELLITES_REVIEWER_SERVICE=embedded
+	// AND the reviewer + task stores are wired. The boot-time grant
+	// minted earlier (sty_62d4b438) gives the service its
+	// role_reviewer authorisation.
+	if cfg.ReviewerService == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
+		commitFn := func(
+			ctx context.Context,
+			ciID, verdict, rationale, reviewTaskID, actor string,
+			now time.Time,
+			memberships []string,
+		) error {
+			_, err := mcp.CommitReviewVerdict(ctx, ciID, verdict, rationale, reviewTaskID, actor, now, memberships)
+			return err
+		}
+		revSvc, err := reviewerservice.New(reviewerservice.Config{}, reviewerservice.Deps{
+			Tasks:     taskStore,
+			Contracts: contractStore,
+			Docs:      docStore,
+			Ledger:    ledgerStore,
+			Reviewer:  rev,
+			Commit:    commitFn,
+			Logger:    logger,
+		})
+		if err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("reviewer service construction failed")
+		} else {
+			revCtx, revStop := context.WithCancel(ctx)
+			revDone := make(chan struct{})
+			go func() {
+				defer close(revDone)
+				if err := revSvc.Run(revCtx); err != nil && !errors.Is(err, context.Canceled) {
+					logger.Warn().Str("error", err.Error()).Msg("reviewer service exited")
+				}
+			}()
+			defer func() {
+				revStop()
+				select {
+				case <-revDone:
+				case <-time.After(5 * time.Second):
+					logger.Warn().Msg("reviewer service shutdown timeout exceeded")
+				}
+			}()
+		}
+	}
+
 	// Embedding ingestion worker (story_5abfe61c). Boots only when an
 	// embeddings provider is configured AND SATELLITES_DB_DSN is set so the Surreal
 	// chunk stores are available. SATELLITES_EMBEDDINGS_PROVIDER=none / unset → the
@@ -610,6 +699,163 @@ func seedOrchestratorDocs(ctx context.Context, docStore document.Store, workspac
 		return fmt.Errorf("seed agent_claude_orchestrator: %w", err)
 	}
 	return nil
+}
+
+// seedReviewerDocs creates the system-scope `role_reviewer` and
+// `agent_gemini_reviewer` documents used by the standalone reviewer
+// service to claim kind:review tasks (epic:v4-lifecycle-refactor
+// sty_62d4b438). Idempotent: existing rows are left untouched.
+//
+// The role's allowed_mcp_verbs covers the verbs the service exercises:
+// task_* (queue claim/close), contract_review_close (verdict), the
+// ledger / document reads needed to assemble the review packet, and
+// the session_whoami / role_claim affordances for observability.
+//
+// The agent doc pins permitted_roles to role_reviewer so the
+// downstream grant-mint resolves cleanly. tool_ceiling matches the
+// role's verb subset.
+func seedReviewerDocs(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
+	if docStore == nil {
+		return nil
+	}
+	role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil)
+	if err != nil {
+		role, err = docStore.Create(ctx, document.Document{
+			WorkspaceID: workspaceID,
+			ProjectID:   nil,
+			Type:        document.TypeRole,
+			Name:        mcpserver.SeedRoleReviewerName,
+			Scope:       document.ScopeSystem,
+			Status:      document.StatusActive,
+			Body:        "Reviewer role — the authorisation bundle the standalone reviewer service holds. Covers task queue verbs (task_claim/close), contract_review_close for verdict commits, and the ledger/document reads needed to assemble the review packet. Seeded by platform bootstrap when SATELLITES_REVIEWER_SERVICE=embedded.",
+			Structured:  []byte(`{"allowed_mcp_verbs":["task_claim","task_close","task_get","task_list","contract_review_close","ledger_get","ledger_list","document_get","contract_get","session_whoami","agent_role_claim","agent_role_release","agent_role_list","satellites_info"],"required_hooks":[],"claim_requirements":[],"default_context_policy":"fresh-per-claim"}`),
+			Tags:        []string{"v4", "agents-roles", "seed", "reviewer"},
+			CreatedBy:   "system",
+		}, now)
+		if err != nil {
+			return fmt.Errorf("seed role_reviewer: %w", err)
+		}
+	}
+	if _, err := docStore.GetByName(ctx, "", mcpserver.SeedAgentReviewerName, nil); err == nil {
+		return nil
+	}
+	structured := `{"provider_chain":[{"provider":"gemini","model":"gemini-2.5-flash","tier":"flash"}],"tier":"flash","permitted_roles":["` + role.ID + `"],"tool_ceiling":["task_claim","task_close","task_get","task_list","contract_review_close","ledger_get","ledger_list","document_get","contract_get","session_whoami"]}`
+	if _, err := docStore.Create(ctx, document.Document{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypeAgent,
+		Name:        mcpserver.SeedAgentReviewerName,
+		Scope:       document.ScopeSystem,
+		Status:      document.StatusActive,
+		Body:        "Gemini reviewer agent — the embedded reviewer service's delivery-agent configuration. provider_chain=gemini/2.5-flash. permitted_roles pins role_reviewer so the boot-time grant-mint path resolves. Seeded by platform bootstrap.",
+		Structured:  []byte(structured),
+		Tags:        []string{"v4", "agents-roles", "seed", "reviewer"},
+		CreatedBy:   "system",
+	}, now); err != nil {
+		return fmt.Errorf("seed agent_gemini_reviewer: %w", err)
+	}
+	return nil
+}
+
+// seedSystemValidationMode appends a system-tier
+// `lifecycle.validation_mode = task` KV row when none already exists
+// at scope=system. Idempotent — a second invocation finds the
+// previous seed and short-circuits without writing a duplicate.
+//
+// epic:v4-lifecycle-refactor sty_e20e1537: this is the production
+// default that flips every close into the review-task gate. Project
+// / user / workspace overrides via kv_set continue to take precedence
+// at resolve time.
+func seedSystemValidationMode(ctx context.Context, ledgerStore ledger.Store, now time.Time) error {
+	if ledgerStore == nil {
+		return nil
+	}
+	const validationModeKey = "lifecycle.validation_mode"
+	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, validationModeKey, ledger.KVResolveOptions{}, []string{""})
+	if err != nil {
+		return fmt.Errorf("resolve existing validation_mode: %w", err)
+	}
+	if found && row.Scope == ledger.KVScopeSystem {
+		return nil
+	}
+	_, err = ledgerStore.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: "",
+		Type:        ledger.TypeKV,
+		Tags:        []string{"scope:system", "key:" + validationModeKey},
+		Content:     mcpserver.DefaultValidationMode,
+		CreatedBy:   "system",
+	}, now)
+	if err != nil {
+		return fmt.Errorf("seed validation_mode KV: %w", err)
+	}
+	return nil
+}
+
+// ensureReviewerServiceGrant mints (or reuses) an active role-grant
+// pinning the embedded reviewer service's session id to role_reviewer.
+// Returns the grant id on success. Idempotent: an existing active
+// grant for (role_reviewer, agent_gemini_reviewer, session=ServiceSessionID)
+// short-circuits without minting a duplicate. Returns ("", nil) when
+// any seed prerequisite is missing — the caller logs and continues
+// (the reviewer service will simply not start without a grant).
+//
+// The grant is registered against a system-owned session row so the
+// reviewer service's task_claim and contract_review_close calls can
+// resolve through the same session-role gate used by interactive
+// orchestrator sessions.
+//
+// epic:v4-lifecycle-refactor sty_62d4b438.
+func ensureReviewerServiceGrant(
+	ctx context.Context,
+	docStore document.Store,
+	grantStore rolegrant.Store,
+	sessionStore session.Store,
+	workspaceID string,
+	now time.Time,
+) (string, error) {
+	if docStore == nil || grantStore == nil || sessionStore == nil {
+		return "", nil
+	}
+	role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil)
+	if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
+		return "", nil
+	}
+	agent, err := docStore.GetByName(ctx, "", mcpserver.SeedAgentReviewerName, nil)
+	if err != nil || agent.Type != document.TypeAgent || agent.Status != document.StatusActive {
+		return "", nil
+	}
+	sess, err := sessionStore.Register(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, session.SourceSessionStart, now)
+	if err != nil {
+		return "", fmt.Errorf("reviewer service session register: %w", err)
+	}
+	if workspaceID != "" && sess.WorkspaceID != workspaceID {
+		if updated, err := sessionStore.SetWorkspace(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, workspaceID, now); err == nil {
+			sess = updated
+		}
+	}
+	// Idempotence: if the session already carries an active grant for
+	// the reviewer role + agent, reuse it. A second boot finds the
+	// grant minted by the first boot and short-circuits.
+	if sess.OrchestratorGrantID != "" {
+		existing, gerr := grantStore.GetByID(ctx, sess.OrchestratorGrantID, nil)
+		if gerr == nil && existing.Status == rolegrant.StatusActive && existing.RoleID == role.ID && existing.AgentID == agent.ID {
+			return existing.ID, nil
+		}
+	}
+	grant, err := grantStore.Create(ctx, rolegrant.RoleGrant{
+		WorkspaceID: workspaceID,
+		RoleID:      role.ID,
+		AgentID:     agent.ID,
+		GranteeKind: rolegrant.GranteeSession,
+		GranteeID:   reviewerservice.ServiceSessionID,
+	}, now)
+	if err != nil {
+		return "", fmt.Errorf("reviewer service grant create: %w", err)
+	}
+	if _, err := sessionStore.SetOrchestratorGrant(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, grant.ID, now); err != nil {
+		return grant.ID, fmt.Errorf("reviewer service session set grant: %w", err)
+	}
+	return grant.ID, nil
 }
 
 // lifecycleAgentSpec captures one seed agent — its document name and
