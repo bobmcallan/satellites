@@ -342,8 +342,10 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 		`data-priority=""`,
 		`data-created="`,
 		`data-updated="`,
-		// Tags render as clickable buttons (not <code>), with @click.stop
-		// so the chip click does not bubble to the row toggle.
+		// Tags render in their own row below the title (V3 parity)
+		// with a wrapper testid that exposes the per-story tag-row.
+		`data-testid="story-row-tags-sty_`,
+		`class="story-row-tags"`,
 		`<button type="button" class="tag-chip is-clickable" data-tag="epic:foo"`,
 		`@click.stop="addTagToQuery"`,
 	} {

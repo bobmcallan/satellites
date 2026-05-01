@@ -35,8 +35,12 @@
             data-testid="story-row-{{.ID}}">
           <td class="col-id"><code>{{.ID}}</code></td>
           <td class="col-title">
-            {{.Title}}
-            {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery">{{.}}</button> {{end}}
+            <div class="story-row-title">{{.Title}}</div>
+            {{if .Tags}}
+            <div class="story-row-tags" data-testid="story-row-tags-{{.ID}}">
+              {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery" title="Click to filter by this tag">{{.}}</button>{{end}}
+            </div>
+            {{end}}
           </td>
           <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
           <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>

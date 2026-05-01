@@ -2288,18 +2288,34 @@ code {
 .legacy-banner a { color: inherit; font-weight: 700; }
 [data-theme="dark"] .legacy-banner { background: #2a1f0d; color: #e0c898; border-color: #d4922a; }
 
-/* sty_6300fb27 — clickable tag chips inside the story-panel rows.
-   The chip is a real <button> for keyboard accessibility but visually
-   matches the existing .tag-chip <code> appearance. Click is captured
-   with @click.stop so it doesn't trigger the row's expand toggle. */
-button.tag-chip.is-clickable {
-    background: transparent;
-    border: 1px solid currentColor;
-    cursor: pointer;
-    font: inherit;
-    padding: 0 0.35rem;
-    margin: 0;
-    line-height: 1.3;
+/* sty_6300fb27 — story panel tag presentation, V3 parity.
+   Tags render in a flex row beneath the title (matching V3's
+   project-detail.html shape). The chip is a real <button> for
+   keyboard accessibility; click is captured with @click.stop so it
+   does not trigger the row's expand toggle. The colour palette
+   mirrors V3 directly (rgba(106,159,181,0.15) background + #6a9fb5
+   foreground) so the rendering reads as the same control across
+   the version cut. */
+.story-row-title { white-space: normal; word-break: break-word; line-height: 1.4; }
+.story-row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+    margin-top: 0.2rem;
 }
-button.tag-chip.is-clickable:hover { background: rgba(127,127,127,0.15); }
-button.tag-chip.is-clickable:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+button.tag-chip.is-clickable {
+    background: rgba(106, 159, 181, 0.15);
+    color: #6a9fb5;
+    border: 0;
+    border-radius: 3px;
+    padding: 0.05rem 0.35rem;
+    font-size: 0.6rem;
+    font-weight: 400;
+    line-height: 1.3;
+    margin: 0;
+    cursor: pointer;
+}
+button.tag-chip.is-clickable:hover { background: rgba(106, 159, 181, 0.3); }
+button.tag-chip.is-clickable:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
+[data-theme="dark"] button.tag-chip.is-clickable { background: rgba(106, 159, 181, 0.2); color: #8ab4c9; }
+[data-theme="dark"] button.tag-chip.is-clickable:hover { background: rgba(106, 159, 181, 0.35); }
