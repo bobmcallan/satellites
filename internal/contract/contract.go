@@ -46,7 +46,14 @@ type ContractInstance struct {
 	// action_claim ledger row instead of trusting the caller-submitted
 	// patterns. Empty in the legacy claim path; populated once the
 	// orchestrator role (story_488b8223) lands.
-	AgentID   string    `json:"agent_id,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
+	// PriorCIID is set when this CI was appended in response to a
+	// review-rejection on a prior CI of the same contract type
+	// (epic:v4-lifecycle-refactor sty_bbe732af). The new CI inherits
+	// the contract document, required role, and rubric; the rejection
+	// reason lives on the ledger and is reachable via standard reads
+	// from the new CI. Empty for the first attempt.
+	PriorCIID string    `json:"prior_ci_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

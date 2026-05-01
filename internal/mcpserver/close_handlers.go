@@ -24,9 +24,16 @@ import (
 //
 //	SATELLITES_MAX_RESUMES_PER_CI
 //	SATELLITES_MAX_RESUMES_PER_STORY
+//
+// reviewIterationCap is the max number of CIs of the same contract
+// type a single story may carry before the rejection-append path
+// gives up and flips the story to blocked
+// (epic:v4-lifecycle-refactor sty_bbe732af). Env override:
+// SATELLITES_REVIEW_ITERATION_CAP.
 const (
-	resumeCapCI    = 5
-	resumeCapStory = 10
+	resumeCapCI        = 5
+	resumeCapStory     = 10
+	reviewIterationCap = 3
 )
 
 func intEnv(key string, fallback int) int {
@@ -885,6 +892,64 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 		_, _ = s.tasks.Close(ctx, reviewTaskID, outcome, now, memberships)
 	}
 
+	// Rejection-append (epic:v4-lifecycle-refactor sty_bbe732af): on
+	// verdict=rejected, append a fresh CI of the same contract type
+	// with PriorCIID set so the next claimer inherits the prior
+	// attempt's evidence + the rejection reason via standard ledger
+	// reads. Iteration cap escalates to the user (story → blocked) on
+	// the Nth attempt.
+	var appendedCIID, blockedReason string
+	if verdictArg == reviewer.VerdictRejected {
+		cap := intEnv("SATELLITES_REVIEW_ITERATION_CAP", reviewIterationCap)
+		peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
+		sameType := 0
+		for _, p := range peers {
+			if p.ContractName == ci.ContractName {
+				sameType++
+			}
+		}
+		if sameType >= cap {
+			blockedReason = fmt.Sprintf("review iteration cap %d exceeded for contract %q", cap, ci.ContractName)
+			if s.stories != nil {
+				_, _ = s.stories.UpdateStatus(ctx, ci.StoryID, story.StatusBlocked, caller.UserID, now, memberships)
+			}
+			_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+				WorkspaceID: ci.WorkspaceID,
+				ProjectID:   ci.ProjectID,
+				StoryID:     ledger.StringPtr(ci.StoryID),
+				Type:        ledger.TypeDecision,
+				Tags:        []string{"kind:story-blocked", "phase:" + ci.ContractName, "reason:iteration_cap_exceeded"},
+				Content:     blockedReason,
+				CreatedBy:   caller.UserID,
+			}, now)
+		} else {
+			newCI, cerr := s.contracts.Create(ctx, contract.ContractInstance{
+				WorkspaceID:      ci.WorkspaceID,
+				ProjectID:        ci.ProjectID,
+				StoryID:          ci.StoryID,
+				ContractID:       ci.ContractID,
+				ContractName:     ci.ContractName,
+				Sequence:         ci.Sequence,
+				RequiredForClose: ci.RequiredForClose,
+				Status:           contract.StatusReady,
+				PriorCIID:        ci.ID,
+			}, now)
+			if cerr == nil {
+				appendedCIID = newCI.ID
+				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+					WorkspaceID: ci.WorkspaceID,
+					ProjectID:   ci.ProjectID,
+					StoryID:     ledger.StringPtr(ci.StoryID),
+					ContractID:  ledger.StringPtr(newCI.ID),
+					Type:        ledger.TypeDecision,
+					Tags:        []string{"kind:rejection-append", "phase:" + ci.ContractName, "prior_ci_id:" + ci.ID, "iteration:" + strconv.Itoa(sameType+1)},
+					Content:     fmt.Sprintf("appended fresh %s CI after rejection of %s; reason: %s", ci.ContractName, ci.ID, rationale),
+					CreatedBy:   caller.UserID,
+				}, now)
+			}
+		}
+	}
+
 	// Story rollup: if every RequiredForClose CI is terminal, flip the
 	// story to done.
 	storyStatus := ""
@@ -911,6 +976,8 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 		"verdict_ledger_id":    verdictRow,
 		"review_task_id":       reviewTaskID,
 		"story_status":         storyStatus,
+		"appended_ci_id":       appendedCIID,
+		"blocked_reason":       blockedReason,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
@@ -918,6 +985,7 @@ func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallTo
 		Str("ci_id", ci.ID).
 		Str("verdict", verdictArg).
 		Str("status", target).
+		Str("appended_ci_id", appendedCIID).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
 }

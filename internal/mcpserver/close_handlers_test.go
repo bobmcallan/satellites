@@ -566,3 +566,160 @@ func TestReviewClose_RejectsNeedsMore(t *testing.T) {
 		t.Fatalf("expected invalid_verdict; got %s", firstText(res))
 	}
 }
+
+// TestReviewClose_RejectAppendsFreshCI covers
+// epic:v4-lifecycle-refactor sty_bbe732af — verdict=rejected appends a
+// fresh CI of the same contract type with PriorCIID set so the next
+// claimer inherits the prior attempt's evidence + the rejection
+// rationale via standard ledger reads.
+func TestReviewClose_RejectAppendsFreshCI(t *testing.T) {
+	t.Parallel()
+	f := newCloseFixture(t)
+	taskStore := task.NewMemoryStore()
+	f.server.tasks = taskStore
+
+	// Mark the plan contract validation_mode=task.
+	planContractID := f.cis[0].ContractID
+	doc, _ := f.server.docs.GetByID(f.ctx, planContractID, nil)
+	taskMode, _ := json.Marshal(map[string]any{"validation_mode": "task"})
+	if _, err := f.server.docs.Update(f.ctx, doc.ID, document.UpdateFields{Structured: &taskMode}, "test", f.now, nil); err != nil {
+		t.Fatalf("update doc: %v", err)
+	}
+
+	// Plan-close gate — enqueue a child task first.
+	if _, err := taskStore.Enqueue(f.ctx, task.Task{
+		WorkspaceID:        f.wsID,
+		ContractInstanceID: f.cis[0].ID,
+		RequiredRole:       "developer",
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+	}, f.now); err != nil {
+		t.Fatalf("enqueue child: %v", err)
+	}
+
+	f.claim(t, 0, "v1 plan")
+	closeRes, _ := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"close_markdown":       "v1 close",
+	}))
+	var closeBody struct {
+		ReviewTaskID string `json:"review_task_id"`
+	}
+	_ = json.Unmarshal([]byte(firstText(closeRes)), &closeBody)
+
+	// Reject — should append a fresh plan CI with PriorCIID set.
+	revRes, _ := f.server.handleContractReviewClose(f.callerCtx(), newCallToolReq("contract_review_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"verdict":              "rejected",
+		"rationale":            "AC2 not addressed",
+		"review_task_id":       closeBody.ReviewTaskID,
+	}))
+	if revRes.IsError {
+		t.Fatalf("review_close: %s", firstText(revRes))
+	}
+	var revBody struct {
+		Status        string `json:"status"`
+		AppendedCIID  string `json:"appended_ci_id"`
+		BlockedReason string `json:"blocked_reason"`
+	}
+	_ = json.Unmarshal([]byte(firstText(revRes)), &revBody)
+	if revBody.Status != contract.StatusFailed {
+		t.Fatalf("status: %q want failed", revBody.Status)
+	}
+	if revBody.AppendedCIID == "" {
+		t.Fatalf("expected appended_ci_id (iteration 2 of plan)")
+	}
+	if revBody.BlockedReason != "" {
+		t.Fatalf("unexpected blocked_reason: %q", revBody.BlockedReason)
+	}
+	appended, err := f.server.contracts.GetByID(f.ctx, revBody.AppendedCIID, nil)
+	if err != nil {
+		t.Fatalf("appended CI lookup: %v", err)
+	}
+	if appended.PriorCIID != f.cis[0].ID {
+		t.Fatalf("PriorCIID: got %q want %q", appended.PriorCIID, f.cis[0].ID)
+	}
+	if appended.ContractName != "plan" {
+		t.Fatalf("appended ContractName: %q want plan", appended.ContractName)
+	}
+	if appended.Status != contract.StatusReady {
+		t.Fatalf("appended Status: %q want ready", appended.Status)
+	}
+}
+
+// TestReviewClose_IterationCapBlocksStory covers cap behavior — when
+// the third rejection fires for the same contract type, the story is
+// flipped to blocked and no further CI is appended.
+func TestReviewClose_IterationCapBlocksStory(t *testing.T) {
+	t.Setenv("SATELLITES_REVIEW_ITERATION_CAP", "2")
+
+	f := newCloseFixture(t)
+	taskStore := task.NewMemoryStore()
+	f.server.tasks = taskStore
+
+	// Move story to in_progress so it's a valid source for the
+	// blocked transition.
+	if _, err := f.server.stories.UpdateStatus(f.ctx, f.storyID, "ready", f.caller.UserID, f.now, nil); err != nil {
+		t.Fatalf("story->ready: %v", err)
+	}
+	if _, err := f.server.stories.UpdateStatus(f.ctx, f.storyID, "in_progress", f.caller.UserID, f.now, nil); err != nil {
+		t.Fatalf("story->in_progress: %v", err)
+	}
+
+	// Mark the plan contract validation_mode=task.
+	doc, _ := f.server.docs.GetByID(f.ctx, f.cis[0].ContractID, nil)
+	taskMode, _ := json.Marshal(map[string]any{"validation_mode": "task"})
+	if _, err := f.server.docs.Update(f.ctx, doc.ID, document.UpdateFields{Structured: &taskMode}, "test", f.now, nil); err != nil {
+		t.Fatalf("update doc: %v", err)
+	}
+
+	// Seed two prior plan CIs at the same contract slot so the existing
+	// f.cis[0] is the *second* iteration. The cap (2) means the next
+	// rejection on f.cis[0] hits the cap.
+	if _, err := f.server.contracts.Create(f.ctx, contract.ContractInstance{
+		WorkspaceID: f.wsID, ProjectID: f.projectID, StoryID: f.storyID,
+		ContractID: f.cis[0].ContractID, ContractName: "plan",
+		Sequence: 0, Status: contract.StatusFailed,
+	}, f.now); err != nil {
+		t.Fatalf("seed prior plan ci: %v", err)
+	}
+
+	// Plan-close gate — task linked.
+	if _, err := taskStore.Enqueue(f.ctx, task.Task{
+		WorkspaceID:        f.wsID,
+		ContractInstanceID: f.cis[0].ID,
+		RequiredRole:       "developer",
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+	}, f.now); err != nil {
+		t.Fatalf("enqueue child: %v", err)
+	}
+	f.claim(t, 0, "v2")
+	_, _ = f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"close_markdown":       "v2",
+	}))
+	revRes, _ := f.server.handleContractReviewClose(f.callerCtx(), newCallToolReq("contract_review_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"verdict":              "rejected",
+		"rationale":            "still missing AC2",
+	}))
+	if revRes.IsError {
+		t.Fatalf("review_close: %s", firstText(revRes))
+	}
+	var revBody struct {
+		AppendedCIID  string `json:"appended_ci_id"`
+		BlockedReason string `json:"blocked_reason"`
+	}
+	_ = json.Unmarshal([]byte(firstText(revRes)), &revBody)
+	if revBody.AppendedCIID != "" {
+		t.Fatalf("cap exceeded — should not append new CI; got %q", revBody.AppendedCIID)
+	}
+	if revBody.BlockedReason == "" {
+		t.Fatalf("expected blocked_reason on cap exceeded")
+	}
+	st, _ := f.server.stories.GetByID(f.ctx, f.storyID, nil)
+	if st.Status != "blocked" {
+		t.Fatalf("story status: %q want blocked", st.Status)
+	}
+}

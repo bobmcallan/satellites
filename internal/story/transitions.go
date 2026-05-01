@@ -4,10 +4,19 @@ import "errors"
 
 // Status values a Story can occupy. Terminal states (done, cancelled) do
 // not transition out.
+//
+// Blocked is a non-terminal escalation state introduced by
+// epic:v4-lifecycle-refactor (sty_bbe732af). When the review-iteration
+// cap is hit on a contract, the rejection-append path flips the story
+// to blocked instead of appending another retry — the user must resolve
+// the impasse before work resumes (typically by relaxing the AC,
+// splitting the story, or amending the plan). Blocked → in_progress
+// resumes; blocked → cancelled gives up.
 const (
 	StatusBacklog    = "backlog"
 	StatusReady      = "ready"
 	StatusInProgress = "in_progress"
+	StatusBlocked    = "blocked"
 	StatusDone       = "done"
 	StatusCancelled  = "cancelled"
 )
@@ -22,12 +31,13 @@ var ErrInvalidTransition = errors.New("story: invalid status transition")
 //
 // Matrix:
 //
-//	from \ to   backlog ready in_progress done cancelled
-//	backlog       -      ✓       -         -       ✓
-//	ready         -      -       ✓         -       ✓
-//	in_progress   -      -       -         ✓       ✓
-//	done          -      -       -         -       -
-//	cancelled     -      -       -         -       -
+//	from \ to   backlog ready in_progress blocked done cancelled
+//	backlog       -      ✓       -         -       -       ✓
+//	ready         -      -       ✓         -       -       ✓
+//	in_progress   -      -       -         ✓       ✓       ✓
+//	blocked       -      -       ✓         -       -       ✓
+//	done          -      -       -         -       -       -
+//	cancelled     -      -       -         -       -       -
 func ValidTransition(from, to string) bool {
 	switch from {
 	case StatusBacklog:
@@ -35,7 +45,9 @@ func ValidTransition(from, to string) bool {
 	case StatusReady:
 		return to == StatusInProgress || to == StatusCancelled
 	case StatusInProgress:
-		return to == StatusDone || to == StatusCancelled
+		return to == StatusBlocked || to == StatusDone || to == StatusCancelled
+	case StatusBlocked:
+		return to == StatusInProgress || to == StatusCancelled
 	case StatusDone, StatusCancelled:
 		return false
 	default:
@@ -47,7 +59,7 @@ func ValidTransition(from, to string) bool {
 // Used by Store.Create to validate the initial status.
 func IsKnownStatus(s string) bool {
 	switch s {
-	case StatusBacklog, StatusReady, StatusInProgress, StatusDone, StatusCancelled:
+	case StatusBacklog, StatusReady, StatusInProgress, StatusBlocked, StatusDone, StatusCancelled:
 		return true
 	}
 	return false
