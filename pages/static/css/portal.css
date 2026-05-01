@@ -2287,3 +2287,19 @@ code {
 }
 .legacy-banner a { color: inherit; font-weight: 700; }
 [data-theme="dark"] .legacy-banner { background: #2a1f0d; color: #e0c898; border-color: #d4922a; }
+
+/* sty_6300fb27 — clickable tag chips inside the story-panel rows.
+   The chip is a real <button> for keyboard accessibility but visually
+   matches the existing .tag-chip <code> appearance. Click is captured
+   with @click.stop so it doesn't trigger the row's expand toggle. */
+button.tag-chip.is-clickable {
+    background: transparent;
+    border: 1px solid currentColor;
+    cursor: pointer;
+    font: inherit;
+    padding: 0 0.35rem;
+    margin: 0;
+    line-height: 1.3;
+}
+button.tag-chip.is-clickable:hover { background: rgba(127,127,127,0.15); }
+button.tag-chip.is-clickable:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }

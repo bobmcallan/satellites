@@ -1,11 +1,8 @@
 {{define "_panel_stories.html"}}
 <div x-data="storyPanel" class="panel-stories" data-testid="panel-stories-body">
-  <p class="panel-actions">
-    <a href="/projects/{{.Project.ID}}/stories" data-testid="panel-stories-open">Open stories →</a>
-  </p>
   <input type="text"
          class="panel-search"
-         placeholder="search stories (id, title, tags)…"
+         placeholder="search (free text + tag chips, plus order:&lt;field&gt;, status:all|done|cancelled)"
          x-model="query"
          data-testid="panel-stories-search">
   {{if not .Composite.Stories}}
@@ -25,13 +22,22 @@
       {{range .Composite.Stories}}
         <tr class="story-row"
             data-id="{{.ID}}"
+            data-status="{{.Status}}"
+            data-priority="{{.Priority}}"
+            data-title="{{.Title}}"
+            data-created="{{.CreatedAt}}"
+            data-updated="{{.UpdatedAt}}"
+            data-tags="{{range .Tags}}{{.}} {{end}}"
             data-search="{{.ID}} {{.Title}} {{range .Tags}}{{.}} {{end}}"
             x-show="matchesRow($el)"
             :class="rowClass($el)"
             @click="toggleRow"
             data-testid="story-row-{{.ID}}">
           <td class="col-id"><code>{{.ID}}</code></td>
-          <td class="col-title">{{.Title}}{{range .Tags}} <code class="tag-chip">{{.}}</code>{{end}}</td>
+          <td class="col-title">
+            {{.Title}}
+            {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery">{{.}}</button> {{end}}
+          </td>
           <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
           <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
           <td class="col-updated muted">{{.UpdatedAt}}</td>

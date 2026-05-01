@@ -292,7 +292,6 @@ func TestProjectWorkspaceRender_SectionsPresentNoSearchBox(t *testing.T) {
 		`data-testid="panel-documents"`,
 		`data-testid="panel-stories-empty"`,
 		`data-testid="panel-documents-empty"`,
-		`data-testid="panel-stories-open"`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(body, want) {
@@ -317,6 +316,7 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 		now := time.Now().UTC()
 		_, _ = stories.Create(ctx, story.Story{
 			ProjectID: projectID, Title: "rendered story", Description: "x", Status: "backlog",
+			Tags: []string{"epic:foo", "ui"},
 		}, now)
 		pid := projectID
 		_, _ = docs.Create(ctx, document.Document{
@@ -336,9 +336,46 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 		`href="/projects/`,
 		`/stories/sty_`,
 		`href="/documents/`,
+		// sty_6300fb27 — story rows carry the data-* attributes the
+		// client-side `order:<field>` and default-hide-done logic reads.
+		`data-status="backlog"`,
+		`data-priority=""`,
+		`data-created="`,
+		`data-updated="`,
+		// Tags render as clickable buttons (not <code>), with @click.stop
+		// so the chip click does not bubble to the row toggle.
+		`<button type="button" class="tag-chip is-clickable" data-tag="epic:foo"`,
+		`@click.stop="addTagToQuery"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
 	}
+	// The legacy "Open stories →" affordance is gone — the panel is the
+	// primary surface now.
+	for _, mustNot := range []string{
+		`data-testid="panel-stories-open"`,
+		`/projects/` + extractProjectID(body) + `/stories"`,
+	} {
+		if mustNot != `/projects//stories"` && strings.Contains(body, mustNot) {
+			t.Errorf("body should not contain %q after sty_6300fb27", mustNot)
+		}
+	}
+}
+
+// extractProjectID is a tiny helper for the TestProjectWorkspaceRender_*
+// suite — pulls the proj_<8hex> out of the rendered project_detail body
+// so absent-affordance assertions can reference the live id without
+// threading it through the harness.
+func extractProjectID(body string) string {
+	const prefix = `data-project-id="`
+	idx := strings.Index(body, prefix)
+	if idx < 0 {
+		return ""
+	}
+	end := strings.Index(body[idx+len(prefix):], `"`)
+	if end < 0 {
+		return ""
+	}
+	return body[idx+len(prefix) : idx+len(prefix)+end]
 }

@@ -46,7 +46,9 @@ type projectWorkspaceComposite struct {
 
 // storyCard is the per-row view-model for the Stories section. The
 // expand-row on the V3-style story panel reads Description and
-// AcceptanceCriteria.
+// AcceptanceCriteria. CreatedAt + Tags are exposed on the row's
+// data-* attributes so the client-side `order:<field>` and tag-chip
+// click handlers can reorder + filter without an extra round trip.
 type storyCard struct {
 	ID                 string
 	ProjectID          string
@@ -54,6 +56,7 @@ type storyCard struct {
 	Status             string
 	Priority           string
 	Tags               []string
+	CreatedAt          string
 	UpdatedAt          string
 	Description        string
 	AcceptanceCriteria string
@@ -253,6 +256,7 @@ func storyCardFor(s story.Story) storyCard {
 		Status:             s.Status,
 		Priority:           s.Priority,
 		Tags:               s.Tags,
+		CreatedAt:          s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:          s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		Description:        s.Description,
 		AcceptanceCriteria: s.AcceptanceCriteria,

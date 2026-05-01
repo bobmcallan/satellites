@@ -77,19 +77,28 @@ function sectionToggle() {
     };
 }
 
-// storyPanel (sty_70c0f7a3) — V3-style story panel. Inline search
-// filters rows by their `data-search` attribute (id + title + tags),
-// and clicking a row toggles its expand-row showing description, AC,
-// and recent ledger activity.
+// storyPanel (sty_70c0f7a3 + sty_6300fb27) — V3-style story panel.
+// Parses `order:<field>` and `status:<all|done|cancelled>` tokens out of
+// the query in addition to free-text matching. Default render hides
+// rows whose data-status is "done" or "cancelled" — `status:done`,
+// `status:cancelled`, or `status:all` lifts that. `order:<field>` (for
+// updated|created|priority|status|title) reorders the visible rows
+// client-side. Clicking a tag-chip appends the tag text to the query
+// (without navigating) so the user can refine without leaving the panel.
 function storyPanel() {
     return {
         query: '',
         expanded: '',
+        get tokens() { return parseStoryQuery(this.query); },
         matchesRow(el) {
-            const q = (this.query || '').trim().toLowerCase();
-            if (!q) { return true; }
-            const hay = ((el && el.dataset && el.dataset.search) || '').toLowerCase();
-            return hay.indexOf(q) !== -1;
+            const ds = (el && el.dataset) || {};
+            const t = this.tokens;
+            // Default-hide terminal rows unless the query asks for them.
+            if (!t.statusOverride && (ds.status === 'done' || ds.status === 'cancelled')) { return false; }
+            if (t.status && t.status !== 'all' && ds.status !== t.status) { return false; }
+            if (!t.text) { return true; }
+            const hay = (ds.search || '').toLowerCase();
+            return hay.indexOf(t.text) !== -1;
         },
         isExpanded(el) {
             const id = (el && el.dataset && el.dataset.detailFor) || '';
@@ -105,7 +114,80 @@ function storyPanel() {
             if (!id) { return; }
             this.expanded = this.expanded === id ? '' : id;
         },
+        addTagToQuery(ev) {
+            const target = ev && ev.currentTarget;
+            const tag = (target && target.dataset && target.dataset.tag) || '';
+            if (!tag) { return; }
+            const q = (this.query || '').trim();
+            // Avoid duplicate tokens.
+            const parts = q.length ? q.split(/\s+/) : [];
+            if (parts.indexOf(tag) === -1) { parts.push(tag); }
+            this.query = parts.join(' ');
+        },
+        // Apply `order:<field>` by physically reordering the table's
+        // tbody after a query change. Triggered via a watcher Alpine
+        // sets up in init(); kept side-effect-y rather than reactive
+        // because re-sorting visible DOM rows is the simplest path.
+        init() {
+            this.$watch('query', () => { applyStoryOrder(this.$el, this.tokens.order); });
+            // Apply once on mount so any initial query (e.g. via #hash) takes effect.
+            this.$nextTick(() => { applyStoryOrder(this.$el, this.tokens.order); });
+        },
     };
+}
+
+// parseStoryQuery splits a story-panel query string into structured
+// tokens. Supports `order:<field>`, `status:<value>`, plus free text.
+// Unknown colon-tokens flow through as free text so a tag like
+// `epic:foo` (V3 convention) still matches the data-search haystack.
+function parseStoryQuery(q) {
+    const out = { order: '', status: '', statusOverride: false, text: '' };
+    const free = [];
+    const parts = (q || '').trim().split(/\s+/).filter(Boolean);
+    const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1 };
+    for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        const idx = p.indexOf(':');
+        if (idx > 0) {
+            const k = p.slice(0, idx).toLowerCase();
+            const v = p.slice(idx + 1).toLowerCase();
+            if (k === 'order' && orderFields[v]) { out.order = v; continue; }
+            if (k === 'status') { out.status = v; out.statusOverride = true; continue; }
+        }
+        free.push(p.toLowerCase());
+    }
+    out.text = free.join(' ');
+    return out;
+}
+
+// applyStoryOrder physically sorts the tbody rows of the story-panel
+// table. Each story has TWO rows (the row itself + the detail row);
+// pairs are kept together so expand-on-click still targets the right
+// detail. host is the panel root element; field is the parsed
+// `order:<field>` value (empty = leave default order).
+function applyStoryOrder(host, field) {
+    if (!host || !field) { return; }
+    const tbody = host.querySelector('tbody');
+    if (!tbody) { return; }
+    const rows = tbody.querySelectorAll('tr.story-row');
+    // Build pairs: [row, detail] keyed by data-id; preserve original index for stable sort.
+    const pairs = [];
+    rows.forEach((row, idx) => {
+        const detail = tbody.querySelector('tr.story-detail[data-detail-for="' + row.dataset.id + '"]');
+        pairs.push({ row, detail, idx });
+    });
+    pairs.sort((a, b) => {
+        const aval = (a.row.dataset[field] || '').toLowerCase();
+        const bval = (b.row.dataset[field] || '').toLowerCase();
+        if (aval === bval) { return a.idx - b.idx; }
+        // Most fields read better newest-first; title sorts ascending.
+        if (field === 'title') { return aval < bval ? -1 : 1; }
+        return aval < bval ? 1 : -1;
+    });
+    for (let i = 0; i < pairs.length; i++) {
+        tbody.appendChild(pairs[i].row);
+        if (pairs[i].detail) { tbody.appendChild(pairs[i].detail); }
+    }
 }
 
 document.addEventListener('alpine:init', () => {

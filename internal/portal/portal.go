@@ -8,7 +8,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -241,7 +240,6 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects/{id}", p.handleProjectDetail)
 	mux.HandleFunc("GET /projects/{id}/configuration", p.handleProjectConfiguration)
 	mux.HandleFunc("GET /projects/{id}/ledger", p.handleProjectLedger)
-	mux.HandleFunc("GET /projects/{id}/stories", p.handleStoriesList)
 	mux.HandleFunc("GET /projects/{id}/stories/{story_id}", p.handleStoryDetail)
 	mux.HandleFunc("GET /api/stories/{story_id}/composite", p.handleStoryComposite)
 	mux.HandleFunc("GET /tasks", p.handleTasks)
@@ -726,40 +724,6 @@ func (p *Portal) handleLedgerRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/projects/"+list[0].ID+"/ledger", http.StatusSeeOther)
 }
 
-type storiesListData struct {
-	Title           string
-	Version         string
-	Commit          string
-	User            auth.User
-	Project         projectRow
-	Stories         []storyRow
-	StatusAll       bool
-	Disabled        bool
-	Filters         storiesListFilters
-	Total           int
-	Sort            string
-	SortDir         string
-	Workspaces      []wsChip
-	ActiveWorkspace wsChip
-	DevMode         bool
-	GlobalAdminChip bool
-	IsGlobalAdmin   bool
-	ThemeMode       string
-	ThemePickerNext string
-	WSConfig        WSConfig
-}
-
-// storiesListFilters echoes the parsed query/filter state back into the
-// stories_list.html template so the search input and filter chips reflect
-// the active URL. Empty fields render no chip.
-type storiesListFilters struct {
-	Query    string
-	Status   string
-	Priority string
-	Category string
-	Tag      string
-}
-
 type storyDetailData struct {
 	Title           string
 	Version         string
@@ -804,176 +768,6 @@ func viewStoryRow(s story.Story) storyRow {
 		Tags:               s.Tags,
 		CreatedAt:          s.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:          s.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-// applyStoriesSort orders rows by the requested column. Default is
-// updated desc — preserves the V3 reading order (most recent first).
-// Unknown columns fall back to the default; dir is "asc" or "desc".
-func applyStoriesSort(rows []storyRow, col, dir string) {
-	desc := dir != "asc"
-	switch col {
-	case "id":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].ID > rows[j].ID
-			}
-			return rows[i].ID < rows[j].ID
-		})
-	case "title":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].Title > rows[j].Title
-			}
-			return rows[i].Title < rows[j].Title
-		})
-	case "category":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].Category > rows[j].Category
-			}
-			return rows[i].Category < rows[j].Category
-		})
-	case "priority":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].Priority > rows[j].Priority
-			}
-			return rows[i].Priority < rows[j].Priority
-		})
-	case "status":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].Status > rows[j].Status
-			}
-			return rows[i].Status < rows[j].Status
-		})
-	case "created":
-		sort.SliceStable(rows, func(i, j int) bool {
-			if desc {
-				return rows[i].CreatedAt > rows[j].CreatedAt
-			}
-			return rows[i].CreatedAt < rows[j].CreatedAt
-		})
-	default:
-		// "updated" + unknown both fall through to the default sort:
-		// most recently updated first.
-		sort.SliceStable(rows, func(i, j int) bool {
-			return rows[i].UpdatedAt > rows[j].UpdatedAt
-		})
-	}
-}
-
-// handleStoriesList renders the project's stories. Default filter excludes
-// done + cancelled (matches the MCP story_list default intent); ?status=all
-// lifts the filter, ?status=<value> applies it exactly.
-func (p *Portal) handleStoriesList(w http.ResponseWriter, r *http.Request) {
-	user, ok := p.resolveUser(r)
-	if !ok {
-		p.redirectToLogin(w, r)
-		return
-	}
-	if p.projects == nil {
-		http.NotFound(w, r)
-		return
-	}
-	id := r.PathValue("id")
-	active, chips, memberships := p.activeWorkspace(r, user)
-	proj, err := p.projects.GetByID(r.Context(), id, memberships)
-	if err != nil || proj.OwnerUserID != user.ID {
-		http.NotFound(w, r)
-		return
-	}
-	data := storiesListData{
-		Title:           buildPageTitle(active, proj.Name, "stories"),
-		Version:         config.Version,
-		Commit:          config.GitCommit,
-		User:            user,
-		Project:         viewRow(proj),
-		Workspaces:      chips,
-		ActiveWorkspace: active,
-		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
-		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
-		IsGlobalAdmin:   p.isGlobalAdmin(user),
-		ThemeMode:       themeFromRequest(r),
-		ThemePickerNext: r.URL.RequestURI(),
-		WSConfig:        buildWSConfig(active, r),
-	}
-	if p.stories == nil {
-		data.Disabled = true
-	} else {
-		q := r.URL.Query()
-		statusParam := q.Get("status")
-		data.StatusAll = statusParam == "all"
-		filters := storiesListFilters{
-			Query:    strings.TrimSpace(q.Get("q")),
-			Status:   strings.TrimSpace(statusParam),
-			Priority: strings.TrimSpace(q.Get("priority")),
-			Category: strings.TrimSpace(q.Get("category")),
-			Tag:      strings.TrimSpace(q.Get("tag")),
-		}
-		data.Filters = filters
-		data.Sort = strings.TrimSpace(q.Get("sort"))
-		data.SortDir = strings.TrimSpace(q.Get("dir"))
-
-		opts := story.ListOptions{}
-		if filters.Status != "" && filters.Status != "all" {
-			opts.Status = filters.Status
-		}
-		if filters.Priority != "" && filters.Priority != "all" {
-			opts.Priority = filters.Priority
-		}
-		if filters.Tag != "" {
-			opts.Tag = filters.Tag
-		}
-
-		list, err := p.stories.List(r.Context(), proj.ID, opts, memberships)
-		if err != nil {
-			p.logger.Error().Str("error", err.Error()).Msg("stories list failed")
-			http.Error(w, "list failed", http.StatusInternalServerError)
-			return
-		}
-
-		// Total = unfiltered project story count, after the implicit
-		// done/cancelled exclusion that applies when ?status=all is not
-		// requested. The header's "(n / total)" pattern compares the
-		// filtered slice against this total.
-		total := 0
-		all, listErr := p.stories.List(r.Context(), proj.ID, story.ListOptions{}, memberships)
-		if listErr == nil {
-			for _, s := range all {
-				if !data.StatusAll && (s.Status == story.StatusDone || s.Status == story.StatusCancelled) {
-					continue
-				}
-				total++
-			}
-		}
-		data.Total = total
-
-		rows := make([]storyRow, 0, len(list))
-		queryLower := strings.ToLower(filters.Query)
-		for _, s := range list {
-			if !data.StatusAll && (s.Status == story.StatusDone || s.Status == story.StatusCancelled) {
-				continue
-			}
-			if filters.Category != "" && filters.Category != "all" && s.Category != filters.Category {
-				continue
-			}
-			if queryLower != "" {
-				if !strings.Contains(strings.ToLower(s.Title), queryLower) &&
-					!strings.Contains(strings.ToLower(s.Description), queryLower) &&
-					!strings.Contains(strings.ToLower(s.ID), queryLower) {
-					continue
-				}
-			}
-			rows = append(rows, viewStoryRow(s))
-		}
-		applyStoriesSort(rows, data.Sort, data.SortDir)
-		data.Stories = rows
-	}
-	if err := p.tmpl.ExecuteTemplate(w, "stories_list.html", data); err != nil {
-		p.logger.Error().Str("template", "stories_list.html").Str("error", err.Error()).Msg("template render failed")
-		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
 }
 
