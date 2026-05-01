@@ -77,25 +77,71 @@ function sectionToggle() {
     };
 }
 
-// storyPanel (sty_70c0f7a3 + sty_6300fb27) — V3-style story panel.
-// Parses `order:<field>` and `status:<all|done|cancelled>` tokens out of
-// the query in addition to free-text matching. Default render hides
-// rows whose data-status is "done" or "cancelled" — `status:done`,
-// `status:cancelled`, or `status:all` lifts that. `order:<field>` (for
-// updated|created|priority|status|title) reorders the visible rows
-// client-side. Clicking a tag-chip appends the tag text to the query
-// (without navigating) so the user can refine without leaving the panel.
+// storyPanel (sty_70c0f7a3 + sty_6300fb27 + sty_48198f3e) — V3-style
+// story panel.
+//
+// Parses these tokens out of the query (plus free-text against
+// data-search):
+//   - `order:<field>` — updated|created|priority|status|title — re-orders
+//     the visible rows client-side.
+//   - `status:<value>` — all|open|done|cancelled|... — comma-separated
+//     values OR. Default chip is `status:open`, which matches any row
+//     whose status is NOT done/cancelled.
+//   - `priority:<value>` — critical|high|medium|low|all — comma-separated.
+//   - `category:<value>` — feature|bug|improvement|... — comma-separated.
+//   - `tags:<value>` — single tag; multiple tags compose with AND.
+//   - free text — matched against data-search (id + title + tags haystack).
+//
+// Clicking a tag-chip appends `tags:<tag>` to the query (V3 parity).
+// `_filterTick` is a reactive counter the realtime bridge bumps when a
+// `story.<status>` WS frame patches a row's data-status, so x-show
+// re-evaluates against the new status (sty_48198f3e bug fix — Alpine
+// doesn't track dataset mutations natively).
 function storyPanel() {
     return {
         query: '',
         expanded: '',
+        // Reactive bump counter for realtime row patches. Read from
+        // matchesRow so x-show re-runs when bumped.
+        _filterTick: 0,
         get tokens() { return parseStoryQuery(this.query); },
         matchesRow(el) {
+            // Touch the reactive counter so dataset mutations applied
+            // by _applyStoryEvent re-trigger x-show evaluation.
+            void this._filterTick;
             const ds = (el && el.dataset) || {};
             const t = this.tokens;
-            // Default-hide terminal rows unless the query asks for them.
-            if (!t.statusOverride && (ds.status === 'done' || ds.status === 'cancelled')) { return false; }
-            if (t.status && t.status !== 'all' && ds.status !== t.status) { return false; }
+            // status: chip default is `open` (= not done, not cancelled).
+            // `status:all` lifts any status filtering. Multi-value lists
+            // OR (any-of).
+            if (t.status.length === 0) {
+                if (ds.status === 'done' || ds.status === 'cancelled') { return false; }
+            } else if (t.status.indexOf('all') === -1) {
+                let ok = false;
+                for (let i = 0; i < t.status.length; i++) {
+                    const s = t.status[i];
+                    if (s === 'open') {
+                        if (ds.status !== 'done' && ds.status !== 'cancelled') { ok = true; break; }
+                    } else if (ds.status === s) { ok = true; break; }
+                }
+                if (!ok) { return false; }
+            }
+            // priority: any-of (or `all` lifts).
+            if (t.priority.length > 0 && t.priority.indexOf('all') === -1) {
+                if (t.priority.indexOf((ds.priority || '').toLowerCase()) === -1) { return false; }
+            }
+            // category: any-of (or `all` lifts).
+            if (t.category.length > 0 && t.category.indexOf('all') === -1) {
+                if (t.category.indexOf((ds.category || '').toLowerCase()) === -1) { return false; }
+            }
+            // tags: AND across the chip list. data-tags is a
+            // space-delimited string ("foo bar baz ").
+            if (t.tags.length > 0) {
+                const rowTags = ' ' + (ds.tags || '').toLowerCase() + ' ';
+                for (let i = 0; i < t.tags.length; i++) {
+                    if (rowTags.indexOf(' ' + t.tags[i] + ' ') === -1) { return false; }
+                }
+            }
             if (!t.text) { return true; }
             const hay = (ds.search || '').toLowerCase();
             return hay.indexOf(t.text) !== -1;
@@ -118,12 +164,92 @@ function storyPanel() {
             const target = ev && ev.currentTarget;
             const tag = (target && target.dataset && target.dataset.tag) || '';
             if (!tag) { return; }
+            const token = 'tags:' + tag;
             const q = (this.query || '').trim();
-            // Avoid duplicate tokens.
+            // Avoid duplicate tokens — both the tags:<tag> form and the
+            // bare-tag form V3 used to write.
             const parts = q.length ? q.split(/\s+/) : [];
-            if (parts.indexOf(tag) === -1) { parts.push(tag); }
+            if (parts.indexOf(token) !== -1 || parts.indexOf(tag) !== -1) { return; }
+            parts.push(token);
             this.query = parts.join(' ');
         },
+        // Effective chip list for the chip strip beneath the search
+        // input. Defaults (status:open, priority:all, category:all)
+        // appear when the user hasn't overridden that key. User-entered
+        // key:value tokens appear after the defaults; free text gets a
+        // single `search:<text>` chip. V3 parity (sty_48198f3e).
+        getEffectiveChips() {
+            const t = this.tokens;
+            const chips = [];
+            if (t.status.length === 0) {
+                chips.push({ key: 'status', value: 'open', isDefault: true });
+            } else {
+                for (let i = 0; i < t.status.length; i++) {
+                    chips.push({ key: 'status', value: t.status[i], isDefault: false });
+                }
+            }
+            if (t.priority.length === 0) {
+                chips.push({ key: 'priority', value: 'all', isDefault: true });
+            } else {
+                for (let i = 0; i < t.priority.length; i++) {
+                    chips.push({ key: 'priority', value: t.priority[i], isDefault: false });
+                }
+            }
+            if (t.category.length === 0) {
+                chips.push({ key: 'category', value: 'all', isDefault: true });
+            } else {
+                for (let i = 0; i < t.category.length; i++) {
+                    chips.push({ key: 'category', value: t.category[i], isDefault: false });
+                }
+            }
+            for (let i = 0; i < t.tags.length; i++) {
+                chips.push({ key: 'tags', value: t.tags[i], isDefault: false });
+            }
+            if (t.order) {
+                chips.push({ key: 'order', value: t.order, isDefault: false });
+            }
+            if (t.text) {
+                chips.push({ key: 'search', value: t.text, isDefault: false });
+            }
+            return chips;
+        },
+        // Strip a key:value (or free-text) token from the query. Default
+        // chips are no-ops — a `status:open` default chip becomes a
+        // user-set chip the moment the user types `status:done`, so
+        // dismissing the default has no token to remove.
+        removeChip(key, value) {
+            if (!key) { return; }
+            if (key === 'search') {
+                // Drop free-text by stripping all non-key:value tokens.
+                const parts = (this.query || '').trim().split(/\s+/).filter(Boolean);
+                const kept = [];
+                for (let i = 0; i < parts.length; i++) {
+                    if (parts[i].indexOf(':') > 0) { kept.push(parts[i]); }
+                }
+                this.query = kept.join(' ');
+                return;
+            }
+            const parts = (this.query || '').trim().split(/\s+/).filter(Boolean);
+            const kept = [];
+            for (let i = 0; i < parts.length; i++) {
+                const p = parts[i];
+                const idx = p.indexOf(':');
+                if (idx <= 0) { kept.push(p); continue; }
+                const k = p.slice(0, idx).toLowerCase();
+                const v = p.slice(idx + 1).toLowerCase();
+                if (k !== key) { kept.push(p); continue; }
+                if (k === 'tags' || k === 'order') {
+                    if (v !== String(value).toLowerCase()) { kept.push(p); }
+                    continue;
+                }
+                // Comma-separated values: drop matching entry, keep rest.
+                const vals = v.split(',').filter(s => s !== String(value).toLowerCase());
+                if (vals.length > 0) { kept.push(k + ':' + vals.join(',')); }
+            }
+            this.query = kept.join(' ');
+        },
+        // Reset to defaults — drops every token, including free text.
+        clearAllFilters() { this.query = ''; },
         // Apply `order:<field>` by physically reordering the table's
         // tbody after a query change. Triggered via a watcher Alpine
         // sets up in init(); kept side-effect-y rather than reactive
@@ -175,16 +301,41 @@ function storyPanel() {
             const pill = row.querySelector('.col-status .status-pill');
             if (pill) { pill.textContent = newStatus; }
             row.setAttribute('data-realtime-updated-at', String(Date.now()));
+            // sty_48198f3e: bump the reactive counter so x-show
+            // re-evaluates against the new dataset.status. Alpine
+            // doesn't track DOM dataset mutations as reactive deps;
+            // this counter is the explicit signal that filters need
+            // to re-run.
+            this._filterTick++;
         },
     };
 }
 
 // parseStoryQuery splits a story-panel query string into structured
-// tokens. Supports `order:<field>`, `status:<value>`, plus free text.
-// Unknown colon-tokens flow through as free text so a tag like
-// `epic:foo` (V3 convention) still matches the data-search haystack.
+// tokens. V3 parity (sty_48198f3e):
+//   - `order:<field>` (single) — updated|created|priority|status|title.
+//   - `status:<value>` — comma-separated list (`status:open,done`).
+//   - `priority:<value>` — comma-separated list.
+//   - `category:<value>` — comma-separated list.
+//   - `tags:<value>` — single tag per token; multiple `tags:` tokens
+//     compose. The `tag:` alias maps to `tags:` for V3 input parity.
+//   - free text — anything else, lower-cased, joined with spaces.
+//
+// Unknown colon-tokens flow through as free text so a bare `epic:foo`
+// (the V3 wire-format that pre-dates the `tags:` prefix) still
+// matches the data-search haystack via free-text path.
 function parseStoryQuery(q) {
-    const out = { order: '', status: '', statusOverride: false, text: '' };
+    const out = {
+        order: '',
+        status: [],
+        priority: [],
+        category: [],
+        tags: [],
+        text: '',
+        // statusOverride retained for back-compat with any external
+        // caller; equivalent to status.length > 0 today.
+        statusOverride: false,
+    };
     const free = [];
     const parts = (q || '').trim().split(/\s+/).filter(Boolean);
     const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1 };
@@ -195,7 +346,26 @@ function parseStoryQuery(q) {
             const k = p.slice(0, idx).toLowerCase();
             const v = p.slice(idx + 1).toLowerCase();
             if (k === 'order' && orderFields[v]) { out.order = v; continue; }
-            if (k === 'status') { out.status = v; out.statusOverride = true; continue; }
+            if (k === 'status') {
+                const vals = v.split(',').filter(Boolean);
+                for (let j = 0; j < vals.length; j++) { out.status.push(vals[j]); }
+                out.statusOverride = true;
+                continue;
+            }
+            if (k === 'priority') {
+                const vals = v.split(',').filter(Boolean);
+                for (let j = 0; j < vals.length; j++) { out.priority.push(vals[j]); }
+                continue;
+            }
+            if (k === 'category') {
+                const vals = v.split(',').filter(Boolean);
+                for (let j = 0; j < vals.length; j++) { out.category.push(vals[j]); }
+                continue;
+            }
+            if (k === 'tags' || k === 'tag') {
+                if (v) { out.tags.push(v); }
+                continue;
+            }
         }
         free.push(p.toLowerCase());
     }

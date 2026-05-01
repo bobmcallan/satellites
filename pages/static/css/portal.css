@@ -2244,7 +2244,7 @@ code {
     width: 100%;
     box-sizing: border-box;
     padding: 0.4rem 0.6rem;
-    margin: 0.25rem 0 0.75rem 0;
+    margin: 0.25rem 0 0.4rem 0;
     border: 1px solid #ccc;
     background: #fff;
     color: inherit;
@@ -2254,6 +2254,55 @@ code {
     background: #0a0a0a;
     border-color: #333;
 }
+
+/* sty_48198f3e: V3-parity chip strip beneath the panel search input.
+   Defaults render dimmed; user-set chips render bright; the × removes
+   the underlying token from the query. */
+.panel-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0 0 0.75rem 0;
+    align-items: center;
+    min-height: 1.2rem;
+}
+.panel-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(106, 159, 181, 0.15);
+    color: #6a9fb5;
+    line-height: 1.2;
+}
+.panel-filter-chip.is-default { opacity: 0.55; font-style: italic; }
+.panel-filter-chip.is-user { background: rgba(106, 159, 181, 0.25); }
+.panel-filter-chip-label { white-space: nowrap; }
+.panel-filter-chip-remove {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+}
+.panel-filter-chip-remove:hover { color: #c85050; }
+.panel-filter-chip-clear {
+    border: 0;
+    background: rgba(200, 80, 80, 0.15);
+    color: #c85050;
+    cursor: pointer;
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    line-height: 1.2;
+}
+.panel-filter-chip-clear:hover { background: rgba(200, 80, 80, 0.25); }
+[data-theme="dark"] .panel-filter-chip { background: rgba(106, 159, 181, 0.2); color: #8ab4c9; }
+[data-theme="dark"] .panel-filter-chip.is-user { background: rgba(106, 159, 181, 0.35); }
 
 .panel-actions { margin: 0 0 0.6rem 0; font-size: 0.8rem; }
 

@@ -2,9 +2,33 @@
 <div x-data="storyPanel" class="panel-stories" data-testid="panel-stories-body">
   <input type="text"
          class="panel-search"
-         placeholder="search (free text + tag chips, plus order:&lt;field&gt;, status:all|done|cancelled)"
+         placeholder="search (free text + chips: tags:foo priority:high status:open category:feature order:updated)"
          x-model="query"
          data-testid="panel-stories-search">
+  <!-- sty_48198f3e: V3-parity default-filter chip strip. Defaults
+       (status:open, priority:all, category:all) render dimmed; user-set
+       chips render bright; clicking × removes the token from query. A
+       `clear all` chip resets every filter to defaults. -->
+  <div class="panel-filter-chips" data-testid="panel-stories-chips">
+    <template x-for="chip in getEffectiveChips()" :key="chip.key + ':' + chip.value + ':' + chip.isDefault">
+      <span class="panel-filter-chip"
+            :class="{ 'is-default': chip.isDefault, 'is-user': !chip.isDefault }"
+            :data-testid="'panel-stories-chip-' + chip.key + '-' + chip.value">
+        <span class="panel-filter-chip-label" x-text="chip.key + ':' + chip.value"></span>
+        <button type="button"
+                class="panel-filter-chip-remove"
+                x-show="!chip.isDefault"
+                @click="removeChip(chip.key, chip.value)"
+                :title="'Remove ' + chip.key + ':' + chip.value">&times;</button>
+      </span>
+    </template>
+    <button type="button"
+            class="panel-filter-chip-clear"
+            x-show="query.length > 0"
+            @click="clearAllFilters"
+            data-testid="panel-stories-clear-all"
+            title="Reset to default filters">clear all</button>
+  </div>
   {{if not .Composite.Stories}}
     <p class="muted" data-testid="panel-stories-empty">No matches</p>
   {{else}}
@@ -24,6 +48,7 @@
             data-id="{{.ID}}"
             data-status="{{.Status}}"
             data-priority="{{.Priority}}"
+            data-category="{{.Category}}"
             data-title="{{.Title}}"
             data-created="{{.CreatedAt}}"
             data-updated="{{.UpdatedAt}}"

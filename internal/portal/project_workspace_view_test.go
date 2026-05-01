@@ -342,12 +342,23 @@ func TestProjectWorkspaceRender_RowsRenderForSeededRows(t *testing.T) {
 		`data-priority=""`,
 		`data-created="`,
 		`data-updated="`,
+		// sty_48198f3e — story rows now also carry data-category so the
+		// V3-parity category: filter token can match without a server
+		// round-trip.
+		`data-category=""`,
 		// Tags render in their own row below the title (V3 parity)
 		// with a wrapper testid that exposes the per-story tag-row.
 		`data-testid="story-row-tags-sty_`,
 		`class="story-row-tags"`,
 		`<button type="button" class="tag-chip is-clickable" data-tag="epic:foo"`,
 		`@click.stop="addTagToQuery"`,
+		// sty_48198f3e — V3-parity filter chip strip beneath the search
+		// input. Defaults render dimmed; user-set chips render bright.
+		`data-testid="panel-stories-chips"`,
+		`class="panel-filter-chips"`,
+		`x-for="chip in getEffectiveChips()"`,
+		`@click="removeChip(chip.key, chip.value)"`,
+		`@click="clearAllFilters"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)

@@ -72,6 +72,7 @@ type storyCard struct {
 	Title              string
 	Status             string
 	Priority           string
+	Category           string
 	Tags               []string
 	CreatedAt          string
 	UpdatedAt          string
@@ -324,6 +325,7 @@ func storyCardFor(s story.Story) storyCard {
 		Title:              s.Title,
 		Status:             s.Status,
 		Priority:           s.Priority,
+		Category:           s.Category,
 		Tags:               s.Tags,
 		CreatedAt:          s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:          s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
