@@ -5,12 +5,20 @@ import "errors"
 // Status values a ContractInstance can occupy per
 // docs/architecture.md §5. Terminal states (passed, failed, skipped)
 // reject further transitions.
+//
+// pending_review is the intermediate state introduced by
+// epic:v4-lifecycle-refactor (sty_b6b2de01). When the agent calls
+// contract_close the CI moves claimed → pending_review and a
+// kind:review task is enqueued for a reviewer-role runtime to claim.
+// The reviewer calls contract_review_close which moves
+// pending_review → passed | failed.
 const (
-	StatusReady   = "ready"
-	StatusClaimed = "claimed"
-	StatusPassed  = "passed"
-	StatusFailed  = "failed"
-	StatusSkipped = "skipped"
+	StatusReady          = "ready"
+	StatusClaimed        = "claimed"
+	StatusPendingReview  = "pending_review"
+	StatusPassed         = "passed"
+	StatusFailed         = "failed"
+	StatusSkipped        = "skipped"
 )
 
 // ErrInvalidTransition is returned when UpdateStatus is asked to move a
@@ -23,18 +31,27 @@ var ErrInvalidTransition = errors.New("contract: invalid status transition")
 //
 // Matrix:
 //
-//	from \ to   ready  claimed  passed  failed  skipped
-//	ready        -      ✓        -       -       ✓
-//	claimed      -      -        ✓       ✓       ✓
-//	passed       -      -        -       -       -
-//	failed       -      -        -       -       -
-//	skipped      -      -        -       -       -
+//	from \ to        ready  claimed  pending_review  passed  failed  skipped
+//	ready             -      ✓         -               -       -       ✓
+//	claimed           -      -         ✓               ✓       ✓       ✓
+//	pending_review    -      -         -               ✓       ✓       -
+//	passed            -      -         -               -       -       -
+//	failed            -      -         -               -       -       -
+//	skipped           -      -         -               -       -       -
+//
+// claimed→passed and claimed→failed remain valid for the legacy inline
+// reviewer path (some tests + the close path during the migration to
+// uniform review-task gating still flip CIs directly). Once gemini is
+// a queue consumer the only path to passed/failed is via
+// pending_review + contract_review_close.
 func ValidTransition(from, to string) bool {
 	switch from {
 	case StatusReady:
 		return to == StatusClaimed || to == StatusSkipped
 	case StatusClaimed:
-		return to == StatusPassed || to == StatusFailed || to == StatusSkipped
+		return to == StatusPendingReview || to == StatusPassed || to == StatusFailed || to == StatusSkipped
+	case StatusPendingReview:
+		return to == StatusPassed || to == StatusFailed
 	case StatusPassed, StatusFailed, StatusSkipped:
 		return false
 	default:
@@ -46,7 +63,7 @@ func ValidTransition(from, to string) bool {
 // Used by Create to validate an explicitly-supplied initial status.
 func IsKnownStatus(s string) bool {
 	switch s {
-	case StatusReady, StatusClaimed, StatusPassed, StatusFailed, StatusSkipped:
+	case StatusReady, StatusClaimed, StatusPendingReview, StatusPassed, StatusFailed, StatusSkipped:
 		return true
 	}
 	return false

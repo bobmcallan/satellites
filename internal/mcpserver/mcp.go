@@ -543,7 +543,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			s.mcp.AddTool(claimTool, s.handleContractClaim)
 
 			closeTool := mcpgo.NewTool("contract_close",
-				mcpgo.WithDescription("Close a contract instance: writes a phase:close kind:close-request row, optional kind:evidence row, flips CI to passed, rolls the story to done when every required CI is terminal."),
+				mcpgo.WithDescription("Close a contract instance. Writes a phase:close kind:close-request row plus an optional kind:evidence row. When the contract document's validation_mode=task, the handler enqueues a kind:review task with required_role:reviewer and flips the CI to pending_review (a reviewer-role runtime then claims the task and calls contract_review_close to flip the CI to passed/failed). Otherwise the inline reviewer dispatches and the CI flips directly to passed/failed."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
 				mcpgo.WithString("close_markdown", mcpgo.Description("Close summary markdown.")),
 				mcpgo.WithString("evidence_markdown", mcpgo.Description("Optional evidence markdown; writes a kind:evidence row when non-empty.")),
@@ -552,6 +552,15 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — used when the CI was claimed without a plan (deferred plan path).")),
 			)
 			s.mcp.AddTool(closeTool, s.handleContractClose)
+
+			reviewCloseTool := mcpgo.NewTool("contract_review_close",
+				mcpgo.WithDescription("Close a pending_review CI by recording a reviewer verdict. Reviewer-role runtimes call this after claiming a kind:review task, reading the contract's rubric + evidence, and reaching a verdict. Writes a kind:verdict ledger row, flips the CI to passed (verdict=accepted) or failed (verdict=rejected), closes the originating review task, and rolls the story to done when every required CI is terminal. epic:v4-lifecycle-refactor sty_b6b2de01."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("CI in pending_review state.")),
+				mcpgo.WithString("verdict", mcpgo.Required(), mcpgo.Description("accepted | rejected. needs_more is not valid here — the reviewer must commit.")),
+				mcpgo.WithString("rationale", mcpgo.Description("Reviewer rationale; recorded on the kind:verdict ledger row.")),
+				mcpgo.WithString("review_task_id", mcpgo.Description("Originating review task id; closed when supplied so the queue worker shutdown path is clean.")),
+			)
+			s.mcp.AddTool(reviewCloseTool, s.handleContractReviewClose)
 
 			respondTool := mcpgo.NewTool("contract_respond",
 				mcpgo.WithDescription("Write a kind:review-response ledger row addressing the latest unresolved review-question on a CI. Reviewer re-invocation happens on the next close."),

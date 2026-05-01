@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/contract"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/task"
 )
@@ -437,3 +438,131 @@ func TestResume_CapPerStory(t *testing.T) {
 // Compile-time reference to avoid unused-import churn when these
 // helpers exist only as convenience in tests.
 var _ = context.Background
+
+// TestClose_ModeTaskEnqueuesReviewTaskAndPendsCI covers the new path
+// added by epic:v4-lifecycle-refactor sty_b6b2de01: when a contract
+// document declares validation_mode=task, contract_close enqueues a
+// kind:review task with required_role:reviewer and flips the CI to
+// pending_review (NOT passed). The reviewer then calls
+// contract_review_close to flip the CI to passed/failed.
+func TestClose_ModeTaskEnqueuesReviewTaskAndPendsCI(t *testing.T) {
+	t.Parallel()
+	f := newCloseFixture(t)
+	taskStore := task.NewMemoryStore()
+	f.server.tasks = taskStore
+
+	// Mark the plan contract document with validation_mode=task so the
+	// new path fires.
+	planContractID := f.cis[0].ContractID
+	doc, err := f.server.docs.GetByID(f.ctx, planContractID, nil)
+	if err != nil {
+		t.Fatalf("get contract doc: %v", err)
+	}
+	taskMode, _ := json.Marshal(map[string]any{"validation_mode": "task"})
+	if _, err := f.server.docs.Update(f.ctx, doc.ID, document.UpdateFields{Structured: &taskMode}, "test", f.now, nil); err != nil {
+		t.Fatalf("update doc: %v", err)
+	}
+
+	// Plan-close gate from sty_0c21a0cf — enqueue a child task first.
+	if _, err := taskStore.Enqueue(f.ctx, task.Task{
+		WorkspaceID:        f.wsID,
+		ContractInstanceID: f.cis[0].ID,
+		RequiredRole:       "developer",
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+	}, f.now); err != nil {
+		t.Fatalf("enqueue child: %v", err)
+	}
+
+	f.claim(t, 0, "plan body")
+
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"close_markdown":       "plan done",
+		"evidence_markdown":    "decomposed into 1 developer task",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("close: err=%v text=%s", err, firstText(res))
+	}
+
+	var body struct {
+		Status       string `json:"status"`
+		ReviewTaskID string `json:"review_task_id"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.Status != contract.StatusPendingReview {
+		t.Fatalf("status: got %q want %q", body.Status, contract.StatusPendingReview)
+	}
+	if body.ReviewTaskID == "" {
+		t.Fatalf("expected review_task_id")
+	}
+	reviewTask, err := taskStore.GetByID(f.ctx, body.ReviewTaskID, nil)
+	if err != nil {
+		t.Fatalf("review task lookup: %v", err)
+	}
+	if reviewTask.RequiredRole != "reviewer" {
+		t.Fatalf("review task required_role: %q want reviewer", reviewTask.RequiredRole)
+	}
+	if reviewTask.ContractInstanceID != f.cis[0].ID {
+		t.Fatalf("review task ci: %q want %q", reviewTask.ContractInstanceID, f.cis[0].ID)
+	}
+
+	// Now exercise contract_review_close — accepted path.
+	revRes, err := f.server.handleContractReviewClose(f.callerCtx(), newCallToolReq("contract_review_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"verdict":              "accepted",
+		"rationale":            "AC mapped, plan complete",
+		"review_task_id":       body.ReviewTaskID,
+	}))
+	if err != nil || revRes.IsError {
+		t.Fatalf("review_close: err=%v text=%s", err, firstText(revRes))
+	}
+
+	finalCI, _ := f.server.contracts.GetByID(f.ctx, f.cis[0].ID, nil)
+	if finalCI.Status != contract.StatusPassed {
+		t.Fatalf("CI status after review_close: %q want passed", finalCI.Status)
+	}
+	finalTask, _ := taskStore.GetByID(f.ctx, body.ReviewTaskID, nil)
+	if finalTask.Status != task.StatusClosed {
+		t.Fatalf("review task status: %q want closed", finalTask.Status)
+	}
+}
+
+// TestReviewClose_RejectsNonPendingReview covers the guard: review_close
+// called on a CI not in pending_review state returns
+// ci_not_pending_review.
+func TestReviewClose_RejectsNonPendingReview(t *testing.T) {
+	t.Parallel()
+	f := newCloseFixture(t)
+	// f.cis[0] is in StatusReady — definitely not pending_review.
+	res, _ := f.server.handleContractReviewClose(f.callerCtx(), newCallToolReq("contract_review_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"verdict":              "accepted",
+	}))
+	if !res.IsError {
+		t.Fatalf("expected error; got %s", firstText(res))
+	}
+	if !strings.Contains(firstText(res), "ci_not_pending_review") {
+		t.Fatalf("expected ci_not_pending_review; got %s", firstText(res))
+	}
+}
+
+// TestReviewClose_RejectsNeedsMore covers the guard: review_close only
+// accepts {accepted, rejected}; needs_more is rejected because
+// pending_review → claimed isn't a valid back-transition.
+func TestReviewClose_RejectsNeedsMore(t *testing.T) {
+	t.Parallel()
+	f := newCloseFixture(t)
+	res, _ := f.server.handleContractReviewClose(f.callerCtx(), newCallToolReq("contract_review_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"verdict":              "needs_more",
+	}))
+	if !res.IsError {
+		t.Fatalf("expected error; got %s", firstText(res))
+	}
+	if !strings.Contains(firstText(res), "invalid_verdict") {
+		t.Fatalf("expected invalid_verdict; got %s", firstText(res))
+	}
+}
