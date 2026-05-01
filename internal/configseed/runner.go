@@ -62,7 +62,7 @@ func Run(ctx context.Context, docs document.Store, seedDir, workspaceID, actor s
 		seedDir = DefaultSeedDir
 	}
 	summary := Summary{}
-	for _, kind := range []Kind{KindAgent, KindContract, KindWorkflow, KindStoryTemplate} {
+	for _, kind := range []Kind{KindAgent, KindContract, KindWorkflow, KindStoryTemplate, KindReplicateVocabulary} {
 		inputs, errs := LoadDir(seedDir, kind, workspaceID, actor)
 		summary.Errors = append(summary.Errors, errs...)
 		for _, in := range inputs {

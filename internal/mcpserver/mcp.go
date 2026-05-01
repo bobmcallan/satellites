@@ -22,6 +22,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/portalreplicate"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/reviewer"
@@ -54,6 +55,8 @@ type Server struct {
 	tasks            task.Store
 	repos            repo.Store
 	indexer          codeindex.Indexer
+	replicateVocab   *portalreplicate.Vocabulary
+	replicateRunner  func(ctx context.Context, opts portalreplicate.RunOptions, actions []portalreplicate.Action) ([]portalreplicate.Result, portalreplicate.Summary, error)
 	nowFunc          func() time.Time
 }
 
@@ -796,6 +799,17 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("path", mcpgo.Required(), mcpgo.Description("Repo-relative file path.")),
 		)
 		s.mcp.AddTool(outlineTool, s.handleRepoGetOutline)
+	}
+
+	// portal_replicate: chromedp-driven UI replication, story-scoped.
+	// Sty_088f6d5c. Requires the story store (to validate scope) and
+	// the ledger (to attach per-action evidence). The vocabulary is
+	// installed separately via SetReplicateVocabulary so configseed's
+	// post-boot phase can swap in a richer alias map without
+	// re-registering the tool.
+	if err := s.requireReplicatePrereqs(); err == nil {
+		s.replicateVocab = portalreplicate.NewVocabulary()
+		s.registerPortalReplicate()
 	}
 
 	s.streamable = mcpserver.NewStreamableHTTPServer(s.mcp,

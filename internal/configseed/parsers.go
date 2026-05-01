@@ -246,6 +246,44 @@ func storyTemplateHooks(raw any) map[string]any {
 	return out
 }
 
+// replicateVocabularyToInput builds a document.UpsertInput for a
+// kind=replicate_vocabulary file. The frontmatter's `aliases:` map
+// is the source of truth — alias strings as keys, canonical
+// action-type strings as values. The parser validates nothing about
+// the values (the runner enforces IsKnownAction at resolve time);
+// authoring mistakes surface there. Sty_088f6d5c.
+func replicateVocabularyToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
+	name := fm.String("name")
+	if name == "" {
+		return document.UpsertInput{}, fmt.Errorf("replicate_vocabulary: name required")
+	}
+	rawAliases := asMap(fm["aliases"])
+	aliases := make(map[string]string, len(rawAliases))
+	for alias, v := range rawAliases {
+		canon := stringOf(v)
+		if canon == "" {
+			continue
+		}
+		aliases[alias] = canon
+	}
+	payload := map[string]any{"aliases": aliases}
+	structured, err := json.Marshal(payload)
+	if err != nil {
+		return document.UpsertInput{}, fmt.Errorf("replicate_vocabulary %q: marshal: %w", name, err)
+	}
+	return document.UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypeReplicateVocabulary,
+		Name:        name,
+		Body:        body,
+		Structured:  structured,
+		Scope:       document.ScopeSystem,
+		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed", "replicate-vocabulary"),
+		Actor:       actor,
+	}, nil
+}
+
 // helpToInput builds a document.UpsertInput for a kind=help file.
 // Sibling story_cc5c67a9 owns the type=help discriminator + portal
 // surface; the loader entry point lives here so the runner stays

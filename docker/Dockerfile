@@ -31,7 +31,21 @@ RUN apk add --no-cache git && \
 
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata curl bash git
+# Chromium + the freetype/font stack are needed by the portal_replicate
+# MCP tool (sty_088f6d5c) — chromedp drives the runtime browser. The
+# swiftshader package is the software GPU; without it chromium fails to
+# initialise on machines without /dev/dri. nss + freetype + harfbuzz +
+# ca-certificates cover TLS + glyph rendering. Adds ~150 MB to the
+# image; acceptable for the unlock value (live UI replication).
+RUN apk add --no-cache \
+    ca-certificates tzdata curl bash git \
+    chromium chromium-swiftshader \
+    nss freetype freetype-dev harfbuzz \
+    ttf-freefont font-noto-emoji
+
+# chromedp picks up CHROME_BIN as the binary path. Alpine's chromium
+# package installs to /usr/bin/chromium-browser.
+ENV CHROME_BIN=/usr/bin/chromium-browser
 
 WORKDIR /app
 

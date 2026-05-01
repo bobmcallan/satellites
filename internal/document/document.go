@@ -40,6 +40,13 @@ const (
 	// `hooks{<status>: { structured: [...], natural_language: [...]}}`.
 	// Story_d2a03cea.
 	TypeStoryTemplate = "story_template"
+	// TypeReplicateVocabulary names a system-scope document mapping
+	// natural-language aliases to portal_replicate canonical action
+	// types (navigate, wait_visible, click, dom_snapshot, ...). One
+	// document per installation; multiple documents merge in load
+	// order. Seeded from config/seed/replicate_vocabulary/*.md.
+	// Sty_088f6d5c.
+	TypeReplicateVocabulary = "replicate_vocabulary"
 )
 
 // Scope enum values per docs/architecture.md §2.
@@ -61,16 +68,17 @@ const (
 )
 
 var validTypes = map[string]struct{}{
-	TypeArtifact:      {},
-	TypeContract:      {},
-	TypeSkill:         {},
-	TypePrinciple:     {},
-	TypeReviewer:      {},
-	TypeAgent:         {},
-	TypeRole:          {},
-	TypeWorkflow:      {},
-	TypeHelp:          {},
-	TypeStoryTemplate: {},
+	TypeArtifact:            {},
+	TypeContract:            {},
+	TypeSkill:               {},
+	TypePrinciple:           {},
+	TypeReviewer:            {},
+	TypeAgent:               {},
+	TypeRole:                {},
+	TypeWorkflow:            {},
+	TypeHelp:                {},
+	TypeStoryTemplate:       {},
+	TypeReplicateVocabulary: {},
 }
 
 var validScopes = map[string]struct{}{

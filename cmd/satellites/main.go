@@ -461,6 +461,14 @@ func main() {
 		Indexer:          repoIndexer,
 		Reviewer:         rev,
 	})
+	// Sty_088f6d5c: install the portal_replicate action vocabulary
+	// from the seeded replicate_vocabulary document. configseed has
+	// already loaded config/seed/replicate_vocabulary/default.md by
+	// this point. Failures fall back to the canonical-only vocabulary
+	// so the tool stays callable with built-in action names.
+	if err := mcp.LoadReplicateVocabularyFromDoc(ctx, "default"); err != nil {
+		logger.Warn().Str("error", err.Error()).Msg("portal_replicate vocabulary load failed (canonical-only fallback)")
+	}
 	mcpAuth := mcpserver.AuthMiddleware(mcpserver.AuthDeps{
 		Sessions:       sessions,
 		Users:          users,
