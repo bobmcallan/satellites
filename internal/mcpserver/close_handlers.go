@@ -775,11 +775,11 @@ func ciContractMode(ctx context.Context, s *Server, ci contract.ContractInstance
 // inclusion in the close response.
 func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInstance, closeRowID, evidenceRowID, actor string, now time.Time) (string, error) {
 	payload, _ := json.Marshal(map[string]any{
-		"contract_instance_id":   ci.ID,
-		"contract_name":          ci.ContractName,
-		"story_id":               ci.StoryID,
-		"close_ledger_id":        closeRowID,
-		"evidence_ledger_id":     evidenceRowID,
+		"contract_instance_id": ci.ID,
+		"contract_name":        ci.ContractName,
+		"story_id":             ci.StoryID,
+		"close_ledger_id":      closeRowID,
+		"evidence_ledger_id":   evidenceRowID,
 	})
 	t, err := s.tasks.Enqueue(ctx, task.Task{
 		WorkspaceID:        ci.WorkspaceID,

@@ -13,12 +13,12 @@ import "errors"
 // The reviewer calls contract_review_close which moves
 // pending_review → passed | failed.
 const (
-	StatusReady          = "ready"
-	StatusClaimed        = "claimed"
-	StatusPendingReview  = "pending_review"
-	StatusPassed         = "passed"
-	StatusFailed         = "failed"
-	StatusSkipped        = "skipped"
+	StatusReady         = "ready"
+	StatusClaimed       = "claimed"
+	StatusPendingReview = "pending_review"
+	StatusPassed        = "passed"
+	StatusFailed        = "failed"
+	StatusSkipped       = "skipped"
 )
 
 // ErrInvalidTransition is returned when UpdateStatus is asked to move a
