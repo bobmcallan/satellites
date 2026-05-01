@@ -2352,10 +2352,13 @@ code {
 [data-theme="dark"] .panel-table tbody tr.story-row.is-expanded { background: #1f1f1f; }
 [data-theme="dark"] .panel-table tbody tr.story-detail > td { background: #0f0f0f; }
 
-.story-detail-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem 1.25rem;
+/* sty_f4b87ea3 — expanded story row is full-width single-column.
+   The block sequence (description, acceptance criteria, contracts)
+   reads top-to-bottom; nothing splits horizontally. */
+.story-detail-flat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
 }
 .story-detail-block { min-width: 0; }
 .story-detail-block h4 {
@@ -2376,10 +2379,15 @@ code {
 }
 [data-theme="dark"] .story-detail-pre { background: #050505; border-color: #222; }
 
-.story-activity { list-style: none; padding: 0; margin: 0 0 0.5rem 0; font-size: 0.75rem; }
-.story-activity li { padding: 0.2rem 0; }
-
-.story-detail-actions { grid-column: 1 / -1; font-size: 0.8rem; }
+/* Contracts sub-table inside the expanded story row. Uses the same
+   panel-table base styles as the parent stories table; only the
+   per-column widths differ. */
+.panel-table-contracts { width: 100%; table-layout: fixed; font-size: 0.75rem; }
+.panel-table-contracts .col-seq { width: 3rem; }
+.panel-table-contracts .col-status { width: 8rem; }
+.panel-table-contracts .col-agent { width: 14rem; }
+.panel-table-contracts tbody tr.story-contract-row > td { padding: 0.3rem 0.5rem; }
+.panel-table-contracts code.ci-name { font-weight: 600; }
 
 .legacy-banner {
     background: #fff5e3;

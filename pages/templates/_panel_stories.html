@@ -76,34 +76,51 @@
             x-show="isExpanded($el)"
             data-testid="story-detail-{{.ID}}">
           <td colspan="5">
-            <div class="story-detail-grid">
-              <div class="story-detail-block">
+            <div class="story-detail-flat">
+              <section class="story-detail-block">
                 <h4>description</h4>
                 {{if .Description}}<pre class="story-detail-pre">{{.Description}}</pre>{{else}}<p class="muted">—</p>{{end}}
-              </div>
-              <div class="story-detail-block">
+              </section>
+              <section class="story-detail-block">
                 <h4>acceptance criteria</h4>
                 {{if .AcceptanceCriteria}}<pre class="story-detail-pre">{{.AcceptanceCriteria}}</pre>{{else}}<p class="muted">—</p>{{end}}
-              </div>
-              <div class="story-detail-block">
-                <h4>recent activity</h4>
-                {{$activity := index $.Composite.LedgerByStory .ID}}
-                {{if $activity}}
-                  <ul class="story-activity">
-                    {{range $activity}}
-                    <li>
-                      <code class="type-pill">{{.Type}}</code>
-                      <span class="muted">{{.CreatedAt}}</span>
-                      <span>{{.Content}}</span>
-                    </li>
-                    {{end}}
-                  </ul>
-                {{else}}<p class="muted">—</p>{{end}}
-                <p><a href="/projects/{{.ProjectID}}/ledger?story_id={{.ID}}">All ledger entries for this story →</a></p>
-              </div>
-              <div class="story-detail-actions">
-                <a href="/projects/{{.ProjectID}}/stories/{{.ID}}">Open story →</a>
-              </div>
+              </section>
+              <section class="story-detail-block" data-story-contracts="{{.ID}}">
+                <h4>contracts</h4>
+                {{if .Contracts}}
+                  <table class="panel-table panel-table-contracts" data-testid="story-contracts-{{.ID}}">
+                    <thead>
+                      <tr>
+                        <th class="col-seq">#</th>
+                        <th class="col-name">contract</th>
+                        <th class="col-status">status</th>
+                        <th class="col-agent">agent</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {{range .Contracts}}
+                      <tr class="story-contract-row"
+                          data-ci-id="{{.ID}}"
+                          data-status="{{.Status}}"
+                          data-testid="story-contract-row-{{.ID}}">
+                        <td class="col-seq"><code>#{{.Sequence}}</code></td>
+                        <td class="col-name"><code class="ci-name">{{.ContractName}}</code></td>
+                        <td class="col-status"><code class="status-pill status-{{.Status}}" data-testid="story-contract-status-{{.ID}}">{{.Status}}</code></td>
+                        <td class="col-agent">
+                          {{if .AgentID}}
+                            <a href="{{.AgentHref}}" class="ci-agent-link" data-testid="story-contract-agent-{{.ID}}" data-agent-id="{{.AgentID}}"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
+                          {{else}}
+                            <span class="muted" data-testid="story-contract-agent-{{.ID}}">—</span>
+                          {{end}}
+                        </td>
+                      </tr>
+                      {{end}}
+                    </tbody>
+                  </table>
+                {{else}}
+                  <p class="muted" data-testid="story-contracts-empty-{{.ID}}">No contracts</p>
+                {{end}}
+              </section>
             </div>
           </td>
         </tr>

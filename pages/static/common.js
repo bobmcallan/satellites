@@ -278,7 +278,7 @@ function storyPanel() {
             this._ws = new window.SatellitesWS({
                 workspaceId: window.SATELLITES_WS.workspaceId,
                 debug: !!window.SATELLITES_WS.debug,
-                onEvent: function (ev) { self._applyStoryEvent(ev, projectID); },
+                onEvent: function (ev) { self._applyEvent(ev, projectID); },
             });
             this._ws.connect();
         },
@@ -286,9 +286,22 @@ function storyPanel() {
             const host = document.querySelector('[data-project-id]');
             return host ? (host.dataset.projectId || '') : '';
         },
-        _applyStoryEvent(ev, projectID) {
+        // sty_f4b87ea3 — single dispatch for the workspace WS frame.
+        // Routes story.<status> to the row-status patcher and
+        // contract_instance.<status> to the contracts sub-table inside
+        // the matching expanded story row.
+        _applyEvent(ev, projectID) {
             if (!ev || !ev.Kind) { return; }
-            if (ev.Kind.indexOf('story.') !== 0) { return; }
+            if (ev.Kind.indexOf('story.') === 0) {
+                this._applyStoryEvent(ev, projectID);
+                return;
+            }
+            if (ev.Kind.indexOf('contract_instance.') === 0) {
+                this._applyContractEvent(ev, projectID);
+                return;
+            }
+        },
+        _applyStoryEvent(ev, projectID) {
             const data = ev.Data || ev.data || {};
             if (data.project_id && data.project_id !== projectID) { return; }
             const storyID = data.story_id;
@@ -307,6 +320,76 @@ function storyPanel() {
             // this counter is the explicit signal that filters need
             // to re-run.
             this._filterTick++;
+        },
+        // sty_f4b87ea3 — patch a contract row inside the expanded
+        // story detail. The contract event payload (contract/emit.go)
+        // carries workspace_id, story_id, ci_id, contract_name, sequence.
+        // We locate the contracts sub-table by data-story-contracts=<story_id>
+        // and update the row keyed by data-ci-id. project_id isn't on
+        // the payload so we scope by story_id presence in the panel —
+        // an unrelated story's event simply finds no host element and
+        // is dropped.
+        _applyContractEvent(ev, projectID) {
+            const data = ev.Data || ev.data || {};
+            const storyID = data.story_id;
+            const ciID = data.ci_id;
+            if (!storyID || !ciID) { return; }
+            const host = this.$el.querySelector('section[data-story-contracts="' + storyID + '"]');
+            if (!host) { return; }
+            const newStatus = ev.Kind.substring('contract_instance.'.length);
+            if (!newStatus) { return; }
+            const row = host.querySelector('tr.story-contract-row[data-ci-id="' + ciID + '"]');
+            if (row) {
+                row.dataset.status = newStatus;
+                const pill = row.querySelector('.status-pill');
+                if (pill) {
+                    pill.textContent = newStatus;
+                    pill.className = 'status-pill status-' + newStatus;
+                }
+                row.setAttribute('data-realtime-updated-at', String(Date.now()));
+                return;
+            }
+            // No row — this is a new contract on this story. Append a
+            // skeleton row so the panel reflects the lifecycle without
+            // a refresh. The empty-state <p> is replaced by a fresh
+            // table on the first event.
+            this._appendContractRow(host, storyID, ciID, newStatus, data);
+        },
+        _appendContractRow(host, storyID, ciID, status, data) {
+            let table = host.querySelector('table.panel-table-contracts');
+            if (!table) {
+                const empty = host.querySelector('p.muted');
+                if (empty) { empty.remove(); }
+                table = document.createElement('table');
+                table.className = 'panel-table panel-table-contracts';
+                table.setAttribute('data-testid', 'story-contracts-' + storyID);
+                table.innerHTML = '<thead><tr><th class="col-seq">#</th><th class="col-name">contract</th><th class="col-status">status</th><th class="col-agent">agent</th></tr></thead><tbody></tbody>';
+                host.appendChild(table);
+            }
+            const tbody = table.querySelector('tbody');
+            if (!tbody) { return; }
+            const tr = document.createElement('tr');
+            tr.className = 'story-contract-row';
+            tr.dataset.ciId = ciID;
+            tr.dataset.status = status;
+            tr.setAttribute('data-testid', 'story-contract-row-' + ciID);
+            tr.setAttribute('data-realtime-updated-at', String(Date.now()));
+            const seq = (data && typeof data.sequence !== 'undefined') ? String(data.sequence) : '';
+            const name = (data && data.contract_name) ? data.contract_name : ciID;
+            tr.innerHTML =
+                '<td class="col-seq"><code>#' + this._escape(seq) + '</code></td>' +
+                '<td class="col-name"><code class="ci-name">' + this._escape(name) + '</code></td>' +
+                '<td class="col-status"><code class="status-pill status-' + this._escape(status) + '" data-testid="story-contract-status-' + this._escape(ciID) + '">' + this._escape(status) + '</code></td>' +
+                '<td class="col-agent"><span class="muted" data-testid="story-contract-agent-' + this._escape(ciID) + '">—</span></td>';
+            tbody.appendChild(tr);
+        },
+        _escape(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         },
     };
 }

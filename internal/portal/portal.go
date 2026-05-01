@@ -531,7 +531,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	filters := parseProjectWorkspaceFilters(r)
 	isAdmin := p.isWorkspaceAdmin(r.Context(), active.ID, user.ID)
-	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.repos, p.ledger, p.changelog, pr.ID, filters, memberships, isAdmin)
+	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.contracts, p.repos, p.ledger, p.changelog, pr.ID, filters, memberships, isAdmin)
 	data := projectDetailData{
 		Title:           buildPageTitle(active, pr.Name, ""),
 		Version:         config.Version,

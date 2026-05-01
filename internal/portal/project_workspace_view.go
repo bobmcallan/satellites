@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/changelog"
+	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/repo"
@@ -62,10 +63,11 @@ type changelogCard struct {
 }
 
 // storyCard is the per-row view-model for the Stories section. The
-// expand-row on the V3-style story panel reads Description and
-// AcceptanceCriteria. CreatedAt + Tags are exposed on the row's
-// data-* attributes so the client-side `order:<field>` and tag-chip
-// click handlers can reorder + filter without an extra round trip.
+// expand-row on the V3-style story panel reads Description,
+// AcceptanceCriteria, and Contracts. CreatedAt + Tags are exposed on
+// the row's data-* attributes so the client-side `order:<field>` and
+// tag-chip click handlers can reorder + filter without an extra round
+// trip.
 type storyCard struct {
 	ID                 string
 	ProjectID          string
@@ -78,6 +80,22 @@ type storyCard struct {
 	UpdatedAt          string
 	Description        string
 	AcceptanceCriteria string
+	Contracts          []storyContractCard
+}
+
+// storyContractCard is one row in the panel's contracts sub-table.
+// Fields mirror the dedicated story view's ciCard but only the columns
+// the panel actually renders (sequence, contract_name, status, agent).
+// AgentHref is empty when AgentID is unset; the template falls back to
+// an em-dash.
+type storyContractCard struct {
+	ID           string
+	Sequence     int
+	ContractName string
+	Status       string
+	AgentID      string
+	AgentName    string
+	AgentHref    string
 }
 
 // projectWorkspaceFilters carries the per-section row cap.
@@ -107,7 +125,7 @@ func parseProjectWorkspaceFilters(r *http.Request) projectWorkspaceFilters {
 // gracefully when running without a backing store. Documents are loaded
 // twice (project scope + system scope) and merged so global content
 // (principles, reviewer notes) shows alongside the project's own.
-func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, repos repo.Store, led ledger.Store, changelogs changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
+func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, contracts contract.Store, repos repo.Store, led ledger.Store, changelogs changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
 	if f.Limit <= 0 {
 		f.Limit = projectWorkspaceDefaultLimit
 	}
@@ -115,6 +133,7 @@ func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, do
 
 	out.Stories = collectStoryCards(ctx, stories, projectID, f, memberships)
 	out.StoryTotal = len(out.Stories)
+	attachStoryContracts(ctx, out.Stories, contracts, docs, memberships)
 
 	out.Documents = collectDocumentCards(ctx, docs, projectID, f, memberships)
 	out.DocTotal = len(out.Documents)
@@ -331,5 +350,51 @@ func storyCardFor(s story.Story) storyCard {
 		UpdatedAt:          s.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		Description:        s.Description,
 		AcceptanceCriteria: s.AcceptanceCriteria,
+	}
+}
+
+// attachStoryContracts loads each story's contracts and stamps the
+// per-row sub-table (id, sequence, contract_name, status, agent). Nil
+// contracts store leaves every story's Contracts empty so the panel
+// degrades to the SSR empty-state. Agent docs are resolved once per
+// unique agent_id across the whole panel so a 25-row panel only does
+// one document.GetByID per distinct agent.
+func attachStoryContracts(ctx context.Context, cards []storyCard, contracts contract.Store, docs document.Store, memberships []string) {
+	if len(cards) == 0 || contracts == nil {
+		return
+	}
+	agentNames := make(map[string]string)
+	for i := range cards {
+		cis, err := contracts.List(ctx, cards[i].ID, memberships)
+		if err != nil || len(cis) == 0 {
+			continue
+		}
+		out := make([]storyContractCard, 0, len(cis))
+		for _, ci := range cis {
+			name := ""
+			if ci.AgentID != "" && docs != nil {
+				if cached, ok := agentNames[ci.AgentID]; ok {
+					name = cached
+				} else if d, err := docs.GetByID(ctx, ci.AgentID, memberships); err == nil {
+					name = d.Name
+					agentNames[ci.AgentID] = name
+				} else {
+					agentNames[ci.AgentID] = ""
+				}
+			}
+			row := storyContractCard{
+				ID:           ci.ID,
+				Sequence:     ci.Sequence,
+				ContractName: ci.ContractName,
+				Status:       ci.Status,
+				AgentID:      ci.AgentID,
+				AgentName:    name,
+			}
+			if ci.AgentID != "" {
+				row.AgentHref = "/documents/" + ci.AgentID
+			}
+			out = append(out, row)
+		}
+		cards[i].Contracts = out
 	}
 }
