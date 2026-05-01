@@ -132,6 +132,49 @@ function storyPanel() {
             this.$watch('query', () => { applyStoryOrder(this.$el, this.tokens.order); });
             // Apply once on mount so any initial query (e.g. via #hash) takes effect.
             this.$nextTick(() => { applyStoryOrder(this.$el, this.tokens.order); });
+            this._attachRealtimeBridge();
+        },
+        destroy() {
+            if (this._ws && typeof this._ws.close === 'function') { this._ws.close(); }
+        },
+        // sty_af303c26 (focused slice) — open a workspace-scoped WebSocket
+        // and apply `story.<status>` events to the matching story row in
+        // place. Existing `internal/story/emit.go` already publishes the
+        // event on every UpdateStatus; we just patch the DOM in
+        // < 500 ms. Document/contract/ledger panels are not yet wired —
+        // they ship in the realtime epic.
+        _attachRealtimeBridge() {
+            if (!window.SATELLITES_WS || !window.SATELLITES_WS.workspaceId) { return; }
+            if (!window.SatellitesWS) { return; }
+            const projectID = this._readProjectID();
+            if (!projectID) { return; }
+            const self = this;
+            this._ws = new window.SatellitesWS({
+                workspaceId: window.SATELLITES_WS.workspaceId,
+                debug: !!window.SATELLITES_WS.debug,
+                onEvent: function (ev) { self._applyStoryEvent(ev, projectID); },
+            });
+            this._ws.connect();
+        },
+        _readProjectID() {
+            const host = document.querySelector('[data-project-id]');
+            return host ? (host.dataset.projectId || '') : '';
+        },
+        _applyStoryEvent(ev, projectID) {
+            if (!ev || !ev.Kind) { return; }
+            if (ev.Kind.indexOf('story.') !== 0) { return; }
+            const data = ev.Data || ev.data || {};
+            if (data.project_id && data.project_id !== projectID) { return; }
+            const storyID = data.story_id;
+            if (!storyID) { return; }
+            const row = this.$el.querySelector('tr.story-row[data-id="' + storyID + '"]');
+            if (!row) { return; }
+            const newStatus = ev.Kind.substring('story.'.length);
+            if (!newStatus) { return; }
+            row.dataset.status = newStatus;
+            const pill = row.querySelector('.col-status .status-pill');
+            if (pill) { pill.textContent = newStatus; }
+            row.setAttribute('data-realtime-updated-at', String(Date.now()));
         },
     };
 }
