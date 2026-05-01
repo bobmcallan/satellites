@@ -7,12 +7,12 @@
     {{$activeID := .ActiveWorkspace.ID}}
     {{$hasOther := false}}
     {{range .Workspaces}}{{if ne .ID $activeID}}{{$hasOther = true}}{{end}}{{end}}
-    <div class="nav-workspace" x-data="navWorkspaceMenu" @keydown.escape.window="close">
+    <div class="nav-workspace" x-data="navWorkspaceMenu" @keydown.escape.window="close" @click.outside="close">
       <button type="button" class="btn-link" @click="toggle">
         WORKSPACE / {{if $activeID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}
         <span aria-hidden="true">▾</span>
       </button>
-      <ul class="nav-workspace-menu" x-cloak :class="hiddenWhenOpen" @click.outside="close" data-testid="nav-workspace-menu">
+      <ul class="nav-workspace-menu" x-cloak :class="hiddenWhenOpen" data-testid="nav-workspace-menu">
         {{range .Workspaces}}
         {{if ne .ID $activeID}}
         <li>
@@ -62,11 +62,11 @@
     {{if .GlobalAdminChip}}<span class="nav-global-admin-chip" data-testid="global-admin-chip" title="Global admin acting outside their workspace memberships">GLOBAL ADMIN</span>{{end}}
     {{if .DevMode}}<span class="nav-dev-chip" data-testid="dev-chip">DEV</span>{{end}}
     {{if .User.Email}}
-    <div class="nav-hamburger-wrap" x-data="navHamburger" @keydown.escape.window="close">
+    <div class="nav-hamburger-wrap" x-data="navHamburger" @keydown.escape.window="close" @click.outside="close">
       <button type="button" class="nav-hamburger" data-testid="nav-hamburger" @click="toggle" aria-label="open menu">
         <span class="nav-hamburger-icon" aria-hidden="true"></span>
       </button>
-      <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown" @click.outside="close">
+      <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
         <a href="/settings" data-testid="nav-settings-link">settings</a>
         {{if .IsGlobalAdmin}}<a href="/admin/system-config" class="nav-admin-item" data-testid="nav-system-config-link">system config</a>{{end}}
