@@ -9,7 +9,14 @@
   <dt>mcp</dt>
   {{if .Project.MCPURL}}
     <dd data-testid="project-meta-mcp" data-mcp-state="{{if .Project.MCPDerived}}derived{{else}}set{{end}}"{{if .Project.MCPDerived}} data-mcp-derived="true"{{end}}>
-      <code>{{.Project.MCPURL}}</code>{{if .Project.MCPDerived}} <span class="mcp-derived-suffix">(derived)</span>{{end}}
+      <code data-mcp-url="{{.Project.MCPURL}}">{{.Project.MCPURL}}</code>
+      <button type="button"
+              class="mcp-copy-btn"
+              data-testid="project-meta-mcp-copy"
+              data-copy-target="mcp-url"
+              data-copy-source="{{.Project.MCPURL}}"
+              title="Copy MCP URL to clipboard"
+              aria-label="Copy MCP URL to clipboard">[copy]</button>
     </dd>
   {{else}}
     <dd data-testid="project-meta-mcp" data-mcp-state="unset">

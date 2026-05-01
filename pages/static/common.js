@@ -559,6 +559,51 @@ function footerStatus() {
     };
 }
 
+// Delegated click handler for .mcp-copy-btn (project meta panel
+// sty_0495f550). The button carries data-copy-source=<url>; clicking
+// it copies that string to the clipboard and briefly swaps the
+// button label to "[copied]" as feedback. Falls back to a hidden-
+// textarea selection when navigator.clipboard is unavailable
+// (older browsers / non-secure contexts).
+function copyToClipboard(text) {
+    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) { resolve(); } else { reject(new Error('copy command failed')); }
+        } catch (e) { reject(e); }
+    });
+}
+
+document.addEventListener('click', function (ev) {
+    const target = ev.target;
+    if (!target || !target.classList || !target.classList.contains('mcp-copy-btn')) { return; }
+    const source = target.getAttribute('data-copy-source') || '';
+    if (!source) { return; }
+    ev.preventDefault();
+    const original = target.textContent;
+    copyToClipboard(source).then(() => {
+        target.textContent = '[copied]';
+        target.setAttribute('data-copied', 'true');
+    }).catch(() => {
+        target.textContent = '[copy failed]';
+    }).finally(() => {
+        setTimeout(() => {
+            target.textContent = original;
+            target.removeAttribute('data-copied');
+        }, 1500);
+    });
+});
+
 document.addEventListener('alpine:init', () => {
     Alpine.store('panels', {
         _expanded: {},

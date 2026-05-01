@@ -16,6 +16,29 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 )
 
+// TestCopyButton_JSHandlerPresent pins the delegated click handler
+// for .mcp-copy-btn in common.js. A future refactor that drops the
+// handler would silently break the copy affordance; this fails the
+// build instead.
+func TestCopyButton_JSHandlerPresent(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("../../pages/static/common.js")
+	if err != nil {
+		t.Fatalf("read common.js: %v", err)
+	}
+	body := string(src)
+	for _, want := range []string{
+		"mcp-copy-btn",
+		"copyToClipboard",
+		"data-copy-source",
+		"navigator.clipboard",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("common.js missing %q", want)
+		}
+	}
+}
+
 // TestKVList_CSSRulePresent — AC8: the .kv-list selector ships in
 // portal.css with grid layout. The bug was that the class was
 // referenced by 9 templates but had zero CSS rules; this test fails
@@ -75,13 +98,21 @@ func TestMetaPanel_MCPRow_DerivedWhenPublicURLSet(t *testing.T) {
 		`data-testid="project-meta-mcp"`,
 		`data-mcp-derived="true"`,
 		`data-mcp-state="derived"`,
-		`(derived)`,
 		wantURL,
 		`class="kv-list"`,
+		// Copy button + clipboard plumbing.
+		`data-testid="project-meta-mcp-copy"`,
+		`class="mcp-copy-btn"`,
+		`data-copy-source="` + wantURL + `"`,
+		`>[copy]<`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+	// "(derived)" suffix dropped per user request.
+	if strings.Contains(body, "(derived)") {
+		t.Errorf("body still contains \"(derived)\" suffix; should be removed")
 	}
 }
 
