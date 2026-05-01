@@ -2256,8 +2256,12 @@ code {
 }
 
 /* sty_48198f3e: V3-parity chip strip beneath the panel search input.
-   Defaults render dimmed; user-set chips render bright; the × removes
-   the underlying token from the query. */
+   Built on the same theme tokens as the rest of the page (--color-fg /
+   --color-bg / --color-border / --color-muted) so both light and dark
+   themes render with the page's monochrome palette. Defaults carry a
+   dashed border + muted text to signal "default, not user-set"; user
+   chips use the solid border + foreground colour pattern shared with
+   .status-pill / .category-pill. */
 .panel-filter-chips {
     display: flex;
     flex-wrap: wrap;
@@ -2269,16 +2273,24 @@ code {
 .panel-filter-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: 0.25rem;
     font-size: 0.7rem;
     padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    background: rgba(106, 159, 181, 0.15);
-    color: #6a9fb5;
-    line-height: 1.2;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    line-height: 1.3;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
 }
-.panel-filter-chip.is-default { opacity: 0.55; font-style: italic; }
-.panel-filter-chip.is-user { background: rgba(106, 159, 181, 0.25); }
+.panel-filter-chip.is-default {
+    color: var(--color-muted);
+    border-style: dashed;
+}
+.panel-filter-chip.is-user {
+    background: var(--color-fg);
+    color: var(--color-bg);
+}
 .panel-filter-chip-label { white-space: nowrap; }
 .panel-filter-chip-remove {
     border: 0;
@@ -2289,20 +2301,30 @@ code {
     line-height: 1;
     padding: 0 0.1rem;
 }
-.panel-filter-chip-remove:hover { color: #c85050; }
+.panel-filter-chip-remove:hover { opacity: 0.6; }
+.panel-filter-chip-remove:focus-visible {
+    outline: 2px solid var(--color-fg);
+    outline-offset: 1px;
+}
 .panel-filter-chip-clear {
-    border: 0;
-    background: rgba(200, 80, 80, 0.15);
-    color: #c85050;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-fg);
     cursor: pointer;
     font-size: 0.65rem;
     padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    line-height: 1.2;
+    line-height: 1.3;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
 }
-.panel-filter-chip-clear:hover { background: rgba(200, 80, 80, 0.25); }
-[data-theme="dark"] .panel-filter-chip { background: rgba(106, 159, 181, 0.2); color: #8ab4c9; }
-[data-theme="dark"] .panel-filter-chip.is-user { background: rgba(106, 159, 181, 0.35); }
+.panel-filter-chip-clear:hover {
+    background: var(--color-fg);
+    color: var(--color-bg);
+}
+.panel-filter-chip-clear:focus-visible {
+    outline: 2px solid var(--color-fg);
+    outline-offset: 1px;
+}
 
 .panel-actions { margin: 0 0 0.6rem 0; font-size: 0.8rem; }
 
