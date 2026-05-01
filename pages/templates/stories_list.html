@@ -20,6 +20,10 @@
         <p class="muted stories-back-link">
           <a href="/projects/{{.Project.ID}}">&larr; back to project</a>
         </p>
+        <div class="legacy-banner" data-testid="legacy-banner">
+          The project page now hosts the stories panel.
+          <a href="/projects/{{.Project.ID}}?expand=stories">Open project page →</a>
+        </div>
 
         {{if .Disabled}}
           <p class="muted">Stories are unavailable in this environment (no database configured).</p>

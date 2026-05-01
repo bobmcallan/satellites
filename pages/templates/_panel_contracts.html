@@ -1,0 +1,25 @@
+{{define "_panel_contracts.html"}}
+<div data-testid="panel-contracts-body">
+  <p class="panel-actions">
+    <a href="/projects/{{.Project.ID}}/configuration" data-testid="panel-contracts-open">Open configuration →</a>
+  </p>
+  {{if not .Composite.Contracts}}
+    <p class="muted" data-testid="panel-contracts-empty">No contracts</p>
+  {{else}}
+    <ul class="document-cards" data-testid="panel-contracts-list">
+      {{range .Composite.Contracts}}
+      <li data-testid="panel-contract-{{.ID}}">
+        <a href="/documents/{{.ID}}" class="document-card-link">
+          <code class="type-pill">{{.Type}}</code>
+          <code class="scope-pill">{{.Scope}}</code>
+          <span class="document-name">{{.Name}}</span>
+          <code class="version-pill">v{{.Version}}</code>
+          {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+          <span class="muted">{{.UpdatedAt}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  {{end}}
+</div>
+{{end}}

@@ -1,0 +1,13 @@
+{{define "_panel_meta.html"}}
+<dl class="kv-list">
+  <dt>id</dt><dd><code>{{.Project.ID}}</code></dd>
+  <dt>name</dt><dd>{{.Project.Name}}</dd>
+  <dt>status</dt><dd>{{.Project.Status}}</dd>
+  <dt>owner</dt><dd><code>{{.Project.OwnerUserID}}</code>{{if .OwnerYou}} <span class="muted">(you)</span>{{end}}</dd>
+  <dt>created</dt><dd><code>{{.Project.CreatedAt}}</code></dd>
+  <dt>updated</dt><dd><code>{{.Project.UpdatedAt}}</code></dd>
+</dl>
+<p class="muted">
+  <a href="/projects">&larr; back to projects</a>
+</p>
+{{end}}

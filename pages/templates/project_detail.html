@@ -6,118 +6,37 @@
 </head>
 <body>
   {{template "nav.html" .}}
-  <main class="portal-main">
+  <main class="portal-main" data-testid="project-page" data-project-id="{{.Project.ID}}">
 
-    <section class="panel-headed" data-testid="workspace-project-meta"
+    {{range .Panels}}
+    <section class="panel-headed" data-testid="panel-{{.ID}}"
              x-data="sectionToggle"
-             data-toggle-key="proj-{{.Project.ID}}-meta"
+             data-toggle-key="{{.ID}}"
+             data-default-expanded="{{.DefaultExpanded}}"
              :class="{ 'section-collapsed': collapsed }">
       <header class="panel-header section-toggle" @click="toggle">
-        <h1>{{.Project.Name}}</h1>
+        <h2>{{.Title}}</h2>
         <span class="panel-header-meta">
+          {{if eq .ID "stories"}}<code data-testid="panel-stories-count">({{$.Composite.StoryTotal}})</code>{{end}}
+          {{if eq .ID "documents"}}<code data-testid="panel-documents-count">({{$.Composite.DocTotal}})</code>{{end}}
+          {{if eq .ID "contracts"}}<code data-testid="panel-contracts-count">({{$.Composite.ContractsTotal}})</code>{{end}}
+          {{if eq .ID "ledger"}}<code data-testid="panel-ledger-count">({{$.Composite.LedgerTotal}})</code>{{end}}
           <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
         </span>
       </header>
       <div class="panel-body" :class="hiddenWhenOpen">
-        <dl class="kv-list">
-          <dt>id</dt><dd><code>{{.Project.ID}}</code></dd>
-          <dt>status</dt><dd>{{.Project.Status}}</dd>
-          <dt>owner</dt><dd><code>{{.Project.OwnerUserID}}</code>{{if .OwnerYou}} <span class="muted">(you)</span>{{end}}</dd>
-          <dt>created</dt><dd><code>{{.Project.CreatedAt}}</code></dd>
-          <dt>updated</dt><dd><code>{{.Project.UpdatedAt}}</code></dd>
-        </dl>
-        <p class="muted">
-          <a href="/projects">&larr; back to projects</a>
-        </p>
-      </div>
-    </section>
-
-    <section class="panel-headed" data-testid="workspace-stories-panel"
-             x-data="sectionToggle"
-             data-toggle-key="proj-{{.Project.ID}}-stories"
-             :class="{ 'section-collapsed': collapsed }">
-      <header class="panel-header section-toggle" @click="toggle">
-        <h2>stories</h2>
-        <span class="panel-header-meta">
-          <code data-testid="workspace-stories-count">({{.Composite.StoryTotal}})</code>
-          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
-        </span>
-      </header>
-      <div class="panel-body" :class="hiddenWhenOpen">
-        <p class="panel-actions">
-          <a href="/projects/{{.Project.ID}}/stories" data-testid="workspace-stories-open">Open stories →</a>
-        </p>
-        {{if not .Composite.Stories}}
-          <p class="muted" data-testid="workspace-stories-empty">No matches</p>
-        {{else}}
-          <ul class="document-cards" data-testid="workspace-stories-list">
-            {{range .Composite.Stories}}
-            <li data-testid="workspace-story-{{.ID}}">
-              <a href="/projects/{{.ProjectID}}/stories/{{.ID}}" class="document-card-link">
-                <code class="type-pill">story</code>
-                <code class="scope-pill">{{.Status}}</code>
-                <span class="document-name">{{.Title}}</span>
-                {{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}
-                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ul>
+        {{if eq .ID "meta"}}{{template "_panel_meta.html" $}}
+        {{else if eq .ID "stories"}}{{template "_panel_stories.html" $}}
+        {{else if eq .ID "documents"}}{{template "_panel_documents.html" $}}
+        {{else if eq .ID "contracts"}}{{template "_panel_contracts.html" $}}
+        {{else if eq .ID "configuration"}}{{template "_panel_configuration.html" $}}
+        {{else if eq .ID "repo"}}{{template "_panel_repo.html" $}}
+        {{else if eq .ID "ledger"}}{{template "_panel_ledger.html" $}}
         {{end}}
       </div>
     </section>
+    {{end}}
 
-    <section class="panel-headed" data-testid="workspace-documents-panel"
-             x-data="sectionToggle"
-             data-toggle-key="proj-{{.Project.ID}}-documents"
-             :class="{ 'section-collapsed': collapsed }">
-      <header class="panel-header section-toggle" @click="toggle">
-        <h2>documents</h2>
-        <span class="panel-header-meta">
-          <code data-testid="workspace-documents-count">({{.Composite.DocTotal}})</code>
-          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
-        </span>
-      </header>
-      <div class="panel-body" :class="hiddenWhenOpen">
-        {{if not .Composite.Documents}}
-          <p class="muted" data-testid="workspace-documents-empty">No matches</p>
-        {{else}}
-          <ul class="document-cards" data-testid="workspace-documents-list">
-            {{range .Composite.Documents}}
-            <li data-testid="workspace-document-{{.ID}}">
-              <a href="/documents/{{.ID}}" class="document-card-link">
-                <code class="type-pill">{{.Type}}</code>
-                <code class="scope-pill">{{.Scope}}</code>
-                <span class="document-name">{{.Name}}</span>
-                <code class="version-pill">v{{.Version}}</code>
-                {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
-                <span class="muted">{{.UpdatedAt}}</span>
-              </a>
-            </li>
-            {{end}}
-          </ul>
-        {{end}}
-      </div>
-    </section>
-
-    <section class="panel-headed" data-testid="workspace-configuration-section"
-             x-data="sectionToggle"
-             data-toggle-key="proj-{{.Project.ID}}-configuration"
-             :class="{ 'section-collapsed': collapsed }">
-      <header class="panel-header section-toggle" @click="toggle">
-        <h2>configuration</h2>
-        <span class="panel-header-meta">
-          <span class="section-toggle-caret" aria-hidden="true" x-text="caret"></span>
-        </span>
-      </header>
-      <div class="panel-body" :class="hiddenWhenOpen">
-        <p>
-          <a href="/projects/{{.Project.ID}}/configuration" data-testid="workspace-configuration-link">Open configuration page →</a>
-        </p>
-        <p class="muted">workflow · contracts · skills · principles</p>
-      </div>
-    </section>
   </main>
   {{template "footer.html" .}}
 </body>

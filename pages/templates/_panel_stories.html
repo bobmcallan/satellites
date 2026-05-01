@@ -1,0 +1,80 @@
+{{define "_panel_stories.html"}}
+<div x-data="storyPanel" class="panel-stories" data-testid="panel-stories-body">
+  <p class="panel-actions">
+    <a href="/projects/{{.Project.ID}}/stories" data-testid="panel-stories-open">Open stories →</a>
+  </p>
+  <input type="text"
+         class="panel-search"
+         placeholder="search stories (id, title, tags)…"
+         x-model="query"
+         data-testid="panel-stories-search">
+  {{if not .Composite.Stories}}
+    <p class="muted" data-testid="panel-stories-empty">No matches</p>
+  {{else}}
+    <table class="panel-table panel-table-stories" data-testid="panel-stories-table">
+      <thead>
+        <tr>
+          <th class="col-id">id</th>
+          <th class="col-title">title</th>
+          <th class="col-status">status</th>
+          <th class="col-priority">priority</th>
+          <th class="col-updated">updated</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Composite.Stories}}
+        <tr class="story-row"
+            data-id="{{.ID}}"
+            data-search="{{.ID}} {{.Title}} {{range .Tags}}{{.}} {{end}}"
+            x-show="matchesRow($el)"
+            :class="rowClass($el)"
+            @click="toggleRow"
+            data-testid="story-row-{{.ID}}">
+          <td class="col-id"><code>{{.ID}}</code></td>
+          <td class="col-title">{{.Title}}{{range .Tags}} <code class="tag-chip">{{.}}</code>{{end}}</td>
+          <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
+          <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
+          <td class="col-updated muted">{{.UpdatedAt}}</td>
+        </tr>
+        <tr class="story-detail"
+            data-detail-for="{{.ID}}"
+            x-show="isExpanded($el)"
+            data-testid="story-detail-{{.ID}}">
+          <td colspan="5">
+            <div class="story-detail-grid">
+              <div class="story-detail-block">
+                <h4>description</h4>
+                {{if .Description}}<pre class="story-detail-pre">{{.Description}}</pre>{{else}}<p class="muted">—</p>{{end}}
+              </div>
+              <div class="story-detail-block">
+                <h4>acceptance criteria</h4>
+                {{if .AcceptanceCriteria}}<pre class="story-detail-pre">{{.AcceptanceCriteria}}</pre>{{else}}<p class="muted">—</p>{{end}}
+              </div>
+              <div class="story-detail-block">
+                <h4>recent activity</h4>
+                {{$activity := index $.Composite.LedgerByStory .ID}}
+                {{if $activity}}
+                  <ul class="story-activity">
+                    {{range $activity}}
+                    <li>
+                      <code class="type-pill">{{.Type}}</code>
+                      <span class="muted">{{.CreatedAt}}</span>
+                      <span>{{.Content}}</span>
+                    </li>
+                    {{end}}
+                  </ul>
+                {{else}}<p class="muted">—</p>{{end}}
+                <p><a href="/projects/{{.ProjectID}}/ledger?story_id={{.ID}}">All ledger entries for this story →</a></p>
+              </div>
+              <div class="story-detail-actions">
+                <a href="/projects/{{.ProjectID}}/stories/{{.ID}}">Open story →</a>
+              </div>
+            </div>
+          </td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  {{end}}
+</div>
+{{end}}

@@ -2200,3 +2200,90 @@ code {
 
 [data-theme="dark"] .agent-ephemeral-pill { background: #2a1f0d; color: #e0c898; border-color: #d4922a; }
 [data-theme="dark"] .agent-canonical-pill { background: #142013; color: #b8d8c0; border-color: #4ca97a; }
+
+/* sty_70c0f7a3 — single-page project view styling. Panel registry on
+   project_detail.html iterates and renders each panel from the same
+   shell; URL `?expand=...` controls open state (no server-side prefs).
+   The story panel adopts V3's click-to-expand table shape, mirroring
+   `.system-doc-table` above. */
+.panel-search {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.6rem;
+    margin: 0.25rem 0 0.75rem 0;
+    border: 1px solid #ccc;
+    background: #fff;
+    color: inherit;
+    font: inherit;
+}
+[data-theme="dark"] .panel-search {
+    background: #0a0a0a;
+    border-color: #333;
+}
+
+.panel-actions { margin: 0 0 0.6rem 0; font-size: 0.8rem; }
+
+.panel-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+.panel-table thead th {
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.65rem;
+    border-bottom: 1px solid #ccc;
+    padding: 0.35rem 0.5rem;
+}
+.panel-table tbody td { padding: 0.4rem 0.5rem; vertical-align: top; }
+.panel-table tbody tr.story-row { cursor: pointer; }
+.panel-table tbody tr.story-row:hover { background: #f5f5f5; }
+.panel-table tbody tr.story-row.is-expanded { background: #f0f0f0; }
+.panel-table tbody tr.story-detail > td { background: #fafafa; padding: 0.75rem 1rem; }
+
+[data-theme="dark"] .panel-table thead th { border-color: #333; }
+[data-theme="dark"] .panel-table tbody tr.story-row:hover { background: #1a1a1a; }
+[data-theme="dark"] .panel-table tbody tr.story-row.is-expanded { background: #1f1f1f; }
+[data-theme="dark"] .panel-table tbody tr.story-detail > td { background: #0f0f0f; }
+
+.story-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1.25rem;
+}
+.story-detail-block { min-width: 0; }
+.story-detail-block h4 {
+    margin: 0 0 0.35rem 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.story-detail-pre {
+    white-space: pre-wrap;
+    font-size: 0.75rem;
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    max-height: 14rem;
+    overflow: auto;
+}
+[data-theme="dark"] .story-detail-pre { background: #050505; border-color: #222; }
+
+.story-activity { list-style: none; padding: 0; margin: 0 0 0.5rem 0; font-size: 0.75rem; }
+.story-activity li { padding: 0.2rem 0; }
+
+.story-detail-actions { grid-column: 1 / -1; font-size: 0.8rem; }
+
+.legacy-banner {
+    background: #fff5e3;
+    color: #774400;
+    border: 1px solid #d4922a;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.8rem;
+}
+.legacy-banner a { color: inherit; font-weight: 700; }
+[data-theme="dark"] .legacy-banner { background: #2a1f0d; color: #e0c898; border-color: #d4922a; }

@@ -1,0 +1,20 @@
+{{define "_panel_repo.html"}}
+<div data-testid="panel-repo-body">
+  {{if .Composite.RepoEmpty}}
+    <p class="muted" data-testid="panel-repo-empty">No repo registered. Use <code>satellites_repo_add</code> to attach one.</p>
+  {{else}}
+    <p class="panel-actions">
+      <a href="/projects/{{.Project.ID}}/repo" data-testid="panel-repo-open">Open repo →</a>
+    </p>
+    <dl class="kv-list">
+      <dt>remote</dt><dd><code>{{.Composite.Repo.GitRemote}}</code></dd>
+      <dt>branch</dt><dd><code>{{.Composite.Repo.DefaultBranch}}</code></dd>
+      <dt>head</dt><dd><code>{{.Composite.Repo.HeadSHA}}</code></dd>
+      <dt>status</dt><dd><code class="status-pill status-{{.Composite.Repo.Status}}">{{.Composite.Repo.Status}}</code></dd>
+      <dt>symbols</dt><dd><code>{{.Composite.Repo.SymbolCount}}</code></dd>
+      <dt>files</dt><dd><code>{{.Composite.Repo.FileCount}}</code></dd>
+      {{if .Composite.Repo.LastIndexedAt}}<dt>indexed</dt><dd><code>{{.Composite.Repo.LastIndexedAt}}</code></dd>{{end}}
+    </dl>
+  {{end}}
+</div>
+{{end}}

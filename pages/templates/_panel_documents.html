@@ -1,0 +1,25 @@
+{{define "_panel_documents.html"}}
+<div data-testid="panel-documents-body">
+  <p class="panel-actions">
+    <a href="/documents" data-testid="panel-documents-open">Open documents →</a>
+  </p>
+  {{if not .Composite.Documents}}
+    <p class="muted" data-testid="panel-documents-empty">No matches</p>
+  {{else}}
+    <ul class="document-cards" data-testid="panel-documents-list">
+      {{range .Composite.Documents}}
+      <li data-testid="panel-document-{{.ID}}">
+        <a href="/documents/{{.ID}}" class="document-card-link">
+          <code class="type-pill">{{.Type}}</code>
+          <code class="scope-pill">{{.Scope}}</code>
+          <span class="document-name">{{.Name}}</span>
+          <code class="version-pill">v{{.Version}}</code>
+          {{range .Tags}}<code class="tag-chip">{{.}}</code> {{end}}
+          <span class="muted">{{.UpdatedAt}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+  {{end}}
+</div>
+{{end}}

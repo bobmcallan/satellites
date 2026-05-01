@@ -16,6 +16,10 @@
         <p class="muted">
           <a href="/projects/{{.Project.ID}}">&larr; back to workspace</a>
         </p>
+        <div class="legacy-banner" data-testid="legacy-banner">
+          This page is folding into the project page.
+          <a href="/projects/{{.Project.ID}}?expand=contracts,configuration">Open project page →</a>
+        </div>
       </div>
     </section>
 

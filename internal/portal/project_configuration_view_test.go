@@ -256,7 +256,7 @@ func TestProjectConfigurationRender_LinkOnProjectDetail(t *testing.T) {
 	if !strings.Contains(body, wantHref) {
 		t.Errorf("project_detail body missing configuration link %q", wantHref)
 	}
-	if !strings.Contains(body, `data-testid="workspace-configuration-link"`) {
-		t.Errorf("project_detail body missing workspace-configuration-link testid")
+	if !strings.Contains(body, `data-testid="panel-configuration-open"`) {
+		t.Errorf("project_detail body missing panel-configuration-open testid")
 	}
 }

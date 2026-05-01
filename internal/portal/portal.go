@@ -336,6 +336,7 @@ type projectDetailData struct {
 	Project         projectRow
 	OwnerYou        bool
 	Composite       projectWorkspaceComposite
+	Panels          []panel
 	Workspaces      []wsChip
 	ActiveWorkspace wsChip
 	DevMode         bool
@@ -522,7 +523,8 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filters := parseProjectWorkspaceFilters(r)
-	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, pr.ID, filters, memberships)
+	isAdmin := p.isWorkspaceAdmin(r.Context(), active.ID, user.ID)
+	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.repos, p.ledger, pr.ID, filters, memberships, isAdmin)
 	data := projectDetailData{
 		Title:           buildPageTitle(active, pr.Name, ""),
 		Version:         config.Version,
@@ -531,6 +533,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		Project:         viewRow(pr),
 		OwnerYou:        true,
 		Composite:       composite,
+		Panels:          defaultPanels(),
 		Workspaces:      chips,
 		ActiveWorkspace: active,
 		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,

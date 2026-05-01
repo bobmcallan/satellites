@@ -93,15 +93,15 @@ func TestCSPStrict(t *testing.T) {
 		// and re-clicking restores. Display computed style is the
 		// observable for the workaround working.
 		const bodyDisplay = `(() => {
-			const el = document.querySelector('[data-testid="workspace-stories-panel"] .panel-body');
+			const el = document.querySelector('[data-testid="panel-stories"] .panel-body');
 			return el ? getComputedStyle(el).display : 'NOT-FOUND';
 		})()`
-		const headerSelector = `[data-testid="workspace-stories-panel"] .panel-header`
+		const headerSelector = `[data-testid="panel-stories"] .panel-header`
 
 		var dispOnLoad, dispAfterFirstClick, dispAfterSecondClick string
 		if err := chromedp.Run(browserCtx,
 			chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-			chromedp.WaitVisible(`[data-testid="workspace-stories-panel"]`, chromedp.ByQuery),
+			chromedp.WaitVisible(`[data-testid="panel-stories"]`, chromedp.ByQuery),
 			chromedp.Sleep(400*time.Millisecond),
 			chromedp.Evaluate(bodyDisplay, &dispOnLoad),
 			jsClick(headerSelector),

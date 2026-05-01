@@ -56,7 +56,7 @@ func TestProjectDetail_SectionOrder(t *testing.T) {
 	var html string
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-		chromedp.WaitVisible(`[data-testid="workspace-project-meta"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-testid="panel-meta"]`, chromedp.ByQuery),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("navigate /projects/%s: %v", projID, err)
@@ -65,10 +65,10 @@ func TestProjectDetail_SectionOrder(t *testing.T) {
 	// story_59b11d8c moved the workspace-search out of project_detail
 	// into the dedicated /projects/<id>/stories page.
 	order := []string{
-		`data-testid="workspace-project-meta"`,
-		`data-testid="workspace-stories-panel"`,
-		`data-testid="workspace-documents-panel"`,
-		`data-testid="workspace-configuration-section"`,
+		`data-testid="panel-meta"`,
+		`data-testid="panel-stories"`,
+		`data-testid="panel-documents"`,
+		`data-testid="panel-configuration"`,
 	}
 	prev := -1
 	for _, marker := range order {
@@ -111,20 +111,20 @@ func TestProjectDetail_SectionToggle(t *testing.T) {
 	var bodyVisibleAfterClick, bodyVisibleAfterReload bool
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-		chromedp.WaitVisible(`[data-testid="workspace-stories-panel"] .panel-body`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-testid="panel-stories"] .panel-body`, chromedp.ByQuery),
 		// Click the stories section header to collapse it.
-		chromedp.Click(`[data-testid="workspace-stories-panel"] .panel-header`, chromedp.ByQuery),
+		chromedp.Click(`[data-testid="panel-stories"] .panel-header`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(r => setTimeout(r, 100))`, nil, chromedp.EvalAsValue),
 		chromedp.Evaluate(`(() => {
-			const body = document.querySelector('[data-testid="workspace-stories-panel"] .panel-body');
+			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
 			return body && body.offsetParent !== null;
 		})()`, &bodyVisibleAfterClick),
 		// Reload the page and assert the collapsed state persists.
 		chromedp.Reload(),
-		chromedp.WaitVisible(`[data-testid="workspace-stories-panel"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-testid="panel-stories"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(r => setTimeout(r, 100))`, nil, chromedp.EvalAsValue),
 		chromedp.Evaluate(`(() => {
-			const body = document.querySelector('[data-testid="workspace-stories-panel"] .panel-body');
+			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
 			return body && body.offsetParent !== null;
 		})()`, &bodyVisibleAfterReload),
 	); err != nil {
