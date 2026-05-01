@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -442,6 +443,7 @@ func main() {
 	if dbPing != nil {
 		srv.SetHealthCheck(dbPing)
 	}
+	srv.SetLLMPinger(newGeminiPinger(cfg.GeminiAPIKey))
 
 	rev := buildReviewer(logger, cfg)
 
@@ -792,6 +794,45 @@ func buildReviewer(logger arbor.ILogger, cfg *config.Config) reviewer.Reviewer {
 		APIKey: cfg.GeminiAPIKey,
 		Model:  model,
 	})
+}
+
+// geminiPinger is the httpserver.LLMPinger adapter for the Google
+// Generative Language API. Configured() reflects whether the API key is
+// set; Ping() does a tiny GET against the /v1beta/models?key=...
+// endpoint with a 5 s timeout. Anything other than 2xx is reported as
+// unreachable so /healthz can colour-code the badge. The probe is
+// independent of the close-time reviewer client — keeping it isolated
+// here avoids dragging the reviewer's internal HTTP shape into the
+// liveness path. Sty_558c0431.
+type geminiPinger struct {
+	apiKey string
+	client *http.Client
+}
+
+func newGeminiPinger(apiKey string) *geminiPinger {
+	return &geminiPinger{apiKey: apiKey, client: &http.Client{Timeout: 5 * time.Second}}
+}
+
+func (g *geminiPinger) Configured() bool { return g != nil && g.apiKey != "" }
+
+func (g *geminiPinger) Ping(ctx context.Context) error {
+	if g == nil || g.apiKey == "" {
+		return errors.New("gemini: api key not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://generativelanguage.googleapis.com/v1beta/models?key="+url.QueryEscape(g.apiKey), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("gemini probe: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // oauthRoutes adapts auth.OAuthServer to the httpserver.RouteRegistrar

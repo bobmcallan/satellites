@@ -1,8 +1,24 @@
 {{define "footer.html"}}
-<footer class="footer">
+<footer class="footer" x-data="footerStatus" data-testid="footer">
   <div class="footer-inner">
-    <span class="footer-text">SATELLITES</span>
-    <span class="footer-text">v{{.Version}}{{if and .Commit (ne .Commit "unknown")}} &middot; {{.Commit}}{{end}}</span>
+    <div class="footer-slot footer-slot-left" data-testid="footer-identity">
+      <span class="footer-text">SATELLITES</span>
+      <span class="footer-text">v{{.Version}}{{if and .Commit (ne .Commit "unknown")}} &middot; {{.Commit}}{{end}}</span>
+    </div>
+    <div class="footer-slot footer-slot-mid" data-testid="footer-uptime">
+      <span class="footer-text" x-text="uptimeLabel"></span>
+    </div>
+    <div class="footer-slot footer-slot-right" data-testid="footer-status">
+      <template x-for="item in items" :key="item.id">
+        <span class="footer-status-badge"
+              :class="badgeClass(item)"
+              :data-testid="item.testid"
+              :title="item.label + ': ' + (status[item.field] || '—')">
+          <span class="footer-status-label" x-text="item.label"></span>
+          <span class="footer-status-value" x-text="status[item.field] || '—'"></span>
+        </span>
+      </template>
+    </div>
   </div>
 </footer>
 {{end}}

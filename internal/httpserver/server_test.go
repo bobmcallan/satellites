@@ -109,6 +109,61 @@ func TestHealthzDBCheck(t *testing.T) {
 	})
 }
 
+// stubLLMPinger implements LLMPinger for tests. configured + pingErr
+// drive the three observable outcomes (ok / unreachable / not_configured).
+type stubLLMPinger struct {
+	configured bool
+	pingErr    error
+}
+
+func (s *stubLLMPinger) Configured() bool             { return s.configured }
+func (s *stubLLMPinger) Ping(_ context.Context) error { return s.pingErr }
+
+// TestHealthzGeminiField (sty_558c0431) — confirms the LLM probe lands
+// in the `gemini` field of /healthz with the V3 enum and never flips
+// the HTTP status (the LLM is not on Fly's machine-probe critical path).
+func TestHealthzGeminiField(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		pinger LLMPinger
+		want   string
+	}{
+		{name: "no pinger attached", pinger: nil, want: ""},
+		{name: "not configured", pinger: &stubLLMPinger{configured: false}, want: "not_configured"},
+		{name: "configured + reachable", pinger: &stubLLMPinger{configured: true, pingErr: nil}, want: "ok"},
+		{name: "configured + unreachable", pinger: &stubLLMPinger{configured: true, pingErr: errors.New("dial")}, want: "unreachable"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.Config{Port: 0, Env: "dev", LogLevel: "info", DevMode: true}
+			s := New(cfg, satarbor.New("info"), time.Now())
+			if tc.pinger != nil {
+				s.SetLLMPinger(tc.pinger)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			rec := httptest.NewRecorder()
+			s.http.Handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (LLM failure must not flip 503)", rec.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("json decode: %v", err)
+			}
+			got, _ := body["gemini"].(string)
+			if got != tc.want {
+				t.Errorf("gemini = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSecurityHeaders_AllPresent covers AC1+AC2 of story_d5652302.
 // All non-HSTS headers ship on every endpoint regardless of env; HSTS
 // is gated on prod (story_d5652302 — dev hits over plain HTTP).

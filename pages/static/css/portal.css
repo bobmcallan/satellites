@@ -566,6 +566,7 @@ a:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 1rem;
 }
 
 .footer-text {
@@ -573,6 +574,38 @@ a:hover {
     color: var(--color-muted);
     letter-spacing: 0.1em;
 }
+
+/* sty_558c0431 — three-slot footer (left identity / middle uptime /
+   right status badges). Slots are flex children sized by content; the
+   status slot grows to host additional badges as the registry adds
+   them. The badges follow the V3 colour rules (ok=green, amber, error,
+   muted). */
+.footer-slot { display: flex; align-items: center; gap: 0.5rem; }
+.footer-slot-left { flex: 0 0 auto; }
+.footer-slot-mid { flex: 0 0 auto; opacity: 0.85; }
+.footer-slot-right { flex: 0 0 auto; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+
+.footer-status-badge {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+}
+.footer-status-label { text-transform: uppercase; opacity: 0.8; }
+.footer-status-value { font-weight: 700; }
+
+.footer-status-badge.is-ok { color: #2d5b3a; background: rgba(76, 169, 122, 0.12); border-color: #4ca97a; }
+.footer-status-badge.is-amber { color: #774400; background: rgba(212, 146, 42, 0.15); border-color: #d4922a; }
+.footer-status-badge.is-error { color: #842029; background: rgba(176, 42, 55, 0.12); border-color: #b02a37; }
+.footer-status-badge.is-muted { color: var(--color-muted); background: transparent; border-color: var(--color-muted); }
+
+[data-theme="dark"] .footer-status-badge.is-ok { color: #b8d8c0; background: rgba(76, 169, 122, 0.18); }
+[data-theme="dark"] .footer-status-badge.is-amber { color: #e0c898; background: rgba(212, 146, 42, 0.2); }
+[data-theme="dark"] .footer-status-badge.is-error { color: #f4a8b1; background: rgba(176, 42, 55, 0.18); }
 
 .footer a {
     color: #000;

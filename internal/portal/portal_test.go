@@ -141,7 +141,7 @@ func TestLanding_AuthRenders(t *testing.T) {
 	if !strings.Contains(body, "alice@local") {
 		t.Errorf("body missing user email: %s", body)
 	}
-	if !strings.Contains(body, `<footer class="footer">`) {
+	if !strings.Contains(body, `<footer class="footer"`) {
 		t.Errorf("body missing footer (version chip moved to footer in story_1340913b): %s", body)
 	}
 }

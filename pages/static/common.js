@@ -190,6 +190,79 @@ function applyStoryOrder(host, field) {
     }
 }
 
+// footerStatus (sty_558c0431) — three-slot footer Alpine factory.
+// Owns the local uptime tick and the /api/health poll cycle. The right
+// slot is data-driven from `footerStatusItems` — adding a status badge
+// is one entry there + one corresponding field on /api/health.
+function footerStatusItems() {
+    return [
+        { id: 'gemini', label: 'gemini', field: 'gemini', testid: 'footer-gemini' },
+    ];
+}
+
+function footerStatus() {
+    return {
+        items: footerStatusItems(),
+        status: {},
+        uptimeSeconds: 0,
+        startedAtMs: 0,
+        _tickHandle: null,
+        _pollHandle: null,
+        _visHandler: null,
+        async init() {
+            // Drive the visible counter off the server's `started_at`
+            // when we have it, otherwise off the page-load instant. The
+            // first /api/health response replaces this anchor.
+            this.startedAtMs = Date.now();
+            this._tickHandle = setInterval(() => { this.uptimeSeconds = Math.max(0, Math.floor((Date.now() - this.startedAtMs) / 1000)); }, 1000);
+            this._visHandler = () => { if (!document.hidden) { this.poll(); } };
+            document.addEventListener('visibilitychange', this._visHandler);
+            await this.poll();
+            this.schedulePoll();
+        },
+        destroy() {
+            if (this._tickHandle) { clearInterval(this._tickHandle); }
+            if (this._pollHandle) { clearTimeout(this._pollHandle); }
+            if (this._visHandler) { document.removeEventListener('visibilitychange', this._visHandler); }
+        },
+        schedulePoll() {
+            if (this._pollHandle) { clearTimeout(this._pollHandle); }
+            // 30 s while visible; pause while hidden — visibilitychange resumes.
+            this._pollHandle = setTimeout(async () => {
+                if (!document.hidden) { await this.poll(); }
+                this.schedulePoll();
+            }, 30000);
+        },
+        async poll() {
+            try {
+                const r = await fetch('/api/health', { credentials: 'same-origin' });
+                if (!r.ok && r.status !== 503) { return; }
+                const j = await r.json();
+                this.status = j || {};
+                if (typeof j.started_at === 'string') {
+                    const t = Date.parse(j.started_at);
+                    if (!isNaN(t)) { this.startedAtMs = t; }
+                }
+            } catch (e) { /* swallow — next poll retries */ }
+        },
+        get uptimeLabel() {
+            const s = this.uptimeSeconds;
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const ss = s % 60;
+            if (h > 0) { return 'agent up ' + h + 'h ' + m + 'm ' + ss + 's'; }
+            return 'agent up ' + m + 'm ' + ss + 's';
+        },
+        badgeClass(item) {
+            const v = (this.status && this.status[item.field]) || '';
+            if (v === 'ok') { return 'is-ok'; }
+            if (v === 'configured') { return 'is-amber'; }
+            if (v === 'unreachable') { return 'is-error'; }
+            return 'is-muted';
+        },
+    };
+}
+
 document.addEventListener('alpine:init', () => {
     Alpine.store('panels', {
         _expanded: {},
@@ -214,4 +287,5 @@ document.addEventListener('alpine:init', () => {
     });
     Alpine.data('sectionToggle', sectionToggle);
     Alpine.data('storyPanel', storyPanel);
+    Alpine.data('footerStatus', footerStatus);
 });

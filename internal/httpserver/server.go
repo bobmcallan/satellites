@@ -30,6 +30,29 @@ type Server struct {
 	mux       *http.ServeMux
 
 	healthCheck atomic.Pointer[HealthCheck]
+	llmPinger   atomic.Pointer[LLMPinger]
+}
+
+// LLMPinger surfaces an LLM-provider liveness probe to /healthz
+// (sty_558c0431, V3 parity). Configured reports whether credentials are
+// wired; Ping returns nil when a tiny live call succeeds, otherwise an
+// error. /healthz translates the two into the `gemini` enum
+// (`ok` | `unreachable` | `not_configured`). A failing ping does NOT
+// flip the response to 503 — only db_ok=false does (Fly's machine probe
+// gates on the database, not on the LLM).
+type LLMPinger interface {
+	Configured() bool
+	Ping(ctx context.Context) error
+}
+
+// SetLLMPinger swaps in (or detaches when nil) the LLM liveness probe
+// /healthz reads to populate the `gemini` field.
+func (s *Server) SetLLMPinger(p LLMPinger) {
+	if p == nil {
+		s.llmPinger.Store(nil)
+		return
+	}
+	s.llmPinger.Store(&p)
 }
 
 // SetHealthCheck swaps in an optional liveness hook used by /healthz. Safe
@@ -147,6 +170,23 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		} else {
 			payload["db_ok"] = true
 		}
+	}
+	// LLM (Gemini) probe — sty_558c0431. Outcome is one of
+	// not_configured | unreachable | ok. Failure does NOT flip the
+	// HTTP status; the LLM is not on Fly's machine-probe critical path.
+	if pinger := s.llmPinger.Load(); pinger != nil {
+		p := *pinger
+		gemini := "not_configured"
+		if p.Configured() {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			if err := p.Ping(ctx); err != nil {
+				gemini = "unreachable"
+			} else {
+				gemini = "ok"
+			}
+		}
+		payload["gemini"] = gemini
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

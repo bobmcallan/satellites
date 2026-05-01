@@ -50,7 +50,7 @@ func TestPortal_Footer_Renders(t *testing.T) {
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			body := rec.Body.String()
-			if !strings.Contains(body, `<footer class="footer">`) {
+			if !strings.Contains(body, `<footer class="footer"`) {
 				t.Errorf("missing <footer class=\"footer\"> on %s — body[len=%d] tail=%q", tc.path, len(body), tailSuffix(body, 200))
 			}
 			if !strings.Contains(body, "SATELLITES") {
@@ -80,7 +80,7 @@ func TestPortal_Footer_OmitsCommitWhenUnknown(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	footerStart := strings.Index(body, `<footer class="footer">`)
+	footerStart := strings.Index(body, `<footer class="footer"`)
 	if footerStart < 0 {
 		t.Fatalf("footer missing")
 	}
@@ -99,6 +99,39 @@ func TestPortal_Footer_OmitsCommitWhenUnknown(t *testing.T) {
 	}
 	if strings.Contains(footer, "unknown") {
 		t.Errorf("footer leaked the literal commit \"unknown\":\n%s", footer)
+	}
+}
+
+// TestPortal_Footer_ThreeSlotShape (sty_558c0431) — confirms the
+// rendered footer carries the three slots (identity / uptime / status)
+// and the data-testids the chromedp + DOM tests pivot on.
+func TestPortal_Footer_ThreeSlotShape(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, _, _, _ := newTestPortal(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_1", Email: "alice@local"}
+	users.Add(user)
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`x-data="footerStatus"`,
+		`data-testid="footer-identity"`,
+		`data-testid="footer-uptime"`,
+		`data-testid="footer-status"`,
+		`x-text="uptimeLabel"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("footer body missing %q", want)
+		}
 	}
 }
 
