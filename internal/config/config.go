@@ -101,6 +101,15 @@ type Config struct {
 	// Env override: SATELLITES_OAUTH_REDIRECT_BASE_URL.
 	OAuthRedirectBaseURL string `toml:"oauth_redirect_base_url"`
 
+	// PublicURL is the externally-reachable base URL of the satellites
+	// server. Used to derive each project's MCP connection string
+	// (`<PublicURL>/mcp?project_id=<id>`) when project.MCPURL is unset.
+	// Empty is allowed; the project meta panel renders an explicit
+	// "not configured" empty-state and the derived mcp_url field on
+	// project_get returns empty.
+	// Env override: SATELLITES_PUBLIC_URL.
+	PublicURL string `toml:"public_url"`
+
 	// OAuthTokenCacheTTL is how long the MCP-side OAuth token validator
 	// caches a successful provider lookup. Default 4h. Out-of-range or
 	// unparseable values fall back to the default with a warning.
@@ -260,6 +269,7 @@ var describeTable = []FieldDoc{
 	{Field: "GithubClientID", Env: "SATELLITES_GITHUB_CLIENT_ID", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client id for GitHub. Pair with SATELLITES_GITHUB_CLIENT_SECRET."},
 	{Field: "GithubClientSecret", Env: "SATELLITES_GITHUB_CLIENT_SECRET", Default: "(empty — provider disabled)", Description: "OAuth 2.0 client secret for GitHub. Never logged."},
 	{Field: "OAuthRedirectBaseURL", Env: "SATELLITES_OAUTH_REDIRECT_BASE_URL", Default: "http://localhost:<Port> (DevMode=true) / (empty)", ProdRecommended: true, Description: "Base URL for OAuth callback redirects. Recommended in prod when any provider is configured."},
+	{Field: "PublicURL", Env: "SATELLITES_PUBLIC_URL", Default: "(empty — derived mcp_url is empty; meta panel renders not-configured empty-state)", ProdRecommended: true, Description: "Externally-reachable base URL of the satellites server. Used to derive each project's MCP connection string."},
 	{Field: "OAuthTokenCacheTTL", Env: "SATELLITES_OAUTH_TOKEN_CACHE_TTL", Default: "4h", Description: "How long the MCP-side OAuth token validator caches a successful provider lookup."},
 	{Field: "JWTSecret", Env: "SATELLITES_JWT_SECRET", Default: "(empty — random per-boot, all MCP tokens invalidate on restart)", ProdRecommended: true, Description: "HMAC-SHA256 key signing satellites-issued OAuth access JWTs. Set a stable value in prod."},
 	{Field: "OAuthIssuer", Env: "SATELLITES_OAUTH_ISSUER", Default: "(empty — derived from request host)", Description: "Absolute base URL announced in OAuth discovery metadata and JWT iss claim. Set when fronted by an opaque proxy."},
@@ -416,6 +426,7 @@ type tomlOverlay struct {
 	GithubClientID       *string   `toml:"github_client_id"`
 	GithubClientSecret   *string   `toml:"github_client_secret"`
 	OAuthRedirectBaseURL *string   `toml:"oauth_redirect_base_url"`
+	PublicURL            *string   `toml:"public_url"`
 	OAuthTokenCacheTTL   *duration `toml:"oauth_token_cache_ttl"`
 	JWTSecret            *string   `toml:"jwt_secret"`
 	OAuthIssuer          *string   `toml:"oauth_issuer"`
@@ -492,6 +503,9 @@ func (o tomlOverlay) applyTo(cfg *Config, warnings *[]string) bool {
 	}
 	if o.OAuthRedirectBaseURL != nil {
 		cfg.OAuthRedirectBaseURL = *o.OAuthRedirectBaseURL
+	}
+	if o.PublicURL != nil {
+		cfg.PublicURL = *o.PublicURL
 	}
 	if o.OAuthTokenCacheTTL != nil {
 		d := time.Duration(*o.OAuthTokenCacheTTL)
@@ -679,6 +693,9 @@ func applyEnvOverrides(cfg *Config, warnings *[]string) {
 	}
 	if v := os.Getenv("SATELLITES_OAUTH_REDIRECT_BASE_URL"); v != "" {
 		cfg.OAuthRedirectBaseURL = v
+	}
+	if v := os.Getenv("SATELLITES_PUBLIC_URL"); v != "" {
+		cfg.PublicURL = v
 	}
 	if v := os.Getenv("SATELLITES_OAUTH_TOKEN_CACHE_TTL"); v != "" {
 		d, err := time.ParseDuration(v)

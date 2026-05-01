@@ -42,4 +42,11 @@ type Session struct {
 	// project_status) that resolve a project's workspace. Empty until
 	// the session has been bound. story_798631fd.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+
+	// ActiveProjectID names the project this session is currently bound
+	// to. Stamped by `project_set` (sty_4db7c3a3) when the agent resolves
+	// a project from the local repo's git remote. Empty until the
+	// session has explicitly bound a project. Project-scoped MCP verbs
+	// may default to this id when the caller omits project_id.
+	ActiveProjectID string `json:"active_project_id,omitempty"`
 }

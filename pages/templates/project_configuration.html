@@ -52,6 +52,32 @@
       </div>
     </section>
 
+    <section class="panel-headed" data-testid="config-agent-process">
+      <header class="panel-header">
+        <h2>agent process</h2>
+        <span class="panel-header-meta">
+          {{if .Composite.AgentProcessIsOverride}}<code class="scope-pill" data-testid="config-agent-process-scope">project override</code>{{else}}<code class="scope-pill" data-testid="config-agent-process-scope">system default</code>{{end}}
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if .Composite.AgentProcessIsOverride}}
+          <p class="muted">
+            This project has its own agent-process override.
+            <a href="/documents/{{.Composite.AgentProcessOverrideDocID}}" data-testid="config-agent-process-edit">Edit override →</a>
+          </p>
+        {{else}}
+          <p class="muted" data-testid="config-agent-process-empty">
+            Using system default — create a <code>type=artifact, name=agent_process</code> document tagged <code>kind:agent-process</code> in this project to override.
+          </p>
+        {{end}}
+        {{if .Composite.AgentProcessBody}}
+          <pre class="story-prose" data-testid="config-agent-process-body">{{.Composite.AgentProcessBody}}</pre>
+        {{else}}
+          <p class="muted" data-testid="config-agent-process-unseeded">No agent-process artifact resolved. Boot the satellites server with the seed enabled.</p>
+        {{end}}
+      </div>
+    </section>
+
     <section class="panel-headed" data-testid="configuration-skills-panel">
       <header class="panel-header">
         <h2>skills</h2>

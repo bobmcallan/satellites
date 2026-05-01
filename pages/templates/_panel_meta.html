@@ -6,6 +6,16 @@
   <dt>owner</dt><dd><code>{{.Project.OwnerUserID}}</code>{{if .OwnerYou}} <span class="muted">(you)</span>{{end}}</dd>
   <dt>created</dt><dd><code>{{.Project.CreatedAt}}</code></dd>
   <dt>updated</dt><dd><code>{{.Project.UpdatedAt}}</code></dd>
+  <dt>mcp</dt>
+  {{if .Project.MCPURL}}
+    <dd data-testid="project-meta-mcp" data-mcp-state="{{if .Project.MCPDerived}}derived{{else}}set{{end}}"{{if .Project.MCPDerived}} data-mcp-derived="true"{{end}}>
+      <code>{{.Project.MCPURL}}</code>{{if .Project.MCPDerived}} <span class="mcp-derived-suffix">(derived)</span>{{end}}
+    </dd>
+  {{else}}
+    <dd data-testid="project-meta-mcp" data-mcp-state="unset">
+      not configured — set <code>SATELLITES_PUBLIC_URL</code> and refresh
+    </dd>
+  {{end}}
 </dl>
 <p class="muted">
   <a href="/projects">&larr; back to projects</a>

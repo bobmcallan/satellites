@@ -38,6 +38,13 @@ type Store interface {
 	// session does not exist. story_798631fd.
 	SetWorkspace(ctx context.Context, userID, sessionID, workspaceID string, now time.Time) (Session, error)
 
+	// SetActiveProject stamps the active_project_id on an existing
+	// session row. Called by `project_set` (sty_4db7c3a3) when the agent
+	// resolves a project from the local repo's git remote. Subsequent
+	// project-scoped verbs may default to this id when the caller omits
+	// project_id. Returns ErrNotFound if the session does not exist.
+	SetActiveProject(ctx context.Context, userID, sessionID, projectID string, now time.Time) (Session, error)
+
 	// ListAll returns every registered session row. Used by the
 	// boot-time CI grant-backfill migration in story_4608a82c to build a
 	// session_id → orchestrator_grant_id lookup. Unscoped read — callers
@@ -146,6 +153,21 @@ func (m *MemoryStore) SetWorkspace(ctx context.Context, userID, sessionID, works
 		return Session{}, ErrNotFound
 	}
 	sess.WorkspaceID = workspaceID
+	sess.LastSeenAt = now
+	m.rows[key] = sess
+	return sess, nil
+}
+
+// SetActiveProject implements Store for MemoryStore.
+func (m *MemoryStore) SetActiveProject(ctx context.Context, userID, sessionID, projectID string, now time.Time) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := memKey(userID, sessionID)
+	sess, ok := m.rows[key]
+	if !ok {
+		return Session{}, ErrNotFound
+	}
+	sess.ActiveProjectID = projectID
 	sess.LastSeenAt = now
 	m.rows[key] = sess
 	return sess, nil

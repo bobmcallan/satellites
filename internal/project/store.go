@@ -65,6 +65,11 @@ type Store interface {
 	// taken by a different row.
 	SetGitRemote(ctx context.Context, id, gitRemote string, now time.Time) (Project, error)
 
+	// SetMCPURL stamps an explicit mcp_url on an existing project,
+	// overriding the derived form. Pass an empty string to clear the
+	// override (the derived form takes over again).
+	SetMCPURL(ctx context.Context, id, mcpURL string, now time.Time) (Project, error)
+
 	// SetStatus flips a project's status (active ↔ archived). Soft-delete
 	// path; rows are never physically removed. Returns the updated Project.
 	SetStatus(ctx context.Context, id, status string, now time.Time) (Project, error)
@@ -213,6 +218,20 @@ func (m *MemoryStore) SetGitRemote(ctx context.Context, id, gitRemote string, no
 		}
 	}
 	p.GitRemote = gitRemote
+	p.UpdatedAt = now
+	m.rows[id] = p
+	return p, nil
+}
+
+// SetMCPURL implements Store for MemoryStore.
+func (m *MemoryStore) SetMCPURL(ctx context.Context, id, mcpURL string, now time.Time) (Project, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.rows[id]
+	if !ok {
+		return Project{}, ErrNotFound
+	}
+	p.MCPURL = mcpURL
 	p.UpdatedAt = now
 	m.rows[id] = p
 	return p, nil

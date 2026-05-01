@@ -363,6 +363,17 @@ type projectRow struct {
 	OwnerUserID string
 	CreatedAt   string
 	UpdatedAt   string
+	// MCPURL is the resolved connection string the meta panel renders
+	// in its `mcp` row (sty_0495f550). Either the persisted value or
+	// the derived `<config.PublicURL>/mcp?project_id=<id>`. Empty when
+	// the public base URL is unset; the template renders the
+	// not-configured empty-state in that case.
+	MCPURL string
+	// MCPDerived is true when MCPURL was computed from PublicURL +
+	// project_id rather than read from a persisted Project.MCPURL
+	// field. The template renders a small (derived) suffix when set
+	// — the schema-gap follow-up will land the persisted-value path.
+	MCPDerived bool
 }
 
 // handleLanding gates GET / on a valid session. Authenticated users get
@@ -537,7 +548,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
-		Project:         viewRow(pr),
+		Project:         p.projectRowWithMCP(pr),
 		OwnerYou:        true,
 		Composite:       composite,
 		Panels:          defaultPanels(),
@@ -1638,6 +1649,18 @@ func viewRow(p project.Project) projectRow {
 		CreatedAt:   p.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:   p.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// projectRowWithMCP is viewRow + the resolved MCP URL fields. Used by
+// the project detail / configuration handlers; the projects-list page
+// stays on the lighter viewRow shape so the row is cheap to compute.
+func (p *Portal) projectRowWithMCP(pr project.Project) projectRow {
+	row := viewRow(pr)
+	row.MCPURL = project.ResolveMCPURL(pr, p.cfg.PublicURL)
+	// Derived = no persisted MCPURL on the row but the resolver still
+	// produced a non-empty value (i.e. PublicURL kicked in).
+	row.MCPDerived = pr.MCPURL == "" && row.MCPURL != ""
+	return row
 }
 
 func (p *Portal) redirectToLogin(w http.ResponseWriter, r *http.Request) {

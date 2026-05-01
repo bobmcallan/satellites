@@ -17,6 +17,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/ternarybob/arbor"
 
+	"github.com/bobmcallan/satellites/internal/agentprocess"
 	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
@@ -60,6 +61,29 @@ type Server struct {
 	replicateVocab   *portalreplicate.Vocabulary
 	replicateRunner  func(ctx context.Context, opts portalreplicate.RunOptions, actions []portalreplicate.Action) ([]portalreplicate.Result, portalreplicate.Summary, error)
 	nowFunc          func() time.Time
+}
+
+// HandshakeFallbackInstructions is the literal MCP server-instructions
+// string used when the agent-process artifact resolver returns empty —
+// i.e. the seed hasn't run, the doc store isn't wired, or no project
+// context narrows the lookup. Kept verbatim from pre-sty_e1ab884d so
+// out-of-band MCP clients that grep for it during integration testing
+// continue to match.
+const HandshakeFallbackInstructions = "Satellites v4 — walking skeleton."
+
+// resolveHandshakeInstructions returns the MCP server-instructions
+// string emitted at handshake. Sourced from the agent-process
+// resolver chain (sty_e1ab884d): project-scope override (not yet
+// wired here — needs URL-scoped project context), then system-scope
+// `default_agent_process`, then HandshakeFallbackInstructions.
+//
+// docs may be nil during early-boot tests; the helper returns the
+// fallback in that case so the server stays bootable.
+func resolveHandshakeInstructions(docs document.Store) string {
+	if body := agentprocess.Resolve(context.Background(), docs, "", nil); body != "" {
+		return body
+	}
+	return HandshakeFallbackInstructions
 }
 
 // Deps bundles the optional per-tool dependencies passed through to
@@ -135,9 +159,16 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.indexer = codeindex.NewStub()
 	}
 
+	// sty_e1ab884d: handshake instructions are sourced from the
+	// agent-process artifact. Resolution chain: project-scope override
+	// (when this server boots into a project context — not yet wired) →
+	// system-scope `default_agent_process` artifact (seeded at boot via
+	// agentprocess.SeedSystemDefault). The literal "walking skeleton"
+	// tagline is the back-compat fallback for boots where the seed
+	// hasn't run (early-test fixtures) or the doc store is unwired.
 	serverOpts := []mcpserver.ServerOption{
 		mcpserver.WithToolCapabilities(true),
-		mcpserver.WithInstructions("Satellites v4 — walking skeleton."),
+		mcpserver.WithInstructions(resolveHandshakeInstructions(s.docs)),
 	}
 	// Grant middleware is always installed; it's a pass-through unless
 	// Config.GrantsEnforced is true AND the RoleGrantStore is wired.
@@ -271,10 +302,11 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(listProjTool, s.handleProjectList)
 
 		updateProjTool := mcpgo.NewTool("project_update",
-			mcpgo.WithDescription("Update a project's name and/or git_remote. Owner-only. Duplicate (workspace, git_remote) is rejected."),
+			mcpgo.WithDescription("Update a project's name, git_remote, and/or mcp_url. Owner-only. Duplicate (workspace, git_remote) is rejected."),
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Project id (proj_<8hex>).")),
 			mcpgo.WithString("name", mcpgo.Description("New display name. Empty to leave unchanged.")),
 			mcpgo.WithString("git_remote", mcpgo.Description("New git remote URL. Empty string clears the remote (caller must explicitly pass empty to clear; absent leaves unchanged).")),
+			mcpgo.WithString("mcp_url", mcpgo.Description("Explicit MCP connection URL. Empty string clears the override and falls back to the derived form. Absent leaves unchanged.")),
 		)
 		s.mcp.AddTool(updateProjTool, s.handleProjectUpdate)
 
@@ -283,6 +315,17 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Project id (proj_<8hex>).")),
 		)
 		s.mcp.AddTool(deleteProjTool, s.handleProjectDelete)
+
+		// project_set — sty_4db7c3a3. The agent's first call when working
+		// in a local repo: takes the canonical git remote, resolves the
+		// existing project by git_remote, and stamps active_project_id on
+		// the session row. Idempotent — never creates a project.
+		setProjTool := mcpgo.NewTool("project_set",
+			mcpgo.WithDescription("Bind the caller's session to the project that owns the given git remote URL. Idempotent — resolves an existing project in the caller's workspace by canonical git_remote, stamps active_project_id on the session row, and returns {project_id, status: \"resolved\", mcp_url}. When no project matches, returns {status: \"no_project_for_remote\", repo_url_canonical: <normalised>} — the agent must call project_create explicitly. Subsequent project-scoped verbs may default to the bound project when project_id is omitted."),
+			mcpgo.WithString("repo_url", mcpgo.Required(), mcpgo.Description("Git remote URL — accepts ssh, https, or git:// forms. Normalised server-side via the same canonicaliser project_create uses.")),
+			mcpgo.WithString("session_id", mcpgo.Description("Optional caller session id. When set, project_set stamps active_project_id on the session row so subsequent verbs can default to the bound project.")),
+		)
+		s.mcp.AddTool(setProjTool, s.handleProjectSet)
 	}
 
 	if s.ledger != nil {
@@ -1423,14 +1466,16 @@ type projectView struct {
 
 func (s *Server) buildProjectView(p project.Project) projectView {
 	pv := projectView{Project: p}
-	base := s.cfg.OAuthRedirectBaseURL
+	// Prefer the explicit PublicURL when set; fall back to OAuthRedirectBaseURL
+	// for back-compat with deployments that haven't set the new var yet.
+	base := s.cfg.PublicURL
 	if base == "" {
+		base = s.cfg.OAuthRedirectBaseURL
+	}
+	url := project.ResolveMCPURL(p, base)
+	if url == "" {
 		return pv
 	}
-	for len(base) > 0 && base[len(base)-1] == '/' {
-		base = base[:len(base)-1]
-	}
-	url := base + "/mcp?project_id=" + p.ID
 	pv.MCPURL = url
 	pv.MCPConfig = map[string]any{
 		"mcpServers": map[string]any{
@@ -1499,6 +1544,73 @@ func (s *Server) handleProjectGet(ctx context.Context, req mcpgo.CallToolRequest
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
+// handleProjectSet implements `project_set`: idempotent bind from a git
+// remote URL to an existing project in the caller's workspace. Never
+// creates a project. sty_4db7c3a3.
+//
+// Response shapes:
+//
+//	{"project_id":"proj_…","status":"resolved","mcp_url":"…","repo_url_canonical":"…"}
+//	{"status":"no_project_for_remote","repo_url_canonical":"…"}
+func (s *Server) handleProjectSet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	start := time.Now()
+	caller, _ := UserFrom(ctx)
+	if caller.UserID == "" {
+		return mcpgo.NewToolResultError("no caller identity"), nil
+	}
+	repoURL, err := req.RequireString("repo_url")
+	if err != nil {
+		return mcpgo.NewToolResultError("repo_url_required"), nil
+	}
+	canonical, err := project.CanonicaliseGitRemote(repoURL)
+	if err != nil {
+		return mcpgo.NewToolResultError("repo_url_invalid"), nil
+	}
+	if canonical == "" {
+		return mcpgo.NewToolResultError("repo_url_required"), nil
+	}
+	wsID := s.resolveCallerWorkspaceID(ctx, caller)
+	p, err := s.projects.GetByGitRemote(ctx, wsID, canonical)
+	if err != nil {
+		body, _ := json.Marshal(map[string]any{
+			"status":             "no_project_for_remote",
+			"repo_url_canonical": canonical,
+		})
+		s.logger.Info().
+			Str("method", "tools/call").
+			Str("tool", "project_set").
+			Str("status", "no_project_for_remote").
+			Str("repo_url_canonical", canonical).
+			Int64("duration_ms", time.Since(start).Milliseconds()).
+			Msg("mcp tool call")
+		return mcpgo.NewToolResultText(string(body)), nil
+	}
+	// Stamp active_project_id on the session row when the caller passed
+	// an explicit session_id. The session need not exist yet — failing
+	// silently here keeps the verb usable from non-registered contexts
+	// (e.g. boot scripts) while still wiring the binding when present.
+	if sessID := req.GetString("session_id", ""); sessID != "" && s.sessions != nil {
+		_, _ = s.sessions.SetActiveProject(ctx, caller.UserID, sessID, p.ID, time.Now().UTC())
+	}
+	view := s.buildProjectView(p)
+	body, _ := json.Marshal(map[string]any{
+		"project_id":         p.ID,
+		"status":             "resolved",
+		"mcp_url":            view.MCPURL,
+		"mcp_config":         view.MCPConfig,
+		"repo_url_canonical": canonical,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "project_set").
+		Str("status", "resolved").
+		Str("project_id", p.ID).
+		Str("repo_url_canonical", canonical).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
 func (s *Server) handleProjectUpdate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
@@ -1537,6 +1649,17 @@ func (s *Server) handleProjectUpdate(ctx context.Context, req mcpgo.CallToolRequ
 					return mcpgo.NewToolResultError("project with that git_remote already exists in this workspace"), nil
 				}
 				return mcpgo.NewToolResultError(remoteErr.Error()), nil
+			}
+			updated = next
+		}
+	}
+	// mcp_url override: same present-vs-absent treatment as git_remote.
+	if mcpURL, ok := req.GetArguments()["mcp_url"]; ok {
+		mcpStr, _ := mcpURL.(string)
+		if mcpStr != updated.MCPURL {
+			next, mcpErr := s.projects.SetMCPURL(ctx, id, mcpStr, now)
+			if mcpErr != nil {
+				return mcpgo.NewToolResultError(mcpErr.Error()), nil
 			}
 			updated = next
 		}

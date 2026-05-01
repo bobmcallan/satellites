@@ -7,17 +7,32 @@ import (
 	"context"
 	"sort"
 
+	"github.com/bobmcallan/satellites/internal/agentprocess"
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
 // projectConfigurationComposite is the view-model for the Configuration
-// page. Two sections, one per type. Totals are exposed so the template
-// can render the count tokens.
+// page. Sections: contracts, skills, and (sty_e1ab884d) the resolved
+// agent-process markdown.
 type projectConfigurationComposite struct {
 	Contracts      []documentCard
 	Skills         []documentCard
 	ContractsTotal int
 	SkillsTotal    int
+
+	// AgentProcessBody is the resolved markdown the MCP handshake
+	// surfaces to agents. Sourced from the project-scope override
+	// when present, falling back to the system default. Empty when
+	// neither is seeded (panel renders the not-configured empty state).
+	AgentProcessBody string
+	// AgentProcessIsOverride is true when the project carries its own
+	// agent_process artifact. False means the panel is rendering the
+	// system-scope default body.
+	AgentProcessIsOverride bool
+	// AgentProcessOverrideDocID identifies the project's per-project
+	// override doc when AgentProcessIsOverride is true. Empty otherwise.
+	// Lets the panel link to /documents/<id> for editing.
+	AgentProcessOverrideDocID string
 }
 
 // buildProjectConfigurationComposite assembles the composite from the
@@ -36,6 +51,26 @@ func buildProjectConfigurationComposite(ctx context.Context, docs document.Store
 
 	out.Skills = collectConfigCards(ctx, docs, projectID, document.TypeSkill, memberships)
 	out.SkillsTotal = len(out.Skills)
+
+	// sty_e1ab884d: resolve the agent-process markdown shown in the
+	// "agent process" panel. Project-scope override wins; otherwise the
+	// system-default body is rendered inline so the panel always shows
+	// the agent the actual handshake content.
+	if projectID != "" {
+		if override, err := docs.GetByName(ctx, projectID, agentprocess.ProjectOverrideName, memberships); err == nil && override.Type == document.TypeArtifact && override.Status == document.StatusActive {
+			for _, t := range override.Tags {
+				if t == agentprocess.KindTag {
+					out.AgentProcessBody = override.Body
+					out.AgentProcessIsOverride = true
+					out.AgentProcessOverrideDocID = override.ID
+					break
+				}
+			}
+		}
+	}
+	if out.AgentProcessBody == "" {
+		out.AgentProcessBody = agentprocess.Resolve(ctx, docs, "", memberships)
+	}
 
 	return out
 }

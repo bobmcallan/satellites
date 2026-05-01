@@ -18,6 +18,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 
+	"github.com/bobmcallan/satellites/internal/agentprocess"
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/changelog"
@@ -276,6 +277,15 @@ func main() {
 		// Story_488b8223.
 		if err := seedLifecycleAgents(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("lifecycle agents seed failed")
+		}
+
+		// Seed the system-scope `default_agent_process` artifact —
+		// the canonical onboarding markdown the MCP server returns
+		// as its handshake instructions block. Per-project overrides
+		// are created by users via document_create with type=artifact,
+		// name=agent_process, scope=project. Idempotent. sty_e1ab884d.
+		if err := agentprocess.SeedSystemDefault(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("agent-process seed failed")
 		}
 
 		// story_7bfd629c: load system-tier configuration from
