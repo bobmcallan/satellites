@@ -234,3 +234,37 @@ func addRequiredRoleIfMissingProxy(t *testing.T, raw []byte, role string) ([]byt
 	}
 	return out, true
 }
+
+// TestResolveRequiredRoleGrant_GrantReleased_Rejects covers
+// epic:v4-lifecycle-refactor sty_8490f906 (claim-after-release path):
+// once the session's orchestrator grant has been released, the next
+// contract_claim resolves to grant_required because the grant is no
+// longer active.
+func TestResolveRequiredRoleGrant_GrantReleased_Rejects(t *testing.T) {
+	t.Parallel()
+	s, roleID, agentID := setupRequiredRoleServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	doc, err := s.docs.Create(ctx, document.Document{
+		WorkspaceID: "wksp_sys",
+		Type:        document.TypeContract,
+		Name:        "gated-contract",
+		Scope:       document.ScopeSystem,
+		Status:      document.StatusActive,
+		Structured:  []byte(`{"category":"develop","required_for_close":true,"validation_mode":"llm","required_role":"` + roleID + `"}`),
+	}, now)
+	require.NoError(t, err)
+
+	grantID := seedClaimedSession(t, s, "user_d", "session_d", roleID, agentID)
+
+	// Release the grant — simulates the agent_role_release flow.
+	if _, err := s.grants.Release(ctx, grantID, "test: end of phase", now.Add(time.Second), []string{"wksp_sys"}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	ci := contract.ContractInstance{ID: "ci_y", ContractID: doc.ID, WorkspaceID: "wksp_sys"}
+	_, err = s.resolveRequiredRoleGrant(ctx, ci, "user_d", "session_d")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "grant_required")
+	assert.Contains(t, err.Error(), "not active")
+}

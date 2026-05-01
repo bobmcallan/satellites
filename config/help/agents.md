@@ -38,3 +38,23 @@ explicitly cannot do.
 - Re-seeding (`/admin/system-config`) updates the document body and
   structured payload but does not interrupt running claims; in-flight
   contract instances keep the patterns they already minted.
+
+## Session role-claim flow (epic:v4-lifecycle-refactor)
+
+Sessions are role-bound. A Claude Code session inherits an
+orchestrator grant at SessionStart; before it can claim a contract
+the session's grant must already be active. `contract_claim` is
+gated by `resolveRequiredRoleGrant`:
+
+1. The contract document carries `required_role` (a role doc id).
+2. The session row carries `OrchestratorGrantID` (set at
+   SessionStart, cleared by `agent_role_release`).
+3. The grant carries `RoleID` (the role doc the session is acting as).
+4. `contract_claim` rejects with `grant_required` when the session
+   has no active grant, and with `required_role_mismatch` when the
+   grant's role doesn't match the contract's required role.
+
+The release path: a session calls `agent_role_release(grant_id)` to
+end its claim window; subsequent `contract_claim` calls from that
+session return `grant_required` ("not active") until a fresh grant
+is minted on a new session.
