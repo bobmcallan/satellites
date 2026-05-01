@@ -21,9 +21,18 @@ const LedgerEntryType = "story.status_change"
 var ErrNotFound = errors.New("story: not found")
 
 // UpdateFields names the per-call mutable subset for Update. Nil-valued
-// fields mean "leave alone"; non-nil means "set to this value". The
-// struct is intentionally narrow; widen explicitly per pr_no_unrequested_compat.
-type UpdateFields struct{}
+// pointers mean "leave alone"; non-nil means "set to this value". The
+// Tags slice is wholesale-replace: a non-nil empty slice clears the tag
+// list, matching V3's "Tags/labels (replaces existing tags)" semantic.
+// Widened in sty_330cc4ab to expose the fields the MCP tool advertises.
+type UpdateFields struct {
+	Title              *string
+	Description        *string
+	AcceptanceCriteria *string
+	Category           *string
+	Priority           *string
+	Tags               *[]string
+}
 
 // ListOptions filters a List call.
 type ListOptions struct {
@@ -246,10 +255,35 @@ func (m *MemoryStore) Update(ctx context.Context, id string, fields UpdateFields
 	if !inStoryMemberships(s.WorkspaceID, memberships) {
 		return Story{}, ErrNotFound
 	}
-	_ = fields
+	applyUpdateFields(&s, fields)
 	s.UpdatedAt = now
 	m.rows[id] = s
 	return s, nil
+}
+
+// applyUpdateFields copies non-nil pointers from fields onto s. Tags is
+// wholesale-replace — a non-nil empty slice clears the tag list. Shared
+// by Memory + Surreal stores so the semantics stay aligned.
+func applyUpdateFields(s *Story, fields UpdateFields) {
+	if fields.Title != nil {
+		s.Title = *fields.Title
+	}
+	if fields.Description != nil {
+		s.Description = *fields.Description
+	}
+	if fields.AcceptanceCriteria != nil {
+		s.AcceptanceCriteria = *fields.AcceptanceCriteria
+	}
+	if fields.Category != nil {
+		s.Category = *fields.Category
+	}
+	if fields.Priority != nil {
+		s.Priority = *fields.Priority
+	}
+	if fields.Tags != nil {
+		next := append([]string{}, (*fields.Tags)...)
+		s.Tags = next
+	}
 }
 
 // SetField implements Store for MemoryStore.

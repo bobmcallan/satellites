@@ -363,8 +363,15 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(createStoryTool, s.handleStoryCreate)
 
 		updateStoryTool := mcpgo.NewTool("story_update",
-			mcpgo.WithDescription("Update a story's mutable non-status fields. Status transitions go through story_update_status."),
+			mcpgo.WithDescription("Update a story's mutable non-status fields. Pass only the fields you want to change; omitted fields are left untouched. Tags replace wholesale (V3 parity) — pass an empty array to clear. Status transitions go through story_update_status."),
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Story id (sty_<8hex>).")),
+			mcpgo.WithString("title", mcpgo.Description("New title.")),
+			mcpgo.WithString("description", mcpgo.Description("New description.")),
+			mcpgo.WithString("acceptance_criteria", mcpgo.Description("New acceptance criteria.")),
+			mcpgo.WithString("category", mcpgo.Description("feature | bug | improvement | infrastructure | documentation")),
+			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium | low")),
+			mcpgo.WithArray("tags", mcpgo.Description("Tags/labels (replaces existing tags). Empty array clears."),
+				mcpgo.Items(map[string]any{"type": "string"})),
 		)
 		s.mcp.AddTool(updateStoryTool, s.handleStoryUpdate)
 
@@ -1761,9 +1768,11 @@ func (s *Server) handleStoryCreate(ctx context.Context, req mcpgo.CallToolReques
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// handleStoryUpdate updates a story's mutable non-status fields. As of
-// story_4ca6cb1b only `configuration_id` is settable; pass empty string
-// to clear. Status transitions remain on story_update_status.
+// handleStoryUpdate updates a story's mutable non-status fields. The
+// per-call surface (sty_330cc4ab, V3 parity) accepts title, description,
+// acceptance_criteria, category, priority, and tags. Omitted fields are
+// left untouched; tags replace wholesale — an empty array clears the
+// list. Status transitions remain on story_update_status.
 func (s *Server) handleStoryUpdate(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
@@ -1780,7 +1789,10 @@ func (s *Server) handleStoryUpdate(ctx context.Context, req mcpgo.CallToolReques
 		return mcpgo.NewToolResultError("story not found"), nil
 	}
 
-	fields := story.UpdateFields{}
+	fields, err := buildStoryUpdateFields(req)
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
 	updated, err := s.stories.Update(ctx, id, fields, caller.UserID, time.Now().UTC(), memberships)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
@@ -1793,6 +1805,61 @@ func (s *Server) handleStoryUpdate(ctx context.Context, req mcpgo.CallToolReques
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// validStoryCategories enumerates the categories accepted by story_create
+// and story_update. Kept here (rather than in the story package) because
+// it gates the MCP surface — the store layer is intentionally
+// schema-free on category strings.
+var validStoryCategories = map[string]struct{}{
+	"feature":        {},
+	"bug":            {},
+	"improvement":    {},
+	"infrastructure": {},
+	"documentation":  {},
+}
+
+// buildStoryUpdateFields reads optional update fields from req. A field
+// is "provided" when its key is present in the argument map (regardless
+// of value), so callers can clear strings or tags by passing an empty
+// value. Returns a structured error when category is provided but not
+// in the allowed set.
+func buildStoryUpdateFields(req mcpgo.CallToolRequest) (story.UpdateFields, error) {
+	args := req.GetArguments()
+	fields := story.UpdateFields{}
+	if _, ok := args["title"]; ok {
+		v := req.GetString("title", "")
+		fields.Title = &v
+	}
+	if _, ok := args["description"]; ok {
+		v := req.GetString("description", "")
+		fields.Description = &v
+	}
+	if _, ok := args["acceptance_criteria"]; ok {
+		v := req.GetString("acceptance_criteria", "")
+		fields.AcceptanceCriteria = &v
+	}
+	if _, ok := args["category"]; ok {
+		v := req.GetString("category", "")
+		if v != "" {
+			if _, allowed := validStoryCategories[v]; !allowed {
+				return story.UpdateFields{}, fmt.Errorf("invalid category %q (allowed: feature | bug | improvement | infrastructure | documentation)", v)
+			}
+		}
+		fields.Category = &v
+	}
+	if _, ok := args["priority"]; ok {
+		v := req.GetString("priority", "")
+		fields.Priority = &v
+	}
+	if _, ok := args["tags"]; ok {
+		v := req.GetStringSlice("tags", []string{})
+		if v == nil {
+			v = []string{}
+		}
+		fields.Tags = &v
+	}
+	return fields, nil
 }
 
 func (s *Server) handleStoryGet(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

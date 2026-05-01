@@ -173,7 +173,7 @@ func (s *SurrealStore) Update(ctx context.Context, id string, fields UpdateField
 	if err != nil {
 		return Story{}, err
 	}
-	_ = fields
+	applyUpdateFields(&current, fields)
 	current.UpdatedAt = now
 	if err := s.write(ctx, current); err != nil {
 		return Story{}, err
