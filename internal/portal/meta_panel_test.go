@@ -85,26 +85,32 @@ func TestMetaPanel_MCPRow_DerivedWhenPublicURLSet(t *testing.T) {
 	}
 }
 
-func TestMetaPanel_MCPRow_EmptyStateWhenPublicURLUnset(t *testing.T) {
+// V3 parity: when SATELLITES_PUBLIC_URL is unset, the meta panel
+// derives the MCP URL from the inbound request's scheme + host. The
+// user is already on the portal so the host they reached is by
+// definition the right one to paste into .mcp.json.
+func TestMetaPanel_MCPRow_DerivesFromRequestWhenPublicURLUnset(t *testing.T) {
 	t.Parallel()
-	body, _ := renderProjectDetailWithPublic(t, "")
+	body, projID := renderProjectDetailWithPublic(t, "")
+	// httptest.NewRequest defaults to Host=example.com; that's the
+	// host the panel must echo back, NOT the not-configured copy.
+	wantURL := "http://example.com/mcp?project_id=" + projID
 	for _, want := range []string{
 		`data-testid="project-meta-mcp"`,
-		`data-mcp-state="unset"`,
-		"not configured",
-		"SATELLITES_PUBLIC_URL",
+		`data-mcp-derived="true"`,
+		wantURL,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
 	}
-	// Must NOT emit a half-formed URL when the base is unset.
+	// The unset empty-state copy must not appear when the request has a Host.
 	for _, mustNot := range []string{
-		"data-mcp-derived",
-		"/mcp?project_id=",
+		`data-mcp-state="unset"`,
+		"not configured",
 	} {
 		if strings.Contains(body, mustNot) {
-			t.Errorf("unset path leaked %q (must not emit half-formed URL)", mustNot)
+			t.Errorf("body should not show unset empty-state when request has a host: %q", mustNot)
 		}
 	}
 }

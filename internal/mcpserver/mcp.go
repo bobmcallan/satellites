@@ -943,6 +943,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if scoped := r.URL.Query().Get("project_id"); scoped != "" {
 		r = r.WithContext(withScopedProjectID(r.Context(), scoped))
 	}
+	// Stash the externally-visible base URL so buildProjectView's MCP
+	// URL resolver can derive a value without requiring SATELLITES_PUBLIC_URL.
+	// V3 parity — the caller is already connected, so the host they
+	// reached is the right one to echo back as mcp_url.
+	r = r.WithContext(withRequestBaseURL(r.Context(), schemeAndHost(r)))
 	s.streamable.ServeHTTP(w, r)
 }
 
@@ -1464,11 +1469,20 @@ type projectView struct {
 	MCPConfig map[string]any `json:"mcp_config,omitempty"`
 }
 
-func (s *Server) buildProjectView(p project.Project) projectView {
+func (s *Server) buildProjectView(ctx context.Context, p project.Project) projectView {
 	pv := projectView{Project: p}
-	// Prefer the explicit PublicURL when set; fall back to OAuthRedirectBaseURL
-	// for back-compat with deployments that haven't set the new var yet.
-	base := s.cfg.PublicURL
+	// Resolution chain (V3 parity):
+	//   1. p.MCPURL persisted on the row (explicit override).
+	//   2. Inbound request's base URL stashed by ServeHTTP — the host
+	//      the caller is already connected to.
+	//   3. cfg.PublicURL — admin override for deployments where the
+	//      external host differs from the one the request came in on.
+	//   4. cfg.OAuthRedirectBaseURL — back-compat for setups that pre-date
+	//      the PublicURL field.
+	base := requestBaseURLFrom(ctx)
+	if base == "" {
+		base = s.cfg.PublicURL
+	}
 	if base == "" {
 		base = s.cfg.OAuthRedirectBaseURL
 	}
@@ -1507,7 +1521,7 @@ func (s *Server) handleProjectCreate(ctx context.Context, req mcpgo.CallToolRequ
 		}
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
-	body, _ := json.Marshal(s.buildProjectView(p))
+	body, _ := json.Marshal(s.buildProjectView(ctx, p))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "project_create").
@@ -1534,7 +1548,7 @@ func (s *Server) handleProjectGet(ctx context.Context, req mcpgo.CallToolRequest
 	if err != nil || p.OwnerUserID != caller.UserID {
 		return mcpgo.NewToolResultError("project not found"), nil
 	}
-	body, _ := json.Marshal(s.buildProjectView(p))
+	body, _ := json.Marshal(s.buildProjectView(ctx, p))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "project_get").
@@ -1592,7 +1606,7 @@ func (s *Server) handleProjectSet(ctx context.Context, req mcpgo.CallToolRequest
 	if sessID := req.GetString("session_id", ""); sessID != "" && s.sessions != nil {
 		_, _ = s.sessions.SetActiveProject(ctx, caller.UserID, sessID, p.ID, time.Now().UTC())
 	}
-	view := s.buildProjectView(p)
+	view := s.buildProjectView(ctx, p)
 	body, _ := json.Marshal(map[string]any{
 		"project_id":         p.ID,
 		"status":             "resolved",
@@ -1664,7 +1678,7 @@ func (s *Server) handleProjectUpdate(ctx context.Context, req mcpgo.CallToolRequ
 			updated = next
 		}
 	}
-	body, _ := json.Marshal(s.buildProjectView(updated))
+	body, _ := json.Marshal(s.buildProjectView(ctx, updated))
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "project_update").

@@ -548,7 +548,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 		Version:         config.Version,
 		Commit:          config.GitCommit,
 		User:            user,
-		Project:         p.projectRowWithMCP(pr),
+		Project:         p.projectRowWithMCP(pr, r),
 		OwnerYou:        true,
 		Composite:       composite,
 		Panels:          defaultPanels(),
@@ -1654,13 +1654,44 @@ func viewRow(p project.Project) projectRow {
 // projectRowWithMCP is viewRow + the resolved MCP URL fields. Used by
 // the project detail / configuration handlers; the projects-list page
 // stays on the lighter viewRow shape so the row is cheap to compute.
-func (p *Portal) projectRowWithMCP(pr project.Project) projectRow {
+//
+// MCP URL resolution chain:
+//  1. pr.MCPURL persisted on the project row (explicit override).
+//  2. cfg.PublicURL — admin-set base URL for the deployment.
+//  3. Derived from the inbound request (`<scheme>://<host>`) — V3
+//     parity, no env var required. The user is already connected to
+//     the satellites portal, so the host they reached is the right
+//     one to paste back into .mcp.json.
+//
+// (1) and (2) cover ops scenarios where the public URL differs from
+// what the browser sees (e.g. internal preview vs canonical prod URL).
+// (3) is the default and removes the "set SATELLITES_PUBLIC_URL or
+// the panel is empty" footgun.
+func (p *Portal) projectRowWithMCP(pr project.Project, r *http.Request) projectRow {
 	row := viewRow(pr)
-	row.MCPURL = project.ResolveMCPURL(pr, p.cfg.PublicURL)
-	// Derived = no persisted MCPURL on the row but the resolver still
-	// produced a non-empty value (i.e. PublicURL kicked in).
+	base := p.cfg.PublicURL
+	if base == "" && r != nil {
+		base = baseURLFromRequest(r)
+	}
+	row.MCPURL = project.ResolveMCPURL(pr, base)
 	row.MCPDerived = pr.MCPURL == "" && row.MCPURL != ""
 	return row
+}
+
+// baseURLFromRequest reconstructs the externally-visible base URL the
+// caller used to reach this server. Mirrors the OAuthServer's
+// issuerForRequest pattern: prefer X-Forwarded-Proto when set (Fly's
+// edge populates it), fall back to the request's TLS state, default
+// to http.
+func baseURLFromRequest(r *http.Request) string {
+	if r == nil || r.Host == "" {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 func (p *Portal) redirectToLogin(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,30 @@ import "context"
 // per-request transport state, not caller identity.
 const scopedProjectKey ctxKey = 1
 
+// requestBaseURLKey is the context key under which Server.ServeHTTP
+// stores the externally-visible base URL the caller used to reach this
+// MCP endpoint (`<scheme>://<host>`). Tool handlers read it via
+// requestBaseURLFrom so derived MCP URLs in responses match the URL
+// the user is already connected to — V3 parity, no env var required.
+const requestBaseURLKey ctxKey = 2
+
+// withRequestBaseURL stores the inbound request's reconstructed base
+// URL on the context. Empty input is a no-op.
+func withRequestBaseURL(ctx context.Context, baseURL string) context.Context {
+	if baseURL == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestBaseURLKey, baseURL)
+}
+
+// requestBaseURLFrom returns the base URL attached by ServeHTTP, or ""
+// when the call did not originate from an HTTP transport (e.g. unit
+// tests calling handlers directly).
+func requestBaseURLFrom(ctx context.Context) string {
+	v, _ := ctx.Value(requestBaseURLKey).(string)
+	return v
+}
+
 // withScopedProjectID returns a child context carrying id as the
 // URL-scoped project. Empty id is a no-op.
 func withScopedProjectID(ctx context.Context, id string) context.Context {
