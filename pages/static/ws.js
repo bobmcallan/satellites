@@ -32,7 +32,16 @@ const __FAST = (typeof window !== 'undefined' && window.__SATELLITES_WS_FAST ===
 const BACKOFF_BASE_MS = __FAST ? 50 : 1000;
 const BACKOFF_MAX_MS = __FAST ? 200 : 30000;
 const ZERO_FLICKER_MS = __FAST ? 30 : 500;
-const MAX_CAP_RETRIES = 3;
+// MAX_CAP_RETRIES bounds the number of retry attempts at the
+// BACKOFF_MAX_MS ceiling before giving up and transitioning to
+// DISCONNECTED. A small cap (3 → ~2 minutes) loses the connection
+// across deploy windows that take longer than that to re-accept WS
+// upgrades; the client then never reconnects and the page goes
+// stale until the user refreshes. Pushed to a much higher value so
+// the client keeps trying through long deploy / network-outage
+// windows; visibilitychange + online listeners (below) reset the
+// backoff for instant recovery when the user returns to the tab.
+const MAX_CAP_RETRIES = __FAST ? 3 : 1000;
 const DEBUG_BUFFER_CAP = 10;
 
 // State enum — five fixed names. The state-table test greps for these.
@@ -249,6 +258,25 @@ function wsIndicator() {
                 },
             });
             this.client.connect();
+            // Recover immediately when the user returns to the tab or the
+            // browser regains network. Without this, after a backend
+            // deploy the client sits in DISCONNECTED until refresh — exactly
+            // the bug the cap-bump above mitigates over time, but
+            // visibility/online events let the recovery happen in seconds.
+            const reconnectIfStale = () => {
+                if (!this.client) { return; }
+                if (this.client.status === STATE_DISCONNECTED || this.client.status === STATE_RECONNECTING) {
+                    this.client.retry();
+                }
+            };
+            if (typeof document !== 'undefined' && document.addEventListener) {
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState === 'visible') { reconnectIfStale(); }
+                });
+            }
+            if (typeof window !== 'undefined' && window.addEventListener) {
+                window.addEventListener('online', reconnectIfStale);
+            }
         },
         retry() {
             if (this.client) { this.client.retry(); }
