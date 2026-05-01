@@ -40,6 +40,8 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 		priority = task.PriorityMedium
 	}
 	projectID := getString(args, "project_id")
+	contractInstanceID := getString(args, "contract_instance_id")
+	requiredRole := getString(args, "required_role")
 	triggerRaw := []byte(getString(args, "trigger"))
 	payloadRaw := []byte(getString(args, "payload"))
 	expectedStr := getString(args, "expected_duration")
@@ -51,13 +53,15 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 	}
 	now := time.Now().UTC()
 	t, err := s.tasks.Enqueue(ctx, task.Task{
-		WorkspaceID:      workspaceID,
-		ProjectID:        projectID,
-		Origin:           origin,
-		Trigger:          triggerRaw,
-		Payload:          payloadRaw,
-		Priority:         priority,
-		ExpectedDuration: expected,
+		WorkspaceID:        workspaceID,
+		ProjectID:          projectID,
+		ContractInstanceID: contractInstanceID,
+		RequiredRole:       requiredRole,
+		Origin:             origin,
+		Trigger:            triggerRaw,
+		Payload:            payloadRaw,
+		Priority:           priority,
+		ExpectedDuration:   expected,
 	}, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("task_enqueue: %s", err)), nil
@@ -123,10 +127,12 @@ func (s *Server) handleTaskList(ctx context.Context, req mcpgo.CallToolRequest) 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	args := req.GetArguments()
 	opts := task.ListOptions{
-		Origin:    getString(args, "origin"),
-		Status:    getString(args, "status"),
-		Priority:  getString(args, "priority"),
-		ClaimedBy: getString(args, "claimed_by"),
+		Origin:             getString(args, "origin"),
+		Status:             getString(args, "status"),
+		Priority:           getString(args, "priority"),
+		ClaimedBy:          getString(args, "claimed_by"),
+		ContractInstanceID: getString(args, "contract_instance_id"),
+		RequiredRole:       getString(args, "required_role"),
 	}
 	if v, ok := args["limit"].(float64); ok {
 		opts.Limit = int(v)

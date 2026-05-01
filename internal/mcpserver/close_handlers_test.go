@@ -10,6 +10,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/task"
 )
 
 // closeFixture is newClaimFixture with a helper for claiming a CI.
@@ -151,6 +152,58 @@ func TestClose_RollsStoryToDone(t *testing.T) {
 // a contract. The plan agent owns process definition; workflow
 // shape is approved during the plan-review loop, not on contract
 // close. The contract_close verb no longer accepts proposed_workflow.
+
+// TestClose_PlanRequiresChildTasks covers
+// epic:v4-lifecycle-refactor sty_0c21a0cf — when a task store is
+// wired and the CI being closed is the plan, contract_close rejects
+// the close with plan_close_requires_tasks unless at least one task
+// is enqueued against the CI.
+func TestClose_PlanRequiresChildTasks(t *testing.T) {
+	t.Parallel()
+	f := newCloseFixture(t)
+
+	// Wire a task store onto the existing server. Without this the gate
+	// is no-op'd by design (early-boot tests pass through unchanged).
+	taskStore := task.NewMemoryStore()
+	f.server.tasks = taskStore
+
+	// f.cis[0] is the plan CI per the fixture chain.
+	f.claim(t, 0, "plan body")
+
+	// Close without enqueuing any task — gate fires.
+	res, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"close_markdown":       "premature close",
+	}))
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected error; got %s", firstText(res))
+	}
+	if !strings.Contains(firstText(res), "plan_close_requires_tasks") {
+		t.Fatalf("expected plan_close_requires_tasks; got %s", firstText(res))
+	}
+
+	// Enqueue a task bound to the plan CI; close now succeeds.
+	if _, err := taskStore.Enqueue(f.ctx, task.Task{
+		WorkspaceID:        f.wsID,
+		ContractInstanceID: f.cis[0].ID,
+		RequiredRole:       "developer",
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+	}, f.now); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	res2, err := f.server.handleContractClose(f.callerCtx(), newCallToolReq("contract_close", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"close_markdown":       "plan done",
+		"evidence_markdown":    "decomposed into 1 developer task",
+	}))
+	if err != nil || res2.IsError {
+		t.Fatalf("close after enqueue: err=%v text=%s", err, firstText(res2))
+	}
+}
 
 func TestClose_PlanDeferred(t *testing.T) {
 	t.Parallel()

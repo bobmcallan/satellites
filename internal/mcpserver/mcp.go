@@ -674,13 +674,15 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 
 	if s.tasks != nil {
 		enqueueTool := mcpgo.NewTool("task_enqueue",
-			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. Story_a8fee0cc."),
+			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. The plan agent enqueues child tasks against the plan CI with required_role tags; downstream contracts pull those tasks by role. Story_a8fee0cc."),
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
+			mcpgo.WithString("contract_instance_id", mcpgo.Description("Optional CI this task belongs to. Plan agents bind their child tasks to the plan CI so the story view groups work per CI.")),
+			mcpgo.WithString("required_role", mcpgo.Description("Optional role required to claim this task (e.g. developer, reviewer, releaser). Workers filter the queue by their role on task_claim.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
-			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload (contract_instance_id, story_id, ...).")),
+			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload.")),
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
 		)
 		s.mcp.AddTool(enqueueTool, s.handleTaskEnqueue)
@@ -692,11 +694,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(getTaskTool, s.handleTaskGet)
 
 		listTaskTool := mcpgo.NewTool("task_list",
-			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped."),
+			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id (work bound to a specific CI) and required_role (workers pulling tasks they're authorised to claim)."),
 			mcpgo.WithString("origin", mcpgo.Description("Filter by origin.")),
 			mcpgo.WithString("status", mcpgo.Description("Filter by status.")),
 			mcpgo.WithString("priority", mcpgo.Description("Filter by priority.")),
 			mcpgo.WithString("claimed_by", mcpgo.Description("Filter by claimed_by worker id.")),
+			mcpgo.WithString("contract_instance_id", mcpgo.Description("Filter by owning contract instance.")),
+			mcpgo.WithString("required_role", mcpgo.Description("Filter by required_role tag.")),
 			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
 		)
 		s.mcp.AddTool(listTaskTool, s.handleTaskList)

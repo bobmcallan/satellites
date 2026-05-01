@@ -34,7 +34,7 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	return s
 }
 
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, contract_instance_id, required_role, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
 
 // Enqueue implements Store for SurrealStore.
 func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task, error) {
@@ -105,6 +105,14 @@ func (s *SurrealStore) List(ctx context.Context, opts ListOptions, memberships [
 	if opts.ClaimedBy != "" {
 		conds = append(conds, "claimed_by = $claimed_by")
 		vars["claimed_by"] = opts.ClaimedBy
+	}
+	if opts.ContractInstanceID != "" {
+		conds = append(conds, "contract_instance_id = $contract_instance_id")
+		vars["contract_instance_id"] = opts.ContractInstanceID
+	}
+	if opts.RequiredRole != "" {
+		conds = append(conds, "required_role = $required_role")
+		vars["required_role"] = opts.RequiredRole
 	}
 	if memberships != nil {
 		conds = append(conds, "workspace_id IN $memberships")

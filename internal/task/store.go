@@ -26,11 +26,13 @@ var ErrNoTaskAvailable = errors.New("task: no task available")
 // ListOptions bundles structured List filters. Workspace scoping is
 // supplied via memberships on the call itself, not through this struct.
 type ListOptions struct {
-	Origin    string
-	Status    string
-	Priority  string
-	ClaimedBy string
-	Limit     int
+	Origin             string
+	Status             string
+	Priority           string
+	ClaimedBy          string
+	ContractInstanceID string
+	RequiredRole       string
+	Limit              int
 }
 
 // Store is the persistence surface for tasks.
@@ -156,6 +158,12 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 			continue
 		}
 		if opts.ClaimedBy != "" && t.ClaimedBy != opts.ClaimedBy {
+			continue
+		}
+		if opts.ContractInstanceID != "" && t.ContractInstanceID != opts.ContractInstanceID {
+			continue
+		}
+		if opts.RequiredRole != "" && t.RequiredRole != opts.RequiredRole {
 			continue
 		}
 		out = append(out, t)

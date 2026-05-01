@@ -16,6 +16,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/task"
 )
 
 // resumeCapCI / resumeCapStory are the defaults for the per-CI and
@@ -62,6 +63,25 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 	if ci.Status == contract.StatusPassed || ci.Status == contract.StatusFailed || ci.Status == contract.StatusSkipped {
 		body, _ := json.Marshal(map[string]any{"error": "ci_already_terminal", "status": ci.Status})
 		return mcpgo.NewToolResultError(string(body)), nil
+	}
+
+	// Plan CIs must enqueue at least one child task before close — a
+	// plan that decomposes nothing is not a plan. Gate is skipped when
+	// no task store is wired (early-boot tests, minimal fixtures).
+	// epic:v4-lifecycle-refactor sty_0c21a0cf.
+	if ci.ContractName == "plan" && s.tasks != nil {
+		linked, lerr := s.tasks.List(ctx, task.ListOptions{ContractInstanceID: ci.ID}, memberships)
+		if lerr != nil {
+			return mcpgo.NewToolResultError(lerr.Error()), nil
+		}
+		if len(linked) == 0 {
+			body, _ := json.Marshal(map[string]any{
+				"error":                "plan_close_requires_tasks",
+				"contract_instance_id": ci.ID,
+				"message":              "plan close requires at least one task enqueued against this CI; call task_enqueue with contract_instance_id + required_role before close",
+			})
+			return mcpgo.NewToolResultError(string(body)), nil
+		}
 	}
 
 	now := s.nowUTC()
