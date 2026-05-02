@@ -575,6 +575,17 @@ func (s *Server) resolveRequiredRoleGrant(ctx context.Context, ci contract.Contr
 	}
 	sess, err := s.sessions.Get(ctx, userID, sessionID)
 	if err != nil || sess.OrchestratorGrantID == "" {
+		// Default-user fallback (sty_94d8a501, epic:status-bus-v1). When
+		// the session carries no active grant AND the required_role is
+		// the orchestrator default AND the caller owns the CI's project,
+		// accept the claim implicitly. The action_claim row already
+		// records actor=caller.UserID, so the audit trail is intact; no
+		// synthetic grant is minted. Other roles (reviewer, future) keep
+		// requiring an explicit grant — only the project owner's
+		// orchestrator role is implicit.
+		if s.callerIsDefaultOrchestrator(ctx, ci.ProjectID, userID, cp.RequiredRole) {
+			return "", nil
+		}
 		body, _ := json.Marshal(map[string]any{
 			"error":         "grant_required",
 			"required_role": cp.RequiredRole,
@@ -626,6 +637,56 @@ func (s *Server) resolveRequiredRoleGrant(ctx context.Context, ci contract.Contr
 		return "", errors.New(string(body))
 	}
 	return grant.ID, nil
+}
+
+// callerIsDefaultOrchestrator reports whether the caller carries the
+// implicit `role_orchestrator` grant under the default-user rule
+// (sty_94d8a501, epic:status-bus-v1). The rule fires only for
+// `role_orchestrator` (other roles still require explicit grants) and
+// only when the caller owns the CI's project.
+//
+// Project ownership is checked via projects.GetByID with nil
+// memberships — the project-pivoted tenancy primitive: ownership of
+// the project, not membership of a workspace, is the access boundary.
+//
+// requiredRole may be either a doc id or a doc name; both forms map to
+// the canonical SeedRoleOrchestratorName before the predicate fires
+// (the resolveRequiredRoleGrant gate reaches this branch before its own
+// name→id resolution, so we accept the name form here directly).
+func (s *Server) callerIsDefaultOrchestrator(ctx context.Context, projectID, userID, requiredRole string) bool {
+	if s.projects == nil || projectID == "" || userID == "" {
+		return false
+	}
+	if !isOrchestratorRoleRef(ctx, s.docs, requiredRole) {
+		return false
+	}
+	proj, err := s.projects.GetByID(ctx, projectID, nil)
+	if err != nil {
+		return false
+	}
+	return proj.OwnerUserID == userID
+}
+
+// isOrchestratorRoleRef reports whether requiredRole names the seeded
+// `role_orchestrator` document — either by its canonical name or by
+// the doc id the seed loader minted. Looks up by-id only when
+// requiredRole carries the `doc_` prefix to avoid an unnecessary store
+// hit on the (much more common) name-form path.
+func isOrchestratorRoleRef(ctx context.Context, docs document.Store, requiredRole string) bool {
+	if requiredRole == SeedRoleOrchestratorName {
+		return true
+	}
+	if !strings.HasPrefix(requiredRole, "doc_") {
+		return false
+	}
+	if docs == nil {
+		return false
+	}
+	role, err := docs.GetByID(ctx, requiredRole, nil)
+	if err != nil {
+		return false
+	}
+	return role.Type == document.TypeRole && role.Name == SeedRoleOrchestratorName
 }
 
 // decodeContractPayload extracts the grant-relevant fields from a

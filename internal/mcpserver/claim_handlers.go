@@ -117,7 +117,19 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
-	agentDoc, derr := s.docs.GetByID(ctx, agentID, memberships)
+	// Project-pivot the agent doc lookup (sty_94d8a501,
+	// epic:status-bus-v1). Pre-fix, the lookup ran with workspace
+	// memberships and rejected every system-scope agent (developer_agent,
+	// releaser_agent, story_close_agent, agent_claude_orchestrator,
+	// agent_gemini_reviewer) for any caller who isn't a member of the
+	// system workspace — even though those docs are global by design.
+	// Post-fix: lookup is unfiltered, then accepted iff the agent's
+	// scope authorises this CI:
+	//   - scope=system → always (system docs are the substrate's
+	//     identity, not anyone's tenant data).
+	//   - scope=project AND agent.project_id == ci.project_id → same-project.
+	//   - otherwise → reject `agent_not_authorized`.
+	agentDoc, derr := s.docs.GetByID(ctx, agentID, nil)
 	if derr != nil {
 		body, _ := json.Marshal(map[string]any{
 			"error":    "agent_not_found",
@@ -130,6 +142,21 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 			"error":    "agent_id_wrong_type",
 			"agent_id": agentID,
 			"type":     agentDoc.Type,
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+	if !agentScopeAuthorises(agentDoc, ci.ProjectID) {
+		agentProj := ""
+		if agentDoc.ProjectID != nil {
+			agentProj = *agentDoc.ProjectID
+		}
+		body, _ := json.Marshal(map[string]any{
+			"error":       "agent_not_authorized",
+			"agent_id":    agentID,
+			"agent_scope": agentDoc.Scope,
+			"agent_proj":  agentProj,
+			"ci_project":  ci.ProjectID,
+			"reason":      "agent must be scope=system OR scope=project with matching project_id",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
@@ -531,6 +558,33 @@ func (s *Server) findLatestActionClaim(ctx context.Context, ci contract.Contract
 		}
 	}
 	return ""
+}
+
+// agentScopeAuthorises reports whether agentDoc is allowed to be
+// allocated to a CI in ciProjectID under the project-pivoted tenancy
+// rule (sty_94d8a501).
+//
+// Two valid shapes:
+//
+//  1. agentDoc.Scope == document.ScopeSystem — system agents are global
+//     by definition (`developer_agent`, `releaser_agent`, etc.). Any
+//     project may use them.
+//  2. agentDoc.Scope == document.ScopeProject AND
+//     *agentDoc.ProjectID == ciProjectID — project-scope agents are
+//     bound to one project; cross-project use is the bug we're guarding
+//     against.
+//
+// Anything else (workspace-scope, missing project_id on a project-scope
+// row, mismatched project) is rejected.
+func agentScopeAuthorises(agentDoc document.Document, ciProjectID string) bool {
+	switch agentDoc.Scope {
+	case document.ScopeSystem:
+		return true
+	case document.ScopeProject:
+		return agentDoc.ProjectID != nil && *agentDoc.ProjectID == ciProjectID
+	default:
+		return false
+	}
 }
 
 // marshalGateRejection is the shared renderer for *contract.GateRejection.
