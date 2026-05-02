@@ -477,8 +477,8 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List principles: %v", err)
 	}
-	if len(principles) != 10 {
-		t.Fatalf("principles count = %d, want 10", len(principles))
+	if len(principles) != 11 {
+		t.Fatalf("principles count = %d, want 11", len(principles))
 	}
 
 	wantNames := map[string]bool{
@@ -492,6 +492,7 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 		"Process is trust":                                       false,
 		"Quality over speed":                                     false,
 		"Root cause, not hack":                                   false,
+		"Skills and reviewers are ad-hoc, not baseline":          false,
 	}
 	for _, p := range principles {
 		if _, ok := wantNames[p.Name]; !ok {
@@ -508,4 +509,114 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 			t.Errorf("expected principle %q not seeded", name)
 		}
 	}
+}
+
+// TestRun_RoleSeedLoadsOrchestratorAndReviewer (sty_a1a77518) — KindRole
+// loads `roles/*.md` into type=role, scope=system documents whose
+// Structured payload carries `allowed_mcp_verbs`, `required_hooks`,
+// `claim_requirements`, and `default_context_policy`. The parsed payload
+// must match the shape the in-Go seedOrchestratorDocs / seedReviewerDocs
+// path writes today, so the cutover in sty_db196ff4 is a no-op for
+// downstream consumers (agent_role_claim, resolveRequiredRoleGrant).
+func TestRun_RoleSeedLoadsOrchestratorAndReviewer(t *testing.T) {
+	t.Parallel()
+	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
+	if err != nil {
+		t.Fatalf("abs seed dir: %v", err)
+	}
+	docs := document.NewMemoryStore()
+	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	if _, err := Run(context.Background(), docs, seedDir, "wksp_sys", "system", now); err != nil {
+		t.Fatalf("Run real seed: %v", err)
+	}
+
+	// Mirrors the in-Go literal in cmd/satellites/main.go:seedOrchestratorDocs.
+	wantOrchestrator := map[string]any{
+		"allowed_mcp_verbs": []any{
+			"document_*", "story_*", "ledger_*", "project_*", "repo_*",
+			"workspace_*", "principle_*", "contract_*", "skill_*", "reviewer_*",
+			"agent_*", "role_*", "session_whoami", "satellites_info",
+		},
+		"required_hooks":         []any{"SessionStart", "PreToolUse", "enforce"},
+		"claim_requirements":     []any{},
+		"default_context_policy": "fresh-per-claim",
+	}
+	wantReviewer := map[string]any{
+		"allowed_mcp_verbs": []any{
+			"task_claim", "task_close", "task_get", "task_list",
+			"contract_review_close", "ledger_get", "ledger_list",
+			"document_get", "contract_get", "session_whoami",
+			"agent_role_claim", "agent_role_release", "agent_role_list",
+			"satellites_info",
+		},
+		"required_hooks":         []any{},
+		"claim_requirements":     []any{},
+		"default_context_policy": "fresh-per-claim",
+	}
+
+	cases := []struct {
+		name string
+		want map[string]any
+	}{
+		{"role_orchestrator", wantOrchestrator},
+		{"role_reviewer", wantReviewer},
+	}
+	for _, tc := range cases {
+		got, err := docs.GetByName(context.Background(), "", tc.name, nil)
+		if err != nil {
+			t.Errorf("GetByName %s: %v", tc.name, err)
+			continue
+		}
+		if got.Type != document.TypeRole {
+			t.Errorf("%s: type = %q, want role", tc.name, got.Type)
+		}
+		if got.Scope != document.ScopeSystem {
+			t.Errorf("%s: scope = %q, want system", tc.name, got.Scope)
+		}
+		if strings.TrimSpace(got.Body) == "" {
+			t.Errorf("%s: body must not be empty", tc.name)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(got.Structured, &payload); err != nil {
+			t.Errorf("%s: decode Structured: %v", tc.name, err)
+			continue
+		}
+		for key, want := range tc.want {
+			if !equalAny(payload[key], want) {
+				t.Errorf("%s: payload[%q] = %v, want %v", tc.name, key, payload[key], want)
+			}
+		}
+	}
+}
+
+// equalAny compares the small subset of types JSON unmarshal yields here
+// (string, []any with string contents) without pulling in reflect.DeepEqual's
+// surprises around nil vs empty slices.
+func equalAny(a, b any) bool {
+	switch ax := a.(type) {
+	case string:
+		bx, ok := b.(string)
+		return ok && ax == bx
+	case []any:
+		bx, ok := b.([]any)
+		if !ok {
+			return false
+		}
+		if len(ax) != len(bx) {
+			return false
+		}
+		for i := range ax {
+			if !equalAny(ax[i], bx[i]) {
+				return false
+			}
+		}
+		return true
+	case nil:
+		bx, ok := b.([]any)
+		if ok && len(bx) == 0 {
+			return true
+		}
+		return b == nil
+	}
+	return false
 }

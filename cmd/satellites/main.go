@@ -18,7 +18,6 @@ import (
 
 	"github.com/ternarybob/arbor"
 
-	"github.com/bobmcallan/satellites/internal/agentprocess"
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/changelog"
@@ -252,48 +251,20 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("document seed failed")
 		}
 
-		// Seed the system-scope orchestrator role + agent documents that
-		// the SessionStart path uses to mint orchestrator grants. System
-		// scope means workspace_id=systemWsID, project_id=nil. Idempotent:
-		// skip when a document with the canonical name already exists.
-		// Story_7d9c4b1b.
-		if err := seedOrchestratorDocs(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("orchestrator docs seed failed")
-		}
-
-		// Seed the system-scope reviewer role + agent documents the
-		// standalone reviewer service holds when SATELLITES_REVIEWER_SERVICE
-		// is set (epic:v4-lifecycle-refactor sty_62d4b438). The seed runs
-		// unconditionally so an operator flipping the env to embedded on a
-		// later boot finds the docs already in place; the boot-time
-		// grant-mint below is gated on the env value.
-		if err := seedReviewerDocs(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("reviewer docs seed failed")
-		}
-
-		// Seed the system-scope lifecycle agent documents that
-		// story_b39b393f's strict-required follow-up will allocate to
-		// each contract instance at workflow_claim time. Idempotent.
-		// Story_488b8223.
-		if err := seedLifecycleAgents(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("lifecycle agents seed failed")
-		}
-
-		// Seed the system-scope `default_agent_process` artifact —
-		// the canonical onboarding markdown the MCP server returns
-		// as its handshake instructions block. Per-project overrides
-		// are created by users via document_create with type=artifact,
-		// name=agent_process, scope=project. Idempotent. sty_e1ab884d.
-		if err := agentprocess.SeedSystemDefault(ctx, docStore, systemWsID, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("agent-process seed failed")
-		}
+		// epic:setup-as-data-v1 (sty_db196ff4 / sty_6c3f8091): role +
+		// agent + artifact seeds previously written by in-Go helpers
+		// (seedOrchestratorDocs / seedReviewerDocs / seedLifecycleAgents
+		// / agentprocess.SeedSystemDefault) are now seeded by configseed
+		// below from config/seed/{roles,agents,artifacts}/*.md.
+		// configseed is the single writer for every doc the substrate
+		// boots with — operators tighten the substrate by editing the
+		// seed files, not Go code.
 
 		// story_7bfd629c: load system-tier configuration from
-		// ./config/seed/{agents,contracts,workflows}/*.md and
-		// ./config/help/*.md. Markdown is the single source of truth;
-		// this loader runs after the in-Go seeds so it can override
-		// their content with the file-driven version. Failures log at
-		// warn — the platform stays bootable on a malformed file.
+		// ./config/seed/{roles,agents,contracts,workflows,artifacts,...}/*.md
+		// and ./config/help/*.md. Markdown is the single source of truth.
+		// Failures log at warn — the platform stays bootable on a
+		// malformed file.
 		if summary, err := configseed.RunAll(ctx, docStore,
 			configseed.ResolveSeedDir(), configseed.ResolveHelpDir(),
 			systemWsID, "system", time.Now().UTC()); err != nil {
@@ -315,7 +286,8 @@ func main() {
 		// agent.skill_refs so the new contract_next resolution path
 		// surfaces skills via the allocated agent. Idempotent — skills
 		// without a binding or already migrated are no-ops. Runs AFTER
-		// seedLifecycleAgents so the matching agent docs exist.
+		// configseed loads the lifecycle agents so the matching agent
+		// docs exist.
 		document.MigrateSkillContractBindings(ctx, docStore, logger, time.Now().UTC())
 
 		// Backfill required_role on pre-existing contract documents.
@@ -660,113 +632,6 @@ func main() {
 	logger.Info().Msg("server stopped cleanly")
 }
 
-// seedOrchestratorDocs creates the system-scope `role_orchestrator` and
-// `agent_claude_orchestrator` documents that the SessionStart path uses
-// to mint orchestrator grants. Idempotent: existing rows are left
-// untouched. Called from main during boot; a nil docStore short-circuits
-// so early-boot tests that don't configure Surreal stay green.
-// Story_7d9c4b1b.
-func seedOrchestratorDocs(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
-	if docStore == nil {
-		return nil
-	}
-	// Create the role first so we can reference its id from the agent's
-	// permitted_roles payload.
-	role, err := docStore.GetByName(ctx, "", "role_orchestrator", nil)
-	if err != nil {
-		role, err = docStore.Create(ctx, document.Document{
-			WorkspaceID: workspaceID,
-			ProjectID:   nil,
-			Type:        document.TypeRole,
-			Name:        "role_orchestrator",
-			Scope:       document.ScopeSystem,
-			Status:      document.StatusActive,
-			Body:        "Orchestrator role — the interactive Claude session's authorisation bundle. Holds every orchestrator-surface MCP verb (document_*, story_*, ledger_*, project_*, repo_*, contract_*, task_*, session_whoami, agent_role_*). Required hooks: SessionStart, PreToolUse, enforce. Seeded by platform bootstrap per pr_contract_separation.",
-			Structured:  []byte(`{"allowed_mcp_verbs":["document_*","story_*","ledger_*","project_*","repo_*","workspace_*","principle_*","contract_*","skill_*","reviewer_*","agent_*","role_*","session_whoami","satellites_info"],"required_hooks":["SessionStart","PreToolUse","enforce"],"claim_requirements":[],"default_context_policy":"fresh-per-claim"}`),
-			Tags:        []string{"v4", "agents-roles", "seed"},
-			CreatedBy:   "system",
-		}, now)
-		if err != nil {
-			return fmt.Errorf("seed role_orchestrator: %w", err)
-		}
-	}
-	if _, err := docStore.GetByName(ctx, "", "agent_claude_orchestrator", nil); err == nil {
-		return nil
-	}
-	structured := `{"provider_chain":[{"provider":"claude","model":"opus-4","tier":"opus"}],"tier":"opus","permitted_roles":["` + role.ID + `"],"tool_ceiling":["*"]}`
-	if _, err := docStore.Create(ctx, document.Document{
-		WorkspaceID: workspaceID,
-		ProjectID:   nil,
-		Type:        document.TypeAgent,
-		Name:        "agent_claude_orchestrator",
-		Scope:       document.ScopeSystem,
-		Status:      document.StatusActive,
-		Body:        "Claude orchestrator agent — the interactive session's delivery-agent configuration. provider_chain=claude/opus, tier=opus, tool_ceiling=['*']. permitted_roles pins role_orchestrator so the SessionStart grant path resolves. Seeded by platform bootstrap.",
-		Structured:  []byte(structured),
-		Tags:        []string{"v4", "agents-roles", "seed"},
-		CreatedBy:   "system",
-	}, now); err != nil {
-		return fmt.Errorf("seed agent_claude_orchestrator: %w", err)
-	}
-	return nil
-}
-
-// seedReviewerDocs creates the system-scope `role_reviewer` and
-// `agent_gemini_reviewer` documents used by the standalone reviewer
-// service to claim kind:review tasks (epic:v4-lifecycle-refactor
-// sty_62d4b438). Idempotent: existing rows are left untouched.
-//
-// The role's allowed_mcp_verbs covers the verbs the service exercises:
-// task_* (queue claim/close), contract_review_close (verdict), the
-// ledger / document reads needed to assemble the review packet, and
-// the session_whoami / role_claim affordances for observability.
-//
-// The agent doc pins permitted_roles to role_reviewer so the
-// downstream grant-mint resolves cleanly. tool_ceiling matches the
-// role's verb subset.
-func seedReviewerDocs(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
-	if docStore == nil {
-		return nil
-	}
-	role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil)
-	if err != nil {
-		role, err = docStore.Create(ctx, document.Document{
-			WorkspaceID: workspaceID,
-			ProjectID:   nil,
-			Type:        document.TypeRole,
-			Name:        mcpserver.SeedRoleReviewerName,
-			Scope:       document.ScopeSystem,
-			Status:      document.StatusActive,
-			Body:        "Reviewer role — the authorisation bundle the standalone reviewer service holds. Covers task queue verbs (task_claim/close), contract_review_close for verdict commits, and the ledger/document reads needed to assemble the review packet. Seeded by platform bootstrap when SATELLITES_REVIEWER_SERVICE=embedded.",
-			Structured:  []byte(`{"allowed_mcp_verbs":["task_claim","task_close","task_get","task_list","contract_review_close","ledger_get","ledger_list","document_get","contract_get","session_whoami","agent_role_claim","agent_role_release","agent_role_list","satellites_info"],"required_hooks":[],"claim_requirements":[],"default_context_policy":"fresh-per-claim"}`),
-			Tags:        []string{"v4", "agents-roles", "seed", "reviewer"},
-			CreatedBy:   "system",
-		}, now)
-		if err != nil {
-			return fmt.Errorf("seed role_reviewer: %w", err)
-		}
-	}
-	if _, err := docStore.GetByName(ctx, "", mcpserver.SeedAgentReviewerName, nil); err == nil {
-		return nil
-	}
-	structured := `{"provider_chain":[{"provider":"gemini","model":"gemini-2.5-flash","tier":"flash"}],"tier":"flash","permitted_roles":["` + role.ID + `"],"tool_ceiling":["task_claim","task_close","task_get","task_list","contract_review_close","ledger_get","ledger_list","document_get","contract_get","session_whoami"]}`
-	if _, err := docStore.Create(ctx, document.Document{
-		WorkspaceID: workspaceID,
-		ProjectID:   nil,
-		Type:        document.TypeAgent,
-		Name:        mcpserver.SeedAgentReviewerName,
-		Scope:       document.ScopeSystem,
-		Status:      document.StatusActive,
-		Body:        "Gemini reviewer agent — the embedded reviewer service's delivery-agent configuration. provider_chain=gemini/2.5-flash. permitted_roles pins role_reviewer so the boot-time grant-mint path resolves. Seeded by platform bootstrap.",
-		Structured:  []byte(structured),
-		Tags:        []string{"v4", "agents-roles", "seed", "reviewer"},
-		CreatedBy:   "system",
-	}, now); err != nil {
-		return fmt.Errorf("seed agent_gemini_reviewer: %w", err)
-	}
-	return nil
-}
-
 // seedSystemValidationMode appends a system-tier
 // `lifecycle.validation_mode = task` KV row when none already exists
 // at scope=system. Idempotent — a second invocation finds the
@@ -866,90 +731,6 @@ func ensureReviewerServiceGrant(
 		return grant.ID, fmt.Errorf("reviewer service session set grant: %w", err)
 	}
 	return grant.ID, nil
-}
-
-// lifecycleAgentSpec captures one seed agent — its document name and
-// the permission_patterns the agent grants when allocated to a CI.
-// Story_488b8223.
-type lifecycleAgentSpec struct {
-	Name     string
-	Body     string
-	Patterns []string
-}
-
-// seedLifecycleAgents creates one system-scope `type=agent` document
-// per lifecycle role: **developer_agent** (plan + develop),
-// **releaser_agent** (push + merge_to_main), and **story_close_agent**
-// (story_close). Each agent's `permission_patterns` is the union of
-// the patterns the folded contracts need, so action_claim resolution
-// stays a simple lookup against the agent doc's structured payload
-// (story_cc55e093). Idempotent — agents already present by name are
-// skipped.
-func seedLifecycleAgents(ctx context.Context, docStore document.Store, workspaceID string, now time.Time) error {
-	if docStore == nil {
-		return nil
-	}
-	specs := []lifecycleAgentSpec{
-		{
-			Name: "developer_agent",
-			Body: "Role-shaped agent covering plan + develop. In plan, reads code/git/ledger, authors plan + review-criteria artefacts, and enqueues role-tagged child tasks against the plan CI. In develop, edits + tests + commits and bumps .version exactly once per story.",
-			Patterns: []string{
-				"Read:**", "Edit:**", "Write:**", "MultiEdit:**", "Grep:**", "Glob:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff", "Bash:git_show",
-				"Bash:git_add", "Bash:git_commit",
-				"Bash:go_build", "Bash:go_test", "Bash:go_vet", "Bash:go_mod", "Bash:go_run",
-				"Bash:gofmt", "Bash:goimports", "Bash:golangci_lint",
-				"Bash:ls", "Bash:pwd", "Bash:cat", "Bash:echo", "Bash:mkdir",
-				"mcp__satellites__satellites_*", "mcp__jcodemunch__*",
-			},
-		},
-		{
-			Name: "releaser_agent",
-			Body: "Role-shaped agent (story_87b46d01) covering push + merge_to_main. Pushes the develop commit upstream; fast-forward merges to local main. Never re-bumps .version. No force operations.",
-			Patterns: []string{
-				"Read:**",
-				"Bash:git_status", "Bash:git_log", "Bash:git_diff",
-				"Bash:git_fetch", "Bash:git_push",
-				"Bash:git_checkout", "Bash:git_branch", "Bash:git_merge",
-				"Bash:ls", "Bash:pwd",
-				"mcp__satellites__satellites_*",
-			},
-		},
-		{
-			Name: "story_close_agent",
-			Body: "Lifecycle story_close agent — reads evidence + calls satellites_story_close to transition the story. Read-only across the codebase plus MCP write to the close verb.",
-			Patterns: []string{
-				"Read:**",
-				"mcp__satellites__satellites_*",
-			},
-		},
-	}
-	for _, spec := range specs {
-		if _, err := docStore.GetByName(ctx, "", spec.Name, nil); err == nil {
-			continue
-		}
-		structured, err := document.MarshalAgentSettings(document.AgentSettings{
-			PermissionPatterns: spec.Patterns,
-		})
-		if err != nil {
-			return fmt.Errorf("seed %s: marshal: %w", spec.Name, err)
-		}
-		if _, err := docStore.Create(ctx, document.Document{
-			WorkspaceID: workspaceID,
-			ProjectID:   nil,
-			Type:        document.TypeAgent,
-			Name:        spec.Name,
-			Scope:       document.ScopeSystem,
-			Status:      document.StatusActive,
-			Body:        spec.Body,
-			Structured:  structured,
-			Tags:        []string{"v4", "agents-roles", "seed", "lifecycle"},
-			CreatedBy:   "system",
-		}, now); err != nil {
-			return fmt.Errorf("seed %s: %w", spec.Name, err)
-		}
-	}
-	return nil
 }
 
 // stampRequiredRoleOnContracts scans every active type=contract row and,

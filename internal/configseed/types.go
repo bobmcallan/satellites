@@ -20,6 +20,16 @@ const (
 	KindPrinciple           Kind = "principle"
 	KindStoryTemplate       Kind = "story_template"
 	KindReplicateVocabulary Kind = "replicate_vocabulary"
+	// KindRole loads `roles/*.md` into type=role, scope=system documents.
+	// Sequenced ahead of KindAgent so agent frontmatter that references
+	// roles by name resolves cleanly. Sty_a1a77518.
+	KindRole Kind = "role"
+	// KindArtifact loads `artifacts/*.md` into type=artifact, scope=system
+	// documents. The body is the artifact's content; frontmatter carries
+	// `name` (required) and `tags`. Used today for the `default_agent_process`
+	// handshake markdown the MCP server returns to connecting clients.
+	// Sty_6c3f8091.
+	KindArtifact Kind = "artifact"
 )
 
 // Summary captures the per-kind result counts a Run pass produces.

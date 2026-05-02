@@ -284,6 +284,78 @@ func replicateVocabularyToInput(fm Frontmatter, body []byte, workspaceID, actor 
 	}, nil
 }
 
+// roleToInput builds a document.UpsertInput for a kind=role file. The
+// frontmatter carries the role's authorisation bundle:
+//
+//	allowed_mcp_verbs   []string  — verbs the role's grant covers
+//	required_hooks      []string  — hooks the substrate enforces while role active
+//	claim_requirements  []string  — preconditions before agent_role_claim succeeds
+//	default_context_policy string — fresh-per-claim | inherited
+//
+// Body is the role's prose description. Sty_a1a77518.
+func roleToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
+	name := fm.String("name")
+	if name == "" {
+		return document.UpsertInput{}, fmt.Errorf("role: name required")
+	}
+	payload := map[string]any{
+		"allowed_mcp_verbs":      fm.StringSlice("allowed_mcp_verbs"),
+		"required_hooks":         fm.StringSlice("required_hooks"),
+		"claim_requirements":     fm.StringSlice("claim_requirements"),
+		"default_context_policy": fm.String("default_context_policy"),
+	}
+	// Preserve empty arrays + the empty default_context_policy so the
+	// payload byte-matches the in-Go seed shape (which writes the keys
+	// even when their values are zero). Don't pruneEmpty here.
+	if payload["allowed_mcp_verbs"] == nil {
+		payload["allowed_mcp_verbs"] = []string{}
+	}
+	if payload["required_hooks"] == nil {
+		payload["required_hooks"] = []string{}
+	}
+	if payload["claim_requirements"] == nil {
+		payload["claim_requirements"] = []string{}
+	}
+	structured, err := json.Marshal(payload)
+	if err != nil {
+		return document.UpsertInput{}, fmt.Errorf("role %q: marshal: %w", name, err)
+	}
+	return document.UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypeRole,
+		Name:        name,
+		Body:        body,
+		Structured:  structured,
+		Scope:       document.ScopeSystem,
+		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
+		Actor:       actor,
+	}, nil
+}
+
+// artifactToInput builds a document.UpsertInput for a kind=artifact file.
+// Frontmatter carries `name` (required) and `tags`; the body is the
+// artifact content. Used today for the system-scope `default_agent_process`
+// handshake markdown the MCP server returns to connecting clients —
+// authors edit a file under config/seed/artifacts/ instead of patching a
+// Go string constant. Sty_6c3f8091.
+func artifactToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
+	name := fm.String("name")
+	if name == "" {
+		return document.UpsertInput{}, fmt.Errorf("artifact: name required")
+	}
+	return document.UpsertInput{
+		WorkspaceID: workspaceID,
+		ProjectID:   nil,
+		Type:        document.TypeArtifact,
+		Name:        name,
+		Body:        body,
+		Scope:       document.ScopeSystem,
+		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
+		Actor:       actor,
+	}, nil
+}
+
 // helpToInput builds a document.UpsertInput for a kind=help file.
 // Sibling story_cc5c67a9 owns the type=help discriminator + portal
 // surface; the loader entry point lives here so the runner stays

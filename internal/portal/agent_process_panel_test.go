@@ -6,19 +6,32 @@ package portal
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/agentprocess"
+	"github.com/bobmcallan/satellites/internal/configseed"
 	"github.com/bobmcallan/satellites/internal/document"
 )
+
+func seedAgentProcessDefault(t *testing.T, ctx context.Context, docs *document.MemoryStore, now time.Time) {
+	t.Helper()
+	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
+	if err != nil {
+		t.Fatalf("abs seed dir: %v", err)
+	}
+	if _, err := configseed.Run(ctx, docs, seedDir, "wksp_a", "system", now); err != nil {
+		t.Fatalf("configseed Run: %v", err)
+	}
+}
 
 func TestAgentProcessPanel_EmptyStateRendersSystemDefault(t *testing.T) {
 	t.Parallel()
 	rec := renderConfiguration(t, func(ctx context.Context, projectID string, docs *document.MemoryStore) {
 		// Seed only the system default — no project-scope override.
-		_ = agentprocess.SeedSystemDefault(ctx, docs, "wksp_a", time.Now().UTC())
+		seedAgentProcessDefault(t, ctx, docs, time.Now().UTC())
 	})
 	body := rec.Body.String()
 	for _, want := range []string{
@@ -53,7 +66,7 @@ func TestAgentProcessPanel_ProjectOverrideRendersCustomBody(t *testing.T) {
 	const customBody = "PROJECT_CUSTOM_BODY_42"
 	rec := renderConfiguration(t, func(ctx context.Context, projectID string, docs *document.MemoryStore) {
 		now := time.Now().UTC()
-		_ = agentprocess.SeedSystemDefault(ctx, docs, "wksp_a", now)
+		seedAgentProcessDefault(t, ctx, docs, now)
 		pid := projectID
 		_, err := docs.Create(ctx, document.Document{
 			Type:      document.TypeArtifact,

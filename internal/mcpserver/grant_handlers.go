@@ -324,6 +324,14 @@ func contains(haystack []string, s string) bool {
 // resolving it via docs.GetByName before comparing. story_a4074d21:
 // configseed loads agent frontmatter verbatim, so permitted_roles may
 // carry name strings (`role_orchestrator`) instead of doc ids.
+//
+// sty_db196ff4: configseed is now the single writer for system-scope
+// agent docs and writes name-form permitted_roles, so the name branch
+// is the primary path. The id branch stays for project-scope agent
+// docs created via agent_compose / document_create where the caller
+// may have resolved a role name to its id before persisting; treating
+// both forms uniformly keeps the gate working regardless of authoring
+// path.
 func permittedRolesContains(ctx context.Context, docs document.Store, permittedRoles []string, wantRoleID string) bool {
 	for _, entry := range permittedRoles {
 		if entry == wantRoleID {
@@ -589,6 +597,11 @@ func (s *Server) resolveRequiredRoleGrant(ctx context.Context, ci contract.Contr
 	// carries (internal/configseed/parsers.go). Resolve names to ids
 	// before comparing so a name-form required_role gates the same
 	// grants an id-form one would. story_a4074d21.
+	//
+	// sty_db196ff4: configseed is the single writer for system-scope
+	// contract docs, so name-form is the canonical case. The id-form
+	// branch stays for project-scope contracts that may resolve their
+	// role at document_create time.
 	requiredRoleID := cp.RequiredRole
 	if !strings.HasPrefix(requiredRoleID, "doc_") {
 		role, err := s.docs.GetByName(ctx, "", cp.RequiredRole, nil)
