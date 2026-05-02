@@ -68,7 +68,11 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: agent %q structured payload malformed: %s", agentID, err)), nil
 	}
-	if !contains(agentPayload.PermittedRoles, roleID) {
+	// permitted_roles entries may be doc ids (`doc_*`) or role doc
+	// *names* (e.g. `role_orchestrator`) — configseed loads agent
+	// frontmatter verbatim. Resolve names to ids before comparing
+	// so the gate accepts either form. story_a4074d21.
+	if !permittedRolesContains(ctx, s.docs, agentPayload.PermittedRoles, roleID) {
 		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role %q not in agent %q permitted_roles", roleID, agentID)), nil
 	}
 
@@ -88,6 +92,45 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 		pid := projectID
 		projectPtr = &pid
 	}
+
+	// story_3cc804cd: sequential role enforcement. A session can hold at
+	// most one active role grant. Three cases:
+	//
+	//  1. No prior grant — fall through and mint a new one.
+	//  2. Prior active grant for the same role — return it as-is so a
+	//     same-role re-claim is a no-op (the §5 same-role optimisation).
+	//  3. Prior active grant for a different role — reject with
+	//     role_already_held; caller must agent_role_release first.
+	if granteeKind == rolegrant.GranteeSession && s.sessions != nil {
+		caller, _ := UserFrom(ctx)
+		if sess, serr := s.sessions.Get(ctx, caller.UserID, granteeID); serr == nil && sess.OrchestratorGrantID != "" {
+			if existing, eerr := s.grants.GetByID(ctx, sess.OrchestratorGrantID, nil); eerr == nil && existing.Status == rolegrant.StatusActive {
+				if existing.RoleID == roleID && existing.AgentID == agentID {
+					return jsonResult(map[string]any{
+						"grant_id":        existing.ID,
+						"workspace_id":    existing.WorkspaceID,
+						"role_id":         existing.RoleID,
+						"agent_id":        existing.AgentID,
+						"grantee_kind":    existing.GranteeKind,
+						"grantee_id":      existing.GranteeID,
+						"status":          existing.Status,
+						"issued_at":       existing.IssuedAt,
+						"effective_verbs": effective,
+						"reused":          true,
+					})
+				}
+				body, _ := json.Marshal(map[string]any{
+					"error":             "role_already_held",
+					"message":           "session already holds an active role grant; call agent_role_release first",
+					"live_grant_id":     existing.ID,
+					"live_role_id":      existing.RoleID,
+					"requested_role_id": roleID,
+				})
+				return mcpgo.NewToolResultError(string(body)), nil
+			}
+		}
+	}
+
 	grant, err := s.grants.Create(ctx, rolegrant.RoleGrant{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectPtr,
@@ -99,6 +142,18 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	}, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: %s", err)), nil
+	}
+
+	// Stamp the grant id on the session row for grantee_kind=session
+	// so the contract_claim required_role gate finds it. Replaces the
+	// dropped session_register auto-grant path. story_a4074d21.
+	if granteeKind == rolegrant.GranteeSession && s.sessions != nil {
+		caller, _ := UserFrom(ctx)
+		if _, err := s.sessions.SetOrchestratorGrant(ctx, caller.UserID, granteeID, grant.ID, now); err != nil {
+			if s.logger != nil {
+				s.logger.Warn().Str("session_id", granteeID).Str("grant_id", grant.ID).Str("error", err.Error()).Msg("agent_role_claim: SetOrchestratorGrant failed; grant minted but session row not stamped")
+			}
+		}
 	}
 
 	// Audit ledger row. Missing ledger store is not fatal — the grant
@@ -152,6 +207,18 @@ func (s *Server) handleAgentRoleRelease(ctx context.Context, req mcpgo.CallToolR
 	if err != nil && !redundant {
 		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_release: %s", err)), nil
 	}
+
+	// story_3cc804cd: clear the session's stamped grant id so the next
+	// agent_role_claim can mint a fresh grant. Only act on session-bound
+	// grants; worker grants (reviewer service) keep their own stamping
+	// path.
+	if !redundant && grant.GranteeKind == rolegrant.GranteeSession && s.sessions != nil {
+		caller, _ := UserFrom(ctx)
+		if sess, serr := s.sessions.Get(ctx, caller.UserID, grant.GranteeID); serr == nil && sess.OrchestratorGrantID == grant.ID {
+			_, _ = s.sessions.SetOrchestratorGrant(ctx, caller.UserID, grant.GranteeID, "", now)
+		}
+	}
+
 	if s.ledger != nil {
 		event := "released"
 		if redundant {
@@ -246,6 +313,33 @@ func decodeRolePayload(raw []byte) (rolePayload, error) {
 func contains(haystack []string, s string) bool {
 	for _, h := range haystack {
 		if h == s {
+			return true
+		}
+	}
+	return false
+}
+
+// permittedRolesContains returns true when wantRoleID matches an entry
+// in permittedRoles, treating any non-doc-id entry as a role name and
+// resolving it via docs.GetByName before comparing. story_a4074d21:
+// configseed loads agent frontmatter verbatim, so permitted_roles may
+// carry name strings (`role_orchestrator`) instead of doc ids.
+func permittedRolesContains(ctx context.Context, docs document.Store, permittedRoles []string, wantRoleID string) bool {
+	for _, entry := range permittedRoles {
+		if entry == wantRoleID {
+			return true
+		}
+		if strings.HasPrefix(entry, "doc_") {
+			continue
+		}
+		if docs == nil {
+			continue
+		}
+		role, err := docs.GetByName(ctx, "", entry, nil)
+		if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
+			continue
+		}
+		if role.ID == wantRoleID {
 			return true
 		}
 	}
@@ -489,12 +583,32 @@ func (s *Server) resolveRequiredRoleGrant(ctx context.Context, ci contract.Contr
 		})
 		return "", errors.New(string(body))
 	}
-	if grant.RoleID != cp.RequiredRole {
+	// The contract's required_role may be either a doc id (e.g.
+	// `doc_756d1fb1`) or a role doc *name* (e.g. `role_orchestrator`)
+	// — the seed loader writes whatever the contract frontmatter
+	// carries (internal/configseed/parsers.go). Resolve names to ids
+	// before comparing so a name-form required_role gates the same
+	// grants an id-form one would. story_a4074d21.
+	requiredRoleID := cp.RequiredRole
+	if !strings.HasPrefix(requiredRoleID, "doc_") {
+		role, err := s.docs.GetByName(ctx, "", cp.RequiredRole, nil)
+		if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
+			body, _ := json.Marshal(map[string]any{
+				"error":         "required_role_unresolved",
+				"required_role": cp.RequiredRole,
+				"reason":        "contract names a required_role that does not resolve to an active type=role document",
+			})
+			return "", errors.New(string(body))
+		}
+		requiredRoleID = role.ID
+	}
+	if grant.RoleID != requiredRoleID {
 		body, _ := json.Marshal(map[string]any{
-			"error":         "required_role_mismatch",
-			"required_role": cp.RequiredRole,
-			"grant_role":    grant.RoleID,
-			"grant_id":      grant.ID,
+			"error":            "required_role_mismatch",
+			"required_role":    cp.RequiredRole,
+			"required_role_id": requiredRoleID,
+			"grant_role":       grant.RoleID,
+			"grant_id":         grant.ID,
 		})
 		return "", errors.New(string(body))
 	}

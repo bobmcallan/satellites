@@ -73,22 +73,32 @@ func callRegister(t *testing.T, s *Server, userID, sessionID string) map[string]
 	return out
 }
 
-func TestSessionRegister_IssuesOrchestratorGrant_WhenSeedsPresent(t *testing.T) {
+// TestSessionRegister_NoAutoGrant covers epic:agent-process-v1
+// (sty_a4074d21): session_register no longer mints an orchestrator
+// grant. The session row carries an empty OrchestratorGrantID until
+// agent_role_claim is called explicitly.
+func TestSessionRegister_NoAutoGrant(t *testing.T) {
 	t.Parallel()
 	s := orchestratorTestServer(t, true)
 	out := callRegister(t, s, "u1", "sess_aaa")
-	grantID, _ := out["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grantID, "session_register should stamp orchestrator_grant_id when seeds are present")
+	if gid, _ := out["orchestrator_grant_id"].(string); gid != "" {
+		t.Fatalf("session_register must not mint an orchestrator grant; got %q", gid)
+	}
 
-	// Grant row resolves + status=active + grantee matches session.
-	grant, err := s.grants.GetByID(context.Background(), grantID, nil)
+	// Session row exists with empty OrchestratorGrantID; no grants in the
+	// store yet.
+	sess, err := s.sessions.Get(context.Background(), "u1", "sess_aaa")
 	require.NoError(t, err)
-	assert.Equal(t, rolegrant.StatusActive, grant.Status)
-	assert.Equal(t, rolegrant.GranteeSession, grant.GranteeKind)
-	assert.Equal(t, "sess_aaa", grant.GranteeID)
+	assert.Equal(t, "sess_aaa", sess.SessionID)
+	assert.Empty(t, sess.OrchestratorGrantID)
+	active, err := s.grants.List(context.Background(), rolegrant.ListOptions{Status: rolegrant.StatusActive}, nil)
+	require.NoError(t, err)
+	assert.Len(t, active, 0, "no auto-grants minted")
 }
 
-func TestSessionRegister_SkipsGrant_WhenSeedsMissing(t *testing.T) {
+// TestSessionRegister_NoAutoGrant_SeedsAbsent confirms the no-auto-grant
+// behaviour holds whether or not the orchestrator seeds resolve.
+func TestSessionRegister_NoAutoGrant_SeedsAbsent(t *testing.T) {
 	t.Parallel()
 	s := orchestratorTestServer(t, false)
 	out := callRegister(t, s, "u1", "sess_noseed")
@@ -96,34 +106,72 @@ func TestSessionRegister_SkipsGrant_WhenSeedsMissing(t *testing.T) {
 		t.Fatalf("no seeds → no grant; got %q", gid)
 	}
 
-	// Session row still exists.
 	sess, err := s.sessions.Get(context.Background(), "u1", "sess_noseed")
 	require.NoError(t, err)
 	assert.Equal(t, "sess_noseed", sess.SessionID)
 	assert.Empty(t, sess.OrchestratorGrantID)
 }
 
-func TestSessionRegister_DistinctGrants_PerSession(t *testing.T) {
+// TestAgentRoleClaim_StampsGrantOnSession covers the post-unblock
+// (sty_a4074d21) flow: agent_role_claim with grantee_kind=session
+// stamps the new grant id on the caller's session row so the
+// contract_claim required_role gate finds it. Replaces the dropped
+// session_register auto-grant path.
+func TestAgentRoleClaim_StampsGrantOnSession(t *testing.T) {
 	t.Parallel()
 	s := orchestratorTestServer(t, true)
-	a := callRegister(t, s, "u1", "sess_alpha")
-	b := callRegister(t, s, "u1", "sess_beta")
-	ga, _ := a["orchestrator_grant_id"].(string)
-	gb, _ := b["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, ga)
-	require.NotEmpty(t, gb)
-	assert.NotEqual(t, ga, gb, "each session should receive a distinct grant id")
+	callRegister(t, s, "u1", "sess_claim")
 
-	// Both grants coexist active in the store.
-	active, err := s.grants.List(context.Background(), rolegrant.ListOptions{Status: rolegrant.StatusActive}, nil)
+	roleDoc, err := s.docs.GetByName(context.Background(), "", SeedRoleOrchestratorName, nil)
 	require.NoError(t, err)
-	assert.Len(t, active, 2)
+	agentDoc, err := s.docs.GetByName(context.Background(), "", SeedAgentOrchestratorName, nil)
+	require.NoError(t, err)
+
+	ctx := context.WithValue(context.Background(), userKey, CallerIdentity{UserID: "u1", Email: "u1@example.com", Source: "apikey"})
+	req := mcpgo.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"workspace_id": "wksp_sys",
+		"role_id":      roleDoc.ID,
+		"agent_id":     agentDoc.ID,
+		"grantee_kind": "session",
+		"grantee_id":   "sess_claim",
+	}
+	res, err := s.handleAgentRoleClaim(ctx, req)
+	require.NoError(t, err)
+	require.False(t, res.IsError, "claim error: %+v", res)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(res.Content[0].(mcpgo.TextContent).Text), &out))
+	grantID, _ := out["grant_id"].(string)
+	require.NotEmpty(t, grantID)
+
+	// Session row is stamped with the same grant id so the gate finds it.
+	sess, err := s.sessions.Get(context.Background(), "u1", "sess_claim")
+	require.NoError(t, err)
+	assert.Equal(t, grantID, sess.OrchestratorGrantID, "agent_role_claim must stamp the grant id on the session row")
 }
 
 func TestSessionWhoami_ReturnsOrchestratorGrant(t *testing.T) {
 	t.Parallel()
 	s := orchestratorTestServer(t, true)
 	callRegister(t, s, "u1", "sess_whoami")
+
+	// Explicit role claim — replaces the auto-grant path.
+	roleDoc, err := s.docs.GetByName(context.Background(), "", SeedRoleOrchestratorName, nil)
+	require.NoError(t, err)
+	agentDoc, err := s.docs.GetByName(context.Background(), "", SeedAgentOrchestratorName, nil)
+	require.NoError(t, err)
+	claimReq := mcpgo.CallToolRequest{}
+	claimReq.Params.Arguments = map[string]any{
+		"workspace_id": "wksp_sys",
+		"role_id":      roleDoc.ID,
+		"agent_id":     agentDoc.ID,
+		"grantee_kind": "session",
+		"grantee_id":   "sess_whoami",
+	}
+	claimCtx := context.WithValue(context.Background(), userKey, CallerIdentity{UserID: "u1", Email: "u1@example.com", Source: "apikey"})
+	claimRes, err := s.handleAgentRoleClaim(claimCtx, claimReq)
+	require.NoError(t, err)
+	require.False(t, claimRes.IsError)
 
 	ctx := context.WithValue(context.Background(), userKey, CallerIdentity{UserID: "u1", Email: "u1@example.com", Source: "apikey"})
 	req := mcpgo.CallToolRequest{}
@@ -135,7 +183,7 @@ func TestSessionWhoami_ReturnsOrchestratorGrant(t *testing.T) {
 	var out map[string]any
 	require.NoError(t, json.Unmarshal([]byte(text), &out))
 	grantID, _ := out["orchestrator_grant_id"].(string)
-	assert.NotEmpty(t, grantID, "whoami should include orchestrator_grant_id")
+	assert.NotEmpty(t, grantID, "whoami should include orchestrator_grant_id after explicit role claim")
 	verbs, _ := out["effective_verbs"].([]any)
 	assert.NotEmpty(t, verbs, "whoami should include effective_verbs when grant is live")
 }

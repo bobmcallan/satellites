@@ -277,6 +277,12 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 		// rationale so the next iteration carries the context.
 		outcome = reviewer.VerdictRejected
 		if len(verdict.ReviewQuestions) > 0 {
+			// story_224621bd: post review-question ledger rows so
+			// contract_respond can address them. Each question gets its
+			// own row tagged kind:review-question, scoped to the CI, so
+			// findLatestReviewQuestion (close_handlers.go:584) can
+			// resolve the latest unresolved question.
+			s.writeReviewQuestionRows(ctx, ci, verdict.ReviewQuestions)
 			rationale = strings.TrimSpace(rationale + "\n\nReview questions:\n- " + strings.Join(verdict.ReviewQuestions, "\n- "))
 		}
 	default:
@@ -357,6 +363,43 @@ func (s *Service) commitFailure(ctx context.Context, ciID, rationale, taskID, lo
 		// failed-commit task.
 		if s.tasks != nil && taskID != "" {
 			_, _ = s.tasks.Close(ctx, taskID, task.OutcomeFailure, s.nowUTC(), nil)
+		}
+	}
+}
+
+// writeReviewQuestionRows records each question as its own
+// kind:review-question ledger row scoped to the CI. story_224621bd:
+// addresses the AC requirement that needs_more verdicts post review-
+// question rows that contract_respond (close_handlers.go) can find via
+// findLatestReviewQuestion.
+func (s *Service) writeReviewQuestionRows(ctx context.Context, ci contract.ContractInstance, questions []string) {
+	if s.ledger == nil {
+		return
+	}
+	now := s.nowUTC()
+	for i, q := range questions {
+		structured, _ := json.Marshal(map[string]any{
+			"index":    i,
+			"question": q,
+		})
+		_, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+			WorkspaceID: ci.WorkspaceID,
+			ProjectID:   ci.ProjectID,
+			StoryID:     ledger.StringPtr(ci.StoryID),
+			ContractID:  ledger.StringPtr(ci.ID),
+			Type:        ledger.TypeDecision,
+			Tags:        []string{"kind:review-question", "phase:" + ci.ContractName},
+			Content:     q,
+			Structured:  structured,
+			Durability:  ledger.DurabilityDurable,
+			SourceType:  ledger.SourceSystem,
+			Status:      ledger.StatusActive,
+			CreatedBy:   s.cfg.UserID,
+		}, now)
+		if err != nil {
+			s.logWarn("reviewer service review-question append failed", err, map[string]string{
+				"ci_id": ci.ID,
+			})
 		}
 	}
 }

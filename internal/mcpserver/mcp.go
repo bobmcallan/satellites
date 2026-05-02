@@ -575,7 +575,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			claimTool := mcpgo.NewTool("contract_claim",
 				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true). story_b39b393f: when agent_id is supplied, the action_claim row's permission_patterns are sourced from the agent document and the CI is stamped with the agent_id."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Claude Code harness chat UUID — must be registered in the session registry.")),
+				mcpgo.WithString("session_id", mcpgo.Description("Optional session id override. Streamable HTTP callers should let the Mcp-Session-Id header carry the id; stdio/test callers may pass it as a body arg. story_31975268.")),
 				mcpgo.WithString("agent_id", mcpgo.Required(), mcpgo.Description("Document id of an active type=agent the orchestrator allocated to this CI (story_cc55e093). The action_claim ledger row's permission_patterns are sourced from this agent doc; the CI's AgentID column is stamped. Required as of story_cc55e093.")),
 				mcpgo.WithArray("permissions_claim", mcpgo.Description("Retired (story_cc55e093). Calls passing this argument are rejected with a structured permissions_claim_retired error directing the caller to allocate an agent."),
 					mcpgo.Items(map[string]any{"type": "string"})),
@@ -621,16 +621,17 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			s.mcp.AddTool(resumeTool, s.handleContractResume)
 
 			whoamiTool := mcpgo.NewTool("session_whoami",
-				mcpgo.WithDescription("Return the caller's session registry row for the given session_id. Returns a structured session_not_registered error when the session is not in the registry."),
-				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session id to inspect.")),
+				mcpgo.WithDescription("Return the caller's session registry row. session_id resolves from the Mcp-Session-Id header by default (story_31975268); pass session_id as a body arg to override. Returns a structured session_not_registered error when the resolved session is not in the registry."),
+				mcpgo.WithString("session_id", mcpgo.Description("Optional session id override. Streamable HTTP callers should let the Mcp-Session-Id header carry the id.")),
 			)
 			s.mcp.AddTool(whoamiTool, s.handleSessionWhoami)
 
 			registerTool := mcpgo.NewTool("session_register",
-				mcpgo.WithDescription("Upsert a session row keyed by (caller_user_id, session_id). Called by the SessionStart hook + by tests. LastSeenAt is set to now. Optional workspace_id binds the session to a workspace for tenant-scoped resolution (story_798631fd)."),
-				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session id to register.")),
+				mcpgo.WithDescription("Upsert a session row. story_31975268: session_id is server-minted when neither the body arg nor the Mcp-Session-Id header carries one — Streamable HTTP clients receive the minted id via the initialize response header and echo it on subsequent calls; stdio/test callers may pass session_id as a body arg. story_cef068fe: when project_id is supplied AND no explicit session_id was carried, the handler resumes the caller's most recent non-stale session for that (user, project), returning the same id (resumed=true). Stale sessions are skipped; a fresh id is minted instead."),
+				mcpgo.WithString("session_id", mcpgo.Description("Optional session id. When omitted, sourced from the Mcp-Session-Id header; if neither carries one (and no resume hits), the server mints a UUIDv4.")),
 				mcpgo.WithString("source", mcpgo.Description("Source string (session_start | enforce_hook | apikey). Defaults to session_start.")),
 				mcpgo.WithString("workspace_id", mcpgo.Description("Optional workspace id to bind to the session row. When present in .mcp.json default_workspace, callers should pass it on registration so subsequent verbs scope to this workspace.")),
+				mcpgo.WithString("project_id", mcpgo.Description("Optional project id. When supplied + no explicit session_id, the handler tries to resume the caller's most recent non-stale session bound to this project. Also stamped as active_project_id on the resulting session row.")),
 			)
 			s.mcp.AddTool(registerTool, s.handleSessionRegister)
 		}
@@ -926,10 +927,41 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.registerPortalReplicate()
 	}
 
+	// Use a tolerant session id manager (sty_31975268): generate a UUID
+	// on initialize so the response carries Mcp-Session-Id, but accept
+	// empty session ids on non-initialize calls so legacy callers that
+	// pass session_id as a body argument still work.
 	s.streamable = mcpserver.NewStreamableHTTPServer(s.mcp,
-		mcpserver.WithStateLess(true),
+		mcpserver.WithSessionIdManager(&tolerantSessionIDManager{
+			inner: &mcpserver.StatelessGeneratingSessionIdManager{},
+		}),
 	)
 	return s
+}
+
+// tolerantSessionIDManager is a SessionIdManager that mints UUIDs on
+// initialize (so the Mcp-Session-Id round-trip works for spec-compliant
+// Streamable HTTP clients) while accepting empty session ids on every
+// other call (so legacy stdio-style callers + tests that don't echo the
+// header continue to function via the body session_id parameter).
+// story_31975268.
+type tolerantSessionIDManager struct {
+	inner mcpserver.SessionIdManager
+}
+
+func (t *tolerantSessionIDManager) Generate() string {
+	return t.inner.Generate()
+}
+
+func (t *tolerantSessionIDManager) Validate(sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	return t.inner.Validate(sessionID)
+}
+
+func (t *tolerantSessionIDManager) Terminate(sessionID string) (bool, error) {
+	return t.inner.Terminate(sessionID)
 }
 
 // ServeHTTP implements http.Handler. AuthMiddleware is responsible for

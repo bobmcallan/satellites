@@ -84,12 +84,15 @@ func TestAgentsRolesRequiredRole_ContractCarriesRequiredRole(t *testing.T) {
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_rr2")
 
-	// session_register → orchestrator grant (carried forward from 6.4).
-	reg := callTool(t, ctx, mcpURL, "key_rr2", "session_register", map[string]any{
+	// session_register → no auto-grant (sty_a4074d21). The claim/release
+	// audit path that this test exercises is unchanged; we still mint a
+	// grant via explicit agent_role_claim to keep the rest of the assertions
+	// honest.
+	_ = callTool(t, ctx, mcpURL, "key_rr2", "session_register", map[string]any{
 		"session_id": "sess_rr2",
 	})
-	grantID, _ := reg["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grantID, "6.4 wiring: session_register should mint a grant")
+	grantID, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_rr2", "sess_rr2")
+	require.NotEmpty(t, grantID, "explicit agent_role_claim should mint a grant")
 
 	// contract_create with a structured payload that carries
 	// required_role=role_orchestrator → accepted.

@@ -78,13 +78,14 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_grc")
 
-	// Step 1: session A registers → grant A minted and stamped.
+	// Step 1: session A registers + explicit agent_role_claim → grant A
+	// minted and stamped (sty_a4074d21).
 	const sessionA = "sess_grc_a"
-	reg1 := callTool(t, ctx, mcpURL, "key_grc", "session_register", map[string]any{
+	_ = callTool(t, ctx, mcpURL, "key_grc", "session_register", map[string]any{
 		"session_id": sessionA,
 	})
-	grantA, _ := reg1["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grantA, "SessionStart should mint a grant")
+	grantA, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_grc", sessionA)
+	require.NotEmpty(t, grantA, "agent_role_claim should mint a grant")
 
 	// Resolve the seed role_orchestrator's document id so every seeded
 	// contract's `required_role` matches the grant's RoleID (both
@@ -216,13 +217,15 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 		"claim after release should report grant_required; got %s", rejectText,
 	)
 
-	// Step 5: re-register session A → mints fresh grant B.
-	reg2 := callTool(t, ctx, mcpURL, "key_grc", "session_register", map[string]any{
+	// Step 5: re-claim the orchestrator role on session A → mints fresh
+	// grant B (sty_a4074d21: roles are claimed explicitly, not on
+	// session_register).
+	_ = callTool(t, ctx, mcpURL, "key_grc", "session_register", map[string]any{
 		"session_id": sessionA,
 	})
-	grantB, _ := reg2["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grantB, "re-register should mint a fresh grant")
-	assert.NotEqual(t, grantA, grantB, "fresh registration must mint a distinct grant")
+	grantB, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_grc", sessionA)
+	require.NotEmpty(t, grantB, "fresh claim should mint a fresh grant")
+	assert.NotEqual(t, grantA, grantB, "fresh claim must mint a distinct grant")
 
 	// Step 6: session A claims the plan CI — succeeds under grant B.
 	claim2 := callTool(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
@@ -231,6 +234,44 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 		"agent_id":             planAgent,
 	})
 	assert.Equal(t, "claimed", claim2["status"])
+}
+
+// claimOrchestratorRole performs the post-sty_a4074d21 dance:
+// session_register no longer mints a grant, so callers explicitly
+// agent_role_claim the seeded role_orchestrator + agent_claude_orchestrator
+// pair. The handler stamps the new grant id on the session row so the
+// contract_claim required_role gate finds it. Returns the grant id +
+// the system workspace id (useful for follow-up calls).
+func claimOrchestratorRole(t *testing.T, ctx context.Context, mcpURL, apiKey, sessionID string) (grantID, workspaceID string) {
+	t.Helper()
+	roles := callToolArray(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
+		"type":  "role",
+		"scope": "system",
+	})
+	roleID := ""
+	for _, raw := range roles {
+		m, _ := raw.(map[string]any)
+		if name, _ := m["name"].(string); name == "role_orchestrator" {
+			roleID, _ = m["id"].(string)
+			workspaceID, _ = m["workspace_id"].(string)
+			if roleID != "" {
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
+	require.NotEmpty(t, workspaceID, "role_orchestrator must carry a workspace_id")
+	agentID := lookupSystemAgentID(t, ctx, mcpURL, apiKey, "agent_claude_orchestrator")
+	out := callTool(t, ctx, mcpURL, apiKey, "agent_role_claim", map[string]any{
+		"workspace_id": workspaceID,
+		"role_id":      roleID,
+		"agent_id":     agentID,
+		"grantee_kind": "session",
+		"grantee_id":   sessionID,
+	})
+	grantID, _ = out["grant_id"].(string)
+	require.NotEmpty(t, grantID, "agent_role_claim must mint a grant")
+	return grantID, workspaceID
 }
 
 // lookupSystemAgentID resolves a system-scope type=agent document by

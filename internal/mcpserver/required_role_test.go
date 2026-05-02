@@ -235,6 +235,61 @@ func addRequiredRoleIfMissingProxy(t *testing.T, raw []byte, role string) ([]byt
 	return out, true
 }
 
+// TestRequiredRoleGate_ResolvesNameToId covers epic:agent-process-v1
+// (sty_a4074d21): the seed loader writes the role's *name* (e.g.
+// `role_orchestrator`) into contract.structured.required_role, but
+// grants store the role doc's *id*. The gate must resolve names to
+// ids before comparing — without this, every seeded lifecycle
+// contract claim fails with required_role_mismatch.
+func TestRequiredRoleGate_ResolvesNameToId(t *testing.T) {
+	t.Parallel()
+	s, roleID, agentID := setupRequiredRoleServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	// Contract carries the role's NAME (matches what configseed writes).
+	doc, err := s.docs.Create(ctx, document.Document{
+		WorkspaceID: "wksp_sys",
+		Type:        document.TypeContract,
+		Name:        "name-form-contract",
+		Scope:       document.ScopeSystem,
+		Status:      document.StatusActive,
+		Structured:  []byte(`{"category":"plan","required_role":"` + SeedRoleOrchestratorName + `"}`),
+	}, now)
+	require.NoError(t, err)
+	wantGrant := seedClaimedSession(t, s, "user_e", "session_e", roleID, agentID)
+
+	ci := contract.ContractInstance{ID: "ci_z", ContractID: doc.ID, WorkspaceID: "wksp_sys"}
+	got, err := s.resolveRequiredRoleGrant(ctx, ci, "user_e", "session_e")
+	require.NoError(t, err, "name-form required_role must resolve to the role doc id and accept the matching grant")
+	assert.Equal(t, wantGrant, got)
+}
+
+// TestRequiredRoleGate_NameForm_Unresolved_Rejects covers the negative
+// path: a name-form required_role that doesn't resolve to any active
+// role document is reported with required_role_unresolved rather than
+// silently passed.
+func TestRequiredRoleGate_NameForm_Unresolved_Rejects(t *testing.T) {
+	t.Parallel()
+	s, roleID, agentID := setupRequiredRoleServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	doc, err := s.docs.Create(ctx, document.Document{
+		WorkspaceID: "wksp_sys",
+		Type:        document.TypeContract,
+		Name:        "ghost-role-contract",
+		Scope:       document.ScopeSystem,
+		Status:      document.StatusActive,
+		Structured:  []byte(`{"category":"plan","required_role":"role_nonexistent"}`),
+	}, now)
+	require.NoError(t, err)
+	seedClaimedSession(t, s, "user_f", "session_f", roleID, agentID)
+
+	ci := contract.ContractInstance{ID: "ci_n", ContractID: doc.ID, WorkspaceID: "wksp_sys"}
+	_, err = s.resolveRequiredRoleGrant(ctx, ci, "user_f", "session_f")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "required_role_unresolved")
+}
+
 // TestResolveRequiredRoleGrant_GrantReleased_Rejects covers
 // epic:v4-lifecycle-refactor sty_8490f906 (claim-after-release path):
 // once the session's orchestrator grant has been released, the next

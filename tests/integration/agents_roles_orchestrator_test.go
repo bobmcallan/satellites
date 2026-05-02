@@ -14,21 +14,18 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// TestAgentsRolesOrchestrator_SessionStart_IssuesGrant boots the full
+// TestAgentsRolesOrchestrator_ExplicitClaim_IssuesGrant boots the full
 // container stack, seeds role_orchestrator + agent_claude_orchestrator
 // at server bootstrap (inline in cmd/satellites/main.go), then exercises
-// the SessionStart grant issuance path end-to-end:
+// the post-sty_a4074d21 explicit-claim flow:
 //
-//  1. session_register → server mints a role-grant, stamps
-//     orchestrator_grant_id on the session row.
-//  2. session_whoami returns the grant id + effective_verbs.
-//  3. Two distinct session_ids receive distinct grants coexisting
-//     active — the concurrent-grant shape that resolves v3's
-//     multi-session session_id collision.
-//
-// GrantsEnforced stays off (default); 6.5 handles the flip + enforce
-// hook re-enable.
-func TestAgentsRolesOrchestrator_SessionStart_IssuesGrant(t *testing.T) {
+//  1. session_register → no auto-grant; orchestrator_grant_id empty.
+//  2. agent_role_claim with grantee_kind=session → grant minted, stamped
+//     on the session row.
+//  3. session_whoami returns the grant id + effective_verbs.
+//  4. Two distinct sessions each agent_role_claim independently and
+//     receive distinct grants coexisting active.
+func TestAgentsRolesOrchestrator_ExplicitClaim_IssuesGrant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers test in short mode")
 	}
@@ -75,14 +72,18 @@ func TestAgentsRolesOrchestrator_SessionStart_IssuesGrant(t *testing.T) {
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_oc")
 
-	// Step 1: register session α.
+	// Step 1: register session α — no auto-grant.
 	reg1 := callTool(t, ctx, mcpURL, "key_oc", "session_register", map[string]any{
 		"session_id": "sess_alpha",
 	})
-	grant1, _ := reg1["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grant1, "SessionStart should mint a grant when seed docs are live")
+	if g, _ := reg1["orchestrator_grant_id"].(string); g != "" {
+		t.Fatalf("session_register must not mint an orchestrator grant; got %q", g)
+	}
 
-	// Step 2: whoami returns grant metadata + effective_verbs.
+	// Step 2: explicit agent_role_claim mints + stamps the grant.
+	grant1, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_oc", "sess_alpha")
+
+	// Step 3: whoami returns grant metadata + effective_verbs.
 	whoami1 := callTool(t, ctx, mcpURL, "key_oc", "session_whoami", map[string]any{
 		"session_id": "sess_alpha",
 	})
@@ -90,13 +91,12 @@ func TestAgentsRolesOrchestrator_SessionStart_IssuesGrant(t *testing.T) {
 	verbs, _ := whoami1["effective_verbs"].([]any)
 	assert.NotEmpty(t, verbs, "session_whoami should surface effective_verbs when grant is live")
 
-	// Step 3: register session β; confirm distinct grant + both coexist.
-	reg2 := callTool(t, ctx, mcpURL, "key_oc", "session_register", map[string]any{
+	// Step 4: register + claim session β; confirm distinct grant + both coexist.
+	_ = callTool(t, ctx, mcpURL, "key_oc", "session_register", map[string]any{
 		"session_id": "sess_beta",
 	})
-	grant2, _ := reg2["orchestrator_grant_id"].(string)
-	require.NotEmpty(t, grant2)
-	assert.NotEqual(t, grant1, grant2, "distinct sessions should receive distinct grants (v3 collision fix)")
+	grant2, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_oc", "sess_beta")
+	assert.NotEqual(t, grant1, grant2, "distinct sessions should receive distinct grants")
 
 	// agent_role_list filtered by status=active should return both.
 	active := callToolArray(t, ctx, mcpURL, "key_oc", "agent_role_list", map[string]any{
@@ -110,11 +110,4 @@ func TestAgentsRolesOrchestrator_SessionStart_IssuesGrant(t *testing.T) {
 		}
 	}
 	assert.GreaterOrEqual(t, activeCount, 2, "both alpha + beta grants should be active")
-
-	// The successful grant issuance on sess_alpha is itself the
-	// strongest evidence the boot-time seed ran — issueOrchestratorGrant
-	// would have short-circuited without minting a grant if either doc
-	// were absent. No separate document_get sanity probe needed (and
-	// document_get defaults project_id to the caller's first owned
-	// project, which does not match the system-scope seed).
 }

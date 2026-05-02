@@ -128,13 +128,13 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_e2e")
 
-	// Register the test session — mints an orchestrator_grant so
-	// contract_claim's grant gate passes.
+	// Register the test session + explicit agent_role_claim
+	// (sty_a4074d21: session_register no longer auto-mints a grant).
 	const sessionID = "sess_e2e_lifecycle"
-	regResp := callTool(t, ctx, mcpURL, "key_e2e", "session_register", map[string]any{
+	_ = callTool(t, ctx, mcpURL, "key_e2e", "session_register", map[string]any{
 		"session_id": sessionID,
 	})
-	require.NotEmpty(t, regResp["orchestrator_grant_id"], "session_register must mint a grant")
+	_, _ = claimOrchestratorRole(t, ctx, mcpURL, "key_e2e", sessionID)
 
 	// Resolve the role_orchestrator doc id and re-seed each lifecycle
 	// contract with required_role pointing at that doc id. The boot-time

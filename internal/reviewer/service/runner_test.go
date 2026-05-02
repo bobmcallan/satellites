@@ -270,6 +270,17 @@ func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
 	assert.Equal(t, reviewer.VerdictRejected, call.Verdict, "needs_more must be coerced to rejected for the task path (no contract_respond loop in the queue model)")
 	assert.Contains(t, call.Rationale, "q1")
 	assert.Contains(t, call.Rationale, "q2")
+
+	// story_224621bd: each question must also land as its own
+	// kind:review-question ledger row so contract_respond can address it.
+	rows, err := f.ledger.List(context.Background(), "", ledger.ListOptions{
+		Tags: []string{"kind:review-question"},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "needs_more must post one kind:review-question row per question")
+	contents := []string{rows[0].Content, rows[1].Content}
+	assert.Contains(t, contents, "q1")
+	assert.Contains(t, contents, "q2")
 }
 
 func TestService_Tick_GeminiError_RejectsWithRationale(t *testing.T) {
