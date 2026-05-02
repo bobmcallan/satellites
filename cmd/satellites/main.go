@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -339,6 +341,19 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("workspace backfill failed")
 		}
 
+		// sty_78ddc67b: stamp task.iteration on legacy rows whose value
+		// is zero/missing. Each task is matched to its CI's lap number
+		// among same-named CIs on the same story. Idempotent — rows with
+		// iteration > 0 are skipped.
+		if surrealTasks, ok := taskStore.(*task.SurrealStore); ok && contractStore != nil {
+			lookup := buildTaskIterationLookup(ctx, contractStore, logger)
+			if n, err := surrealTasks.BackfillIteration(ctx, lookup); err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("task iteration backfill failed")
+			} else if n > 0 {
+				logger.Info().Int("rows", n).Msg("task iteration backfilled")
+			}
+		}
+
 		// Wire user-creation → workspace.EnsureDefault. Each new user gets
 		// a personal workspace on first login. Project creation is now an
 		// explicit action — sty_c975ebeb removed the auto-seeded "Default"
@@ -441,6 +456,16 @@ func main() {
 			attachLedgerListener(ledgerStore, recon)
 			go runStoryStatusBackfill(ctx, recon, projStore, storyStore, logger)
 		}
+	}
+
+	// sty_dc2998c5: nightly sweep that flips closed tasks older than
+	// SATELLITES_TASKS_RETENTION_DAYS (default 90) into archived. The
+	// row stays put + ledger anchors are untouched; archived rows just
+	// fall out of the default task_list query. Boot-time first pass
+	// runs immediately so a freshly-deployed build doesn't wait 24h
+	// to catch up on history.
+	if taskStore != nil {
+		go runTaskRetentionSweep(ctx, taskStore, cfg, logger)
 	}
 
 	bearerValidator := auth.NewBearerValidator(auth.BearerValidatorConfig{
@@ -906,6 +931,112 @@ func (o *oauthRoutes) Register(mux *http.ServeMux) {
 // decoupled from the concrete types.
 type projectListAller interface {
 	ListAll(ctx context.Context) ([]project.Project, error)
+}
+
+// buildTaskIterationLookup returns a closure mapping a contract_instance_id
+// to its 1-based lap number among same-named CIs on the same story
+// (sty_78ddc67b). Memoised: the closure caches story → CI list scans so a
+// large backfill makes O(stories) reads, not O(tasks).
+func buildTaskIterationLookup(ctx context.Context, contracts contract.Store, logger arbor.ILogger) func(string) int {
+	storyCache := make(map[string][]contract.ContractInstance)
+	return func(ciID string) int {
+		if contracts == nil || ciID == "" {
+			return 0
+		}
+		ci, err := contracts.GetByID(ctx, ciID, nil)
+		if err != nil {
+			return 0
+		}
+		peers, ok := storyCache[ci.StoryID]
+		if !ok {
+			peers, err = contracts.List(ctx, ci.StoryID, nil)
+			if err != nil {
+				if logger != nil {
+					logger.Warn().Str("story_id", ci.StoryID).Str("error", err.Error()).Msg("task iteration backfill: peer list failed")
+				}
+				return 0
+			}
+			storyCache[ci.StoryID] = peers
+		}
+		n := 0
+		for _, p := range peers {
+			if p.ContractName != ci.ContractName {
+				continue
+			}
+			if p.CreatedAt.After(ci.CreatedAt) {
+				continue
+			}
+			n++
+		}
+		if n == 0 {
+			return 1
+		}
+		return n
+	}
+}
+
+// runTaskRetentionSweep is the boot-time goroutine that runs the task
+// retention sweep on a 24h cadence (sty_dc2998c5). The cutoff is
+// SATELLITES_TASKS_RETENTION_DAYS days back (default 90). The sweep
+// only flips closed → archived; ledger anchors persist + the row stays
+// in place. Best-effort — errors log + the loop keeps ticking.
+func runTaskRetentionSweep(ctx context.Context, store task.Store, cfg *config.Config, logger arbor.ILogger) {
+	if store == nil {
+		return
+	}
+	retention := taskRetentionDays()
+	// Initial pass + 24h ticker.
+	runOnce := func() {
+		now := time.Now().UTC()
+		cutoff := now.Add(-time.Duration(retention) * 24 * time.Hour)
+		res, err := task.Sweep(ctx, store, cutoff, now, nil)
+		if err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("task retention sweep failed")
+			return
+		}
+		if res.Archived > 0 || res.Errored > 0 {
+			logger.Info().
+				Int("scanned", res.Scanned).
+				Int("archived", res.Archived).
+				Int("errored", res.Errored).
+				Int("retention_days", retention).
+				Msg("task retention sweep complete")
+		}
+	}
+	runOnce()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runOnce()
+		}
+	}
+}
+
+// taskRetentionDays returns the resolved retention window in days. Reads
+// SATELLITES_TASKS_RETENTION_DAYS; falls back to 90 when unset, empty,
+// non-numeric, or non-positive. Surfaced as a helper so tests can flip
+// the env without dragging the full Config layer through.
+func taskRetentionDays() int {
+	const fallback = 90
+	raw := os.Getenv("SATELLITES_TASKS_RETENTION_DAYS")
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconvAtoiSafe(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+// strconvAtoiSafe wraps strconv.Atoi but trims whitespace first so the
+// env var lookup tolerates trailing newlines from `echo -n` patterns.
+func strconvAtoiSafe(s string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(s))
 }
 
 // runStoryStatusBackfill walks every active project's stories and runs

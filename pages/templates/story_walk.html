@@ -1,0 +1,79 @@
+{{define "story_walk.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main">
+    <section class="panel-headed" data-testid="story-walk-header">
+      <header class="panel-header">
+        <h1>{{.Story.Title}}</h1>
+        <span class="panel-header-meta">
+          <code class="status-pill status-{{.Story.Status}}">{{.Story.Status}}</code>
+        </span>
+      </header>
+      <div class="panel-body">
+        {{if .BackHref}}
+        <p class="muted"><a href="{{.BackHref}}">&larr; back to story detail</a></p>
+        {{end}}
+        <dl class="kv-list">
+          <dt>id</dt><dd><code>{{.Story.ID}}</code></dd>
+          <dt>priority</dt><dd>{{.Story.Priority}}</dd>
+          <dt>category</dt><dd>{{.Story.Category}}</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="story-walk-timeline">
+      <header class="panel-header"><h2>contract walk</h2></header>
+      <div class="panel-body">
+        {{if not .Groups}}
+          <p class="muted" data-testid="story-walk-empty">This story has no contract walk yet — call <code>workflow_claim</code> to lock the shape.</p>
+        {{else}}
+          <ol class="walk-timeline">
+            {{range .Groups}}
+            <li class="walk-group" data-testid="walk-group-{{.ContractName}}">
+              <header class="walk-group-header">
+                <span class="walk-group-name">{{.ContractName}}{{if gt .Iterations 1}} &times;{{.Iterations}}{{end}}</span>
+                {{if .RequiredRole}}<code class="walk-role-chip">role: {{.RequiredRole}}</code>{{end}}
+              </header>
+              <ul class="walk-card-list">
+                {{range .Cards}}
+                <li class="walk-card{{if .IsCurrent}} walk-card-current{{end}}" data-testid="walk-card-{{.ID}}" data-ci-id="{{.ID}}">
+                  <a class="walk-card-link" href="{{.LedgerHref}}">
+                    <header class="walk-card-header">
+                      <span class="walk-card-title">{{.ContractName}} #{{.Iteration}}</span>
+                      <code class="status-pill status-{{.Status}}">{{.Status}}</code>
+                    </header>
+                    <dl class="walk-card-meta">
+                      {{if .ClaimedAt}}<dt>claimed</dt><dd><code>{{.ClaimedAt}}</code></dd>{{end}}
+                      {{if .ClosedAt}}<dt>closed</dt><dd><code>{{.ClosedAt}}</code></dd>{{end}}
+                      {{if .ClaimedByUser}}<dt>by</dt><dd>{{.ClaimedByUser}}</dd>{{end}}
+                      {{if .ClaimedBySession}}<dt>session</dt><dd><code>{{.ClaimedBySession}}</code></dd>{{end}}
+                      <dt>ledger rows</dt><dd>{{.LedgerRowCount}}</dd>
+                      <dt>tasks</dt>
+                      <dd>
+                        <span class="walk-task-count" title="enqueued">enq:{{.TaskSummary.Enqueued}}</span>
+                        <span class="walk-task-count" title="in flight">flt:{{.TaskSummary.InFlight}}</span>
+                        <span class="walk-task-count walk-task-success" title="closed success">ok:{{.TaskSummary.ClosedSuccess}}</span>
+                        <span class="walk-task-count walk-task-failure" title="closed failure">fail:{{.TaskSummary.ClosedFailure}}</span>
+                        {{if .TaskSummary.ClosedTimeout}}<span class="walk-task-count walk-task-timeout" title="closed timeout">to:{{.TaskSummary.ClosedTimeout}}</span>{{end}}
+                      </dd>
+                    </dl>
+                  </a>
+                </li>
+                {{end}}
+              </ul>
+            </li>
+            {{end}}
+          </ol>
+        {{end}}
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}

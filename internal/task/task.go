@@ -26,11 +26,17 @@ const (
 )
 
 // Status enum values per §4 "Lifecycle" diagram.
+//
+// StatusArchived is the post-retention state introduced by sty_dc2998c5.
+// The nightly sweep flips closed rows older than the project retention
+// window into archived; the row stays in place + ledger anchors are
+// untouched, but the row falls out of the default task_list query.
 const (
 	StatusEnqueued = "enqueued"
 	StatusClaimed  = "claimed"
 	StatusInFlight = "in_flight"
 	StatusClosed   = "closed"
+	StatusArchived = "archived"
 )
 
 // Priority enum values — dispatcher pulls critical before high, etc.
@@ -54,7 +60,7 @@ var validOrigins = map[string]struct{}{
 }
 
 var validStatuses = map[string]struct{}{
-	StatusEnqueued: {}, StatusClaimed: {}, StatusInFlight: {}, StatusClosed: {},
+	StatusEnqueued: {}, StatusClaimed: {}, StatusInFlight: {}, StatusClosed: {}, StatusArchived: {},
 }
 
 var validPriorities = map[string]struct{}{
@@ -91,12 +97,19 @@ func PriorityRank(p string) int {
 // it with the role required to claim it. Plan CIs enqueue child tasks
 // against themselves so downstream contracts (develop, push, ...) can
 // pull the role-tagged work the plan agent decomposed.
+//
+// Iteration is the lap number for tasks bound to a contract that appears
+// multiple times in a story's workflow (loop case from rejection-append).
+// First task on (story_id, contract_name) gets iteration=1; the next
+// loop's tasks get iteration=2, etc. Surfaced on task_list so renderers
+// can show "develop #2" without joining through CIs. sty_78ddc67b.
 type Task struct {
 	ID                 string        `json:"id"`
 	WorkspaceID        string        `json:"workspace_id"`
 	ProjectID          string        `json:"project_id,omitempty"`
 	ContractInstanceID string        `json:"contract_instance_id,omitempty"`
 	RequiredRole       string        `json:"required_role,omitempty"`
+	Iteration          int           `json:"iteration,omitempty"`
 	Origin             string        `json:"origin"`
 	Trigger            []byte        `json:"trigger,omitempty"`
 	Payload            []byte        `json:"payload,omitempty"`
@@ -154,6 +167,10 @@ func (t Task) Validate() error {
 // ValidTransition returns true when moving from → to is a legal Status
 // transition per the §4 lifecycle diagram. Store-layer enforcement so
 // the invariant survives callers that bypass happy-path helpers.
+//
+// closed → archived is the retention sweep's transition (sty_dc2998c5).
+// Archived is terminal — the row drops out of the default task_list
+// query but the ledger anchors persist for audit.
 func ValidTransition(from, to string) bool {
 	switch from {
 	case StatusEnqueued:
@@ -162,6 +179,8 @@ func ValidTransition(from, to string) bool {
 		return to == StatusInFlight || to == StatusClosed || to == StatusEnqueued
 	case StatusInFlight:
 		return to == StatusClosed
+	case StatusClosed:
+		return to == StatusArchived
 	default:
 		return false
 	}

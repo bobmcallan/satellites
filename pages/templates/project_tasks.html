@@ -1,0 +1,92 @@
+{{define "project_tasks.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  {{template "head.html" .}}
+  <script>
+    window.SATELLITES_PROJECT_TASKS = {
+      projectID: {{.Project.ID}},
+      workspaceID: {{.ActiveWorkspace.ID}},
+      filter: {{.Filter.Raw}}
+    };
+  </script>
+</head>
+<body>
+  {{template "nav.html" .}}
+  <main class="portal-main" data-testid="project-tasks-page">
+    <section class="panel-headed">
+      <header class="panel-header">
+        <h1>tasks</h1>
+        <span class="panel-header-meta"><a href="/projects/{{.Project.ID}}">&larr; {{.Project.Name}}</a></span>
+      </header>
+      <div class="panel-body">
+        <form method="get" class="task-filter-form" data-testid="project-tasks-filter">
+          <input type="search" name="q" value="{{.Filter.Raw}}"
+                 placeholder="filter — role:reviewer  status:in_flight  iter:>1  order:age"
+                 data-testid="project-tasks-filter-input" />
+          <button type="submit">apply</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="pane-enqueued">
+      <header class="panel-header">
+        <h2>enqueued</h2>
+        <span class="panel-header-meta">{{len .Composite.Enqueued}}</span>
+      </header>
+      <div class="panel-body">
+        {{template "_panel_project_task_rows.html" .Composite.Enqueued}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="pane-in-flight">
+      <header class="panel-header">
+        <h2>in flight</h2>
+        <span class="panel-header-meta">{{len .Composite.InFlight}}</span>
+      </header>
+      <div class="panel-body">
+        {{template "_panel_project_task_rows.html" .Composite.InFlight}}
+      </div>
+    </section>
+
+    <section class="panel-headed" data-testid="pane-closed">
+      <header class="panel-header">
+        <h2>closed (last 24h)</h2>
+        <span class="panel-header-meta">{{len .Composite.Closed}}</span>
+      </header>
+      <div class="panel-body">
+        {{template "_panel_project_task_rows.html" .Composite.Closed}}
+      </div>
+    </section>
+  </main>
+  {{template "footer.html" .}}
+</body>
+</html>
+{{end}}
+
+{{define "_panel_project_task_rows.html"}}
+{{if not .}}
+  <p class="muted" data-testid="pane-empty">No tasks match this filter.</p>
+{{else}}
+<table class="task-table">
+  <thead>
+    <tr>
+      <th>id</th><th>role</th><th>contract</th><th>iter</th><th>story</th><th>claimed by</th><th>age</th>
+    </tr>
+  </thead>
+  <tbody data-testid="project-task-rows">
+    {{range .}}
+    <tr data-task-id="{{.ID}}" data-testid="project-task-row">
+      <td><code>{{.ID}}</code></td>
+      <td>{{if .RequiredRole}}<code class="walk-role-chip">{{.RequiredRole}}</code>{{end}}</td>
+      <td>{{.ContractCategory}}{{if gt .Iteration 1}} #{{.Iteration}}{{end}}</td>
+      <td>{{.Iteration}}</td>
+      <td>{{if .StoryHref}}<a href="{{.WalkHref}}">{{.StoryTitle}}</a>{{else}}—{{end}}</td>
+      <td>{{.ClaimedByUser}}</td>
+      <td>{{.Age}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

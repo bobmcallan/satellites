@@ -11,8 +11,6 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
-	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 )
@@ -76,7 +74,7 @@ func TestStoryView_EmptyPanelsRender(t *testing.T) {
 		`data-testid="delivery-strip"`,
 		`data-testid="scope-panel"`,
 		`data-testid="source-docs-panel"`,
-		`data-testid="ci-timeline-panel"`,
+		`data-testid="ci-walk-link-panel"`,
 		`data-testid="verdict-panel"`,
 		`data-testid="repo-provenance-panel"`,
 		`data-testid="excerpts-panel"`,
@@ -129,9 +127,14 @@ func TestStoryView_SourceDocsFromTags(t *testing.T) {
 	}
 }
 
-func TestStoryView_CITimelinePopulated(t *testing.T) {
+// TestStoryView_LinksToWalkPage verifies sty_3132035b — the story
+// detail page links to /stories/{id}/walk where the contract walk
+// content now lives. The prior TestStoryView_CITimelinePopulated test
+// asserted CI rows on the story detail itself; that surface was
+// retired and its assertions now live in story_walk_view_test.go.
+func TestStoryView_LinksToWalkPage(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, projects, _, stories, contracts, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, projects, _, stories := newTestPortal(t, &config.Config{Env: "dev"})
 	ctx := context.Background()
 	now := time.Now().UTC()
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
@@ -145,34 +148,6 @@ func TestStoryView_CITimelinePopulated(t *testing.T) {
 		Category:  "feature",
 		CreatedBy: user.ID,
 	}, now)
-
-	// Seed a contract document so contract.MemoryStore.Create can validate
-	// the FK. The doc must have type=contract per validateContractBinding.
-	doc, err := docs.Create(ctx, document.Document{
-		Name:   "plan",
-		Type:   "contract",
-		Scope:  "system",
-		Status: "active",
-		Body:   "plan contract body",
-		Tags:   []string{"category:plan"},
-	}, now)
-	if err != nil {
-		t.Fatalf("seed contract doc: %v", err)
-	}
-
-	for i, name := range []string{"plan", "develop", "story_close"} {
-		_, err := contracts.Create(ctx, contract.ContractInstance{
-			StoryID:      s.ID,
-			ContractID:   doc.ID,
-			ContractName: name,
-			Sequence:     i,
-			Status:       contract.StatusReady,
-		}, now)
-		if err != nil {
-			t.Fatalf("seed CI %s: %v", name, err)
-		}
-	}
-
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
 	rec := renderStoryDetail(t, p, proj.ID, s.ID, sess.ID)
 	if rec.Code != http.StatusOK {
@@ -180,10 +155,9 @@ func TestStoryView_CITimelinePopulated(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`>plan</code>`,
-		`>develop</code>`,
-		`>story_close</code>`,
-		`status-ready`,
+		`data-testid="ci-walk-link-panel"`,
+		`href="/stories/` + s.ID + `/walk"`,
+		`View contract walk`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)

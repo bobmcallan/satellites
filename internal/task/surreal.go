@@ -34,7 +34,7 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	return s
 }
 
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, contract_instance_id, required_role, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, contract_instance_id, required_role, iteration, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
 
 // Enqueue implements Store for SurrealStore.
 func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task, error) {
@@ -43,6 +43,9 @@ func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task
 	}
 	if t.Priority == "" {
 		t.Priority = PriorityMedium
+	}
+	if t.Iteration <= 0 {
+		t.Iteration = 1
 	}
 	if err := t.Validate(); err != nil {
 		return Task{}, err
@@ -97,6 +100,9 @@ func (s *SurrealStore) List(ctx context.Context, opts ListOptions, memberships [
 	if opts.Status != "" {
 		conds = append(conds, "status = $status")
 		vars["status"] = opts.Status
+	} else if !opts.IncludeArchived {
+		conds = append(conds, "status != $archived")
+		vars["archived"] = StatusArchived
 	}
 	if opts.Priority != "" {
 		conds = append(conds, "priority = $priority")
@@ -285,6 +291,26 @@ func (s *SurrealStore) Reclaim(ctx context.Context, id, reason string, now time.
 	return t, nil
 }
 
+// Archive implements Store for SurrealStore.
+func (s *SurrealStore) Archive(ctx context.Context, id string, now time.Time, memberships []string) (Task, error) {
+	t, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return Task{}, err
+	}
+	if t.Status == StatusArchived {
+		return t, nil
+	}
+	if !ValidTransition(t.Status, StatusArchived) {
+		return Task{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, t.Status, StatusArchived)
+	}
+	t.Status = StatusArchived
+	if err := s.write(ctx, t); err != nil {
+		return Task{}, err
+	}
+	emitStatus(ctx, s.publisher, t)
+	return t, nil
+}
+
 // ListExpiring implements Store for SurrealStore.
 func (s *SurrealStore) ListExpiring(ctx context.Context, now time.Time, multiplier float64, memberships []string) ([]Task, error) {
 	// Fetch all claimed/in_flight tasks in the caller's workspaces and
@@ -333,6 +359,43 @@ func (s *SurrealStore) write(ctx context.Context, t Task) error {
 		return fmt.Errorf("task: upsert: %w", err)
 	}
 	return nil
+}
+
+// BackfillIteration stamps Iteration on rows whose value is zero or
+// missing. The lookup callback resolves a contract_instance_id to its
+// 1-based lap number among CIs of the same contract_name on the same
+// story; zero means the caller couldn't resolve and the row is skipped.
+// Idempotent: rows with Iteration > 0 are untouched. sty_78ddc67b.
+func (s *SurrealStore) BackfillIteration(ctx context.Context, lookup func(ciID string) int) (int, error) {
+	if lookup == nil {
+		return 0, nil
+	}
+	sql := fmt.Sprintf(
+		"SELECT %s FROM tasks WHERE iteration IS NONE OR iteration = 0 OR iteration = NONE",
+		selectCols,
+	)
+	results, err := surrealdb.Query[[]Task](ctx, s.db, sql, map[string]any{})
+	if err != nil {
+		return 0, fmt.Errorf("task: backfill iteration select: %w", err)
+	}
+	if results == nil || len(*results) == 0 {
+		return 0, nil
+	}
+	stamped := 0
+	for _, t := range (*results)[0].Result {
+		iter := 1
+		if t.ContractInstanceID != "" {
+			if n := lookup(t.ContractInstanceID); n > 0 {
+				iter = n
+			}
+		}
+		t.Iteration = iter
+		if err := s.write(ctx, t); err != nil {
+			return stamped, err
+		}
+		stamped++
+	}
+	return stamped, nil
 }
 
 // Compile-time assertion.

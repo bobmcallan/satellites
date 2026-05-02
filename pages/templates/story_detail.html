@@ -77,55 +77,23 @@
       </div>
     </section>
 
-    <!-- Contract instance timeline — live -->
-    <section class="panel-headed" data-testid="ci-timeline-panel">
+    <!-- Contract walk link panel — sty_3132035b retired the inline
+         contract-instance timeline; the canonical "what's happening on
+         this story" view lives at /stories/{id}/walk now. -->
+    <section class="panel-headed" data-testid="ci-walk-link-panel">
       <header class="panel-header">
-        <h2>contracts</h2>
+        <h2>contract walk</h2>
         <span class="panel-header-meta" data-testid="ci-count">
           <code>(<span x-text="ciCount">{{len .Composite.CIs}}</span>)</code>
-          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
         </span>
       </header>
       <div class="panel-body">
-        <template x-if="ciEmpty">
-          <p class="muted" data-testid="ci-empty">No contract instances yet.</p>
-        </template>
-        {{if not .Composite.CIs}}<noscript><p class="muted" data-testid="ci-empty-ssr">No contract instances yet.</p></noscript>{{end}}
-        <ul class="ci-timeline">
-          <template x-for="ci in composite.contract_instances" :key="ci.id">
-            <li :data-ci-id="ci.id" :data-status="ci.status" :data-testid="ci.testid">
-              <code class="ci-seq" x-text="ci.seqLabel"></code>
-              <code class="ci-name" x-text="ci.contract_name"></code>
-              <code :class="ci.statusClass" x-text="ci.status"></code>
-              <span class="ci-times">
-                <template x-if="ci.claimed_at"><code x-text="ci.claimedLabel"></code></template>
-                <template x-if="ci.closed_at"><code x-text="ci.closedLabel"></code></template>
-              </span>
-            </li>
-          </template>
-          {{range .Composite.CIs}}
-          <noscript>
-            <li data-ci-id="{{.ID}}" data-status="{{.Status}}" data-depth="{{.Depth}}" class="ci-row ci-depth-{{.Depth}}{{if .ParentInvocationID}} ci-child{{end}}" {{if .ParentInvocationID}}data-parent="{{.ParentInvocationID}}"{{end}} data-testid="ci-row-{{.ID}}">
-              <code class="ci-seq">#{{.Sequence}}</code>
-              <code class="ci-name">{{.ContractName}}</code>
-              <code class="status-pill status-{{.Status}}">{{.Status}}</code>
-              {{if .ACScopeLabel}}<code class="ac-scope-chip" data-testid="ci-ac-scope">{{.ACScopeLabel}}</code>{{end}}
-              {{if .Iteration}}
-                <code class="iteration-chip{{if .IterationWarn}} iteration-warn{{end}}" data-testid="ci-iteration-counter">{{if .ACScopeLabel}}{{.ACScopeLabel}}: {{end}}{{.Iteration}}/{{.IterationCap}} iterations</code>
-              {{end}}
-              {{if .AgentID}}
-                <a href="{{.AgentHref}}" class="ci-agent-link" data-testid="ci-agent" data-agent-id="{{.AgentID}}"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
-              {{else}}
-                <span class="muted ci-agent-empty" data-testid="ci-agent">—</span>
-              {{end}}
-              <span class="ci-times">
-                {{if .ClaimedAt}}<code>claimed {{.ClaimedAt}}</code>{{end}}
-                {{if .ClosedAt}}<code>closed {{.ClosedAt}}</code>{{end}}
-              </span>
-            </li>
-          </noscript>
-          {{end}}
-        </ul>
+        <p>
+          <a class="walk-link" data-testid="ci-walk-href" href="/stories/{{.Story.ID}}/walk">View contract walk &rarr;</a>
+        </p>
+        <p class="muted">
+          Per-CI status, claim/close timestamps, iteration grouping, and ledger row counts now live on the walk page.
+        </p>
       </div>
     </section>
 

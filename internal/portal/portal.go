@@ -250,6 +250,8 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects/{id}/configuration", p.handleProjectConfiguration)
 	mux.HandleFunc("GET /projects/{id}/ledger", p.handleProjectLedger)
 	mux.HandleFunc("GET /projects/{id}/stories/{story_id}", p.handleStoryDetail)
+	mux.HandleFunc("GET /projects/{id}/tasks", p.handleProjectTasks)
+	mux.HandleFunc("GET /stories/{story_id}/walk", p.handleStoryWalk)
 	mux.HandleFunc("GET /api/stories/{story_id}/composite", p.handleStoryComposite)
 	mux.HandleFunc("GET /tasks", p.handleTasks)
 	mux.HandleFunc("GET /api/tasks/{task_id}", p.handleTaskDrawer)

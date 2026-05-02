@@ -747,13 +747,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(getTaskTool, s.handleTaskGet)
 
 		listTaskTool := mcpgo.NewTool("task_list",
-			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id (work bound to a specific CI) and required_role (workers pulling tasks they're authorised to claim)."),
+			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id (work bound to a specific CI) and required_role (workers pulling tasks they're authorised to claim). Archived rows (sty_dc2998c5 retention sweep) are excluded by default; pass include_archived=true to opt in."),
 			mcpgo.WithString("origin", mcpgo.Description("Filter by origin.")),
 			mcpgo.WithString("status", mcpgo.Description("Filter by status.")),
 			mcpgo.WithString("priority", mcpgo.Description("Filter by priority.")),
 			mcpgo.WithString("claimed_by", mcpgo.Description("Filter by claimed_by worker id.")),
 			mcpgo.WithString("contract_instance_id", mcpgo.Description("Filter by owning contract instance.")),
 			mcpgo.WithString("required_role", mcpgo.Description("Filter by required_role tag.")),
+			mcpgo.WithBoolean("include_archived", mcpgo.Description("Include rows with status=archived. Default false — the retention sweep moves closed rows older than the project window into archived; opt in to include them in history queries.")),
 			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
 		)
 		s.mcp.AddTool(listTaskTool, s.handleTaskList)
@@ -772,6 +773,29 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("worker_id", mcpgo.Description("Optional worker id; when supplied, the handler rejects the close if the task has been reclaimed to a different worker since claim time.")),
 		)
 		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
+
+		// sty_41488515: task_walk returns one coherent payload describing
+		// where a story sits in its contract walk — story metadata,
+		// ordered CI list with per-CI iteration / status / claimer /
+		// ledger row count / task summary, and a current_ci_id pointer.
+		// Replaces the agent-side stitch of story_get + contract_next +
+		// task_list. Read-only — no state mutation.
+		taskWalkTool := mcpgo.NewTool("task_walk",
+			mcpgo.WithDescription("Return where a story sits in its contract walk: ordered contract_instances with status, claimer, role, iteration, ledger row count, task summary, and a current_ci_id pointer. Single roundtrip orientation — replaces story_get + contract_next + task_list. Workspace-scoped. Sty_41488515."),
+			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story whose walk should be returned.")),
+		)
+		s.mcp.AddTool(taskWalkTool, s.handleTaskWalk)
+
+		// sty_a248f4df: story_export_walk renders the same walk projection
+		// as paste-ready markdown for PR descriptions, delivery reports,
+		// and stakeholder hand-offs. Currently markdown-only; other
+		// formats are out of scope.
+		exportWalkTool := mcpgo.NewTool("story_export_walk",
+			mcpgo.WithDescription("Render a story's contract walk as paste-ready markdown. Returns {filename, content, format}. Iteration loops collapse under a single H2 header (\"## develop ×3 (loop)\"); each CI in the loop becomes an H3 subsection with role, outcome, timestamps, claimer, and ledger anchor counts. Sty_a248f4df."),
+			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story whose walk should be exported.")),
+			mcpgo.WithString("format", mcpgo.Description("Output format. Currently only \"markdown\" (default).")),
+		)
+		s.mcp.AddTool(exportWalkTool, s.handleStoryExportWalk)
 
 		// Story_66d4249f (S6): orchestrator dynamic plan composition.
 		// Wires the orchestrator role at the story-implement entry path —

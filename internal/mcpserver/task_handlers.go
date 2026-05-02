@@ -52,7 +52,7 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 		}
 	}
 	now := time.Now().UTC()
-	t, err := s.tasks.Enqueue(ctx, task.Task{
+	seed := s.stampTaskIteration(ctx, task.Task{
 		WorkspaceID:        workspaceID,
 		ProjectID:          projectID,
 		ContractInstanceID: contractInstanceID,
@@ -62,7 +62,8 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 		Payload:            payloadRaw,
 		Priority:           priority,
 		ExpectedDuration:   expected,
-	}, now)
+	}, memberships)
+	t, err := s.tasks.Enqueue(ctx, seed, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("task_enqueue: %s", err)), nil
 	}
@@ -133,6 +134,9 @@ func (s *Server) handleTaskList(ctx context.Context, req mcpgo.CallToolRequest) 
 		ClaimedBy:          getString(args, "claimed_by"),
 		ContractInstanceID: getString(args, "contract_instance_id"),
 		RequiredRole:       getString(args, "required_role"),
+	}
+	if v, ok := args["include_archived"].(bool); ok {
+		opts.IncludeArchived = v
 	}
 	if v, ok := args["limit"].(float64); ok {
 		opts.Limit = int(v)

@@ -25,6 +25,11 @@ var ErrNoTaskAvailable = errors.New("task: no task available")
 
 // ListOptions bundles structured List filters. Workspace scoping is
 // supplied via memberships on the call itself, not through this struct.
+//
+// IncludeArchived defaults to false: archived rows fall out of the
+// default query so the active queue stays uncluttered. Callers that
+// need history (closed-pane "Load more", admin audit) opt in by
+// setting it to true. sty_dc2998c5.
 type ListOptions struct {
 	Origin             string
 	Status             string
@@ -32,6 +37,7 @@ type ListOptions struct {
 	ClaimedBy          string
 	ContractInstanceID string
 	RequiredRole       string
+	IncludeArchived    bool
 	Limit              int
 }
 
@@ -82,6 +88,11 @@ type Store interface {
 	// original claimer can be detected and rejected.
 	Reclaim(ctx context.Context, id, reason string, now time.Time, memberships []string) (Task, error)
 
+	// Archive flips a closed task to Status=archived. Idempotent:
+	// already-archived rows return without mutation. Used by the
+	// retention sweep (internal/task.Sweep). sty_dc2998c5.
+	Archive(ctx context.Context, id string, now time.Time, memberships []string) (Task, error)
+
 	// ListExpiring returns tasks whose Status is claimed or in_flight
 	// AND (now - ClaimedAt) exceeds `threshold * ExpectedDuration`. Used
 	// by the dispatcher watchdog. When ExpectedDuration is zero, the
@@ -112,6 +123,9 @@ func (m *MemoryStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task,
 	}
 	if t.Priority == "" {
 		t.Priority = PriorityMedium
+	}
+	if t.Iteration <= 0 {
+		t.Iteration = 1
 	}
 	if err := t.Validate(); err != nil {
 		return Task{}, err
@@ -156,6 +170,11 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 	out := make([]Task, 0, len(m.rows))
 	for _, t := range m.rows {
 		if !workspaceVisible(t.WorkspaceID, memberships) {
+			continue
+		}
+		// Default-filter archived rows unless the caller opts in or
+		// explicitly asks for status=archived.
+		if t.Status == StatusArchived && !opts.IncludeArchived && opts.Status != StatusArchived {
 			continue
 		}
 		if opts.Origin != "" && t.Origin != opts.Origin {
@@ -297,6 +316,30 @@ func (m *MemoryStore) Reclaim(ctx context.Context, id, reason string, now time.T
 	t.ClaimedBy = ""
 	t.ClaimedAt = nil
 	t.ReclaimCount++
+	m.rows[id] = t
+	pub := m.publisher
+	m.mu.Unlock()
+	emitStatus(ctx, pub, t)
+	return t, nil
+}
+
+// Archive implements Store for MemoryStore.
+func (m *MemoryStore) Archive(ctx context.Context, id string, now time.Time, memberships []string) (Task, error) {
+	m.mu.Lock()
+	t, ok := m.rows[id]
+	if !ok || !workspaceVisible(t.WorkspaceID, memberships) {
+		m.mu.Unlock()
+		return Task{}, ErrNotFound
+	}
+	if t.Status == StatusArchived {
+		m.mu.Unlock()
+		return t, nil
+	}
+	if !ValidTransition(t.Status, StatusArchived) {
+		m.mu.Unlock()
+		return Task{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, t.Status, StatusArchived)
+	}
+	t.Status = StatusArchived
 	m.rows[id] = t
 	pub := m.publisher
 	m.mu.Unlock()

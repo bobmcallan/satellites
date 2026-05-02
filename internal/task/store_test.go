@@ -310,3 +310,35 @@ func TestMemoryStore_ContractInstanceAndRoleBinding(t *testing.T) {
 	require.Len(t, combined, 1)
 	assert.Equal(t, planXRev.ID, combined[0].ID)
 }
+
+// TestMemoryStore_IterationDefault verifies sty_78ddc67b — Enqueue
+// stamps Iteration=1 when the caller doesn't supply one, and preserves
+// caller-supplied iteration values verbatim.
+func TestMemoryStore_IterationDefault(t *testing.T) {
+	t.Parallel()
+	store := task.NewMemoryStore()
+	now := time.Now().UTC()
+	ctx := context.Background()
+
+	noIter, err := store.Enqueue(ctx, task.Task{
+		WorkspaceID: "w",
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
+	}, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, noIter.Iteration)
+
+	loop2, err := store.Enqueue(ctx, task.Task{
+		WorkspaceID: "w",
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
+		Iteration:   2,
+	}, now.Add(time.Second))
+	require.NoError(t, err)
+	assert.Equal(t, 2, loop2.Iteration)
+
+	// Round-trip: GetByID surfaces the stamped iteration.
+	got, err := store.GetByID(ctx, loop2.ID, []string{"w"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, got.Iteration)
+}

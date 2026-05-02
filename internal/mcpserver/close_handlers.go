@@ -637,7 +637,7 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 		"close_ledger_id":      closeRowID,
 		"evidence_ledger_id":   evidenceRowID,
 	})
-	t, err := s.tasks.Enqueue(ctx, task.Task{
+	seed := s.stampTaskIteration(ctx, task.Task{
 		WorkspaceID:        ci.WorkspaceID,
 		ProjectID:          ci.ProjectID,
 		ContractInstanceID: ci.ID,
@@ -645,7 +645,8 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 		Payload:            payload,
-	}, now)
+	}, nil)
+	t, err := s.tasks.Enqueue(ctx, seed, now)
 	if err != nil {
 		return "", err
 	}

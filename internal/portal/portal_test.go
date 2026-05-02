@@ -666,7 +666,8 @@ func TestStoryDetail_RendersFieldsAndHistory(t *testing.T) {
 		"the-description",
 		"the-AC",
 		"epic:v4-stories",
-		`data-testid="ci-timeline-panel"`,
+		`data-testid="ci-walk-link-panel"`,
+		`data-testid="ci-walk-href"`,
 		`data-testid="excerpts-panel"`,
 	} {
 		if !strings.Contains(body, want) {
