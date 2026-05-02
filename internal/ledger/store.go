@@ -92,6 +92,7 @@ type MemoryStore struct {
 	publisher hubemit.Publisher
 	embedder  embeddings.Embedder
 	chunks    ChunkStore
+	listeners []Listener
 }
 
 // NewMemoryStore returns an empty MemoryStore without semantic search.
@@ -117,6 +118,20 @@ func NewMemoryStoreWithEmbeddings(embedder embeddings.Embedder, chunks ChunkStor
 // A nil value disables publishes — the default state.
 func (m *MemoryStore) SetPublisher(p hubemit.Publisher) { m.publisher = p }
 
+// AddListener registers l on the bus-subscriber slice. Listeners fire
+// inline at Append time after the workspace hub publish; panics are
+// recovered per listener so a buggy subscriber cannot abort the writer.
+// Cross-workspace consumers (e.g. the storystatus reconciler) attach
+// here at boot time. Sty_e805a01a.
+func (m *MemoryStore) AddListener(l Listener) {
+	if l == nil {
+		return
+	}
+	m.mu.Lock()
+	m.listeners = append(m.listeners, l)
+	m.mu.Unlock()
+}
+
 // Append implements Store for MemoryStore.
 func (m *MemoryStore) Append(ctx context.Context, entry LedgerEntry, now time.Time) (LedgerEntry, error) {
 	applyDefaults(&entry)
@@ -129,8 +144,10 @@ func (m *MemoryStore) Append(ctx context.Context, entry LedgerEntry, now time.Ti
 	entry.CreatedAt = now
 	m.rows = append(m.rows, entry)
 	pub := m.publisher
+	listeners := append([]Listener(nil), m.listeners...)
 	m.mu.Unlock()
 	emitAppended(ctx, pub, entry)
+	fanoutListeners(ctx, listeners, entry)
 	return entry, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
@@ -22,6 +23,8 @@ type SurrealStore struct {
 	publisher hubemit.Publisher
 	embedder  embeddings.Embedder
 	chunks    ChunkStore
+	listenMu  sync.Mutex
+	listeners []Listener
 }
 
 // WithEmbeddings installs the Embedder + ChunkStore so SearchSemantic
@@ -34,6 +37,16 @@ func (s *SurrealStore) WithEmbeddings(embedder embeddings.Embedder, chunks Chunk
 
 // SetPublisher installs the hub emit sink for subsequent mutations.
 func (s *SurrealStore) SetPublisher(p hubemit.Publisher) { s.publisher = p }
+
+// AddListener registers l on the bus-subscriber slice (sty_e805a01a).
+func (s *SurrealStore) AddListener(l Listener) {
+	if l == nil {
+		return
+	}
+	s.listenMu.Lock()
+	s.listeners = append(s.listeners, l)
+	s.listenMu.Unlock()
+}
 
 // NewSurrealStore wraps db as a Store. Defines the `ledger` table
 // schemaless so first-time SELECTs don't error on a missing table; also
@@ -170,6 +183,10 @@ func (s *SurrealStore) Append(ctx context.Context, entry LedgerEntry, now time.T
 		return LedgerEntry{}, fmt.Errorf("ledger: append: %w", err)
 	}
 	emitAppended(ctx, s.publisher, entry)
+	s.listenMu.Lock()
+	listeners := append([]Listener(nil), s.listeners...)
+	s.listenMu.Unlock()
+	fanoutListeners(ctx, listeners, entry)
 	return entry, nil
 }
 

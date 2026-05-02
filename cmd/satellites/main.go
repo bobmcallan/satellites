@@ -44,6 +44,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/storystatus"
 	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/internal/wshandler"
@@ -428,6 +429,18 @@ func main() {
 		attachPublisher(taskStore, publisher)
 		attachPublisher(contractStore, publisher)
 		attachPublisher(storyStore, publisher)
+
+		// sty_e805a01a — derived story status. The reconciler subscribes
+		// to the workspace-agnostic ledger.Listener bus, recomputes
+		// status from CI rows on every CI-state-transition event, and
+		// writes back via stories.UpdateStatus. Boot-time backfill
+		// repairs drift accumulated before this wiring landed; runs
+		// in the background so startup does not block on it.
+		if storyStore != nil && contractStore != nil {
+			recon := storystatus.New(storyStore, contractStore, logger)
+			attachLedgerListener(ledgerStore, recon)
+			go runStoryStatusBackfill(ctx, recon, projStore, storyStore, logger)
+		}
 	}
 
 	bearerValidator := auth.NewBearerValidator(auth.BearerValidatorConfig{
@@ -885,4 +898,47 @@ func (o *oauthRoutes) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/register", o.srv.HandleRegister)
 	mux.HandleFunc("/oauth/authorize", o.srv.HandleAuthorize)
 	mux.HandleFunc("POST /oauth/token", o.srv.HandleToken)
+}
+
+// projectListAller is the optional ListAll surface a project store may
+// implement. Both project.MemoryStore and project.SurrealStore satisfy
+// it today; the interface is declared here so cmd/satellites stays
+// decoupled from the concrete types.
+type projectListAller interface {
+	ListAll(ctx context.Context) ([]project.Project, error)
+}
+
+// runStoryStatusBackfill walks every active project's stories and runs
+// the reconciler on each so derived status flips don't lag the live
+// CI state on a freshly-deployed build (sty_e805a01a). Best-effort —
+// errors are logged, never fatal.
+func runStoryStatusBackfill(ctx context.Context, recon *storystatus.Reconciler, projects project.Store, stories story.Store, logger arbor.ILogger) {
+	if recon == nil || projects == nil || stories == nil {
+		return
+	}
+	listAller, ok := projects.(projectListAller)
+	if !ok {
+		return
+	}
+	allProjects, err := listAller.ListAll(ctx)
+	if err != nil {
+		logger.Warn().Str("error", err.Error()).Msg("storystatus backfill: project list failed")
+		return
+	}
+	totalTouched, totalErrored := 0, 0
+	for _, p := range allProjects {
+		ss, err := stories.List(ctx, p.ID, story.ListOptions{Limit: 500}, nil)
+		if err != nil {
+			totalErrored++
+			continue
+		}
+		t, e := recon.Backfill(ctx, ss)
+		totalTouched += t
+		totalErrored += e
+	}
+	logger.Info().
+		Int("projects", len(allProjects)).
+		Int("touched", totalTouched).
+		Int("errored", totalErrored).
+		Msg("storystatus backfill complete")
 }

@@ -35,6 +35,25 @@ func attachPublisher(store any, p hubemit.Publisher) {
 	}
 }
 
+// listenerAttacher is satisfied by ledger.Store implementations that
+// expose the bus-subscriber slice (sty_e805a01a). cmd/satellites
+// registers cross-workspace consumers (e.g. the storystatus reconciler)
+// via this surface at boot.
+type listenerAttacher interface {
+	AddListener(l ledger.Listener)
+}
+
+// attachLedgerListener installs l on store when store implements the
+// adder. Unknown store types are silently skipped.
+func attachLedgerListener(store any, l ledger.Listener) {
+	if store == nil || l == nil {
+		return
+	}
+	if a, ok := store.(listenerAttacher); ok {
+		a.AddListener(l)
+	}
+}
+
 // hubPublisher adapts *hub.AuthHub to the hubemit.Publisher contract the
 // stores import. Running store-emitted events through AuthHub keeps the
 // publish-time topic-suffix guard in the path for defence in depth.
