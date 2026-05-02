@@ -251,6 +251,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects/{id}/ledger", p.handleProjectLedger)
 	mux.HandleFunc("GET /projects/{id}/stories/{story_id}", p.handleStoryDetail)
 	mux.HandleFunc("GET /api/stories/{story_id}/composite", p.handleStoryComposite)
+	mux.HandleFunc("GET /api/stories/{story_id}/activity", p.handleStoryActivity)
 	mux.HandleFunc("GET /tasks", p.handleTasks)
 	mux.HandleFunc("GET /api/tasks/{task_id}", p.handleTaskDrawer)
 	mux.HandleFunc("GET /ledger", p.handleLedgerRedirect)
@@ -888,6 +889,51 @@ func (p *Portal) handleStoryComposite(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(composite); err != nil {
 		p.logger.Error().Str("error", err.Error()).Msg("composite encode failed")
+	}
+}
+
+// handleStoryActivity serves the per-story activity-log backfill (sty_e55f335e).
+// Returns the curated subset of ledger rows scoped to the story —
+// substrate-internal lifecycle events (plan, role-grant, agent-compose,
+// action-claim, close-request, evidence, artifact, verdict, review q/a) —
+// in time order. Workspace-scoped via memberships; cross-owner project
+// check is mirrored from handleStoryComposite. The resolved kind set is
+// returned alongside so the panel can render "showing N kinds" without
+// a follow-up call.
+func (p *Portal) handleStoryActivity(w http.ResponseWriter, r *http.Request) {
+	user, ok := p.resolveUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if p.stories == nil || p.ledger == nil {
+		http.NotFound(w, r)
+		return
+	}
+	storyID := r.PathValue("story_id")
+	active, _, memberships := p.activeWorkspace(r, user)
+	s, err := p.stories.GetByID(r.Context(), storyID, memberships)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if p.projects != nil {
+		proj, err := p.projects.GetByID(r.Context(), s.ProjectID, memberships)
+		if err != nil || proj.OwnerUserID != user.ID {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	kinds := resolveStoryActivityKinds(r.Context(), p.ledger, active.ID, s.ProjectID, memberships)
+	rows := buildStoryActivity(r.Context(), p.ledger, s.ProjectID, storyID, kinds, memberships)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(storyActivityComposite{
+		StoryID: storyID,
+		Kinds:   kinds,
+		Rows:    rows,
+	}); err != nil {
+		p.logger.Error().Str("error", err.Error()).Msg("story activity encode failed")
 	}
 }
 

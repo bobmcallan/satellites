@@ -137,3 +137,78 @@ func TestLedger_Emit_NoWorkspaceID_Skips(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, rec.count(), "no publish for missing workspace_id")
 }
+
+// TestLedger_Append_StoryActivityEmit covers sty_e55f335e: a story-
+// scoped row whose tags contain an activity-kind triggers a second
+// publish under EventKindStoryActivity carrying the panel-render
+// fields (content, kind, created_at).
+func TestLedger_Append_StoryActivityEmit(t *testing.T) {
+	store := NewMemoryStore()
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	storyRef := "sty_test_e55f"
+	contractRef := "ci_test"
+	createdAt := time.Date(2026, 5, 2, 6, 0, 0, 0, time.UTC)
+
+	entry, err := store.Append(context.Background(), LedgerEntry{
+		WorkspaceID: "wksp_A",
+		ProjectID:   "proj_1",
+		StoryID:     &storyRef,
+		ContractID:  &contractRef,
+		Type:        TypePlan,
+		Tags:        []string{"kind:plan", "phase:orchestrator"},
+		Content:     "orchestrator plan composed",
+	}, createdAt)
+	require.NoError(t, err)
+	require.NotEmpty(t, entry.ID)
+	require.Equal(t, 2, rec.count(), "expect ledger.append + story.activity.append")
+
+	var append1, activity *captured
+	for i := range rec.events {
+		switch rec.events[i].kind {
+		case EventKindAppended:
+			e := rec.events[i]
+			append1 = &e
+		case EventKindStoryActivity:
+			e := rec.events[i]
+			activity = &e
+		}
+	}
+	require.NotNil(t, append1, "ledger.append event missing")
+	require.NotNil(t, activity, "story.activity.append event missing")
+	assert.Equal(t, "ws:wksp_A", activity.topic)
+	payload := activity.data.(map[string]any)
+	assert.Equal(t, entry.ID, payload["ledger_id"])
+	assert.Equal(t, storyRef, payload["story_id"])
+	assert.Equal(t, contractRef, payload["contract_id"])
+	assert.Equal(t, "kind:plan", payload["kind"])
+	assert.Equal(t, "orchestrator plan composed", payload["content"])
+	assert.Equal(t, createdAt.Format(time.RFC3339), payload["created_at"])
+}
+
+func TestLedger_Append_StoryActivityEmit_SkipsWhenNotStoryScoped(t *testing.T) {
+	store := NewMemoryStore()
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	_, err := store.Append(context.Background(), LedgerEntry{
+		WorkspaceID: "wksp_A", ProjectID: "p",
+		Type: TypePlan, Tags: []string{"kind:plan"}, Content: "no story",
+	}, time.Now().UTC())
+	require.NoError(t, err)
+	assert.Equal(t, 1, rec.count(), "non-story-scoped row should not double-emit")
+	assert.Equal(t, EventKindAppended, rec.events[0].kind)
+}
+
+func TestLedger_Append_StoryActivityEmit_SkipsNonActivityKind(t *testing.T) {
+	store := NewMemoryStore()
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	storyRef := "sty_x"
+	_, err := store.Append(context.Background(), LedgerEntry{
+		WorkspaceID: "wksp_A", ProjectID: "p", StoryID: &storyRef,
+		Type: TypeDecision, Tags: []string{"kind:something-else"}, Content: "x",
+	}, time.Now().UTC())
+	require.NoError(t, err)
+	assert.Equal(t, 1, rec.count(), "row whose kind is outside the activity set should not double-emit")
+	assert.Equal(t, EventKindAppended, rec.events[0].kind)
+}

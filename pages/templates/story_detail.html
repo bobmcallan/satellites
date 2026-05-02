@@ -184,6 +184,47 @@
       </div>
     </section>
 
+    <!-- Story activity log — substrate-internal lifecycle events (sty_e55f335e) -->
+    <section class="panel-headed" data-testid="story-activity-log">
+      <header class="panel-header">
+        <h2>activity</h2>
+        <span class="panel-header-meta">
+          <code>(<span x-text="activityCount">{{len .Composite.Activity}}</span>)</code>
+          <span class="live-dot" :class="liveClass" aria-label="live">●</span>
+        </span>
+      </header>
+      <div class="panel-body">
+        <template x-if="activityEmpty">
+          <p class="muted" data-testid="story-activity-empty">No activity yet — events appear here as the agent works on this story.</p>
+        </template>
+        {{if not .Composite.Activity}}<noscript><p class="muted" data-testid="story-activity-empty-ssr">No activity yet — events appear here as the agent works on this story.</p></noscript>{{end}}
+        <ol class="story-activity-list" data-testid="story-activity-list">
+          <template x-for="row in composite.activity" :key="row.id">
+            <li :data-testid="row.testid" :data-kind="row.kind" :data-kind-class="row.kind_class">
+              <code class="activity-when" :title="row.created_at" x-text="row.relative"></code>
+              <code class="activity-kind tag-chip" x-text="row.kind"></code>
+              <template x-if="row.contract_slot">
+                <code class="activity-slot" x-text="row.contract_slot"></code>
+              </template>
+              <span class="activity-summary" x-text="row.summary"></span>
+              <a class="activity-anchor muted" :href="row.anchor" x-text="row.anchorLabel"></a>
+            </li>
+          </template>
+          {{range .Composite.Activity}}
+          <noscript>
+            <li data-testid="story-activity-row-ssr-{{.ID}}" data-kind="{{.Kind}}" data-kind-class="{{.KindClass}}" class="story-activity-row{{if .KindClass}} activity-kind-{{.KindClass}}{{end}}">
+              <code class="activity-when">{{.CreatedAt}}</code>
+              <code class="activity-kind tag-chip">{{.Kind}}</code>
+              {{if .Phase}}<code class="activity-slot">{{.Phase}}</code>{{end}}
+              <span class="activity-summary">{{.Summary}}</span>
+              <a class="activity-anchor muted" href="#ledger-{{.ID}}">{{.ID}}</a>
+            </li>
+          </noscript>
+          {{end}}
+        </ol>
+      </div>
+    </section>
+
     <!-- Ledger excerpts — bounded window, live updates -->
     <section class="panel-headed" data-testid="excerpts-panel">
       <header class="panel-header">
