@@ -239,21 +239,14 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
+	// sty_dc121948: the close path no longer writes story status.
+	// The internal/storystatus reconciler subscribed to kind:close-
+	// request / kind:verdict events recomputes derived status from
+	// CI rows and writes via UpdateStatusDerived. Response shape
+	// preserves story_status="" for client back-compat — clients now
+	// refresh from story_get or watch the WS hub for the next
+	// story.<status> event.
 	storyStatus := ""
-	peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
-	allTerminal := true
-	for _, p := range peers {
-		if !p.RequiredForClose {
-			continue
-		}
-		if p.Status != contract.StatusPassed && p.Status != contract.StatusSkipped {
-			allTerminal = false
-			break
-		}
-	}
-	if allTerminal {
-		storyStatus = s.walkStoryToDone(ctx, ci.StoryID, caller.UserID, now, memberships)
-	}
 
 	body, _ := json.Marshal(map[string]any{
 		"contract_instance_id": ci.ID,
@@ -512,36 +505,6 @@ func (s *Server) handleContractResume(ctx context.Context, req mcpgo.CallToolReq
 		"resume_count_story":   storyCount + 1,
 	})
 	return mcpgo.NewToolResultText(string(body)), nil
-}
-
-// walkStoryToDone advances the story through the required intermediate
-// statuses (backlog → ready → in_progress → done) until it lands on
-// done. Safe when the story is already mid-way through — the loop
-// short-circuits when UpdateStatus rejects as an invalid transition.
-func (s *Server) walkStoryToDone(ctx context.Context, storyID, actor string, now time.Time, memberships []string) string {
-	current, err := s.stories.GetByID(ctx, storyID, memberships)
-	if err != nil {
-		return ""
-	}
-	path := map[string]string{
-		story.StatusBacklog:    story.StatusReady,
-		story.StatusReady:      story.StatusInProgress,
-		story.StatusInProgress: story.StatusDone,
-	}
-	for {
-		next, ok := path[current.Status]
-		if !ok {
-			return current.Status
-		}
-		updated, err := s.stories.UpdateStatus(ctx, storyID, next, actor, now, memberships)
-		if err != nil {
-			return current.Status
-		}
-		current = updated
-		if current.Status == story.StatusDone {
-			return current.Status
-		}
-	}
 }
 
 // readCounter returns the latest kv counter value for key or 0 when
@@ -894,20 +857,10 @@ func (s *Server) CommitReviewVerdict(
 		}
 	}
 
-	peers, _ := s.contracts.List(ctx, ci.StoryID, memberships)
-	allTerminal := true
-	for _, p := range peers {
-		if !p.RequiredForClose {
-			continue
-		}
-		if p.Status != contract.StatusPassed && p.Status != contract.StatusSkipped {
-			allTerminal = false
-			break
-		}
-	}
-	if allTerminal && verdictArg == reviewer.VerdictAccepted {
-		out.StoryStatus = s.walkStoryToDone(ctx, ci.StoryID, actor, now, memberships)
-	}
+	// sty_dc121948: see handleContractClose comment above. The
+	// reconciler is the single writer for story status; the close
+	// path no longer races it.
+	_ = verdictArg
 	return out, nil
 }
 

@@ -122,9 +122,20 @@ func TestClose_EvidenceAndCloseRequestRows(t *testing.T) {
 	}
 }
 
-func TestClose_RollsStoryToDone(t *testing.T) {
+// TestClose_DoesNotWriteStoryStatus asserts the close path no longer
+// advances story status (sty_dc121948 retired walkStoryToDone). The
+// internal/storystatus reconciler subscribed to kind:close-request /
+// kind:verdict ledger events is now the single writer; the close
+// handler's response carries story_status="" for client back-compat.
+// The reconciler is exercised separately in internal/storystatus.
+func TestClose_DoesNotWriteStoryStatus(t *testing.T) {
 	t.Parallel()
 	f := newCloseFixture(t)
+	priorStatus, err := f.server.stories.GetByID(f.ctx, f.storyID, nil)
+	if err != nil {
+		t.Fatalf("load story before close: %v", err)
+	}
+
 	// Close CI[0..2] (required_for_close=true); CI[3] is the optional
 	// story_close slot.
 	for i := 0; i < 3; i++ {
@@ -136,14 +147,28 @@ func TestClose_RollsStoryToDone(t *testing.T) {
 		if res.IsError {
 			t.Fatalf("close[%d]: %s", i, firstText(res))
 		}
+		// Response shape: story_status field is preserved for client
+		// back-compat but always empty post-sty_dc121948.
+		var body map[string]any
+		if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+			t.Fatalf("close[%d] body: %v", i, err)
+		}
+		if got, _ := body["story_status"].(string); got != "" {
+			t.Fatalf("close[%d] story_status: %q want \"\" (close path no longer writes)", i, got)
+		}
 	}
-	// Verify story transitioned to done.
+
+	// Story status is unchanged — the close path did not write it. The
+	// reconciler (subscribed to ledger.append in production wiring) is
+	// the path that would advance it; it is exercised independently in
+	// internal/storystatus/reconciler_test.go.
 	st, err := f.server.stories.GetByID(f.ctx, f.storyID, nil)
 	if err != nil {
-		t.Fatalf("load story: %v", err)
+		t.Fatalf("load story after close: %v", err)
 	}
-	if st.Status != "done" {
-		t.Fatalf("story status: %q want done", st.Status)
+	if st.Status != priorStatus.Status {
+		t.Fatalf("close path advanced story status from %q to %q (must be reconciler's job)",
+			priorStatus.Status, st.Status)
 	}
 }
 

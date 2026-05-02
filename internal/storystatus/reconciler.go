@@ -16,11 +16,10 @@
 //	no CI ever advanced past ready   → backlog
 //	otherwise                        → ready
 //
-// Until sty_dc121948 lands, stories.UpdateStatus enforces a forward-
-// only walk (backlog→ready→in_progress→done). Derivation-driven jumps
-// that violate this guard are caught and rate-limited at WARN; the
-// row stays at its prior status. sty_dc121948 will add a reason
-// parameter and relax the table.
+// As of sty_dc121948 the reconciler writes via stories.UpdateStatusDerived,
+// which bypasses the forward-only transition guard that gates manual
+// callers. The audit trail carries actor=system:reconciler and a
+// "reason:derived" tag on the kind:story.status_change ledger row.
 package storystatus
 
 import (
@@ -28,7 +27,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/ternarybob/arbor"
 
@@ -36,11 +34,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 )
-
-// derivedActor is recorded as the actor on stories.UpdateStatus calls
-// originating from the reconciler. The audit trail explicitly carries
-// "derived" rather than masquerading as a user.
-const derivedActor = "system:reconciler"
 
 // Reconciler is the singleton ledger-bus subscriber that recomputes
 // derived story status. Construct via New, install via ledger.Store
@@ -50,12 +43,6 @@ type Reconciler struct {
 	stories   story.Store
 	contracts contract.Store
 	logger    arbor.ILogger
-
-	rejMu sync.Mutex
-	// rejected tracks the (story_id, from→to) tuples that have already
-	// emitted a transition_rejected WARN in this process. Keys
-	// suppress duplicate noise until sty_dc121948 lands.
-	rejected map[string]struct{}
 }
 
 // New constructs a Reconciler. Logger may be nil — silently dropped.
@@ -64,7 +51,6 @@ func New(stories story.Store, contracts contract.Store, logger arbor.ILogger) *R
 		stories:   stories,
 		contracts: contracts,
 		logger:    logger,
-		rejected:  make(map[string]struct{}),
 	}
 }
 
@@ -125,32 +111,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, storyID string) error {
 	if derived == "" || derived == st.Status {
 		return nil
 	}
-	if _, err := r.stories.UpdateStatus(ctx, storyID, derived, derivedActor, st.UpdatedAt, nil); err != nil {
-		r.notRejected(storyID, st.Status, derived, err)
+	if _, err := r.stories.UpdateStatusDerived(ctx, storyID, derived, st.UpdatedAt, nil); err != nil {
+		if r.logger != nil {
+			r.logger.Warn().
+				Str("story_id", storyID).
+				Str("from", st.Status).
+				Str("to", derived).
+				Str("error", err.Error()).
+				Msg("storystatus: derived status write failed")
+		}
 	}
 	return nil
-}
-
-// notRejected emits a one-shot WARN per (story_id, from→to) tuple so
-// the log stays signal-rich while sty_dc121948 is in flight.
-func (r *Reconciler) notRejected(storyID, from, to string, err error) {
-	key := storyID + "|" + from + "|" + to
-	r.rejMu.Lock()
-	_, seen := r.rejected[key]
-	if !seen {
-		r.rejected[key] = struct{}{}
-	}
-	r.rejMu.Unlock()
-	if seen || r.logger == nil {
-		return
-	}
-	r.logger.Warn().
-		Str("story_id", storyID).
-		Str("from", from).
-		Str("to", to).
-		Str("reason", "derived").
-		Str("error", err.Error()).
-		Msg("storystatus: transition_rejected (sty_dc121948 will relax this guard)")
 }
 
 // derive computes the derived status from a slice of CIs. Empty CI

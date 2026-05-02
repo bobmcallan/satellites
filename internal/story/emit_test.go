@@ -146,6 +146,79 @@ func TestStory_InvalidTransition_NoPublish(t *testing.T) {
 	assert.Equal(t, priorCount, rec.count(), "no publish on failed transition")
 }
 
+// TestStory_UpdateStatusDerived_BypassesTransitionGuard asserts the
+// derived-write path (sty_dc121948) accepts transitions the manual
+// path's forward-only walk rejects, and emits the ledger row + WS
+// event with actor=system:reconciler + reason:derived tag.
+func TestStory_UpdateStatusDerived_BypassesTransitionGuard(t *testing.T) {
+	led := ledger.NewMemoryStore()
+	store := NewMemoryStore(led)
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s, err := store.Create(ctx, Story{
+		WorkspaceID: "wksp_A", ProjectID: "proj_1", Title: "t",
+	}, now)
+	require.NoError(t, err)
+
+	// Manual path rejects backlog → done (forward-only walk).
+	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now, nil)
+	require.Error(t, err, "manual path must still reject illegal jumps")
+
+	// Derived path accepts the same transition.
+	updated, err := store.UpdateStatusDerived(ctx, s.ID, StatusDone, now.Add(time.Second), nil)
+	require.NoError(t, err)
+	assert.Equal(t, StatusDone, updated.Status)
+
+	// Ledger row carries reason:derived and the system:reconciler actor.
+	rows, err := led.List(ctx, "proj_1", ledger.ListOptions{
+		Type: ledger.TypeDecision,
+		Tags: []string{"kind:" + LedgerEntryType},
+	}, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+	last := rows[0]
+	assert.Equal(t, derivedActor, last.CreatedBy)
+	hasReason := false
+	for _, tag := range last.Tags {
+		if tag == "reason:derived" {
+			hasReason = true
+		}
+	}
+	assert.True(t, hasReason, "derived ledger row must carry reason:derived tag")
+
+	// WS event still publishes — the panel sees the flip.
+	require.GreaterOrEqual(t, rec.count(), 2) // at least Create-emit + Derived-emit
+	last2 := rec.events[rec.count()-1]
+	assert.Equal(t, "story.done", last2.kind)
+}
+
+// TestStory_UpdateStatusDerived_NoOpWhenStatusMatches asserts a
+// derived call whose target equals the current status is a no-op —
+// no ledger row, no WS event. Idempotence under repeated bus events.
+func TestStory_UpdateStatusDerived_NoOpWhenStatusMatches(t *testing.T) {
+	led := ledger.NewMemoryStore()
+	store := NewMemoryStore(led)
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s, err := store.Create(ctx, Story{
+		WorkspaceID: "wksp_A", ProjectID: "proj_1", Title: "t",
+	}, now)
+	require.NoError(t, err)
+	priorEvents := rec.count()
+
+	// Story is already at backlog; derived call to backlog is a no-op.
+	got, err := store.UpdateStatusDerived(ctx, s.ID, StatusBacklog, now.Add(time.Second), nil)
+	require.NoError(t, err)
+	assert.Equal(t, StatusBacklog, got.Status)
+	assert.Equal(t, priorEvents, rec.count(), "idempotent derived call must not emit")
+}
+
 func TestStory_PanicRecovered(t *testing.T) {
 	led := ledger.NewMemoryStore()
 	store := NewMemoryStore(led)

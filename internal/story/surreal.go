@@ -168,6 +168,53 @@ func (s *SurrealStore) UpdateStatus(ctx context.Context, id, newStatus, actor st
 	return current, nil
 }
 
+// UpdateStatusDerived implements Store for SurrealStore. See the
+// MemoryStore version for the contract — bypasses ValidTransition for
+// derivation-driven flips. Sty_dc121948.
+func (s *SurrealStore) UpdateStatusDerived(ctx context.Context, id, newStatus string, now time.Time, memberships []string) (Story, error) {
+	if !IsKnownStatus(newStatus) {
+		return Story{}, fmt.Errorf("story: unknown status %q", newStatus)
+	}
+	current, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return Story{}, err
+	}
+	if current.Status == newStatus {
+		return current, nil
+	}
+	prior := current.Status
+	current.Status = newStatus
+	current.UpdatedAt = now
+	if err := s.write(ctx, current); err != nil {
+		return Story{}, err
+	}
+	payload := transitionPayload{
+		StoryID: id,
+		From:    prior,
+		To:      newStatus,
+		Actor:   derivedActor,
+	}
+	content, _ := json.Marshal(payload)
+	if _, err := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: current.WorkspaceID,
+		ProjectID:   current.ProjectID,
+		StoryID:     ledger.StringPtr(current.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:" + LedgerEntryType, "reason:derived"},
+		Content:     string(content),
+		CreatedBy:   derivedActor,
+	}, now); err != nil {
+		current.Status = prior
+		current.UpdatedAt = now
+		if writeErr := s.write(ctx, current); writeErr != nil {
+			return Story{}, fmt.Errorf("story: derived ledger emission failed (%v) AND revert failed (%w)", err, writeErr)
+		}
+		return Story{}, fmt.Errorf("story: derived ledger emission failed (status reverted): %w", err)
+	}
+	emitStatus(ctx, s.publisher, current)
+	return current, nil
+}
+
 // Update implements Store for SurrealStore.
 func (s *SurrealStore) Update(ctx context.Context, id string, fields UpdateFields, actor string, now time.Time, memberships []string) (Story, error) {
 	current, err := s.GetByID(ctx, id, memberships)

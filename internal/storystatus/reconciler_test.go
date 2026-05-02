@@ -305,6 +305,25 @@ func TestReconciler_NonTriggerKind_NoOp(t *testing.T) {
 		"non-trigger kind must not advance story status")
 }
 
+// TestReconciler_BacklogToInProgressDirect (sty_dc121948) asserts the
+// reconciler now writes via UpdateStatusDerived and can advance a
+// story straight from backlog to in_progress without the manual
+// "walk to ready first" choreography the prior transition guard
+// required.
+func TestReconciler_BacklogToInProgressDirect(t *testing.T) {
+	f := newFixture(t)
+	st := f.seedStory(t, story.StatusBacklog)
+	// No manual walk-to-ready — derivation must succeed directly.
+	f.seedCI(t, st.ID, contract.StatusClaimed, 0, true)
+
+	require.NoError(t, f.rec.Reconcile(f.ctx, st.ID))
+
+	updated, err := f.stories.GetByID(f.ctx, st.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, story.StatusInProgress, updated.Status,
+		"reconciler must flip backlog → in_progress directly via UpdateStatusDerived")
+}
+
 func TestKindOf(t *testing.T) {
 	assert.Equal(t, "action_claim", kindOf([]string{"kind:action_claim", "story:sty_x"}))
 	assert.Equal(t, "", kindOf([]string{"story:sty_x"}))

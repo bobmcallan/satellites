@@ -17,6 +17,11 @@ import (
 // LedgerEntryType is the canonical event-type for story status changes.
 const LedgerEntryType = "story.status_change"
 
+// derivedActor is recorded as the actor on UpdateStatusDerived calls
+// from the storystatus reconciler so the audit trail explicitly
+// carries the derivation provenance. Sty_dc121948.
+const derivedActor = "system:reconciler"
+
 // ErrNotFound is returned when a story lookup misses.
 var ErrNotFound = errors.New("story: not found")
 
@@ -70,6 +75,15 @@ type Store interface {
 	GetByID(ctx context.Context, id string, memberships []string) (Story, error)
 	List(ctx context.Context, projectID string, opts ListOptions, memberships []string) ([]Story, error)
 	UpdateStatus(ctx context.Context, id, newStatus, actor string, now time.Time, memberships []string) (Story, error)
+
+	// UpdateStatusDerived bypasses the forward-only transition guard
+	// for derivation-driven flips (sty_dc121948). The substrate's
+	// derived-status reconciler (internal/storystatus) calls this
+	// path; manual operator updates continue to use UpdateStatus and
+	// stay guarded against illegal jumps. The actor is recorded as
+	// "system:reconciler" so the audit trail explicitly carries the
+	// derivation provenance — no synthetic user impersonation.
+	UpdateStatusDerived(ctx context.Context, id, newStatus string, now time.Time, memberships []string) (Story, error)
 
 	// Update applies fields to the story with the given id. Fields whose
 	// pointer is nil are left untouched. Status, immutable identity
@@ -240,6 +254,57 @@ func (m *MemoryStore) UpdateStatus(ctx context.Context, id, newStatus, actor str
 		s.Status = prior
 		m.rows[id] = s
 		return Story{}, fmt.Errorf("story: ledger emission failed (status reverted): %w", err)
+	}
+	emitStatus(ctx, m.publisher, s)
+	return s, nil
+}
+
+// UpdateStatusDerived implements Store for MemoryStore. Mirrors
+// UpdateStatus exactly except for the ValidTransition guard, which is
+// skipped — derivation-driven flips may legitimately cross the manual
+// path's forward-only walk (e.g. backlog → in_progress directly when
+// a CI claim event arrives before the close walk would have run).
+// Sty_dc121948.
+func (m *MemoryStore) UpdateStatusDerived(ctx context.Context, id, newStatus string, now time.Time, memberships []string) (Story, error) {
+	if !IsKnownStatus(newStatus) {
+		return Story{}, fmt.Errorf("story: unknown status %q", newStatus)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.rows[id]
+	if !ok {
+		return Story{}, ErrNotFound
+	}
+	if !inStoryMemberships(s.WorkspaceID, memberships) {
+		return Story{}, ErrNotFound
+	}
+	if s.Status == newStatus {
+		return s, nil
+	}
+	prior := s.Status
+	s.Status = newStatus
+	s.UpdatedAt = now
+	m.rows[id] = s
+
+	payload := transitionPayload{
+		StoryID: id,
+		From:    prior,
+		To:      newStatus,
+		Actor:   derivedActor,
+	}
+	content, _ := json.Marshal(payload)
+	if _, err := m.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: s.WorkspaceID,
+		ProjectID:   s.ProjectID,
+		StoryID:     ledger.StringPtr(s.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{"kind:" + LedgerEntryType, "reason:derived"},
+		Content:     string(content),
+		CreatedBy:   derivedActor,
+	}, now); err != nil {
+		s.Status = prior
+		m.rows[id] = s
+		return Story{}, fmt.Errorf("story: derived ledger emission failed (status reverted): %w", err)
 	}
 	emitStatus(ctx, m.publisher, s)
 	return s, nil
