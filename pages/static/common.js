@@ -306,10 +306,16 @@ function storyPanel() {
             if (data.project_id && data.project_id !== projectID) { return; }
             const storyID = data.story_id;
             if (!storyID) { return; }
-            const row = this.$el.querySelector('tr.story-row[data-id="' + storyID + '"]');
-            if (!row) { return; }
             const newStatus = ev.Kind.substring('story.'.length);
             if (!newStatus) { return; }
+            const row = this.$el.querySelector('tr.story-row[data-id="' + storyID + '"]');
+            if (!row) {
+                // sty_1ff1065a: cold row — substrate just emitted a
+                // story.<status> event for a story we haven't rendered.
+                // Synthesise a row from the payload + bump _filterTick.
+                this._appendStoryRow(storyID, newStatus, data);
+                return;
+            }
             row.dataset.status = newStatus;
             const pill = row.querySelector('.col-status .status-pill');
             if (pill) { pill.textContent = newStatus; }
@@ -319,6 +325,88 @@ function storyPanel() {
             // doesn't track DOM dataset mutations as reactive deps;
             // this counter is the explicit signal that filters need
             // to re-run.
+            this._filterTick++;
+        },
+        // sty_1ff1065a — append a freshly-created story row to the
+        // panel without a refetch. The substrate's story.Create emit
+        // (internal/story/emit.go) carries every data-* attribute the
+        // chip filter reads: status, priority, category, tags, plus
+        // title for the visible cell and updated_at for ordering.
+        // When the panel is in its empty state (no <table>), we swap
+        // the "No matches" placeholder for a fresh skeleton table.
+        _appendStoryRow(storyID, status, data) {
+            const root = this.$el;
+            if (!root) { return; }
+            let table = root.querySelector('table.panel-table-stories');
+            if (!table) {
+                const empty = root.querySelector('p[data-testid="panel-stories-empty"]');
+                if (empty) { empty.remove(); }
+                table = document.createElement('table');
+                table.className = 'panel-table panel-table-stories';
+                table.setAttribute('data-testid', 'panel-stories-table');
+                table.innerHTML =
+                    '<thead><tr>' +
+                    '<th class="col-id">id</th>' +
+                    '<th class="col-title">title</th>' +
+                    '<th class="col-status">status</th>' +
+                    '<th class="col-priority">priority</th>' +
+                    '<th class="col-updated">updated</th>' +
+                    '</tr></thead><tbody></tbody>';
+                root.appendChild(table);
+            }
+            const tbody = table.querySelector('tbody');
+            if (!tbody) { return; }
+            const title = (data && data.title) ? String(data.title) : '';
+            const priority = (data && data.priority) ? String(data.priority) : '';
+            const category = (data && data.category) ? String(data.category) : '';
+            const updated = (data && data.updated_at) ? String(data.updated_at) : '';
+            const tagsArr = (data && Array.isArray(data.tags)) ? data.tags : [];
+            const tagsStr = tagsArr.join(' ') + (tagsArr.length ? ' ' : '');
+            const search = (storyID + ' ' + title + ' ' + tagsStr).toLowerCase();
+
+            const row = document.createElement('tr');
+            row.className = 'story-row';
+            row.dataset.id = storyID;
+            row.dataset.status = status;
+            row.dataset.priority = priority;
+            row.dataset.category = category;
+            row.dataset.title = title;
+            row.dataset.updated = updated;
+            row.dataset.tags = tagsStr;
+            row.dataset.search = search;
+            row.setAttribute('data-testid', 'story-row-' + storyID);
+            row.setAttribute('data-realtime-updated-at', String(Date.now()));
+            row.setAttribute('x-show', 'matchesRow($el)');
+            row.setAttribute(':class', 'rowClass($el)');
+            row.setAttribute('@click', 'toggleRow');
+            const tagChips = tagsArr.map(t =>
+                '<button type="button" class="tag-chip is-clickable" data-tag="' + this._escape(t) + '" @click.stop="addTagToQuery" title="Click to filter by this tag">' + this._escape(t) + '</button>'
+            ).join('');
+            row.innerHTML =
+                '<td class="col-id"><code>' + this._escape(storyID) + '</code></td>' +
+                '<td class="col-title">' +
+                '<div class="story-row-title">' + this._escape(title) + '</div>' +
+                (tagsArr.length ? '<div class="story-row-tags" data-testid="story-row-tags-' + this._escape(storyID) + '">' + tagChips + '</div>' : '') +
+                '</td>' +
+                '<td class="col-status"><code class="status-pill">' + this._escape(status) + '</code></td>' +
+                '<td class="col-priority">' + (priority ? '<code class="priority-pill">' + this._escape(priority) + '</code>' : '') + '</td>' +
+                '<td class="col-updated muted">' + this._escape(updated) + '</td>';
+
+            const detail = document.createElement('tr');
+            detail.className = 'story-detail';
+            detail.dataset.detailFor = storyID;
+            detail.setAttribute('data-testid', 'story-detail-' + storyID);
+            detail.setAttribute('x-show', 'isExpanded($el)');
+            detail.innerHTML =
+                '<td colspan="5">' +
+                '<div class="story-detail-flat">' +
+                '<section class="story-detail-block"><h4>description</h4><p class="muted">—</p></section>' +
+                '<section class="story-detail-block"><h4>acceptance criteria</h4><p class="muted">—</p></section>' +
+                '<section class="story-detail-block" data-story-contracts="' + this._escape(storyID) + '"><h4>contracts</h4><p class="muted" data-testid="story-contracts-empty-' + this._escape(storyID) + '">No contracts</p></section>' +
+                '</div></td>';
+
+            tbody.insertBefore(row, tbody.firstChild);
+            tbody.insertBefore(detail, row.nextSibling);
             this._filterTick++;
         },
         // sty_f4b87ea3 — patch a contract row inside the expanded

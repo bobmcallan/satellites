@@ -52,19 +52,76 @@ func TestStory_UpdateStatus_Publishes(t *testing.T) {
 		Title:       "parent",
 	}, now)
 	require.NoError(t, err)
-	// Create does not emit — only UpdateStatus. Confirm zero events so far.
-	require.Equal(t, 0, rec.count())
+	// sty_1ff1065a: Create now emits story.backlog so the workspace
+	// panel can append a fresh row without a refetch.
+	require.Equal(t, 1, rec.count())
+	require.Equal(t, "story.backlog", rec.events[0].kind)
 
 	_, err = store.UpdateStatus(ctx, s.ID, StatusReady, "alice", now.Add(time.Second), nil)
 	require.NoError(t, err)
-	require.Equal(t, 1, rec.count())
+	require.Equal(t, 2, rec.count())
 
-	got := rec.events[0]
+	got := rec.events[1]
 	assert.Equal(t, "ws:wksp_A", got.topic)
 	assert.Equal(t, "story.ready", got.kind)
 	payload := got.data.(map[string]any)
 	assert.Equal(t, s.ID, payload["story_id"])
 	assert.Equal(t, "parent", payload["title"])
+}
+
+// TestStory_Create_Publishes asserts the substrate emits a story.<status>
+// event from Create so workspace WS subscribers can render a freshly-
+// created row without a page reload (sty_1ff1065a).
+func TestStory_Create_Publishes(t *testing.T) {
+	led := ledger.NewMemoryStore()
+	store := NewMemoryStore(led)
+	rec := &recorder{}
+	store.SetPublisher(rec)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	s, err := store.Create(ctx, Story{
+		WorkspaceID: "wksp_A",
+		ProjectID:   "proj_1",
+		Title:       "fresh",
+		Priority:    "high",
+		Category:    "bug",
+		Tags:        []string{"epic:status-bus-v1"},
+	}, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, rec.count())
+
+	got := rec.events[0]
+	assert.Equal(t, "ws:wksp_A", got.topic)
+	assert.Equal(t, "story.backlog", got.kind)
+	assert.Equal(t, "wksp_A", got.workspaceID)
+
+	payload, ok := got.data.(map[string]any)
+	require.True(t, ok, "payload must be map")
+	assert.Equal(t, s.ID, payload["story_id"])
+	assert.Equal(t, "wksp_A", payload["workspace_id"])
+	assert.Equal(t, "proj_1", payload["project_id"])
+	assert.Equal(t, "fresh", payload["title"])
+	assert.Equal(t, "backlog", payload["status"])
+	assert.Equal(t, "high", payload["priority"])
+	assert.Equal(t, "bug", payload["category"])
+	assert.Equal(t, []string{"epic:status-bus-v1"}, payload["tags"])
+	assert.NotNil(t, payload["updated_at"])
+}
+
+// TestStory_Create_NoPublisher_NoCrash asserts Create is safe when no
+// publisher is wired (test harnesses that never call SetPublisher).
+func TestStory_Create_NoPublisher_NoCrash(t *testing.T) {
+	led := ledger.NewMemoryStore()
+	store := NewMemoryStore(led)
+	// Deliberately no SetPublisher.
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := store.Create(ctx, Story{
+		WorkspaceID: "wksp_A", ProjectID: "proj_1", Title: "t",
+	}, now)
+	assert.NoError(t, err)
 }
 
 func TestStory_InvalidTransition_NoPublish(t *testing.T) {
@@ -79,11 +136,14 @@ func TestStory_InvalidTransition_NoPublish(t *testing.T) {
 		WorkspaceID: "wksp_A", ProjectID: "proj_1", Title: "t",
 	}, now)
 	require.NoError(t, err)
+	// Create emits one event (sty_1ff1065a). Capture the count so we
+	// can assert no further publish on the failed UpdateStatus below.
+	priorCount := rec.count()
 
 	// backlog → done is invalid.
 	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now, nil)
 	assert.Error(t, err)
-	assert.Equal(t, 0, rec.count(), "no publish on failed transition")
+	assert.Equal(t, priorCount, rec.count(), "no publish on failed transition")
 }
 
 func TestStory_PanicRecovered(t *testing.T) {

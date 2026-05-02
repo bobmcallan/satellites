@@ -57,6 +57,7 @@ func (s *SurrealStore) Create(ctx context.Context, st Story, now time.Time) (Sto
 	if err := s.write(ctx, st); err != nil {
 		return Story{}, err
 	}
+	emitStatus(ctx, s.publisher, st)
 	return st, nil
 }
 

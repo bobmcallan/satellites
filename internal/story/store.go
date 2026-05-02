@@ -138,6 +138,7 @@ func (m *MemoryStore) Create(ctx context.Context, s Story, now time.Time) (Story
 		s.Tags = []string{}
 	}
 	m.rows[s.ID] = s
+	emitStatus(ctx, m.publisher, s)
 	return s, nil
 }
 
