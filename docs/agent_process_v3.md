@@ -6,10 +6,20 @@ This is the verb chain a Claude session runs to take a story from
 The unit of capability is the **agent doc**. An agent's
 `tool_ceiling` enumerates the MCP verbs that agent may call; its
 `permission_patterns` enumerates the file/shell patterns it may
-touch. The orchestrator's `agent_assignments` map (returned by
-`orchestrator_compose_plan`) binds one agent to each contract
-instance. There is no separate primitive between the agent and
-the contract instance — the agent IS what authorises the work.
+touch.
+
+The unit of work is the **task**. A task names an action on a
+contract — `implement plan`, `review plan`, `implement develop`,
+`review develop`, … — and carries an `agent_id` assigned at
+compose time. Implement tasks are explicitly **claimed** by the
+implementing agent. Review tasks are **published**; the embedded
+reviewer is a long-running subscriber that claims and completes
+them automatically — the orchestrator never claims a review task.
+
+Contracts are the spec (markdown docs under `config/seed/contracts/`).
+Contract instances (CIs) exist as derived state — bookkeeping that
+aggregates the implement+review task pair for one contract on one
+story. CIs are not the unit of claim.
 
 ---
 
@@ -47,7 +57,7 @@ Subsequent project-scoped verbs default to the bound project.
    `documentation`).
 2. (Optional) **`task_walk({story_id})`** — single-roundtrip
    orientation. If the story has never been planned this returns
-   no `contract_instances`; that's the signal to compose a plan.
+   no `tasks`; that's the signal to compose a plan.
 
 ---
 
@@ -57,19 +67,21 @@ Subsequent project-scoped verbs default to the bound project.
    - writes a `kind:plan` ledger row + a `kind:plan-approved` row
      (legacy auto-approval shortcut),
    - writes the `kind:workflow-claim` row,
-   - creates one CI per slot (default sequence
-     `plan → develop → push → merge_to_main → story_close`),
-   - **assigns one agent to each CI** deterministically:
-     `plan` and `develop` → `developer_agent`,
-     `push` and `merge_to_main` → `releaser_agent`,
-     `story_close` → `story_close_agent`,
+   - **creates an ordered task list** — for the default contract
+     sequence `plan → develop → push → merge_to_main → story_close`
+     this produces 10 tasks, paired:
+     `implement plan → review plan →
+      implement develop → review develop →
+      implement push → review push →
+      implement merge_to_main → review merge_to_main →
+      implement story_close → review story_close`,
+   - **mints one ephemeral agent per implement task** with
+     permission patterns derived from the contract's needs;
+     stamps the agent_id on the task,
+   - assigns the persistent reviewer agent to every review task,
    - returns
-     `{contract_instances, plan_ledger_id, workflow_claim_ledger_id,
-      task_ids, agent_assignments}`.
-
-   The `agent_assignments` map is the dispatch source of truth —
-   each CI's assigned agent is what `contract_claim` will
-   authorise the work under.
+     `{tasks, plan_ledger_id, workflow_claim_ledger_id,
+      agent_assignments}`.
 
    **Reviewer-loop alternative (preferred for new stories):**
    **`orchestrator_submit_plan({story_id, plan_markdown,
@@ -79,41 +91,44 @@ Subsequent project-scoped verbs default to the bound project.
    `proposed_contracts` MUST start with `plan` (verified — the
    reviewer rejects otherwise).
 
-2. **`task_walk({story_id})`** — returns the freshly-composed CI
-   list with `current_ci_id` pointing at the first non-terminal
-   CI. The CI list IS the task list — each row represents an
-   ordered (action, contract) pair the orchestrator will dispatch.
+2. **`task_walk({story_id})`** — returns the freshly-composed task
+   list with `current_task_id` pointing at the first ready
+   implement task. Each row is an ordered (action, contract,
+   agent_id, status) tuple — this IS the dispatch list.
 
 ---
 
-## 5. Per-CI cycle
+## 5. Per-task cycle
 
-For each CI returned by `task_walk` (in `current_ci_id` order):
+For each implement task returned by `task_walk` (in
+`current_task_id` order). Review tasks are not in the
+orchestrator's loop — they fire automatically when their paired
+implement task closes.
 
 ### 5a. Claim
-**`contract_claim({contract_instance_id, agent_id, plan_markdown,
-skills_used?})`** —
-- runs the predecessor gate (predecessors must be
-  `passed`/`skipped`),
-- resolves the agent doc by id and verifies its capability surface
-  (`agent.tool_ceiling`, `agent.permission_patterns`),
+**`task_claim({task_id, agent_id, plan_markdown})`** —
+- runs the predecessor gate (the prior task in the ordered list
+  must be `closed_success` or `skipped`),
+- verifies the agent's capability surface (`agent.tool_ceiling`,
+  `agent.permission_patterns`) covers what the task needs,
 - writes a `kind:action-claim` row + optional `kind:plan` row,
-- flips the CI to `claimed`.
+- flips the task to `claimed`.
 
-The `agent_id` should come from the `agent_assignments` map
-returned by `orchestrator_compose_plan`. Same-session re-claim is
-treated as an amend: prior action-claim + plan rows are
-dereferenced and replaced.
+The `agent_id` should come from the task's stamped `agent_id`
+field returned by `task_walk`. Same-session re-claim is treated
+as an amend: prior action-claim + plan rows are dereferenced and
+replaced.
 
-### 5b. Plan CI specifics
+### 5b. `implement plan` task specifics
 
-A plan close that doesn't enqueue at least one task is rejected
-**by the substrate**, not the reviewer. Always:
+A plan implement task close that doesn't enqueue at least one
+downstream task is rejected **by the substrate**. Always:
 
 ```
 task_enqueue({
   origin: "story_stage",
-  contract_instance_id: <plan-ci-id>,
+  parent_task_id: <plan-implement-task-id>,
+  agent_id: <minted-or-overridden-agent>,
   payload: <json describing the work item>
 })
 ```
@@ -138,9 +153,9 @@ ledger_append({
 })
 ```
 
-Then `contract_close` with all three ids in `evidence_ledger_ids`.
+Then `task_close` with all three ids in `evidence_ledger_ids`.
 
-### 5c. Develop CI specifics
+### 5c. `implement develop` task specifics
 
 The reviewer rubric for `develop` (per the lived flow, not yet
 formally documented in seed) demands:
@@ -165,7 +180,7 @@ formally documented in seed) demands:
   round-trip if uncommitted) showing the same flake rate
   pre-change. Anything less gets rejected.
 
-### 5d. Push CI specifics
+### 5d. `implement push` task specifics
 
 Push contract (`config/seed/contracts/push.md`) is intentionally
 thin: `git fetch` then `git push` non-force, evidence is the
@@ -178,14 +193,14 @@ On trunk-based repos the reviewer occasionally misreads the
 pre-empt by including a branch-topology proof
 (`git branch -a` showing only `main`) in the close evidence.
 
-### 5e. merge_to_main CI
+### 5e. `implement merge_to_main` task specifics
 
 Trunk-based repos: this is a state-only verification. Capture
 `git status --short`, `git rev-parse HEAD`,
 `git rev-parse origin/main`, and `git rev-parse --abbrev-ref HEAD`
-to show local + remote both at the develop CI's commit on `main`.
+to show local + remote both at the develop commit on `main`.
 
-### 5f. story_close CI
+### 5f. `implement story_close` task specifics
 
 The story template gates the `done` transition on
 `field_present:<…>` hooks. Set every `done`-required field via
@@ -198,47 +213,58 @@ story_field_set({id, field: "regression_test_path", value: "..."})
 …
 ```
 
-Then `contract_claim` → `contract_close` the story_close CI.
-Reviewer flips the CI to `passed`. The story's auto-flip to
-`done` does NOT always fire — call `story_update_status({id,
-status: "done"})` manually after the reviewer accepts to confirm
-the transition.
+Then `task_claim` → `task_close` the story_close implement task.
+The paired review task fires automatically; on success the
+substrate flips the story to `done`.
+Auto-flip is sometimes unreliable — call
+`story_update_status({id, status: "done"})` manually to confirm
+if the story stays `in_progress` after the review task closes.
 
 ### 5g. Close
 
-**`contract_close({contract_instance_id, close_markdown,
+**`task_close({task_id, outcome, close_markdown,
 evidence_markdown?, evidence_ledger_ids?})`** —
 - writes a `kind:close-request` row,
 - writes an inline `kind:evidence` row when `evidence_markdown`
   non-empty,
-- enqueues a `kind:review` task and flips the CI to
-  `pending_review` (production `validation_mode=task`),
-- the embedded Gemini reviewer claims that task on its own
-  session and runs the rubric against the close evidence + every
-  ledger row referenced in `evidence_ledger_ids` + the contract
-  body.
+- flips the task to `closed_success` or `closed_failure`,
+- **publishes the paired review task** — the substrate emits a
+  `task.review_ready` event for the review task. The embedded
+  reviewer (Gemini, default) is subscribed to this event kind and
+  claims the review task on its own session, runs the rubric
+  against the close evidence + every ledger row referenced in
+  `evidence_ledger_ids` + the contract body, and closes the
+  review task with `verdict ∈ {accepted, rejected}`.
 
-### 5h. On rejected
+The orchestrator never sees the review task — it's published,
+the subscriber consumes it. The orchestrator's next visibility
+into the review outcome is `task_walk` returning the next ready
+implement task (on accepted) OR a fresh implement task with
+`prior_task_id` set (on rejected).
 
-The substrate appends a fresh CI of the same contract type with
-`PriorCIID` set. Read the latest `kind:verdict` row for the
-review questions, then either:
+### 5h. On rejected review
 
-- `contract_claim` the new CI with revised `plan_markdown` and
-  re-close with stronger evidence, OR
-- `contract_respond({contract_instance_id, response_markdown})`
-  to write a `kind:review-response` row that addresses the
-  question, then close the new CI.
+The substrate spawns a fresh implement task of the same contract
+type with `prior_task_id` set, carrying the review verdict and
+review questions as ledger context. The orchestrator's next
+`task_walk` shows it as the new `current_task_id`. Read the
+latest `kind:verdict` row for the review questions, then either:
 
-The plan-iteration cap is `KV.plan_review_max_iterations`
-(default 5). For non-plan CIs there's no formal cap — the
-reviewer will loop until the evidence package satisfies the
-rubric.
+- `task_claim` the new implement task with revised
+  `plan_markdown` and re-close with stronger evidence, OR
+- `task_respond({task_id, response_markdown})` to write a
+  `kind:review-response` row that addresses the question,
+  then close the new implement task.
+
+The review iteration cap on plan tasks is
+`KV.plan_review_max_iterations` (default 5). For non-plan tasks
+there's no formal cap — the reviewer will loop until the
+evidence package satisfies the rubric.
 
 ### 5i. Move on
 
-`task_walk({story_id})` again — `current_ci_id` now points at
-the next non-terminal CI. Loop back to 5a.
+`task_walk({story_id})` again — `current_task_id` now points at
+the next ready implement task. Loop back to 5a.
 
 ---
 
@@ -249,7 +275,7 @@ the next non-terminal CI. Loop back to 5a.
 | Subdir | Document type | What lives here |
 |---|---|---|
 | `agents/` | `agent` | `developer_agent`, `releaser_agent`, `story_close_agent`, `story_reviewer`, `development_reviewer`. The `tool_ceiling` field enforces the agent's capability scope; `permission_patterns` lists the file/shell patterns it may touch. |
-| `contracts/` | `contract` | per-slot contracts — `category`, `validation_mode`, `evidence_required` body. |
+| `contracts/` | `contract` | per-contract specs — `category`, `validation_mode`, `evidence_required` body. The contract is the spec; tasks are the execution. |
 | `workflows/` | `workflow` | prose workflow descriptions (slot algebra retired in story_af79cf95). |
 | `artifacts/` | `artifact` | `default_agent_process` — the handshake markdown the MCP server returns as its `instructions` block. |
 | `principles/` | `principle` | enforced rules (`pr_evidence`, `pr_root_cause`, `pr_no_unrequested_compat`, `pr_skills_reviewers_ad_hoc`, …). |
@@ -272,36 +298,37 @@ session_register                              (server mints id; header carries i
   └─ project_set                              (or project_create on miss)
        └─ story_get
             └─ orchestrator_compose_plan      (or orchestrator_submit_plan loop)
-                 └─ task_walk                 (orient — single call)
-                      └─ for each CI in sequence:
-                           ├─ contract_claim  (agent_id required; resolves directly)
-                           ├─ task_enqueue    (plan CI ONLY — substrate gate)
-                           ├─ ledger_append   (plan CI: plan-md, review-criteria-md, readiness-assessment)
-                           ├─ ledger_append   (develop CI: lint output, ac-references, etc.)
-                           └─ contract_close  (evidence_ledger_ids carries every artefact id)
-                                ↳ kind:review task → embedded Gemini reviewer →
-                                   contract_review_close → CI flips passed / failed
-                                ↳ on rejected: substrate appends fresh CI; address verdict
-                                   review_questions on next claim
-                      └─ story_field_set      (every done-required template field BEFORE story_close CI)
-                      └─ contract_claim/close story_close CI
-                      └─ story_update_status  (manual flip to done — auto-flip is unreliable)
+                 │   ↳ creates 10 tasks: implement+review per contract
+                 │   ↳ mints ephemeral agent per implement task; reviewer agent on review tasks
+                 └─ task_walk                 (orient — single call, returns ordered task list)
+                      └─ for each implement task in sequence:
+                           ├─ task_claim      (agent_id from task's stamped field)
+                           ├─ task_enqueue    (implement plan task ONLY — substrate gate)
+                           ├─ ledger_append   (implement plan: plan-md, review-criteria-md, readiness-assessment)
+                           ├─ ledger_append   (implement develop: lint output, ac-references, etc.)
+                           └─ task_close      (publishes paired review task → reviewer subscriber)
+                                ↳ reviewer subscriber claims review task automatically
+                                ↳ reviewer closes with verdict ∈ {accepted, rejected}
+                                ↳ on rejected: substrate spawns fresh implement task with prior_task_id
+                      └─ story_field_set      (every done-required template field BEFORE story_close task)
+                      └─ task_claim/close implement story_close task
+                      └─ story_update_status  (manual flip to done if auto-flip didn't fire)
 ```
 
 ---
 
 ## Field-tested gotchas
 
-These are the rejections seen in practice walking sty_de9f10f9.
-Treat them as default rules until proven otherwise.
+These are the rejections seen in practice. Treat them as default
+rules until proven otherwise.
 
 1. **`proposed_contracts` MUST start with `plan`.** Reviewer
    rejects "missing plan contract" otherwise even if the plan is
-   the CI you're currently inside.
-2. **Plan close needs `task_enqueue` first.** Substrate-level
-   gate, returns `plan_close_requires_tasks` from
-   `contract_close`. Enqueue at least one task against the plan
-   CI before close.
+   the task you're currently inside.
+2. **`implement plan` close needs `task_enqueue` first.**
+   Substrate-level gate — a plan that decomposes nothing is
+   rejected before the reviewer sees it. Enqueue at least one
+   downstream task against the plan implement task before close.
 3. **`evidence_ledger_ids` must reference rows that contain the
    actual content** the reviewer asks for — not summaries. Write
    the plan body / criteria / readiness as their own
@@ -322,9 +349,12 @@ Treat them as default rules until proven otherwise.
 8. **`story_field_set` BEFORE `story_update_status`** — the
    category template's hooks gate the transition. A missed field
    returns the failure prose as the tool's text content, which
-   downstream JSON parsing trips over (root cause documented in
-   sty_de9f10f9).
+   downstream JSON parsing trips over.
 9. **story_close auto-flip is unreliable.** Even after the
-   reviewer accepts the story_close CI, the story may stay in
+   reviewer accepts the story_close task, the story may stay in
    `in_progress`. Call `story_update_status({id, status: "done"})`
    manually to confirm.
+10. **Never claim a review task.** The reviewer subscriber owns
+    the review-task lane. Manually claiming a review task from
+    the orchestrator session is a bug — let the publish/subscribe
+    flow run.
