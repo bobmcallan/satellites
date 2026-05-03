@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chromedp/chromedp"
+
+	"github.com/bobmcallan/satellites/internal/story"
 )
 
 // firstProjectID navigates to /projects and reads the first project's id
@@ -160,29 +163,31 @@ func TestProjectDetail_ExpandStyAutoOpensStoriesPanel(t *testing.T) {
 		t.Fatalf("locate project: %v", err)
 	}
 
-	// Discover a real story id on the project so the row-expand match
-	// has a concrete target. firstProjectID returns the first project
-	// the harness owns; the seed creates at least one story per project.
-	var styID string
-	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-		chromedp.WaitVisible(`[data-testid="panel-stories-table"] tr.story-row`, chromedp.ByQuery),
-		chromedp.Evaluate(`(() => {
-			const r = document.querySelector('[data-testid="panel-stories-table"] tr.story-row');
-			return r ? r.dataset.id : '';
-		})()`, &styID),
-	); err != nil {
-		t.Fatalf("seed story lookup: %v", err)
+	// Seed a story directly through the harness store — the default
+	// harness project has no stories, and the row-pin assertions need
+	// a concrete target.
+	now := time.Now().UTC()
+	seeded, err := h.Stories.Create(context.Background(), story.Story{
+		ProjectID:          projID,
+		WorkspaceID:        h.WorkspaceID,
+		Title:              "fixture row for ?expand=sty pin",
+		Description:        "sty_43d72112 fixture",
+		AcceptanceCriteria: "covered by test assertions",
+		Status:             "backlog",
+		Priority:           "medium",
+		Category:           "bug",
+		CreatedBy:          h.UserID,
+	}, now)
+	if err != nil {
+		t.Fatalf("seed story: %v", err)
 	}
-	if styID == "" {
-		t.Skip("project has no stories; cannot exercise sty_43d72112 path")
-	}
+	styID := seeded.ID
 
 	var storiesVisible, documentsVisible, rowExpanded bool
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(h.BaseURL+"/projects/"+projID+"?expand="+styID),
 		chromedp.WaitVisible(`[data-testid="panel-stories"]`, chromedp.ByQuery),
-		chromedp.Evaluate(`new Promise(r => setTimeout(r, 150))`, nil, chromedp.EvalAsValue),
+		chromedp.Evaluate(`new Promise(r => setTimeout(r, 250))`, nil, chromedp.EvalAsValue),
 		chromedp.Evaluate(`(() => {
 			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
 			return body && body.offsetParent !== null;
