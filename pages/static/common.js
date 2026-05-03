@@ -405,35 +405,6 @@ function storyPanel() {
             this.bulkResultText = 'applied ' + applied + ' / failed ' + failed;
             this.bulkBusy = false;
         },
-        // sty_82662a66 — operator-override CI affordances. Both verbs
-        // hit thin Portal-side handlers that resolve the CI, gate on
-        // ownership, and chain the status transitions needed to reach
-        // passed (ready→claimed→passed, claimed→passed,
-        // pending_review→passed). Realtime bridge patches the row's
-        // status pill on the next contract_instance.<status> WS event.
-        async completeContract(id) {
-            return this._postContractAction(id, 'close');
-        },
-        async reviewContract(id) {
-            return this._postContractAction(id, 'review-close');
-        },
-        async _postContractAction(id, verb) {
-            try {
-                const resp = await fetch('/api/contracts/' + encodeURIComponent(id) + '/' + verb, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ reason: '' }),
-                });
-                const text = await resp.text();
-                if (!resp.ok) {
-                    console.warn('storyPanel: ci action failed', id, verb, resp.status, text);
-                }
-                return { ok: resp.ok, status: resp.status, body: text };
-            } catch (err) {
-                return { ok: false, status: 0, body: String(err) };
-            }
-        },
         async _postStatus(id, target, reason) {
             try {
                 const resp = await fetch('/api/stories/' + encodeURIComponent(id) + '/status', {
@@ -587,17 +558,17 @@ function storyPanel() {
                 '<div class="story-detail-flat">' +
                 '<section class="story-detail-block"><h4>description</h4><p class="muted">—</p></section>' +
                 '<section class="story-detail-block"><h4>acceptance criteria</h4><p class="muted">—</p></section>' +
-                '<section class="story-detail-block" data-story-contracts="' + this._escape(storyID) + '"><h4>contracts</h4><p class="muted" data-testid="story-contracts-empty-' + this._escape(storyID) + '">No contracts</p></section>' +
+                '<section class="story-detail-block" data-story-tasks="' + this._escape(storyID) + '"><h4>tasks</h4><p class="muted" data-testid="story-tasks-empty-' + this._escape(storyID) + '">No tasks</p></section>' +
                 '</div></td>';
 
             tbody.insertBefore(row, tbody.firstChild);
             tbody.insertBefore(detail, row.nextSibling);
             this._filterTick++;
         },
-        // sty_f4b87ea3 — patch a contract row inside the expanded
+        // sty_f4b87ea3 — patch a task row inside the expanded
         // story detail. The contract event payload (contract/emit.go)
         // carries workspace_id, story_id, ci_id, contract_name, sequence.
-        // We locate the contracts sub-table by data-story-contracts=<story_id>
+        // We locate the tasks sub-table by data-story-tasks=<story_id>
         // and update the row keyed by data-ci-id. project_id isn't on
         // the payload so we scope by story_id presence in the panel —
         // an unrelated story's event simply finds no host element and
@@ -607,11 +578,11 @@ function storyPanel() {
             const storyID = data.story_id;
             const ciID = data.ci_id;
             if (!storyID || !ciID) { return; }
-            const host = this.$el.querySelector('section[data-story-contracts="' + storyID + '"]');
+            const host = this.$el.querySelector('section[data-story-tasks="' + storyID + '"]');
             if (!host) { return; }
             const newStatus = ev.Kind.substring('contract_instance.'.length);
             if (!newStatus) { return; }
-            const row = host.querySelector('tr.story-contract-row[data-ci-id="' + ciID + '"]');
+            const row = host.querySelector('tr.story-task-row[data-ci-id="' + ciID + '"]');
             if (row) {
                 row.dataset.status = newStatus;
                 const pill = row.querySelector('.status-pill');
@@ -622,38 +593,38 @@ function storyPanel() {
                 row.setAttribute('data-realtime-updated-at', String(Date.now()));
                 return;
             }
-            // No row — this is a new contract on this story. Append a
+            // No row — this is a new task on this story. Append a
             // skeleton row so the panel reflects the lifecycle without
             // a refresh. The empty-state <p> is replaced by a fresh
             // table on the first event.
             this._appendContractRow(host, storyID, ciID, newStatus, data);
         },
         _appendContractRow(host, storyID, ciID, status, data) {
-            let table = host.querySelector('table.panel-table-contracts');
+            let table = host.querySelector('table.panel-table-tasks');
             if (!table) {
                 const empty = host.querySelector('p.muted');
                 if (empty) { empty.remove(); }
                 table = document.createElement('table');
-                table.className = 'panel-table panel-table-contracts';
-                table.setAttribute('data-testid', 'story-contracts-' + storyID);
-                table.innerHTML = '<thead><tr><th class="col-seq">#</th><th class="col-name">contract</th><th class="col-status">status</th><th class="col-agent">agent</th></tr></thead><tbody></tbody>';
+                table.className = 'panel-table panel-table-tasks';
+                table.setAttribute('data-testid', 'story-tasks-' + storyID);
+                table.innerHTML = '<thead><tr><th class="col-seq">#</th><th class="col-name">task</th><th class="col-status">status</th><th class="col-agent">agent</th></tr></thead><tbody></tbody>';
                 host.appendChild(table);
             }
             const tbody = table.querySelector('tbody');
             if (!tbody) { return; }
             const tr = document.createElement('tr');
-            tr.className = 'story-contract-row';
+            tr.className = 'story-task-row';
             tr.dataset.ciId = ciID;
             tr.dataset.status = status;
-            tr.setAttribute('data-testid', 'story-contract-row-' + ciID);
+            tr.setAttribute('data-testid', 'story-task-row-' + ciID);
             tr.setAttribute('data-realtime-updated-at', String(Date.now()));
             const seq = (data && typeof data.sequence !== 'undefined') ? String(data.sequence) : '';
             const name = (data && data.contract_name) ? data.contract_name : ciID;
             tr.innerHTML =
                 '<td class="col-seq"><code>#' + this._escape(seq) + '</code></td>' +
                 '<td class="col-name"><code class="ci-name">' + this._escape(name) + '</code></td>' +
-                '<td class="col-status"><code class="status-pill status-' + this._escape(status) + '" data-testid="story-contract-status-' + this._escape(ciID) + '">' + this._escape(status) + '</code></td>' +
-                '<td class="col-agent"><span class="muted" data-testid="story-contract-agent-' + this._escape(ciID) + '">—</span></td>';
+                '<td class="col-status"><code class="status-pill status-' + this._escape(status) + '" data-testid="story-task-status-' + this._escape(ciID) + '">' + this._escape(status) + '</code></td>' +
+                '<td class="col-agent"><span class="muted" data-testid="story-task-agent-' + this._escape(ciID) + '">—</span></td>';
             tbody.appendChild(tr);
         },
         _escape(s) {

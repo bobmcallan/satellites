@@ -2379,33 +2379,15 @@ code {
 }
 [data-theme="dark"] .story-detail-pre { background: #050505; border-color: #222; }
 
-/* Contracts sub-table inside the expanded story row. Uses the same
+/* Tasks sub-table inside the expanded story row. Uses the same
    panel-table base styles as the parent stories table; only the
    per-column widths differ. */
-.panel-table-contracts { width: 100%; table-layout: fixed; font-size: 0.75rem; }
-.panel-table-contracts .col-seq { width: 3rem; }
-.panel-table-contracts .col-status { width: 8rem; }
-.panel-table-contracts .col-actions { width: 7rem; }
-.panel-table-contracts .col-agent { width: 12rem; }
-.panel-table-contracts tbody tr.story-contract-row > td { padding: 0.3rem 0.5rem; }
-.panel-table-contracts code.ci-name { font-weight: 600; }
-
-/* sty_82662a66 — operator-override CI action button. Mirrors the
-   .status-button outlined-button shape but smaller and without the
-   inverted disabled-current state (CI actions never render disabled —
-   terminal CIs collapse to a — span instead). */
-button.ci-action-btn {
-    background: var(--color-bg);
-    color: var(--color-fg);
-    border: 1px solid var(--color-border);
-    padding: 0.2rem 0.5rem;
-    font: inherit;
-    font-size: 0.7rem;
-    line-height: 1;
-    cursor: pointer;
-}
-button.ci-action-btn:hover { color: var(--color-muted); }
-button.ci-action-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 1px; }
+.panel-table-tasks { width: 100%; table-layout: fixed; font-size: 0.75rem; }
+.panel-table-tasks .col-seq { width: 3rem; }
+.panel-table-tasks .col-status { width: 8rem; }
+.panel-table-tasks .col-agent { width: 12rem; }
+.panel-table-tasks tbody tr.story-task-row > td { padding: 0.3rem 0.5rem; }
+.panel-table-tasks code.ci-name { font-weight: 600; }
 
 .legacy-banner {
     background: #fff5e3;
@@ -2528,8 +2510,6 @@ button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
     .story-bulk-bar,
     .story-status-controls,
     .panel-table-stories .col-select,
-    .panel-table-contracts .col-actions,
-    .ci-action-btn,
     .status-reason-input { display: none !important; }
 
     /* slice 1: reading-density font shrink. */
@@ -2575,30 +2555,30 @@ button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
         padding: 0.5rem 0.6rem;
     }
 
-    /* slice 2: contracts sub-table inside the expand row. Same
+    /* slice 2: tasks sub-table inside the expand row. Same
        collapse as the parent table; sequence + status pill share
        the header line, name takes the body line, agent muted
        footer. */
-    .panel-table-contracts thead { display: none; }
-    .panel-table-contracts,
-    .panel-table-contracts tbody,
-    .panel-table-contracts tr,
-    .panel-table-contracts td { display: block; width: 100%; }
-    .panel-table-contracts tbody tr.story-contract-row {
+    .panel-table-tasks thead { display: none; }
+    .panel-table-tasks,
+    .panel-table-tasks tbody,
+    .panel-table-tasks tr,
+    .panel-table-tasks td { display: block; width: 100%; }
+    .panel-table-tasks tbody tr.story-task-row {
         padding: 0.4rem 0.5rem;
         border-bottom: 1px solid var(--color-border);
     }
-    .panel-table-contracts tbody tr.story-contract-row td.col-seq,
-    .panel-table-contracts tbody tr.story-contract-row td.col-status {
+    .panel-table-tasks tbody tr.story-task-row td.col-seq,
+    .panel-table-tasks tbody tr.story-task-row td.col-status {
         display: inline-block;
         width: auto;
         margin-right: 0.5rem;
     }
-    .panel-table-contracts tbody tr.story-contract-row td.col-name {
+    .panel-table-tasks tbody tr.story-task-row td.col-name {
         display: block;
         margin: 0.2rem 0;
     }
-    .panel-table-contracts tbody tr.story-contract-row td.col-agent {
+    .panel-table-tasks tbody tr.story-task-row td.col-agent {
         display: block;
         color: var(--color-muted);
         font-size: 0.7rem;

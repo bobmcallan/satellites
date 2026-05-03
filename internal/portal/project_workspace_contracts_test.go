@@ -75,15 +75,15 @@ func TestProjectWorkspace_ContractsRenderInExpandedRow(t *testing.T) {
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
 	body := renderProjectDetailBody(t, mux, proj.ID, sess.ID)
 
-	// AC2 — contracts sub-table renders with sequence, name, status, agent.
+	// AC2 — tasks sub-table renders with sequence, name, status, agent.
 	wants := []string{
-		`data-testid="story-contracts-` + s.ID + `"`,
-		`data-testid="story-contract-row-` + ci.ID + `"`,
+		`data-testid="story-tasks-` + s.ID + `"`,
+		`data-testid="story-task-row-` + ci.ID + `"`,
 		`data-ci-id="` + ci.ID + `"`,
 		`>plan</code>`,
 		`status-ready`,
-		`data-testid="story-contract-status-` + ci.ID + `"`,
-		`data-testid="story-contract-agent-` + ci.ID + `"`,
+		`data-testid="story-task-status-` + ci.ID + `"`,
+		`data-testid="story-task-agent-` + ci.ID + `"`,
 		`href="/documents/` + agentDoc.ID + `"`,
 		`alice-the-agent`,
 		// Single-column wrapper, not the legacy 2-column grid.
@@ -125,9 +125,9 @@ func TestProjectWorkspace_ContractsEmptyStateForStoryWithoutContracts(t *testing
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
 	body := renderProjectDetailBody(t, mux, proj.ID, sess.ID)
 
-	want := `data-testid="story-contracts-empty-` + s.ID + `"`
+	want := `data-testid="story-tasks-empty-` + s.ID + `"`
 	if !strings.Contains(body, want) {
-		t.Errorf("body missing %q (empty contracts state)", want)
+		t.Errorf("body missing %q (empty tasks state)", want)
 	}
 }
 
@@ -150,8 +150,8 @@ func TestPortal_StoryPanelJS_HandlesContractEvents(t *testing.T) {
 		"_applyContractEvent(ev, projectID)",
 		"contract_instance.",
 		// DOM hooks the handler reads.
-		`section[data-story-contracts="`,
-		`tr.story-contract-row[data-ci-id="`,
+		`section[data-story-tasks="`,
+		`tr.story-task-row[data-ci-id="`,
 		// Append-on-new-CI helper exists.
 		"_appendContractRow(",
 	} {

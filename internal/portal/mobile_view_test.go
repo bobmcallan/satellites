@@ -48,8 +48,6 @@ func TestMobileView_ActionAffordancesHiddenAtMobile(t *testing.T) {
 		".story-bulk-bar",
 		".story-status-controls",
 		".col-select",
-		".col-actions",
-		".ci-action-btn",
 		".status-reason-input",
 	} {
 		if !strings.Contains(mobileBlock, sel) {
@@ -67,9 +65,9 @@ func TestMobileView_StoriesPanelTableCollapse(t *testing.T) {
 	mobileBlock := extractMobileBlock(t, src)
 	for _, want := range []string{
 		".panel-table-stories thead",
-		".panel-table-contracts thead",
+		".panel-table-tasks thead",
 		".panel-table-stories tbody tr.story-row",
-		".panel-table-contracts tbody tr.story-contract-row",
+		".panel-table-tasks tbody tr.story-task-row",
 	} {
 		if !strings.Contains(mobileBlock, want) {
 			t.Errorf("mobile @media block missing stories-panel collapse rule %q", want)
