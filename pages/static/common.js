@@ -104,6 +104,16 @@ function storyPanel() {
         // Reactive bump counter for realtime row patches. Read from
         // matchesRow so x-show re-runs when bumped.
         _filterTick: 0,
+        // sty_1d6751e9 — bulk-select state for the operator-status-
+        // override surface. selectedIDs is a Set keyed by story id;
+        // bulkTarget / bulkReason hold the action-bar form state;
+        // bulkBusy disables apply during an in-flight Promise.all;
+        // bulkResultText carries the "applied N / failed M" strip.
+        selectedIDs: new Set(),
+        bulkTarget: 'ready',
+        bulkReason: '',
+        bulkBusy: false,
+        bulkResultText: '',
         get tokens() { return parseStoryQuery(this.query); },
         matchesRow(el) {
             // Touch the reactive counter so dataset mutations applied
@@ -262,6 +272,67 @@ function storyPanel() {
         },
         destroy() {
             if (this._ws && typeof this._ws.close === 'function') { this._ws.close(); }
+        },
+        // sty_1d6751e9 — operator status override (per-row + bulk). The
+        // POST endpoint /api/stories/{id}/status takes {status, reason}
+        // and delegates to stores.UpdateStatus, which emits the canonical
+        // story.status_change event. The realtime bridge above patches
+        // the row in place on that event — no extra plumbing here.
+        isSelected(id) {
+            void this._filterTick;
+            return this.selectedIDs.has(id);
+        },
+        toggleRowSelection(id, ev) {
+            if (ev) { ev.stopPropagation(); }
+            if (this.selectedIDs.has(id)) {
+                this.selectedIDs.delete(id);
+            } else {
+                this.selectedIDs.add(id);
+            }
+            // Clone the Set so Alpine sees a reactive write — `Set` mutations
+            // don't trigger reactivity on Alpine's proxy.
+            this.selectedIDs = new Set(this.selectedIDs);
+            this.bulkResultText = '';
+        },
+        clearSelection() {
+            this.selectedIDs = new Set();
+            this.bulkResultText = '';
+        },
+        async applyRowStatus(id, target, reason) {
+            const res = await this._postStatus(id, target, reason);
+            if (!res.ok) {
+                console.warn('storyPanel: row status failed', id, res.status, res.body);
+            }
+            return res;
+        },
+        async applySelectionStatus() {
+            if (this.bulkBusy || this.selectedIDs.size === 0) { return; }
+            this.bulkBusy = true;
+            this.bulkResultText = '';
+            const ids = Array.from(this.selectedIDs);
+            const target = this.bulkTarget;
+            const reason = this.bulkReason;
+            const results = await Promise.all(ids.map(id => this._postStatus(id, target, reason)));
+            let applied = 0, failed = 0;
+            for (const r of results) {
+                if (r.ok) { applied++; } else { failed++; }
+            }
+            this.bulkResultText = 'applied ' + applied + ' / failed ' + failed;
+            this.bulkBusy = false;
+        },
+        async _postStatus(id, target, reason) {
+            try {
+                const resp = await fetch('/api/stories/' + encodeURIComponent(id) + '/status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ status: target, reason: reason || '' }),
+                });
+                const text = await resp.text();
+                return { ok: resp.ok, status: resp.status, body: text };
+            } catch (err) {
+                return { ok: false, status: 0, body: String(err) };
+            }
         },
         // sty_af303c26 (focused slice) — open a workspace-scoped WebSocket
         // and apply `story.<status>` events to the matching story row in

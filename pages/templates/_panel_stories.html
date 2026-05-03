@@ -32,9 +32,38 @@
   {{if not .Composite.Stories}}
     <p class="muted" data-testid="panel-stories-empty">No matches</p>
   {{else}}
+    <!-- sty_1d6751e9: bulk action bar — appears when at least one row
+         is selected via the checkbox column. Per-id POSTs run in
+         Promise.all; the result strip reports applied/failed counts. -->
+    <div class="story-bulk-bar"
+         data-testid="story-bulk-bar"
+         x-show="selectedIDs.size > 0"
+         x-cloak>
+      <span class="story-bulk-count" data-testid="story-bulk-count" x-text="selectedIDs.size + ' selected'"></span>
+      <label>set status to
+        <select x-model="bulkTarget" data-testid="story-bulk-target">
+          <option value="ready">ready</option>
+          <option value="in_progress">in_progress</option>
+          <option value="done">done</option>
+          <option value="cancelled">cancelled</option>
+          <option value="backlog">backlog</option>
+        </select>
+      </label>
+      <input type="text"
+             x-model="bulkReason"
+             placeholder="reason (required for non-derivable jumps)"
+             data-testid="story-bulk-reason" />
+      <button type="button"
+              data-testid="story-bulk-apply"
+              :disabled="bulkBusy"
+              @click="applySelectionStatus">apply to selection</button>
+      <button type="button" data-testid="story-bulk-clear" @click="clearSelection">clear</button>
+      <span class="story-bulk-result" data-testid="story-bulk-result" x-show="bulkResultText" x-text="bulkResultText"></span>
+    </div>
     <table class="panel-table panel-table-stories" data-testid="panel-stories-table">
       <thead>
         <tr>
+          <th class="col-select"><span class="visually-hidden">select</span></th>
           <th class="col-id">id</th>
           <th class="col-title">title</th>
           <th class="col-status">status</th>
@@ -58,6 +87,12 @@
             :class="rowClass($el)"
             @click="toggleRow"
             data-testid="story-row-{{.ID}}">
+          <td class="col-select" @click.stop>
+            <input type="checkbox"
+                   data-testid="story-row-select-{{.ID}}"
+                   :checked="isSelected('{{.ID}}')"
+                   @change="toggleRowSelection('{{.ID}}', $event)" />
+          </td>
           <td class="col-id"><code>{{.ID}}</code></td>
           <td class="col-title">
             <div class="story-row-title">{{.Title}}</div>
@@ -75,8 +110,49 @@
             data-detail-for="{{.ID}}"
             x-show="isExpanded($el)"
             data-testid="story-detail-{{.ID}}">
-          <td colspan="5">
+          <td colspan="6">
             <div class="story-detail-flat">
+              <!-- sty_1d6751e9: per-row status override. Current status's
+                   button is disabled; click on any other button POSTs to
+                   /api/stories/{id}/status. The reason field is required
+                   for non-derivable jumps; the realtime bridge patches
+                   the status pill in place on the next WS event. -->
+              <section class="story-detail-block story-status-controls" data-testid="story-status-buttons-{{.ID}}">
+                <h4>status</h4>
+                <div class="status-button-group">
+                  <button type="button"
+                          class="status-button"
+                          data-testid="story-status-button-{{.ID}}-backlog"
+                          {{if eq .Status "backlog"}}disabled aria-pressed="true"{{end}}
+                          @click.stop="applyRowStatus('{{.ID}}', 'backlog', $refs.reason{{.ID}}.value)">backlog</button>
+                  <button type="button"
+                          class="status-button"
+                          data-testid="story-status-button-{{.ID}}-ready"
+                          {{if eq .Status "ready"}}disabled aria-pressed="true"{{end}}
+                          @click.stop="applyRowStatus('{{.ID}}', 'ready', $refs.reason{{.ID}}.value)">ready</button>
+                  <button type="button"
+                          class="status-button"
+                          data-testid="story-status-button-{{.ID}}-in_progress"
+                          {{if eq .Status "in_progress"}}disabled aria-pressed="true"{{end}}
+                          @click.stop="applyRowStatus('{{.ID}}', 'in_progress', $refs.reason{{.ID}}.value)">in_progress</button>
+                  <button type="button"
+                          class="status-button"
+                          data-testid="story-status-button-{{.ID}}-done"
+                          {{if eq .Status "done"}}disabled aria-pressed="true"{{end}}
+                          @click.stop="applyRowStatus('{{.ID}}', 'done', $refs.reason{{.ID}}.value)">done</button>
+                  <button type="button"
+                          class="status-button"
+                          data-testid="story-status-button-{{.ID}}-cancelled"
+                          {{if eq .Status "cancelled"}}disabled aria-pressed="true"{{end}}
+                          @click.stop="applyRowStatus('{{.ID}}', 'cancelled', $refs.reason{{.ID}}.value)">cancelled</button>
+                </div>
+                <input type="text"
+                       x-ref="reason{{.ID}}"
+                       class="status-reason-input"
+                       placeholder="reason (required for non-derivable jumps)"
+                       data-testid="story-status-reason-{{.ID}}"
+                       @click.stop />
+              </section>
               <section class="story-detail-block">
                 <h4>description</h4>
                 {{if .Description}}<pre class="story-detail-pre">{{.Description}}</pre>{{else}}<p class="muted">—</p>{{end}}
