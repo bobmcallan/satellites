@@ -2385,9 +2385,27 @@ code {
 .panel-table-contracts { width: 100%; table-layout: fixed; font-size: 0.75rem; }
 .panel-table-contracts .col-seq { width: 3rem; }
 .panel-table-contracts .col-status { width: 8rem; }
-.panel-table-contracts .col-agent { width: 14rem; }
+.panel-table-contracts .col-actions { width: 7rem; }
+.panel-table-contracts .col-agent { width: 12rem; }
 .panel-table-contracts tbody tr.story-contract-row > td { padding: 0.3rem 0.5rem; }
 .panel-table-contracts code.ci-name { font-weight: 600; }
+
+/* sty_82662a66 — operator-override CI action button. Mirrors the
+   .status-button outlined-button shape but smaller and without the
+   inverted disabled-current state (CI actions never render disabled —
+   terminal CIs collapse to a — span instead). */
+button.ci-action-btn {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    padding: 0.2rem 0.5rem;
+    font: inherit;
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+}
+button.ci-action-btn:hover { color: var(--color-muted); }
+button.ci-action-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 1px; }
 
 .legacy-banner {
     background: #fff5e3;
@@ -2484,3 +2502,86 @@ button.mcp-copy-btn {
 button.mcp-copy-btn:hover { color: var(--color-fg); }
 button.mcp-copy-btn:focus-visible { outline: 1px dotted var(--color-fg); outline-offset: 1px; }
 button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
+
+/* sty_f315d848 — operator-override surface styling (status button-group
+   + reason input + bulk action bar). The templates were shipped by
+   sty_1d6751e9 referencing classes that had no CSS, so the disabled
+   current-status button rendered with the OS's grey, reading as
+   *highlighted* against the un-styled siblings. These rules pin the
+   button-group to the V3 token palette and invert the disabled-current
+   so the active status reads as a pill not a greyed-out widget. */
+.story-status-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.status-button-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+button.status-button {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    padding: var(--control-padding-y) var(--control-padding-x);
+    font-family: inherit;
+    font-size: var(--font-size-control);
+    line-height: 1;
+    cursor: pointer;
+    margin: 0 -1px 0 0;
+}
+button.status-button:hover:not([disabled]) { color: var(--color-muted); }
+button.status-button:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 1px; z-index: 1; }
+button.status-button[disabled] {
+    background: var(--color-fg);
+    color: var(--color-bg);
+    cursor: default;
+}
+input.status-reason-input {
+    width: 100%;
+    background: var(--color-input-bg);
+    color: var(--color-input-fg);
+    border: 1px solid var(--color-border);
+    padding: var(--control-padding-y) var(--control-padding-x);
+    font: inherit;
+    font-size: var(--font-size-control);
+}
+input.status-reason-input::placeholder { color: var(--color-muted); }
+
+.story-bulk-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    margin: 0 0 0.6rem 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    font-size: var(--font-size-control);
+}
+.story-bulk-bar label { display: inline-flex; align-items: center; gap: 0.3rem; }
+.story-bulk-bar select,
+.story-bulk-bar input[type="text"] {
+    background: var(--color-input-bg);
+    color: var(--color-input-fg);
+    border: 1px solid var(--color-border);
+    padding: var(--control-padding-y) var(--control-padding-x);
+    font: inherit;
+    font-size: var(--font-size-control);
+}
+.story-bulk-bar input[type="text"] { flex: 1 1 14rem; min-width: 10rem; }
+.story-bulk-bar button {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    padding: var(--control-padding-y) var(--control-padding-x);
+    font: inherit;
+    font-size: var(--font-size-control);
+    cursor: pointer;
+}
+.story-bulk-bar button:hover:not([disabled]) { color: var(--color-muted); }
+.story-bulk-bar button[disabled] { color: var(--color-muted); cursor: default; }
+.story-bulk-count { color: var(--color-muted); white-space: nowrap; }
+.story-bulk-result { color: var(--color-muted); margin-left: auto; }

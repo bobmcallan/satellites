@@ -120,6 +120,12 @@ function storyPanel() {
             // by _applyStoryEvent re-trigger x-show evaluation.
             void this._filterTick;
             const ds = (el && el.dataset) || {};
+            // sty_a34cd88f — pinned-expand bypass. When a story is
+            // expanded, its row stays visible regardless of any filter.
+            // Prevents the orphan-expand artefact when status flips to
+            // a value the chip filter excludes (e.g. operator marks it
+            // done while the default status:open chip is active).
+            if (ds.id && ds.id === this.expanded) { return true; }
             const t = this.tokens;
             // status: chip default is `open` (= not done, not cancelled).
             // `status:all` lifts any status filtering. Multi-value lists
@@ -169,6 +175,23 @@ function storyPanel() {
             const id = (target && target.dataset && target.dataset.id) || '';
             if (!id) { return; }
             this.expanded = this.expanded === id ? '' : id;
+            this._syncExpandToURL();
+        },
+        // sty_a34cd88f — mirror this.expanded into the URL via
+        // history.replaceState so reloads + bookmarks keep the
+        // expansion. No history entry is added (replaceState, not
+        // pushState) — the expand toggle isn't navigation.
+        _syncExpandToURL() {
+            if (typeof window === 'undefined' || !window.history || typeof window.history.replaceState !== 'function') { return; }
+            try {
+                const url = new URL(window.location.href);
+                if (this.expanded) {
+                    url.searchParams.set('expand', this.expanded);
+                } else {
+                    url.searchParams.delete('expand');
+                }
+                window.history.replaceState(window.history.state, '', url.toString());
+            } catch (err) { /* URL ctor or replaceState unavailable — best effort */ }
         },
         addTagToQuery(ev) {
             const target = ev && ev.currentTarget;
@@ -265,10 +288,21 @@ function storyPanel() {
         // sets up in init(); kept side-effect-y rather than reactive
         // because re-sorting visible DOM rows is the simplest path.
         init() {
+            this._readExpandFromURL();
             this.$watch('query', () => { applyStoryOrder(this.$el, this.tokens.order); });
             // Apply once on mount so any initial query (e.g. via #hash) takes effect.
             this.$nextTick(() => { applyStoryOrder(this.$el, this.tokens.order); });
             this._attachRealtimeBridge();
+        },
+        // sty_a34cd88f — seed this.expanded from ?expand=<sty_id> on
+        // page load so reloads + bookmarks restore the expansion.
+        _readExpandFromURL() {
+            if (typeof window === 'undefined' || !window.location) { return; }
+            try {
+                const url = new URL(window.location.href);
+                const id = url.searchParams.get('expand') || '';
+                if (id) { this.expanded = id; }
+            } catch (err) { /* best effort */ }
         },
         destroy() {
             if (this._ws && typeof this._ws.close === 'function') { this._ws.close(); }
@@ -319,6 +353,35 @@ function storyPanel() {
             }
             this.bulkResultText = 'applied ' + applied + ' / failed ' + failed;
             this.bulkBusy = false;
+        },
+        // sty_82662a66 — operator-override CI affordances. Both verbs
+        // hit thin Portal-side handlers that resolve the CI, gate on
+        // ownership, and chain the status transitions needed to reach
+        // passed (ready→claimed→passed, claimed→passed,
+        // pending_review→passed). Realtime bridge patches the row's
+        // status pill on the next contract_instance.<status> WS event.
+        async completeContract(id) {
+            return this._postContractAction(id, 'close');
+        },
+        async reviewContract(id) {
+            return this._postContractAction(id, 'review-close');
+        },
+        async _postContractAction(id, verb) {
+            try {
+                const resp = await fetch('/api/contracts/' + encodeURIComponent(id) + '/' + verb, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ reason: '' }),
+                });
+                const text = await resp.text();
+                if (!resp.ok) {
+                    console.warn('storyPanel: ci action failed', id, verb, resp.status, text);
+                }
+                return { ok: resp.ok, status: resp.status, body: text };
+            } catch (err) {
+                return { ok: false, status: 0, body: String(err) };
+            }
         },
         async _postStatus(id, target, reason) {
             try {

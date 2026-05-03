@@ -170,6 +170,7 @@
                         <th class="col-seq">#</th>
                         <th class="col-name">contract</th>
                         <th class="col-status">status</th>
+                        <th class="col-actions">actions</th>
                         <th class="col-agent">agent</th>
                       </tr>
                     </thead>
@@ -182,6 +183,28 @@
                         <td class="col-seq"><code>#{{.Sequence}}</code></td>
                         <td class="col-name"><code class="ci-name">{{.ContractName}}</code></td>
                         <td class="col-status"><code class="status-pill status-{{.Status}}" data-testid="story-contract-status-{{.ID}}">{{.Status}}</code></td>
+                        <!-- sty_82662a66 — operator-override CI affordance.
+                             Per-row action depends on status: ready/claimed
+                             render `complete`, pending_review renders
+                             `review`, terminal renders `—`. The realtime
+                             bridge flips the status pill via the existing
+                             contract_instance.<status> WS event after a
+                             successful POST. -->
+                        <td class="col-actions" @click.stop>
+                          {{if or (eq .Status "ready") (eq .Status "claimed")}}
+                            <button type="button"
+                                    class="ci-action-btn"
+                                    data-testid="ci-complete-{{.ID}}"
+                                    @click="completeContract('{{.ID}}')">complete</button>
+                          {{else if eq .Status "pending_review"}}
+                            <button type="button"
+                                    class="ci-action-btn"
+                                    data-testid="ci-review-{{.ID}}"
+                                    @click="reviewContract('{{.ID}}')">review</button>
+                          {{else}}
+                            <span class="muted" data-testid="ci-action-empty-{{.ID}}">—</span>
+                          {{end}}
+                        </td>
                         <td class="col-agent">
                           {{if .AgentID}}
                             <a href="{{.AgentHref}}" class="ci-agent-link" data-testid="story-contract-agent-{{.ID}}" data-agent-id="{{.AgentID}}"><code>{{if .AgentName}}{{.AgentName}}{{else}}{{.AgentID}}{{end}}</code></a>
