@@ -46,6 +46,8 @@
                 verdicts: [],
                 commits: [],
                 ledger_excerpts: [],
+                activity: [],
+                activity_kinds: [],
                 delivery: { status: '' }
             },
             wsStatus: 'idle',
@@ -68,11 +70,13 @@
             get verdictsCount() { return (this.composite.verdicts || []).length; },
             get commitsCount() { return (this.composite.commits || []).length; },
             get excerptsCount() { return (this.composite.ledger_excerpts || []).length; },
+            get activityCount() { return (this.composite.activity || []).length; },
 
             get ciEmpty() { return this.ciCount === 0; },
             get verdictsEmpty() { return this.verdictsCount === 0; },
             get commitsEmpty() { return this.commitsCount === 0; },
             get excerptsEmpty() { return this.excerptsCount === 0; },
+            get activityEmpty() { return this.activityCount === 0; },
 
             async fetchComposite() {
                 if (!this.compositeURL) { return; }
@@ -118,7 +122,11 @@
                 if (!matchesStory(data, this.storyID)) { return; }
                 switch (ev.Kind) {
                     case 'ledger.created':
+                    case 'ledger.append':
                         this.applyLedgerCreated(data);
+                        break;
+                    case 'story.activity.append':
+                        this.applyStoryActivity(data);
                         break;
                     case 'contract_instance.updated':
                     case 'ci.updated':
@@ -201,6 +209,27 @@
                 this.composite.contract_instances = cis;
             },
 
+            applyStoryActivity(row) {
+                if (!row || !row.ledger_id) {
+                    row = row && row.row ? row.row : row;
+                }
+                if (!row || !row.ledger_id) { return; }
+                if (row.story_id && row.story_id !== this.storyID) { return; }
+                const tags = row.tags || row.Tags || [];
+                const created = row.created_at || row.CreatedAt || '';
+                const activityRow = decorateActivity({
+                    id: row.ledger_id,
+                    type: row.type || row.Type || '',
+                    kind: row.kind || pickKindTag(tags),
+                    contract_slot: pickPhaseTag(tags),
+                    contract_id: row.contract_id || row.ContractID || '',
+                    tags: tags,
+                    summary: truncateContent(row.content || row.Content || '', 240),
+                    created_at: created
+                });
+                this.composite.activity = appendActivity(this.composite.activity, activityRow);
+            },
+
             applyStoryUpdated(row) {
                 if (!row || !row.id) {
                     row = row && row.row ? row.row : row;
@@ -223,8 +252,55 @@
         out.verdicts = reindexProminent((data.verdicts || []).map(decorateVerdict));
         out.commits = (data.commits || []).map(decorateCommit);
         out.ledger_excerpts = (data.ledger_excerpts || []).map(decorateExcerpt);
+        out.activity = (data.activity || []).map(decorateActivity);
+        out.activity_kinds = data.activity_kinds || [];
         out.delivery = data.delivery || { status: '' };
         return out;
+    }
+
+    function decorateActivity(row) {
+        row.testid = 'story-activity-row-' + (row.id || '');
+        row.kind_class = row.kind ? String(row.kind).replace(/^kind:/, '') : '';
+        row.anchor = '#ledger-' + (row.id || '');
+        row.anchorLabel = (row.id || '').replace(/^ldg_/, '#');
+        row.relative = row.created_at || '';
+        return row;
+    }
+
+    function appendActivity(existing, row) {
+        const list = (existing || []).slice();
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].id === row.id) {
+                list[i] = row;
+                return list;
+            }
+        }
+        list.push(row);
+        return list;
+    }
+
+    function pickKindTag(tags) {
+        for (let i = 0; i < (tags || []).length; i++) {
+            if (typeof tags[i] === 'string' && tags[i].indexOf('kind:') === 0) {
+                return tags[i];
+            }
+        }
+        return '';
+    }
+
+    function pickPhaseTag(tags) {
+        for (let i = 0; i < (tags || []).length; i++) {
+            if (typeof tags[i] === 'string' && tags[i].indexOf('phase:') === 0) {
+                return tags[i].substring('phase:'.length);
+            }
+        }
+        return '';
+    }
+
+    function truncateContent(s, n) {
+        s = s || '';
+        if (s.length <= n) { return s; }
+        return s.slice(0, n) + '…';
     }
 
     function decorateCI(ci) {
@@ -318,6 +394,11 @@
         decorateVerdict: decorateVerdict,
         decorateCommit: decorateCommit,
         decorateExcerpt: decorateExcerpt,
+        decorateActivity: decorateActivity,
+        appendActivity: appendActivity,
+        pickKindTag: pickKindTag,
+        pickPhaseTag: pickPhaseTag,
+        truncateContent: truncateContent,
         reindexProminent: reindexProminent
     };
 })();

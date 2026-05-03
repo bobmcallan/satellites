@@ -54,13 +54,15 @@ var distinctLedgerKinds = map[string]string{
 // SSR template renders it directly; the JSON composite endpoint marshals
 // it for reconnect refetch.
 type storyComposite struct {
-	Story      storyRow        `json:"story"`
-	SourceDocs []sourceDocLink `json:"source_documents"`
-	CIs        []ciCard        `json:"contract_instances"`
-	Verdicts   []verdictCard   `json:"verdicts"`
-	Commits    []commitCard    `json:"commits"`
-	Excerpts   []ledgerExcerpt `json:"ledger_excerpts"`
-	Delivery   deliveryStrip   `json:"delivery"`
+	Story         storyRow           `json:"story"`
+	SourceDocs    []sourceDocLink    `json:"source_documents"`
+	CIs           []ciCard           `json:"contract_instances"`
+	Verdicts      []verdictCard      `json:"verdicts"`
+	Commits       []commitCard       `json:"commits"`
+	Excerpts      []ledgerExcerpt    `json:"ledger_excerpts"`
+	Activity      []storyActivityRow `json:"activity"`
+	ActivityKinds []string           `json:"activity_kinds"`
+	Delivery      deliveryStrip      `json:"delivery"`
 }
 
 // sourceDocLink is the source-documents-panel view-model. Path is the
@@ -172,6 +174,8 @@ func buildStoryComposite(
 		c.Verdicts = verdictsForStory(ctx, ledgerStore, s.ProjectID, storyID, memberships)
 		c.Commits = commitsForStory(ctx, ledgerStore, s.ProjectID, storyID, memberships)
 		c.Excerpts = excerptsForStory(ctx, ledgerStore, s.ProjectID, storyID, memberships)
+		c.ActivityKinds = resolveStoryActivityKinds(ctx, ledgerStore, s.WorkspaceID, s.ProjectID, memberships)
+		c.Activity = buildStoryActivity(ctx, ledgerStore, s.ProjectID, storyID, c.ActivityKinds, memberships)
 		c.Delivery = applyDeliveryVerdict(c.Delivery, c.Verdicts)
 	}
 
