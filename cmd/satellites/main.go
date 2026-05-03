@@ -300,17 +300,12 @@ func main() {
 		// docs exist.
 		document.MigrateSkillContractBindings(ctx, docStore, logger, time.Now().UTC())
 
-		// Backfill required_role on pre-existing contract documents.
-		// Contracts without a required_role field in their structured
-		// payload receive role_orchestrator so the process-order gate's
-		// new grant check (story_85675c33) can hit a stable target.
-		// Idempotent: contracts that already carry required_role are
-		// untouched.
-		if n, err := stampRequiredRoleOnContracts(ctx, docStore, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("contract required_role backfill failed")
-		} else if n > 0 {
-			logger.Info().Int("rows", n).Msg("contract required_role backfill stamped")
-		}
+		// epic:roleless-agents — required_role backfill is no longer
+		// invoked. Contracts no longer declare a required_role; the
+		// process-order gate falls through cleanly when the field is
+		// empty (resolveRequiredRoleGrant returns nil). Function kept
+		// for migration paths that still reference it.
+		_ = stampRequiredRoleOnContracts
 
 		// Migrate pre-6.5 contract_instance rows off the legacy
 		// claimed_by_session_id column (story_4608a82c): first stamp
@@ -798,9 +793,12 @@ func ensureReviewerServiceGrant(
 	if docStore == nil || grantStore == nil || sessionStore == nil {
 		return "", nil
 	}
-	role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil)
-	if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
-		return "", nil
+	// epic:roleless-agents — reviewer role doc is no longer required.
+	// The grant binds session→agent directly. We still look up the role
+	// when present (back-compat for envs that haven't re-seeded yet).
+	roleID := ""
+	if role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil); err == nil && role.Type == document.TypeRole && role.Status == document.StatusActive {
+		roleID = role.ID
 	}
 	agent, err := docStore.GetByName(ctx, "", mcpserver.SeedAgentReviewerName, nil)
 	if err != nil || agent.Type != document.TypeAgent || agent.Status != document.StatusActive {
@@ -816,17 +814,17 @@ func ensureReviewerServiceGrant(
 		}
 	}
 	// Idempotence: if the session already carries an active grant for
-	// the reviewer role + agent, reuse it. A second boot finds the
-	// grant minted by the first boot and short-circuits.
+	// the reviewer agent, reuse it. A second boot finds the grant minted
+	// by the first boot and short-circuits.
 	if sess.OrchestratorGrantID != "" {
 		existing, gerr := grantStore.GetByID(ctx, sess.OrchestratorGrantID, nil)
-		if gerr == nil && existing.Status == rolegrant.StatusActive && existing.RoleID == role.ID && existing.AgentID == agent.ID {
+		if gerr == nil && existing.Status == rolegrant.StatusActive && existing.AgentID == agent.ID {
 			return existing.ID, nil
 		}
 	}
 	grant, err := grantStore.Create(ctx, rolegrant.RoleGrant{
 		WorkspaceID: workspaceID,
-		RoleID:      role.ID,
+		RoleID:      roleID,
 		AgentID:     agent.ID,
 		GranteeKind: rolegrant.GranteeSession,
 		GranteeID:   reviewerservice.ServiceSessionID,

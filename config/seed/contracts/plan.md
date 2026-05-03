@@ -1,7 +1,6 @@
 ---
 name: plan
 category: plan
-required_role: role_orchestrator
 required_categories: [plan]
 validation_mode: llm
 evidence_required: |

@@ -87,41 +87,18 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	grantA, _ := claimOrchestratorRole(t, ctx, mcpURL, "key_grc", sessionA)
 	require.NotEmpty(t, grantA, "agent_role_claim should mint a grant")
 
-	// Resolve the seed role_orchestrator's document id so every seeded
-	// contract's `required_role` matches the grant's RoleID (both
-	// compare as document ids, not names).
-	roles := callToolArray(t, ctx, mcpURL, "key_grc", "document_list", map[string]any{
-		"type":  "role",
-		"scope": "system",
-	})
-	roleID := ""
-	for _, raw := range roles {
-		m, _ := raw.(map[string]any)
-		if name, _ := m["name"].(string); name == "role_orchestrator" {
-			if id, _ := m["id"].(string); id != "" {
-				roleID = id
-				break
-			}
-		}
-	}
-	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
-	requiredRoleJSON := `{"category":"lifecycle","required_for_close":true,"validation_mode":"agent","required_role":"` + roleID + `"}`
-
-	// Seed the 3 lifecycle contract docs the workflow_claim will
-	// instantiate against. Each carries required_role so the claim gate
-	// exercises the full grant-based path. Unique names ("grctest_*")
-	// avoid colliding with the system-seeded contract docs (plan,
-	// develop, story_close) — those carry required_role as a name
-	// string ("role_orchestrator") which won't match the doc-id the
-	// grant stores on session_register, so the test owns its full
-	// contract set with doc-id required_role for a deterministic claim.
+	// epic:roleless-agents — contracts no longer carry required_role.
+	// The claim derives agent_id from the session's grant.AgentID
+	// (set by claimOrchestratorRole above), so no role binding is
+	// asserted at the contract layer.
+	contractStructured := `{"category":"lifecycle","required_for_close":true,"validation_mode":"agent"}`
 	contractNames := []string{"grctest_plan", "grctest_develop", "grctest_story_close"}
 	for _, name := range contractNames {
 		_ = callTool(t, ctx, mcpURL, "key_grc", "contract_create", map[string]any{
 			"scope":      "system",
 			"name":       name,
 			"body":       "contract " + name + " for release-reclaim test",
-			"structured": requiredRoleJSON,
+			"structured": contractStructured,
 		})
 	}
 
@@ -201,20 +178,20 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	})
 	assert.Equal(t, "released", rel["status"])
 
-	// Step 4: attempt to claim the plan CI under the same session — rejected.
-	// The session's OrchestratorGrantID still points at grant A, but
-	// grant A is no longer active, so resolveRequiredRoleGrant returns
-	// grant_required.
+	// Step 4: attempt to claim the plan CI under the same session WITHOUT
+	// supplying agent_id — rejected. epic:roleless-agents flipped the
+	// gate from required_role to agent-derivation: with grant A released,
+	// the session can no longer derive an active agent_id, so the call
+	// returns the structured agent_required error.
 	rejectResp := callToolRaw(t, ctx, mcpURL, "key_grc", "contract_claim", map[string]any{
 		"contract_instance_id": ciIDs[1],
 		"session_id":           sessionA,
-		"agent_id":             planAgent,
 	})
-	require.True(t, isToolError(rejectResp), "claim should fail after grant release")
+	require.True(t, isToolError(rejectResp), "claim should fail after grant release when no explicit agent_id is supplied")
 	rejectText := extractToolText(t, rejectResp)
 	assert.True(t,
-		strings.Contains(rejectText, "grant_required"),
-		"claim after release should report grant_required; got %s", rejectText,
+		strings.Contains(rejectText, "agent_required"),
+		"claim after release should report agent_required; got %s", rejectText,
 	)
 
 	// Step 5: re-claim the orchestrator role on session A → mints fresh
@@ -236,35 +213,34 @@ func TestAgentsRolesGrantReleaseReclaim_EndToEnd(t *testing.T) {
 	assert.Equal(t, "claimed", claim2["status"])
 }
 
-// claimOrchestratorRole performs the post-sty_a4074d21 dance:
-// session_register no longer mints a grant, so callers explicitly
-// agent_role_claim the seeded role_orchestrator + agent_claude_orchestrator
-// pair. The handler stamps the new grant id on the session row so the
-// contract_claim required_role gate finds it. Returns the grant id +
-// the system workspace id (useful for follow-up calls).
+// claimOrchestratorRole performs the post-sty_a4074d21 / epic:roleless-agents
+// dance: session_register no longer mints a grant, so callers explicitly
+// agent_role_claim against agent_claude_orchestrator. role_id is now
+// optional (epic:roleless-agents — agents are the sole capability tier);
+// the handler stamps the new grant id on the session row so the
+// contract_claim agent-derivation path finds it. Returns the grant id
+// + the system workspace id (useful for follow-up calls).
 func claimOrchestratorRole(t *testing.T, ctx context.Context, mcpURL, apiKey, sessionID string) (grantID, workspaceID string) {
 	t.Helper()
-	roles := callToolArray(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
-		"type":  "role",
+	agents := callToolArray(t, ctx, mcpURL, apiKey, "document_list", map[string]any{
+		"type":  "agent",
 		"scope": "system",
 	})
-	roleID := ""
-	for _, raw := range roles {
+	agentID := ""
+	for _, raw := range agents {
 		m, _ := raw.(map[string]any)
-		if name, _ := m["name"].(string); name == "role_orchestrator" {
-			roleID, _ = m["id"].(string)
+		if name, _ := m["name"].(string); name == "agent_claude_orchestrator" {
+			agentID, _ = m["id"].(string)
 			workspaceID, _ = m["workspace_id"].(string)
-			if roleID != "" {
+			if agentID != "" {
 				break
 			}
 		}
 	}
-	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
-	require.NotEmpty(t, workspaceID, "role_orchestrator must carry a workspace_id")
-	agentID := lookupSystemAgentID(t, ctx, mcpURL, apiKey, "agent_claude_orchestrator")
+	require.NotEmpty(t, agentID, "agent_claude_orchestrator seed must be resolvable")
+	require.NotEmpty(t, workspaceID, "agent_claude_orchestrator must carry a workspace_id")
 	out := callTool(t, ctx, mcpURL, apiKey, "agent_role_claim", map[string]any{
 		"workspace_id": workspaceID,
-		"role_id":      roleID,
 		"agent_id":     agentID,
 		"grantee_kind": "session",
 		"grantee_id":   sessionID,

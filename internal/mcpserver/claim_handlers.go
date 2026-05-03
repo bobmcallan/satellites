@@ -78,17 +78,25 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 	skillsUsed := req.GetStringSlice("skills_used", nil)
 	planMarkdown := req.GetString("plan_markdown", "")
-	// story_cc55e093: agent_id is REQUIRED and the permissions_claim
-	// arg is REJECTED. The orchestrator allocates a type=agent document
-	// to each CI before claim; the action_claim row's
-	// permission_patterns are sourced exclusively from the agent doc.
-	// Callers passing the legacy permissions_claim arg get a structured
-	// rejection so the deprecation is visible at the boundary.
+	// epic:roleless-agents — agent_id is OPTIONAL. Resolution order:
+	//   1. Explicit agent_id arg (kept for callers that want override / for tests).
+	//   2. Session's ACTIVE bound agent via OrchestratorGrantID → grant.AgentID.
+	//      A released grant does NOT resolve — callers must rebind first.
+	//   3. Structured agent_required error.
+	// The legacy permissions_claim arg remains REJECTED (story_cc55e093).
 	agentID := req.GetString("agent_id", "")
+	if agentID == "" && s.sessions != nil && s.grants != nil {
+		caller2, _ := UserFrom(ctx)
+		if sess, serr := s.sessions.Get(ctx, caller2.UserID, sessionID); serr == nil && sess.OrchestratorGrantID != "" {
+			if grant, gerr := s.grants.GetByID(ctx, sess.OrchestratorGrantID, nil); gerr == nil && grant.AgentID != "" && grant.Status == "active" {
+				agentID = grant.AgentID
+			}
+		}
+	}
 	if agentID == "" {
 		body, _ := json.Marshal(map[string]any{
 			"error":   "agent_required",
-			"message": "contract_claim requires agent_id; allocate a type=agent document to the CI before claiming",
+			"message": "contract_claim could not resolve an agent — supply agent_id arg or bind the session to an agent first (agent_role_claim)",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}

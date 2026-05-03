@@ -47,9 +47,11 @@ func (s *SurrealStore) Create(ctx context.Context, g RoleGrant, now time.Time) (
 	if err := g.Validate(); err != nil {
 		return RoleGrant{}, err
 	}
-	role, err := s.docs.GetByID(ctx, g.RoleID, nil)
-	if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
-		return RoleGrant{}, ErrDanglingRole
+	if g.RoleID != "" {
+		role, err := s.docs.GetByID(ctx, g.RoleID, nil)
+		if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
+			return RoleGrant{}, ErrDanglingRole
+		}
 	}
 	agent, err := s.docs.GetByID(ctx, g.AgentID, nil)
 	if err != nil || agent.Type != document.TypeAgent || agent.Status != document.StatusActive {

@@ -136,35 +136,14 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	})
 	_, _ = claimOrchestratorRole(t, ctx, mcpURL, "key_e2e", sessionID)
 
-	// Resolve the role_orchestrator doc id and re-seed each lifecycle
-	// contract with required_role pointing at that doc id. The boot-time
-	// seed writes contracts with `required_role: "role_orchestrator"`
-	// (a name string), but the claim gate compares the grant's RoleID
-	// (a doc id) against the contract's required_role field — a name vs
-	// id mismatch which surfaces as required_role_mismatch on claim.
-	// Mirrors the workaround in agents_roles_grant_release_reclaim_test.go.
-	roles := callToolArray(t, ctx, mcpURL, "key_e2e", "document_list", map[string]any{
-		"type":  "role",
-		"scope": "system",
-	})
-	roleID := ""
-	for _, raw := range roles {
-		m, _ := raw.(map[string]any)
-		if name, _ := m["name"].(string); name == "role_orchestrator" {
-			roleID, _ = m["id"].(string)
-			if roleID != "" {
-				break
-			}
-		}
-	}
-	require.NotEmpty(t, roleID, "role_orchestrator seed must be resolvable")
+	// epic:roleless-agents — contracts no longer carry required_role.
 	// validation_mode=llm so contract_close routes through the reviewer
 	// dispatcher (story_b4d1107c). The dispatcher's writeLLMUsageRow
 	// fires regardless of which Reviewer is wired, so llm_usage_ledger_id
 	// is populated on every close — both AcceptAll (no key) and Gemini
 	// (key present). When Gemini returns needs_more, the per-CI close
 	// loop retries via contract_respond.
-	requiredRoleJSON := `{"category":"lifecycle","required_for_close":true,"validation_mode":"llm","required_role":"` + roleID + `"}`
+	contractStructured := `{"category":"lifecycle","required_for_close":true,"validation_mode":"llm"}`
 	contractDocs := callToolArray(t, ctx, mcpURL, "key_e2e", "document_list", map[string]any{
 		"type":  "contract",
 		"scope": "system",
@@ -185,7 +164,7 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 		}
 		_ = callTool(t, ctx, mcpURL, "key_e2e", "document_update", map[string]any{
 			"id":         docID,
-			"structured": requiredRoleJSON,
+			"structured": contractStructured,
 		})
 	}
 

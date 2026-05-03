@@ -1,7 +1,6 @@
 ---
 name: story_close
 category: story-close
-required_role: role_orchestrator
 required_categories: [story-close]
 validation_mode: llm
 evidence_required: |

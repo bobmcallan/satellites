@@ -511,14 +511,12 @@ func TestRun_RealSeedDirShipsAllPrinciples(t *testing.T) {
 	}
 }
 
-// TestRun_RoleSeedLoadsOrchestratorAndReviewer (sty_a1a77518) — KindRole
-// loads `roles/*.md` into type=role, scope=system documents whose
-// Structured payload carries `allowed_mcp_verbs`, `required_hooks`,
-// `claim_requirements`, and `default_context_policy`. The parsed payload
-// must match the shape the in-Go seedOrchestratorDocs / seedReviewerDocs
-// path writes today, so the cutover in sty_db196ff4 is a no-op for
-// downstream consumers (agent_role_claim, resolveRequiredRoleGrant).
-func TestRun_RoleSeedLoadsOrchestratorAndReviewer(t *testing.T) {
+// TestRun_RoleSeedNotPresent (epic:roleless-agents) — confirms that
+// after the role tier was retired, the seed loader writes no role docs.
+// Replaces the legacy sty_a1a77518 test that expected role_orchestrator
+// and role_reviewer to be loaded. With agents as the sole capability
+// tier, GetByName("role_orchestrator") must miss.
+func TestRun_RoleSeedNotPresent(t *testing.T) {
 	t.Parallel()
 	seedDir, err := filepath.Abs(filepath.Join("..", "..", "config", "seed"))
 	if err != nil {
@@ -529,62 +527,9 @@ func TestRun_RoleSeedLoadsOrchestratorAndReviewer(t *testing.T) {
 	if _, err := Run(context.Background(), docs, seedDir, "wksp_sys", "system", now); err != nil {
 		t.Fatalf("Run real seed: %v", err)
 	}
-
-	// Mirrors the in-Go literal in cmd/satellites/main.go:seedOrchestratorDocs.
-	wantOrchestrator := map[string]any{
-		"allowed_mcp_verbs": []any{
-			"document_*", "story_*", "ledger_*", "project_*", "repo_*",
-			"workspace_*", "principle_*", "contract_*", "skill_*", "reviewer_*",
-			"agent_*", "role_*", "session_whoami", "satellites_info",
-		},
-		"required_hooks":         []any{"SessionStart", "PreToolUse", "enforce"},
-		"claim_requirements":     []any{},
-		"default_context_policy": "fresh-per-claim",
-	}
-	wantReviewer := map[string]any{
-		"allowed_mcp_verbs": []any{
-			"task_claim", "task_close", "task_get", "task_list",
-			"contract_review_close", "ledger_get", "ledger_list",
-			"document_get", "contract_get", "session_whoami",
-			"agent_role_claim", "agent_role_release", "agent_role_list",
-			"satellites_info",
-		},
-		"required_hooks":         []any{},
-		"claim_requirements":     []any{},
-		"default_context_policy": "fresh-per-claim",
-	}
-
-	cases := []struct {
-		name string
-		want map[string]any
-	}{
-		{"role_orchestrator", wantOrchestrator},
-		{"role_reviewer", wantReviewer},
-	}
-	for _, tc := range cases {
-		got, err := docs.GetByName(context.Background(), "", tc.name, nil)
-		if err != nil {
-			t.Errorf("GetByName %s: %v", tc.name, err)
-			continue
-		}
-		if got.Type != document.TypeRole {
-			t.Errorf("%s: type = %q, want role", tc.name, got.Type)
-		}
-		if got.Scope != document.ScopeSystem {
-			t.Errorf("%s: scope = %q, want system", tc.name, got.Scope)
-		}
-		if strings.TrimSpace(got.Body) == "" {
-			t.Errorf("%s: body must not be empty", tc.name)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(got.Structured, &payload); err != nil {
-			t.Errorf("%s: decode Structured: %v", tc.name, err)
-			continue
-		}
-		for key, want := range tc.want {
-			if !equalAny(payload[key], want) {
-				t.Errorf("%s: payload[%q] = %v, want %v", tc.name, key, payload[key], want)
-			}
+	for _, name := range []string{"role_orchestrator", "role_reviewer"} {
+		if _, err := docs.GetByName(context.Background(), "", name, nil); err == nil {
+			t.Errorf("expected role doc %q to be absent post-retire; found it", name)
 		}
 	}
 }

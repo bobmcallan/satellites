@@ -80,9 +80,6 @@ func (g RoleGrant) Validate() error {
 	if g.WorkspaceID == "" {
 		return errors.New("rolegrant: workspace_id is required")
 	}
-	if g.RoleID == "" {
-		return errors.New("rolegrant: role_id is required")
-	}
 	if g.AgentID == "" {
 		return errors.New("rolegrant: agent_id is required")
 	}

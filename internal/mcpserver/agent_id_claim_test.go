@@ -118,11 +118,33 @@ func TestClaim_AgentIDNotFound(t *testing.T) {
 	}
 }
 
-// TestClaim_RejectsMissingAgentID verifies story_cc55e093 AC1: claim
-// without agent_id returns a structured agent_required error.
-func TestClaim_RejectsMissingAgentID(t *testing.T) {
+// TestClaim_DerivesAgentIDFromSessionGrant — epic:roleless-agents.
+// agent_id is now optional. When the caller's session carries an
+// OrchestratorGrantID whose grant.AgentID resolves, contract_claim
+// succeeds without an explicit agent_id arg.
+func TestClaim_DerivesAgentIDFromSessionGrant(t *testing.T) {
 	t.Parallel()
 	f := newClaimFixture(t)
+	res, _ := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           f.sessionID,
+	}))
+	if res.IsError {
+		t.Fatalf("expected success when session has grant; got error %s", firstText(res))
+	}
+}
+
+// TestClaim_RejectsMissingAgentIDAndGrant — epic:roleless-agents. When
+// neither agent_id arg nor session grant is available, the structured
+// agent_required error fires. Replaces the legacy story_cc55e093 AC1
+// behaviour where agent_id was always required.
+func TestClaim_RejectsMissingAgentIDAndGrant(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	// Clear the session's orchestrator grant so derivation cannot succeed.
+	if _, err := f.server.sessions.SetOrchestratorGrant(f.ctx, "user_alice", f.sessionID, "", f.now); err != nil {
+		t.Fatalf("clear orchestrator grant: %v", err)
+	}
 	res, _ := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
 		"contract_instance_id": f.cis[0].ID,
 		"session_id":           f.sessionID,

@@ -1,6 +1,5 @@
 ---
 name: agent_gemini_reviewer
-permitted_roles: ["role_reviewer"]
 tier: flash
 tool_ceiling:
   - "task_claim"

@@ -1,7 +1,6 @@
 ---
 name: push
 category: push
-required_role: role_orchestrator
 required_categories: [push]
 validation_mode: llm
 evidence_required: |

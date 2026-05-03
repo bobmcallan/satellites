@@ -45,8 +45,11 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	projectID := getString(args, "project_id")
 	providerOverride := getString(args, "provider_override")
 
-	if workspaceID == "" || roleID == "" || granteeKind == "" || granteeID == "" {
-		return mcpgo.NewToolResultError("agent_role_claim requires workspace_id, role_id, grantee_kind, grantee_id"), nil
+	// epic:roleless-agents — role_id is now optional. When omitted, the
+	// claim binds the session directly to the agent; effective_verbs come
+	// from the agent's tool_ceiling alone (no role intersection).
+	if workspaceID == "" || granteeKind == "" || granteeID == "" {
+		return mcpgo.NewToolResultError("agent_role_claim requires workspace_id, grantee_kind, grantee_id"), nil
 	}
 	if providerOverride == "mechanical" {
 		return s.mechanicalClaimResponse(ctx, mechanical.TriggerForceFlag, workspaceID, projectID, roleID, agentID, granteeKind, granteeID, "provider_override=mechanical")
@@ -55,10 +58,6 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 		return s.mechanicalClaimResponse(ctx, mechanical.TriggerNoAgent, workspaceID, projectID, roleID, "", granteeKind, granteeID, "no agent_id supplied and no resolver configured")
 	}
 
-	roleDoc, err := s.docs.GetByID(ctx, roleID, nil)
-	if err != nil || roleDoc.Type != document.TypeRole || roleDoc.Status != document.StatusActive {
-		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role_id %q does not resolve to an active type=role document", roleID)), nil
-	}
 	agentDoc, err := s.docs.GetByID(ctx, agentID, nil)
 	if err != nil || agentDoc.Type != document.TypeAgent || agentDoc.Status != document.StatusActive {
 		return s.mechanicalClaimResponse(ctx, mechanical.TriggerNoAgent, workspaceID, projectID, roleID, agentID, granteeKind, granteeID, fmt.Sprintf("agent_id %q unresolved", agentID))
@@ -68,23 +67,29 @@ func (s *Server) handleAgentRoleClaim(ctx context.Context, req mcpgo.CallToolReq
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: agent %q structured payload malformed: %s", agentID, err)), nil
 	}
-	// permitted_roles entries may be doc ids (`doc_*`) or role doc
-	// *names* (e.g. `role_orchestrator`) — configseed loads agent
-	// frontmatter verbatim. Resolve names to ids before comparing
-	// so the gate accepts either form. story_a4074d21.
-	if !permittedRolesContains(ctx, s.docs, agentPayload.PermittedRoles, roleID) {
-		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role %q not in agent %q permitted_roles", roleID, agentID)), nil
-	}
 
-	rolePayload, err := decodeRolePayload(roleDoc.Structured)
-	if err != nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role %q structured payload malformed: %s", roleID, err)), nil
+	effective := agentPayload.ToolCeiling
+	if roleID != "" {
+		roleDoc, err := s.docs.GetByID(ctx, roleID, nil)
+		if err != nil || roleDoc.Type != document.TypeRole || roleDoc.Status != document.StatusActive {
+			return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role_id %q does not resolve to an active type=role document", roleID)), nil
+		}
+		// permitted_roles entries may be doc ids (`doc_*`) or role doc
+		// *names* (e.g. `role_orchestrator`) — configseed loads agent
+		// frontmatter verbatim. Resolve names to ids before comparing
+		// so the gate accepts either form. story_a4074d21.
+		if !permittedRolesContains(ctx, s.docs, agentPayload.PermittedRoles, roleID) {
+			return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role %q not in agent %q permitted_roles", roleID, agentID)), nil
+		}
+		rolePayload, err := decodeRolePayload(roleDoc.Structured)
+		if err != nil {
+			return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: role %q structured payload malformed: %s", roleID, err)), nil
+		}
+		if !ceilingCovers(agentPayload.ToolCeiling, rolePayload.AllowedMCPVerbs) {
+			return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: agent %q tool_ceiling does not cover role %q allowed_mcp_verbs", agentID, roleID)), nil
+		}
+		effective = intersectPatterns(agentPayload.ToolCeiling, rolePayload.AllowedMCPVerbs)
 	}
-	if !ceilingCovers(agentPayload.ToolCeiling, rolePayload.AllowedMCPVerbs) {
-		return mcpgo.NewToolResultError(fmt.Sprintf("agent_role_claim: agent %q tool_ceiling does not cover role %q allowed_mcp_verbs", agentID, roleID)), nil
-	}
-
-	effective := intersectPatterns(agentPayload.ToolCeiling, rolePayload.AllowedMCPVerbs)
 
 	now := time.Now().UTC()
 	var projectPtr *string
@@ -704,11 +709,12 @@ func decodeContractPayload(raw []byte) (contractPayload, error) {
 }
 
 // resolveGrantEffectiveVerbs returns the effective verb allowlist for a
-// grant id by reading the grant row, its role document, and its agent
-// document — returning the intersection of role.allowed_mcp_verbs and
-// agent.tool_ceiling. Empty slice on any lookup failure so callers can
-// distinguish "no verbs resolved" from "grant exists". Cost: three
-// store reads; acceptable on the session_whoami hot path.
+// grant id. epic:roleless-agents — when grant.RoleID is empty (the
+// roleless path), effective verbs are the agent's tool_ceiling alone.
+// When RoleID is present (back-compat), returns the intersection of
+// role.allowed_mcp_verbs and agent.tool_ceiling. Empty slice on any
+// lookup failure so callers can distinguish "no verbs resolved" from
+// "grant exists".
 func (s *Server) resolveGrantEffectiveVerbs(ctx context.Context, grantID string) []string {
 	if s.grants == nil || s.docs == nil {
 		return nil
@@ -717,21 +723,24 @@ func (s *Server) resolveGrantEffectiveVerbs(ctx context.Context, grantID string)
 	if err != nil {
 		return nil
 	}
-	role, err := s.docs.GetByID(ctx, grant.RoleID, nil)
-	if err != nil {
-		return nil
-	}
 	agent, err := s.docs.GetByID(ctx, grant.AgentID, nil)
-	if err != nil {
-		return nil
-	}
-	rp, err := decodeRolePayload(role.Structured)
 	if err != nil {
 		return nil
 	}
 	ap, err := decodeAgentPayload(agent.Structured)
 	if err != nil {
 		return nil
+	}
+	if grant.RoleID == "" {
+		return ap.ToolCeiling
+	}
+	role, err := s.docs.GetByID(ctx, grant.RoleID, nil)
+	if err != nil {
+		return ap.ToolCeiling
+	}
+	rp, err := decodeRolePayload(role.Structured)
+	if err != nil {
+		return ap.ToolCeiling
 	}
 	return intersectPatterns(ap.ToolCeiling, rp.AllowedMCPVerbs)
 }

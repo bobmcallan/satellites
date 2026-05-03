@@ -185,12 +185,15 @@ func (m *MemoryStore) Release(ctx context.Context, id, note string, now time.Tim
 	return g, nil
 }
 
-// resolveFK confirms RoleID + AgentID resolve to active documents of the
-// correct type.
+// resolveFK confirms AgentID resolves to an active type=agent document.
+// RoleID is validated only when supplied (epic:roleless-agents — the
+// role tier is now optional; agents are the sole capability tier).
 func (m *MemoryStore) resolveFK(ctx context.Context, g RoleGrant) error {
-	role, err := m.docs.GetByID(ctx, g.RoleID, nil)
-	if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
-		return ErrDanglingRole
+	if g.RoleID != "" {
+		role, err := m.docs.GetByID(ctx, g.RoleID, nil)
+		if err != nil || role.Type != document.TypeRole || role.Status != document.StatusActive {
+			return ErrDanglingRole
+		}
 	}
 	agent, err := m.docs.GetByID(ctx, g.AgentID, nil)
 	if err != nil || agent.Type != document.TypeAgent || agent.Status != document.StatusActive {

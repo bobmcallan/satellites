@@ -1,7 +1,6 @@
 ---
 name: merge_to_main
 category: merge_to_main
-required_role: role_orchestrator
 required_categories: [merge_to_main]
 validation_mode: llm
 evidence_required: |

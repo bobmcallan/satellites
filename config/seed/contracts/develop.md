@@ -1,7 +1,6 @@
 ---
 name: develop
 category: develop
-required_role: role_orchestrator
 required_categories: [develop]
 validation_mode: llm
 evidence_required: |

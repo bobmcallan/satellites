@@ -1,6 +1,5 @@
 ---
 name: agent_claude_orchestrator
-permitted_roles: ["role_orchestrator"]
 tool_ceiling: ["*"]
 tags: [v4, agents-roles, orchestrator]
 ---
