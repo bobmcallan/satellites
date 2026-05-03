@@ -189,10 +189,11 @@ func TestNav_NoActiveWSChip(t *testing.T) {
 }
 
 // TestNav_WorkspaceNameSingle asserts the active workspace name appears
-// exactly once in the rendered nav. The switcher button is the single
-// source of truth; the chip has been removed and the menu lists only
-// the OTHER workspaces (the active one is the button label, not a
-// switch target). story_4d1ef14f.
+// exactly twice in the rendered nav: once on the top-bar switcher
+// button (desktop) and once inside the hamburger dropdown's mobile
+// mirror (sty_9ab89ca3). The OTHER workspace appears twice as well —
+// once as a top-bar switch target, once as a mobile switch target.
+// story_4d1ef14f (original guard) extended by epic:mobile-view.
 func TestNav_WorkspaceNameSingle(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
@@ -229,11 +230,11 @@ func TestNav_WorkspaceNameSingle(t *testing.T) {
 	}
 	navOnly := body[headerStart:headerEnd]
 
-	if got := strings.Count(navOnly, activeName); got != 1 {
-		t.Errorf("active workspace name occurrences in nav = %d, want 1 (switcher button only); navOnly=%s", got, navOnly)
+	if got := strings.Count(navOnly, activeName); got != 2 {
+		t.Errorf("active workspace name occurrences in nav = %d, want 2 (top-bar switcher button + hamburger mobile mirror); navOnly=%s", got, navOnly)
 	}
-	if got := strings.Count(navOnly, otherName); got != 1 {
-		t.Errorf("other workspace name occurrences in nav = %d, want 1 (menu list item); navOnly=%s", got, navOnly)
+	if got := strings.Count(navOnly, otherName); got != 2 {
+		t.Errorf("other workspace name occurrences in nav = %d, want 2 (top-bar menu item + hamburger mobile switch link); navOnly=%s", got, navOnly)
 	}
 }
 

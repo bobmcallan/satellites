@@ -114,6 +114,7 @@ func TestMobileView_HamburgerSurfacesPrimaryNavLinks(t *testing.T) {
 		`data-testid="nav-mobile-link-tasks"`,
 		`data-testid="nav-mobile-link-config"`,
 		`data-testid="nav-mobile-link-help"`,
+		`data-testid="nav-mobile-workspace-active"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("nav.html missing primary-nav mirror %q", want)
@@ -126,6 +127,10 @@ func TestMobileView_HamburgerSurfacesPrimaryNavLinks(t *testing.T) {
 	mobileBlock := extractMobileBlock(t, css)
 	if !strings.Contains(mobileBlock, ".nav-dropdown-mobile-links") {
 		t.Errorf("mobile @media block must reveal .nav-dropdown-mobile-links")
+	}
+	// Top-bar workspace switcher must hide at mobile to make room.
+	if !strings.Contains(mobileBlock, ".nav-workspace") {
+		t.Errorf("mobile @media block must hide .nav-workspace from the top bar")
 	}
 }
 

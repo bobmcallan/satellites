@@ -68,12 +68,28 @@
       </button>
       <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
-        <!-- sty_9ab89ca3 — primary nav mirror for mobile width. The
-             top-bar .nav-links hide at ≤48rem (existing rule); this
-             block surfaces them inside the hamburger so projects /
-             tasks / config / help stay reachable on a phone. CSS
-             hides this block at desktop width. -->
+        <!-- sty_9ab89ca3 — primary nav + workspace switcher mirror for
+             mobile width. The top-bar .nav-links + .nav-workspace
+             hide at ≤48rem; this block surfaces them inside the
+             hamburger so projects / tasks / config / help and the
+             workspace list stay reachable on a phone. CSS hides this
+             block at desktop width. -->
         <div class="nav-dropdown-mobile-links" data-testid="nav-mobile-links">
+          {{if .Workspaces}}
+          {{$activeID := .ActiveWorkspace.ID}}
+          <div class="nav-dropdown-section-label">workspace</div>
+          <div class="nav-dropdown-mobile-active" data-testid="nav-mobile-workspace-active">{{if $activeID}}{{.ActiveWorkspace.Name}}{{else}}—{{end}}</div>
+          {{$hasOther := false}}
+          {{range .Workspaces}}{{if ne .ID $activeID}}{{$hasOther = true}}{{end}}{{end}}
+          {{if $hasOther}}
+            {{range .Workspaces}}
+            {{if ne .ID $activeID}}
+            <a href="/workspaces/select?id={{.ID}}&amp;next=/projects" data-testid="nav-mobile-workspace-switch-{{.ID}}">switch → {{.Name}}</a>
+            {{end}}
+            {{end}}
+          {{end}}
+          <div class="nav-dropdown-section-label">navigate</div>
+          {{end}}
           <a href="/projects" data-testid="nav-mobile-link-projects">projects</a>
           <a href="/tasks" data-testid="nav-mobile-link-tasks">tasks</a>
           <a href="/config" data-testid="nav-mobile-link-config">config</a>

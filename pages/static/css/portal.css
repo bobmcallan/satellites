@@ -2653,19 +2653,30 @@ button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
     .footer-slot { flex: 0 0 auto; width: 100%; justify-content: flex-start; }
     .footer-slot-right { justify-content: flex-start; }
 
-    /* slice 4: nav workspace switcher condense. The workspace
-       label can be long ("WORKSPACE / Personal Workspace") and
-       wraps awkwardly. At mobile we drop the WORKSPACE / prefix
-       via CSS — the switcher's purpose is implicit from context. */
-    .nav-workspace { margin-left: 0.5rem; }
-    .nav-workspace .btn-link { font-size: 0.7rem; }
+    /* slice 4: at mobile width the top-bar workspace switcher and
+       global-admin / dev chips eat too much horizontal space — hide
+       them; the workspace switcher reappears inside the hamburger
+       dropdown via .nav-dropdown-mobile-links. The top bar collapses
+       to brand + WS dot + hamburger, which fits a 360px viewport
+       cleanly. */
+    .nav-workspace,
+    .nav-global-admin-chip,
+    .nav-dev-chip { display: none; }
 
-    /* sty_9ab89ca3 — surface the primary nav links inside the
-       hamburger dropdown at mobile. The top-bar .nav-links hide
-       at this breakpoint (existing rule); without this rule the
-       operator has no way to reach /projects / /tasks / /config
-       / /help on a phone. */
+    /* sty_9ab89ca3 — surface the primary nav links + workspace
+       switcher inside the hamburger dropdown at mobile. */
     .nav-dropdown-mobile-links { display: flex; flex-direction: column; }
+    .nav-dropdown-section-label {
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-muted);
+        padding: 0.4rem 0.6rem 0.15rem;
+    }
+    .nav-dropdown-mobile-active {
+        padding: 0 0.6rem 0.3rem;
+        font-weight: 700;
+    }
 
     /* Filter chip strip — the chips already wrap via flex-wrap on
        .panel-filter-chips, just shrink them slightly. */
