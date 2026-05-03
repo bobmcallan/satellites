@@ -1,3 +1,10 @@
+> **[ARCHIVED]** This document describes a substrate state where
+> the role tier was a first-class primitive. The role tier has
+> been deleted (in principle by sty_c67ad430 + sty_0f7cea24, with
+> code-residue cleanup tracked by sty_92218a87). For the current
+> process, see `agent_process_v3.md`. Do not follow the role-grant
+> ceremony described below — it no longer exists.
+
 ## Agent process v2 — the actual process today
 
 This is the post-implementation snapshot of the verb chain a Claude

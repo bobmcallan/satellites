@@ -1,58 +1,40 @@
-## Agent process v3 — current substrate (post role-tier retirement)
+## Agent process v3 — current substrate
 
-This is the post-implementation snapshot of the verb chain a Claude
-session runs to take a story from `backlog` to `done`. It supersedes
-`agent_process_v2.md` after the role tier was retired
-(sty_c67ad430, sty_0f7cea24, commit `2aca005`) and the lived flow
-shifted to make the **agent doc the sole capability tier** and the
-**embedded reviewer non-trivial to satisfy**.
+This is the verb chain a Claude session runs to take a story from
+`backlog` to `done`. It supersedes `agent_process_v2.md`.
 
-If v2 says "agent_role_claim before contract_claim" — v3 says
-the role is implicit in the agent doc; you call agent_role_claim
-only when you want the role-grant audit row.
-
----
-
-## What changed vs `agent_process_v2.md`
-
-| Area | v2 | v3 (now) |
-|---|---|---|
-| Capability tier | Role doc + agent doc | **Agent doc only** (sty_c67ad430). `config/seed/roles/` directory deleted. Agent's `tool_ceiling` is the authority. |
-| `agent_role_claim` | Required before every `contract_claim` | Still wired (`internal/mcpserver/grant_handlers.go:21`) but `role_id` is optional. **Most flows skip it** — `contract_claim({agent_id})` resolves the agent and checks its tool ceiling directly. |
-| `permissions_claim` arg on `contract_claim` | Documented array of patterns | **Retired** (`claim_handlers.go:103-108`) — calls return `permissions_claim_retired`. Permission patterns come from the agent doc. |
-| `required_role` on contracts | Field in YAML frontmatter | **Removed from seed** — see `config/seed/contracts/*.md`. Gate code keeps a legacy fallback but seed writes none. The contract's `category` and the orchestrator's `agent_assignments` map drive routing now. |
-| Plan-CI close | Just write `kind:close-request` row | **Plan close requires ≥1 task enqueued against the plan CI** (`close_handlers.go:95-107`, error `plan_close_requires_tasks`). A plan that decomposes nothing is rejected by the substrate before the reviewer even sees it. |
-| Plan close evidence | "Inline kind:evidence row" | **Three artifacts the reviewer hard-rejects without** (`config/seed/contracts/plan.md`): `plan.md` (scope, files-to-change, approach, test strategy, AC mapping), `review-criteria.md` (per-AC verify / evidence / pass-fail boundary), and a readiness assessment (relevance, dependencies, prior delivery). File these as `type=artifact` ledger rows and pass their ids in `evidence_ledger_ids`. |
-| Develop close evidence | Test results | Test results **plus** `go vet ./...` + `gofmt -l .` output, the full commit message, `.version` patch-bump confirmation, and **file:line / SHA references for every AC** — declarative "AC met by construction" is auto-rejected. |
-| Push contract | "Ship the develop commit" | Same intent (`config/seed/contracts/push.md:14-22`); branch-agnostic ("current branch's upstream"). The Gemini reviewer occasionally misreads "develop commit" as a branch name on trunk-based repos — call it out in close evidence. |
-| Pre-existing flake handling | Undocumented | Reviewer expects a **`git stash -u --keep-index` round-trip** (or worktree round-trip on HEAD~1 if you've already committed). Just saying "this is pre-existing" gets rejected. |
-| Orientation verb | `story_get` + `contract_next` + `task_list` | **`task_walk({story_id})`** — single roundtrip returning `{story, contract_instances, current_ci_id, configuration_name}` (`task_walk_handler.go:18-60`). Returns CI list only — not separate "ready tasks". |
-| Reviewer in-loop | Body-arg `session_id` | Header-only under Streamable HTTP; embedded Gemini reviewer is the gate (`SATELLITES_REVIEWER_SERVICE=embedded`). |
+The unit of capability is the **agent doc**. An agent's
+`tool_ceiling` enumerates the MCP verbs that agent may call; its
+`permission_patterns` enumerates the file/shell patterns it may
+touch. The orchestrator's `agent_assignments` map (returned by
+`orchestrator_compose_plan`) binds one agent to each contract
+instance. There is no separate primitive between the agent and
+the contract instance — the agent IS what authorises the work.
 
 ---
 
 ## 1. Session bootstrap
 
-1. **`session_register({})`** — server mints UUIDv4 and returns it
-   via the `Mcp-Session-Id` header on `initialize`. Spec-compliant
-   clients echo it on every call. Body-arg `session_id` is
-   stdio/test-only.
+1. **`session_register({})`** — server mints a UUIDv4 and returns
+   it via the `Mcp-Session-Id` header on `initialize`.
+   Spec-compliant clients echo it on every call. Body-arg
+   `session_id` is stdio/test-only.
 2. **`session_register({project_id})`** — resume semantics. Returns
    the most recent non-stale session for `(user, project)` if one
    exists (`resumed=true`).
-3. (Optional) **`session_whoami({})`** — returns
-   `effective_verbs` from the agent's `tool_ceiling` (NOT a role
-   doc — that tier is gone).
+3. (Optional) **`session_whoami({})`** — smoke check; returns
+   `effective_verbs` derived from the active agent's
+   `tool_ceiling`.
 
 ---
 
 ## 2. Project context
 
-1. `git remote get-url origin`.
+1. `git remote get-url origin` (shell).
 2. **`project_set({repo_url})`** — binds the session to the project
    that owns the canonicalised remote.
 3. **On miss** (`status: no_project_for_remote`) ask the user
-   before `project_create`.
+   before calling `project_create`.
 
 Subsequent project-scoped verbs default to the bound project.
 
@@ -77,15 +59,17 @@ Subsequent project-scoped verbs default to the bound project.
    - writes the `kind:workflow-claim` row,
    - creates one CI per slot (default sequence
      `plan → develop → push → merge_to_main → story_close`),
-   - assigns a system agent to each CI via the
-     `agentRoleForContract` map
-     (`orchestrator_compose.go:231-247`):
-     plan/develop → `developer_agent`,
-     push/merge_to_main → `releaser_agent`,
-     story_close → `story_close_agent`,
+   - **assigns one agent to each CI** deterministically:
+     `plan` and `develop` → `developer_agent`,
+     `push` and `merge_to_main` → `releaser_agent`,
+     `story_close` → `story_close_agent`,
    - returns
      `{contract_instances, plan_ledger_id, workflow_claim_ledger_id,
       task_ids, agent_assignments}`.
+
+   The `agent_assignments` map is the dispatch source of truth —
+   each CI's assigned agent is what `contract_claim` will
+   authorise the work under.
 
    **Reviewer-loop alternative (preferred for new stories):**
    **`orchestrator_submit_plan({story_id, plan_markdown,
@@ -97,33 +81,29 @@ Subsequent project-scoped verbs default to the bound project.
 
 2. **`task_walk({story_id})`** — returns the freshly-composed CI
    list with `current_ci_id` pointing at the first non-terminal
-   CI.
+   CI. The CI list IS the task list — each row represents an
+   ordered (action, contract) pair the orchestrator will dispatch.
 
 ---
 
 ## 5. Per-CI cycle
 
-There is no per-CI role grant in v3. The agent doc is the
-authority. Optional `agent_role_release` / `agent_role_claim`
-calls remain for callers that want the audit-row trail, but the
-contract claim does not require an active grant.
-
-For each CI returned by `task_walk`:
+For each CI returned by `task_walk` (in `current_ci_id` order):
 
 ### 5a. Claim
 **`contract_claim({contract_instance_id, agent_id, plan_markdown,
 skills_used?})`** —
 - runs the predecessor gate (predecessors must be
   `passed`/`skipped`),
-- resolves agent permissions from the agent doc (`agent_id`
-  required; `permissions_claim` is RETIRED — pass it and you get
-  `permissions_claim_retired`),
+- resolves the agent doc by id and verifies its capability surface
+  (`agent.tool_ceiling`, `agent.permission_patterns`),
 - writes a `kind:action-claim` row + optional `kind:plan` row,
 - flips the CI to `claimed`.
 
-`agent_id` resolution order
-(`claim_handlers.go:81-109`): explicit arg → session's
-`OrchestratorGrantID` → grant's `AgentID` → error.
+The `agent_id` should come from the `agent_assignments` map
+returned by `orchestrator_compose_plan`. Same-session re-claim is
+treated as an amend: prior action-claim + plan rows are
+dereferenced and replaced.
 
 ### 5b. Plan CI specifics
 
@@ -134,8 +114,7 @@ A plan close that doesn't enqueue at least one task is rejected
 task_enqueue({
   origin: "story_stage",
   contract_instance_id: <plan-ci-id>,
-  required_role: "developer",   // or releaser, etc.
-  payload: <json>
+  payload: <json describing the work item>
 })
 ```
 
@@ -220,7 +199,10 @@ story_field_set({id, field: "regression_test_path", value: "..."})
 ```
 
 Then `contract_claim` → `contract_close` the story_close CI.
-Reviewer flips it to `passed`; substrate flips story to `done`.
+Reviewer flips the CI to `passed`. The story's auto-flip to
+`done` does NOT always fire — call `story_update_status({id,
+status: "done"})` manually after the reviewer accepts to confirm
+the transition.
 
 ### 5g. Close
 
@@ -229,9 +211,8 @@ evidence_markdown?, evidence_ledger_ids?})`** —
 - writes a `kind:close-request` row,
 - writes an inline `kind:evidence` row when `evidence_markdown`
   non-empty,
-- enqueues a `kind:review` task (`required_role=reviewer`) and
-  flips the CI to `pending_review` (production
-  `validation_mode=task`),
+- enqueues a `kind:review` task and flips the CI to
+  `pending_review` (production `validation_mode=task`),
 - the embedded Gemini reviewer claims that task on its own
   session and runs the rubric against the close evidence + every
   ledger row referenced in `evidence_ledger_ids` + the contract
@@ -241,7 +222,7 @@ evidence_markdown?, evidence_ledger_ids?})`** —
 
 The substrate appends a fresh CI of the same contract type with
 `PriorCIID` set. Read the latest `kind:verdict` row for the
-review questions, address them, then either:
+review questions, then either:
 
 - `contract_claim` the new CI with revised `plan_markdown` and
   re-close with stronger evidence, OR
@@ -263,19 +244,17 @@ the next non-terminal CI. Loop back to 5a.
 
 ## 6. Where the substrate's setup data lives
 
-`config/seed/` is the single source of truth. After role-tier
-retirement (sty_c67ad430) the layout is:
+`config/seed/` is the single source of truth.
 
 | Subdir | Document type | What lives here |
 |---|---|---|
-| `agents/` | `agent` | `developer_agent`, `releaser_agent`, `story_close_agent`, `story_reviewer`, `development_reviewer` (and gemini reviewer agents). `permitted_roles` is the legacy field, `tool_ceiling` is what enforces. |
-| `contracts/` | `contract` | per-slot contracts — `category`, `validation_mode`, `evidence_required` body. `required_role` removed from frontmatter. |
+| `agents/` | `agent` | `developer_agent`, `releaser_agent`, `story_close_agent`, `story_reviewer`, `development_reviewer`. The `tool_ceiling` field enforces the agent's capability scope; `permission_patterns` lists the file/shell patterns it may touch. |
+| `contracts/` | `contract` | per-slot contracts — `category`, `validation_mode`, `evidence_required` body. |
 | `workflows/` | `workflow` | prose workflow descriptions (slot algebra retired in story_af79cf95). |
 | `artifacts/` | `artifact` | `default_agent_process` — the handshake markdown the MCP server returns as its `instructions` block. |
 | `principles/` | `principle` | enforced rules (`pr_evidence`, `pr_root_cause`, `pr_no_unrequested_compat`, `pr_skills_reviewers_ad_hoc`, …). |
 | `story_templates/` | `story_template` | per-category required + done-hook fields. |
 | `replicate_vocabulary/` | `replicate_vocabulary` | natural-language → `portal_replicate` action mapping. |
-| ~~`roles/`~~ | — | **DELETED** in commit `2aca005` (sty_c67ad430). |
 
 Skills + reviewers (`type=skill`, `type=reviewer`) are not seeded
 — ad-hoc by principle (`pr_skills_reviewers_ad_hoc`).
@@ -293,9 +272,9 @@ session_register                              (server mints id; header carries i
   └─ project_set                              (or project_create on miss)
        └─ story_get
             └─ orchestrator_compose_plan      (or orchestrator_submit_plan loop)
-                 └─ task_walk                 (orient — single call, not story_get + contract_next + task_list)
+                 └─ task_walk                 (orient — single call)
                       └─ for each CI in sequence:
-                           ├─ contract_claim  (agent_id required; no permissions_claim; no role grant needed)
+                           ├─ contract_claim  (agent_id required; resolves directly)
                            ├─ task_enqueue    (plan CI ONLY — substrate gate)
                            ├─ ledger_append   (plan CI: plan-md, review-criteria-md, readiness-assessment)
                            ├─ ledger_append   (develop CI: lint output, ac-references, etc.)
@@ -305,27 +284,28 @@ session_register                              (server mints id; header carries i
                                 ↳ on rejected: substrate appends fresh CI; address verdict
                                    review_questions on next claim
                       └─ story_field_set      (every done-required template field BEFORE story_close CI)
-                      └─ (story_close CI flips story to done)
+                      └─ contract_claim/close story_close CI
+                      └─ story_update_status  (manual flip to done — auto-flip is unreliable)
 ```
 
 ---
 
 ## Field-tested gotchas
 
-These are the rejections I've seen in practice that v2 doesn't
-warn about. Treat them as default rules until proven otherwise.
+These are the rejections seen in practice walking sty_de9f10f9.
+Treat them as default rules until proven otherwise.
 
 1. **`proposed_contracts` MUST start with `plan`.** Reviewer
    rejects "missing plan contract" otherwise even if the plan is
    the CI you're currently inside.
 2. **Plan close needs `task_enqueue` first.** Substrate-level
    gate, returns `plan_close_requires_tasks` from
-   `contract_close`. Enqueue at least one downstream-role task
-   against the plan CI before close.
+   `contract_close`. Enqueue at least one task against the plan
+   CI before close.
 3. **`evidence_ledger_ids` must reference rows that contain the
    actual content** the reviewer asks for — not summaries. Write
-   the plan body / criteria / readiness as their own `type=artifact`
-   rows.
+   the plan body / criteria / readiness as their own
+   `type=artifact` rows.
 4. **Develop close needs lint output even when clean.** "go vet
    clean" stated declaratively gets rejected; paste the empty
    output of `go vet ./...` and `gofmt -l .` verbatim.
@@ -344,3 +324,7 @@ warn about. Treat them as default rules until proven otherwise.
    returns the failure prose as the tool's text content, which
    downstream JSON parsing trips over (root cause documented in
    sty_de9f10f9).
+9. **story_close auto-flip is unreliable.** Even after the
+   reviewer accepts the story_close CI, the story may stay in
+   `in_progress`. Call `story_update_status({id, status: "done"})`
+   manually to confirm.
