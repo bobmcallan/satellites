@@ -96,6 +96,39 @@ func TestMobileView_TaskFeedAndWalkDensity(t *testing.T) {
 	}
 }
 
+// TestMobileView_HamburgerSurfacesPrimaryNavLinks asserts the primary
+// nav links (projects / tasks / config / help) live inside the
+// hamburger dropdown so they're reachable at mobile width — the
+// top-bar .nav-links hide at ≤48rem and would otherwise leave the
+// operator unable to navigate.
+func TestMobileView_HamburgerSurfacesPrimaryNavLinks(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("../../pages/templates/nav.html")
+	if err != nil {
+		t.Fatalf("read nav.html: %v", err)
+	}
+	body := string(src)
+	for _, want := range []string{
+		`data-testid="nav-mobile-links"`,
+		`data-testid="nav-mobile-link-projects"`,
+		`data-testid="nav-mobile-link-tasks"`,
+		`data-testid="nav-mobile-link-config"`,
+		`data-testid="nav-mobile-link-help"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("nav.html missing primary-nav mirror %q", want)
+		}
+	}
+	css := readCSS(t)
+	if !strings.Contains(css, ".nav-dropdown-mobile-links { display: none; }") {
+		t.Errorf("portal.css must hide .nav-dropdown-mobile-links at desktop width")
+	}
+	mobileBlock := extractMobileBlock(t, css)
+	if !strings.Contains(mobileBlock, ".nav-dropdown-mobile-links") {
+		t.Errorf("mobile @media block must reveal .nav-dropdown-mobile-links")
+	}
+}
+
 // TestMobileView_NavMetaAndFooterStack asserts slice 4 (sty_ba2c9de8):
 // .kv-list collapses to single-column, footer 3-slot row stacks
 // vertically, and nav workspace switcher condenses.

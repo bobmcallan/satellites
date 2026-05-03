@@ -2660,6 +2660,13 @@ button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
     .nav-workspace { margin-left: 0.5rem; }
     .nav-workspace .btn-link { font-size: 0.7rem; }
 
+    /* sty_9ab89ca3 — surface the primary nav links inside the
+       hamburger dropdown at mobile. The top-bar .nav-links hide
+       at this breakpoint (existing rule); without this rule the
+       operator has no way to reach /projects / /tasks / /config
+       / /help on a phone. */
+    .nav-dropdown-mobile-links { display: flex; flex-direction: column; }
+
     /* Filter chip strip — the chips already wrap via flex-wrap on
        .panel-filter-chips, just shrink them slightly. */
     .panel-filter-chip { font-size: 0.65rem; }
@@ -2673,6 +2680,11 @@ button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
     /* Reduce portal-main side padding. */
     .portal-main { padding-left: 0.5rem; padding-right: 0.5rem; }
 }
+
+/* sty_9ab89ca3 — desktop-default: the hamburger's mobile-links
+   mirror is hidden. The mobile @media block above flips it to
+   display: flex at narrow widths. */
+.nav-dropdown-mobile-links { display: none; }
 
 /* sty_f315d848 — operator-override surface styling (status button-group
    + reason input + bulk action bar). The templates were shipped by

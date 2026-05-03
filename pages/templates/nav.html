@@ -68,6 +68,17 @@
       </button>
       <div class="nav-dropdown" x-cloak :class="hiddenWhenOpen" data-testid="nav-dropdown">
         <div class="nav-dropdown-user">{{.User.Email}}</div>
+        <!-- sty_9ab89ca3 — primary nav mirror for mobile width. The
+             top-bar .nav-links hide at ≤48rem (existing rule); this
+             block surfaces them inside the hamburger so projects /
+             tasks / config / help stay reachable on a phone. CSS
+             hides this block at desktop width. -->
+        <div class="nav-dropdown-mobile-links" data-testid="nav-mobile-links">
+          <a href="/projects" data-testid="nav-mobile-link-projects">projects</a>
+          <a href="/tasks" data-testid="nav-mobile-link-tasks">tasks</a>
+          <a href="/config" data-testid="nav-mobile-link-config">config</a>
+          <a href="/help" data-testid="nav-mobile-link-help">help</a>
+        </div>
         <a href="/settings" data-testid="nav-settings-link">settings</a>
         {{if .IsGlobalAdmin}}<a href="/admin/system-config" class="nav-admin-item" data-testid="nav-system-config-link">system config</a>{{end}}
         <form action="/auth/logout" method="post" class="nav-dropdown-form">
