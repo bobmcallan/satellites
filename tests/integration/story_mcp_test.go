@@ -130,6 +130,35 @@ func TestStoryMCPRoundTrip(t *testing.T) {
 		t.Errorf("initial status = %q, want backlog", status)
 	}
 
+	// sty_de9f10f9 — fill the feature template's required fields BEFORE
+	// walking the lifecycle. Root cause of the prior failure: the
+	// `feature` category template gates `in_progress` on
+	// field_present:user_story and `done` on acceptance_demo +
+	// fix_commit + regression_test_path + post_deploy_check. With those
+	// missing, story_update_status returned the gate-failure text as
+	// the tool's plain text content, and extractToolText handed
+	// json.Unmarshal a non-JSON string ("invalid character 'a' in
+	// literal true" — the 'a' in the explanation prose).
+	for _, field := range []struct{ name, value string }{
+		{"user_story", "As an integration test I want a complete feature story so that the in_progress gate passes."},
+		{"acceptance_demo", "Walk the story lifecycle backlog→ready→in_progress→done via MCP."},
+		{"fix_commit", "tests/integration/story_mcp_test.go"},
+		{"regression_test_path", "tests/integration/story_mcp_test.go"},
+		{"post_deploy_check", "Re-run TestStoryMCPRoundTrip against the live instance."},
+	} {
+		setResp := rpcCall(t, ctx, mcpURL, "key_story", map[string]any{
+			"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+			"params": map[string]any{
+				"name":      "story_field_set",
+				"arguments": map[string]any{"id": storyID, "field": field.name, "value": field.value},
+			},
+		})
+		setResult, _ := setResp["result"].(map[string]any)
+		if isErr, _ := setResult["isError"].(bool); isErr {
+			t.Fatalf("story_field_set %q failed: %s", field.name, extractToolText(t, setResp))
+		}
+	}
+
 	// story_list via tag filter must surface it.
 	listByTag := rpcCall(t, ctx, mcpURL, "key_story", map[string]any{
 		"jsonrpc": "2.0", "id": 5, "method": "tools/call",
