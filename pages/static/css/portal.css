@@ -2503,6 +2503,177 @@ button.mcp-copy-btn:hover { color: var(--color-fg); }
 button.mcp-copy-btn:focus-visible { outline: 1px dotted var(--color-fg); outline-offset: 1px; }
 button.mcp-copy-btn[data-copied="true"] { color: var(--color-fg); }
 
+/* ============================================================
+   epic:mobile-view — view-mode parity at narrow viewports.
+   Single 48rem (768px) breakpoint mirrors the existing nav rule.
+   No new colour tokens; light/dark parity preserved through the
+   existing [data-theme="dark"] overrides on each base class.
+
+   Strategy:
+   - Slice 1 (sty_11f60d6d): hide every action affordance via one
+     selector list; reduce body font-size for reading density.
+   - Slice 2 (sty_f8791f88): stories panel + contracts sub-table
+     collapse — thead hides, tr/td render as block-level cards.
+   - Slice 3 (sty_dc8349d8): task-table on /projects/{id}/tasks
+     gets the same card collapse; story walk cards tighten padding
+     + font for phone density.
+   - Slice 4 (sty_ba2c9de8): .kv-list single-column; footer 3-slot
+     row stacks vertically; nav workspace switcher condenses.
+   ============================================================ */
+@media (max-width: 48rem) {
+    /* slice 1: action-affordance hide. Every write-path surface
+       hides at mobile width so view-mode is enforced by
+       construction. New action surfaces should be added to this
+       selector list as they ship. */
+    .story-bulk-bar,
+    .story-status-controls,
+    .panel-table-stories .col-select,
+    .panel-table-contracts .col-actions,
+    .ci-action-btn,
+    .status-reason-input { display: none !important; }
+
+    /* slice 1: reading-density font shrink. */
+    body { font-size: 0.8rem; }
+
+    /* slice 2: stories panel — table → card stack. thead hides;
+       tr.story-row becomes a block with a divider; the
+       td.col-id + td.col-status pair sits inline on the header
+       line, td.col-title takes its own line, the muted
+       priority + updated pair forms the footer. */
+    .panel-table-stories thead { display: none; }
+    .panel-table-stories,
+    .panel-table-stories tbody,
+    .panel-table-stories tr,
+    .panel-table-stories td { display: block; width: 100%; }
+    .panel-table-stories tbody tr.story-row {
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .panel-table-stories tbody tr.story-row td.col-id,
+    .panel-table-stories tbody tr.story-row td.col-status {
+        display: inline-block;
+        width: auto;
+        vertical-align: baseline;
+        margin-right: 0.6rem;
+    }
+    .panel-table-stories tbody tr.story-row td.col-title {
+        display: block;
+        margin: 0.25rem 0;
+    }
+    .panel-table-stories tbody tr.story-row td.col-priority,
+    .panel-table-stories tbody tr.story-row td.col-updated {
+        display: inline-block;
+        width: auto;
+        margin-right: 0.6rem;
+        color: var(--color-muted);
+        font-size: 0.7rem;
+    }
+    /* The detail row (sty_f4b87ea3 single-column wrapper) already
+       stacks vertically via flex-direction:column; just give it
+       the same edge padding as the parent row. */
+    .panel-table-stories tbody tr.story-detail > td {
+        padding: 0.5rem 0.6rem;
+    }
+
+    /* slice 2: contracts sub-table inside the expand row. Same
+       collapse as the parent table; sequence + status pill share
+       the header line, name takes the body line, agent muted
+       footer. */
+    .panel-table-contracts thead { display: none; }
+    .panel-table-contracts,
+    .panel-table-contracts tbody,
+    .panel-table-contracts tr,
+    .panel-table-contracts td { display: block; width: 100%; }
+    .panel-table-contracts tbody tr.story-contract-row {
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .panel-table-contracts tbody tr.story-contract-row td.col-seq,
+    .panel-table-contracts tbody tr.story-contract-row td.col-status {
+        display: inline-block;
+        width: auto;
+        margin-right: 0.5rem;
+    }
+    .panel-table-contracts tbody tr.story-contract-row td.col-name {
+        display: block;
+        margin: 0.2rem 0;
+    }
+    .panel-table-contracts tbody tr.story-contract-row td.col-agent {
+        display: block;
+        color: var(--color-muted);
+        font-size: 0.7rem;
+    }
+
+    /* slice 3: project task feed — same card-collapse pattern as
+       the stories panel applied to .task-table. The 3 panes
+       (Enqueued / In-flight / Closed) are already separate
+       <section class="panel-headed"> blocks, so they stack
+       vertically by default — no template change needed. */
+    .task-table thead { display: none; }
+    .task-table,
+    .task-table tbody,
+    .task-table tr,
+    .task-table td { display: block; width: 100%; }
+    .task-table tbody tr {
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .task-table tbody tr td { font-size: 0.7rem; }
+    .task-table tbody tr td:first-child { font-size: 0.75rem; }
+
+    /* slice 3: story walk page card density. The walk cards
+       (.walk-card) already stack vertically via the .walk-card-list
+       <ul>; tighten padding + font so more cards fit a phone
+       viewport. */
+    .walk-card { padding: 0.4rem 0.5rem; }
+    .walk-card-meta { font-size: 0.65rem; gap: 0.3rem; }
+    .walk-group-header { font-size: 0.75rem; margin: 0.4rem 0 0.25rem; }
+
+    /* slice 4: kv-list single-column. dt above dd, dt as a small
+       muted label. Used by the project meta panel + document
+       detail + repo + tasks views. */
+    .kv-list {
+        grid-template-columns: 1fr;
+        column-gap: 0;
+        row-gap: 0.3rem;
+    }
+    .kv-list dt {
+        font-size: 0.65rem;
+        margin-top: 0.4rem;
+    }
+    .kv-list dt:first-child { margin-top: 0; }
+
+    /* slice 4: footer 3-slot row stacks vertically. */
+    .footer-inner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.4rem;
+        padding: 0.5rem 0.6rem;
+    }
+    .footer-slot { flex: 0 0 auto; width: 100%; justify-content: flex-start; }
+    .footer-slot-right { justify-content: flex-start; }
+
+    /* slice 4: nav workspace switcher condense. The workspace
+       label can be long ("WORKSPACE / Personal Workspace") and
+       wraps awkwardly. At mobile we drop the WORKSPACE / prefix
+       via CSS — the switcher's purpose is implicit from context. */
+    .nav-workspace { margin-left: 0.5rem; }
+    .nav-workspace .btn-link { font-size: 0.7rem; }
+
+    /* Filter chip strip — the chips already wrap via flex-wrap on
+       .panel-filter-chips, just shrink them slightly. */
+    .panel-filter-chip { font-size: 0.65rem; }
+    .panel-search { font-size: 0.7rem; }
+
+    /* Reduce panel padding so panel content claims more of the
+       narrow viewport. */
+    .panel-body { padding: 0.5rem 0.6rem; }
+    .panel-header { padding: 0.4rem 0.6rem; }
+
+    /* Reduce portal-main side padding. */
+    .portal-main { padding-left: 0.5rem; padding-right: 0.5rem; }
+}
+
 /* sty_f315d848 — operator-override surface styling (status button-group
    + reason input + bulk action bar). The templates were shipped by
    sty_1d6751e9 referencing classes that had no CSS, so the disabled
