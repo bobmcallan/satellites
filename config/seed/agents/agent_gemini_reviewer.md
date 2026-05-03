@@ -30,6 +30,8 @@ provider_chain=gemini/2.5-flash. `permitted_roles` pins
 (verdict commits), and the ledger/document reads needed to
 assemble the review packet.
 
-The service runs alongside the satellites server when
-`SATELLITES_REVIEWER_SERVICE=embedded`; it claims `kind:review`
-tasks from the queue and returns verdicts.
+The service runs alongside the satellites server when the system-tier
+KV row `reviewer.service.mode` resolves to `embedded` (the default).
+It claims `kind:review` tasks from the queue and returns verdicts.
+Operators flip the value via `kv_set` at scope=system; the next boot
+picks it up.

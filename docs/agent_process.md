@@ -162,7 +162,8 @@ File edits, shell commands, etc. — bounded by the agent's
      reviewer dispatches and the CI flips directly to `passed` /
      `failed`.
 2. **The internal Gemini reviewer runtime** (sty_224621bd, run as an
-   in-server goroutine when `SATELLITES_REVIEWER_SERVICE=embedded`)
+   in-server goroutine when the system-tier KV row
+   `reviewer.service.mode` resolves to `embedded` — the default)
    then claims the queued `kind:review` task on its own session +
    `role_reviewer` grant, runs the rubric against the close evidence,
    and calls `contract_review_close` with `verdict ∈ {accepted,

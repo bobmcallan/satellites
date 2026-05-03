@@ -126,6 +126,13 @@ func main() {
 		repoIndexer      codeindex.Indexer
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
+		// reviewerServiceMode is the resolved value of the system-tier KV
+		// row `reviewer.service.mode` — the substrate-managed source of
+		// truth for whether the embedded reviewer goroutine starts.
+		// Defaults to "embedded" when no row resolves so out-of-the-box
+		// boots have a working close path. Operators flip the row via
+		// `kv_set` at scope=system; the next boot picks it up.
+		reviewerServiceMode = reviewerservice.ModeEmbedded
 
 		surrealDocChunks    document.ChunkStore
 		surrealLedgerChunks ledger.ChunkStore
@@ -384,13 +391,24 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("validation_mode KV seed failed")
 		}
 
+		// Reviewer service mode lives on the system-tier KV row
+		// `reviewer.service.mode` (default "embedded"). Application
+		// behaviour belongs in the substrate's KV layer, not in
+		// infrastructure secrets. Operators flip the value via `kv_set`
+		// at scope=system; the next boot picks it up.
+		if err := seedSystemReviewerServiceMode(ctx, ledgerStore, time.Now().UTC()); err != nil {
+			logger.Warn().Str("error", err.Error()).Msg("reviewer_service KV seed failed")
+		}
+		reviewerServiceMode = resolveReviewerServiceMode(ctx, ledgerStore)
+		logger.Info().Str("mode", reviewerServiceMode).Msg("reviewer service mode resolved")
+
 		// epic:v4-lifecycle-refactor sty_62d4b438: when the reviewer
 		// service is wired in embedded mode, mint (or reuse) an active
 		// role-grant pinning the service's session id to role_reviewer.
 		// The grant is the prerequisite for the service goroutine —
 		// without it, task_claim and contract_review_close fail the
 		// session-role gate (sty_8490f906).
-		if cfg.ReviewerService == reviewerservice.ModeEmbedded {
+		if reviewerServiceMode == reviewerservice.ModeEmbedded {
 			grantID, err := ensureReviewerServiceGrant(ctx, docStore, grantStore, sessionStore, systemWsID, time.Now().UTC())
 			if err != nil {
 				logger.Warn().Str("error", err.Error()).Msg("reviewer service grant mint failed; service will not start")
@@ -576,11 +594,9 @@ func main() {
 	// service. Runs as an in-process goroutine consuming kind:review
 	// tasks from the queue, invoking the gemini reviewer against the
 	// rubric + evidence, and committing the verdict via
-	// CommitReviewVerdict. Disabled unless SATELLITES_REVIEWER_SERVICE=embedded
-	// AND the reviewer + task stores are wired. The boot-time grant
-	// minted earlier (sty_62d4b438) gives the service its
-	// role_reviewer authorisation.
-	if cfg.ReviewerService == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
+	// CommitReviewVerdict. Mode is resolved from the system-tier KV row
+	// `reviewer.service.mode` (default "embedded") earlier at boot.
+	if reviewerServiceMode == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
 		commitFn := func(
 			ctx context.Context,
 			ciID, verdict, rationale, reviewTaskID, actor string,
@@ -668,6 +684,59 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info().Msg("server stopped cleanly")
+}
+
+// reviewerServiceModeKVKey is the system-tier KV key the boot loop
+// resolves to decide whether the embedded reviewer goroutine starts.
+// Application config belongs in the substrate's KV layer, not in
+// process env vars or infrastructure secrets.
+const reviewerServiceModeKVKey = "reviewer.service.mode"
+
+// seedSystemReviewerServiceMode writes the default "embedded" value
+// onto the system-tier KV row `reviewer.service.mode` when no system-
+// scope value exists yet. Idempotent — operator-set rows or an
+// existing system seed are left untouched. Operators flip the value
+// via `kv_set` at scope=system; the next boot picks it up.
+func seedSystemReviewerServiceMode(ctx context.Context, ledgerStore ledger.Store, now time.Time) error {
+	if ledgerStore == nil {
+		return nil
+	}
+	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, reviewerServiceModeKVKey, ledger.KVResolveOptions{}, []string{""})
+	if err != nil {
+		return fmt.Errorf("resolve existing reviewer_service mode: %w", err)
+	}
+	if found && row.Scope == ledger.KVScopeSystem {
+		return nil
+	}
+	if _, err := ledgerStore.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: "",
+		Type:        ledger.TypeKV,
+		Tags:        []string{"scope:system", "key:" + reviewerServiceModeKVKey},
+		Content:     reviewerservice.ModeEmbedded,
+		CreatedBy:   "system",
+	}, now); err != nil {
+		return fmt.Errorf("seed reviewer_service KV: %w", err)
+	}
+	return nil
+}
+
+// resolveReviewerServiceMode reads the resolved value of the system-
+// tier KV row `reviewer.service.mode`. Falls back to "embedded" when
+// the ledger store is unwired or no row resolves so out-of-the-box
+// boots have a working close path.
+func resolveReviewerServiceMode(ctx context.Context, ledgerStore ledger.Store) string {
+	if ledgerStore == nil {
+		return reviewerservice.ModeEmbedded
+	}
+	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, reviewerServiceModeKVKey, ledger.KVResolveOptions{}, []string{""})
+	if err != nil || !found {
+		return reviewerservice.ModeEmbedded
+	}
+	v := strings.TrimSpace(strings.ToLower(row.Value))
+	if v == "" {
+		return reviewerservice.ModeEmbedded
+	}
+	return v
 }
 
 // seedSystemValidationMode appends a system-tier

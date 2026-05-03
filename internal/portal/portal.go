@@ -265,6 +265,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/repos/{id}/symbols/{symbol_id}", p.handleRepoSymbolSource)
 	mux.HandleFunc("GET /api/repos/{id}/diff", p.handleRepoDiff)
 	mux.HandleFunc("POST /api/repos/{id}/reindex", p.handleRepoReindex)
+	mux.HandleFunc("POST /api/stories/{id}/status", p.handleStoryStatusUpdate)
 	mux.HandleFunc("GET /roles", p.handleRoles)
 	mux.HandleFunc("GET /agents", p.handleAgents)
 	mux.HandleFunc("GET /grants", p.handleGrants)

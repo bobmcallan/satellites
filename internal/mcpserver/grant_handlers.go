@@ -473,8 +473,9 @@ const (
 
 // Reviewer service seed canonical names (epic:v4-lifecycle-refactor
 // sty_62d4b438). main.go's boot sequence creates these system-scope
-// docs and, when SATELLITES_REVIEWER_SERVICE=embedded, mints a grant
-// pinning the embedded reviewer service's session id to role_reviewer.
+// docs and, when the system-tier KV row `reviewer.service.mode`
+// resolves to "embedded" (the default), mints a grant pinning the
+// embedded reviewer service's session id to role_reviewer.
 const (
 	SeedRoleReviewerName  = "role_reviewer"
 	SeedAgentReviewerName = "agent_gemini_reviewer"

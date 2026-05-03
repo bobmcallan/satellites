@@ -4,15 +4,17 @@
 // flip the CI to passed/failed.
 //
 // Today the worker runs as an in-process goroutine wired by
-// cmd/satellites/main.go when SATELLITES_REVIEWER_SERVICE=embedded.
-// The shape is forward-compatible with a separate-process worker
-// (ModeExternal) — the queue + role-grant primitives both work
-// equally well across processes.
+// cmd/satellites/main.go. The mode is sourced from the system-tier
+// KV row `reviewer.service.mode` (default "embedded") — application
+// behaviour belongs in the substrate, not in process env or
+// infrastructure secrets. The shape is forward-compatible with a
+// separate-process worker (ModeExternal) — the queue + role-grant
+// primitives both work equally well across processes.
 //
 // epic:v4-lifecycle-refactor sty_6077711d / sty_62d4b438.
 package service
 
-// Mode enum values for SATELLITES_REVIEWER_SERVICE.
+// Mode enum values for the system-tier KV row `reviewer.service.mode`.
 //
 //   - ModeEmbedded runs the reviewer as an in-process goroutine.
 //   - ModeExternal is the placeholder for a separate-process worker
