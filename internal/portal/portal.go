@@ -135,6 +135,18 @@ type wsChip struct {
 	Name string
 }
 
+// displayWorkspaceName trims the seeded "Personal (<userID>)" suffix that
+// workspace.EnsureDefault stamps on a freshly minted personal workspace
+// (sty_26e2f2e5). The full id stays in storage; the switcher button, mobile
+// active-line, and SSR <title> only need the short label. Custom names —
+// anything that doesn't match the seeded shape exactly — are returned as-is.
+func displayWorkspaceName(name string) string {
+	if strings.HasPrefix(name, workspace.DefaultNamePrefix+" (") && strings.HasSuffix(name, ")") {
+		return workspace.DefaultNamePrefix
+	}
+	return name
+}
+
 // buildPageTitle composes the SSR <title> per story_f7152e83. Pattern:
 //
 //	SATELLITES — <project|workspace>[ — <page>]
@@ -186,7 +198,7 @@ func (p *Portal) memberWorkspaces(r *http.Request, user auth.User) ([]wsChip, []
 	chips := make([]wsChip, 0, len(list))
 	ids := make([]string, 0, len(list))
 	for _, w := range list {
-		chips = append(chips, wsChip{ID: w.ID, Name: w.Name})
+		chips = append(chips, wsChip{ID: w.ID, Name: displayWorkspaceName(w.Name)})
 		ids = append(ids, w.ID)
 	}
 	return chips, ids

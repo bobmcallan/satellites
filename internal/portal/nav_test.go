@@ -10,6 +10,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 // TestNav_HasFlexContainer asserts the nav children sit inside a
@@ -394,4 +395,72 @@ func TestNav_LogoutInDropdownNotInline(t *testing.T) {
 	if strings.Contains(body, `class="nav-logout"`) {
 		t.Errorf("legacy inline nav-logout class still present — should be removed")
 	}
+}
+
+// TestDisplayWorkspaceName covers the trim helper directly: the seeded
+// "Personal (<userID>)" shape collapses to just "Personal"; anything that
+// doesn't match the seeded shape is passed through. story_26e2f2e5.
+func TestDisplayWorkspaceName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"Personal (u_google:bobmcallan@gmail.com)", "Personal"},
+		{"Personal (u_alice)", "Personal"},
+		{workspace.DefaultNamePrefix + " (u_xyz)", workspace.DefaultNamePrefix},
+		{"Personal", "Personal"},               // no parens — pass through
+		{"alpha-ws", "alpha-ws"},               // custom name — pass through
+		{"Team (eng)", "Team (eng)"},           // not the seeded prefix — pass through
+		{"Personal Stuff", "Personal Stuff"},   // prefix without "(" — pass through
+		{"Personal (no-close", "Personal (no-close"}, // unbalanced — pass through
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := displayWorkspaceName(tc.in); got != tc.want {
+			t.Errorf("displayWorkspaceName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestNav_WorkspaceSwitcher_StripsSeededUserSuffix asserts the WORKSPACE
+// switcher button (top-bar + mobile mirror) renders the trimmed label and
+// does NOT leak the user-id portion of the seeded "Personal (<userID>)"
+// workspace name. story_26e2f2e5.
+func TestNav_WorkspaceSwitcher_StripsSeededUserSuffix(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Env: "dev", DevMode: true}
+	p, users, sessions, ws := newPortalWithWorkspace(t, cfg)
+	mux := http.NewServeMux()
+	p.Register(mux)
+
+	user := auth.User{ID: "u_google:bobmcallan@gmail.com", Email: "bobmcallan@gmail.com"}
+	users.Add(user)
+	seededName := workspace.DefaultNamePrefix + " (" + user.ID + ")"
+	if _, err := ws.Create(testCtx(), user.ID, seededName, time.Now().UTC()); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sess.ID})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	headerStart := strings.Index(body, `<header class="portal-nav nav"`)
+	headerEnd := strings.Index(body, `</header>`)
+	if headerStart < 0 || headerEnd < 0 || headerEnd < headerStart {
+		t.Fatalf("nav header markers missing; body=%s", body)
+	}
+	navOnly := body[headerStart:headerEnd]
+
+	if !strings.Contains(navOnly, "WORKSPACE / "+workspace.DefaultNamePrefix) {
+		t.Errorf("nav must render trimmed label `WORKSPACE / Personal`; navOnly=%s", navOnly)
+	}
+	if strings.Contains(navOnly, user.ID) {
+		t.Errorf("nav must NOT leak the seeded `(%s)` suffix from the workspace label; navOnly=%s", user.ID, navOnly)
+	}
+	// The workspace name still appears verbatim in the user-email line of
+	// the hamburger dropdown — that's a different surface and unaffected.
 }
