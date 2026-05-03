@@ -27,20 +27,55 @@ function toasts() {
     };
 }
 
-// panels store (sty_70c0f7a3) — URL is the source of truth for which
-// panels are open on /projects/{id}. `?expand=stories,documents` lists
-// the open keys; absence falls back to per-panel data-default-expanded.
-// Toggling rewrites the URL via history.replaceState; nothing is
-// persisted server-side, so the page remains stateless and shareable.
+// Panel keys recognised by the project page. Anything in `?expand=`
+// not listed here is treated as an entity id (sty_*, doc_*, ci_*, etc.)
+// and routed to its owning panel via PANEL_KEYS_BY_ID_PREFIX.
+const PANEL_KEYS = [
+    'meta', 'stories', 'documents', 'contracts',
+    'configuration', 'repo', 'changelog', 'ledger',
+];
+const PANEL_KEYS_SET = (function () {
+    const m = {};
+    for (let i = 0; i < PANEL_KEYS.length; i++) { m[PANEL_KEYS[i]] = true; }
+    return m;
+})();
+const PANEL_KEYS_BY_ID_PREFIX = {
+    'sty_': 'stories',
+    'doc_': 'documents',
+    'ci_':  'contracts',
+    'ldg_': 'ledger',
+    'cl_':  'changelog',
+};
+function panelForEntityID(token) {
+    for (const pfx in PANEL_KEYS_BY_ID_PREFIX) {
+        if (token.indexOf(pfx) === 0) { return PANEL_KEYS_BY_ID_PREFIX[pfx]; }
+    }
+    return '';
+}
+
+// panels store (sty_70c0f7a3, sty_43d72112) — URL is the source of truth
+// for which panels are open on /projects/{id}. `?expand=` is a
+// comma-separated set whose tokens are EITHER panel keys (stories,
+// documents, ...) OR entity ids (sty_*, doc_*, ci_*). Entity-id tokens
+// implicitly open their owning panel; default-open panels (per
+// `data-default-expanded`) are layered on top, never erased by a
+// non-empty URL list. Toggling rewrites the URL via history.replaceState
+// (defaults are not written — the bare URL stays bare).
 function panelsStoreInit(store) {
     const params = new URLSearchParams(window.location.search);
-    if (params.has('expand')) {
-        store._urlMode = true;
-        const set = params.get('expand').split(',').map(s => s.trim()).filter(Boolean);
-        const next = {};
-        set.forEach(k => { next[k] = true; });
-        store._expanded = next;
+    if (!params.has('expand')) { return; }
+    const tokens = params.get('expand').split(',').map(s => s.trim()).filter(Boolean);
+    const next = Object.assign({}, store._expanded);
+    for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (PANEL_KEYS_SET[t]) {
+            next[t] = true;
+        } else {
+            const owner = panelForEntityID(t);
+            if (owner) { next[owner] = true; }
+        }
     }
+    store._expanded = next;
 }
 
 // sectionToggle (story_25695308; URL-state for sty_70c0f7a3) —
@@ -55,11 +90,17 @@ function sectionToggle() {
         init() {
             const ds = (this.$el && this.$el.dataset) || {};
             this._key = ds.toggleKey || '';
-            const def = ds.defaultExpanded !== 'false';
+            const def = ds.defaultExpanded === 'true';
             const store = Alpine.store('panels');
             if (!this._key || !store) { return; }
-            if (!store._urlMode && def) {
-                store._expanded = Object.assign({}, store._expanded, { [this._key]: true });
+            // sty_43d72112 — defaults always layer on top of URL state.
+            // Track default-open keys so _writeURL can skip them and the
+            // bare-URL invariant survives the user toggling other panels.
+            if (def) {
+                store._defaults = Object.assign({}, store._defaults, { [this._key]: true });
+                if (!store._expanded[this._key]) {
+                    store._expanded = Object.assign({}, store._expanded, { [this._key]: true });
+                }
             }
         },
         toggle() {
@@ -177,19 +218,21 @@ function storyPanel() {
             this.expanded = this.expanded === id ? '' : id;
             this._syncExpandToURL();
         },
-        // sty_a34cd88f — mirror this.expanded into the URL via
-        // history.replaceState so reloads + bookmarks keep the
-        // expansion. No history entry is added (replaceState, not
-        // pushState) — the expand toggle isn't navigation.
+        // sty_a34cd88f + sty_43d72112 — mirror this.expanded into the
+        // URL via history.replaceState so reloads + bookmarks keep the
+        // expansion. The `?expand=` slot is shared with the panels
+        // store: storyPanel owns the sty_* token only and preserves
+        // every other token (panel keys + non-sty entity ids).
         _syncExpandToURL() {
             if (typeof window === 'undefined' || !window.history || typeof window.history.replaceState !== 'function') { return; }
             try {
                 const url = new URL(window.location.href);
-                if (this.expanded) {
-                    url.searchParams.set('expand', this.expanded);
-                } else {
-                    url.searchParams.delete('expand');
-                }
+                const current = (url.searchParams.get('expand') || '')
+                    .split(',').map(s => s.trim()).filter(Boolean);
+                const others = current.filter(t => t.indexOf('sty_') !== 0);
+                const next = this.expanded ? others.concat([this.expanded]) : others;
+                if (next.length) { url.searchParams.set('expand', next.join(',')); }
+                else { url.searchParams.delete('expand'); }
                 window.history.replaceState(window.history.state, '', url.toString());
             } catch (err) { /* URL ctor or replaceState unavailable — best effort */ }
         },
@@ -294,14 +337,22 @@ function storyPanel() {
             this.$nextTick(() => { applyStoryOrder(this.$el, this.tokens.order); });
             this._attachRealtimeBridge();
         },
-        // sty_a34cd88f — seed this.expanded from ?expand=<sty_id> on
-        // page load so reloads + bookmarks restore the expansion.
+        // sty_a34cd88f + sty_43d72112 — seed this.expanded from the
+        // first sty_ token in the comma-separated `?expand=` list so
+        // reloads + bookmarks restore the expansion regardless of
+        // which other tokens (panel keys, doc ids, etc.) ride along.
         _readExpandFromURL() {
             if (typeof window === 'undefined' || !window.location) { return; }
             try {
                 const url = new URL(window.location.href);
-                const id = url.searchParams.get('expand') || '';
-                if (id) { this.expanded = id; }
+                const tokens = (url.searchParams.get('expand') || '')
+                    .split(',').map(s => s.trim()).filter(Boolean);
+                for (let i = 0; i < tokens.length; i++) {
+                    if (tokens[i].indexOf('sty_') === 0) {
+                        this.expanded = tokens[i];
+                        return;
+                    }
+                }
             } catch (err) { /* best effort */ }
         },
         destroy() {
@@ -829,7 +880,7 @@ document.addEventListener('click', function (ev) {
 document.addEventListener('alpine:init', () => {
     Alpine.store('panels', {
         _expanded: {},
-        _urlMode: false,
+        _defaults: {},
         init() { panelsStoreInit(this); },
         isOpen(key) { return !!this._expanded[key]; },
         toggle(key) {
@@ -838,10 +889,21 @@ document.addEventListener('alpine:init', () => {
             this._expanded = next;
             this._writeURL();
         },
+        // sty_43d72112 — write only the user-set delta (open panels that
+        // are NOT default-open) to the URL, and preserve any entity-id
+        // tokens (sty_*, doc_*, ci_*) the storyPanel and friends own.
+        // Two writers (panels + storyPanel) share the `?expand=` slot;
+        // each owns its own token class and merges with the other.
         _writeURL() {
             try {
                 const url = new URL(window.location.href);
-                const list = Object.keys(this._expanded).sort();
+                const current = (url.searchParams.get('expand') || '')
+                    .split(',').map(s => s.trim()).filter(Boolean);
+                const entityTokens = current.filter(t => !PANEL_KEYS_SET[t]);
+                const panelTokens = Object.keys(this._expanded)
+                    .filter(k => PANEL_KEYS_SET[k] && !this._defaults[k])
+                    .sort();
+                const list = panelTokens.concat(entityTokens);
                 if (list.length) { url.searchParams.set('expand', list.join(',')); }
                 else { url.searchParams.delete('expand'); }
                 window.history.replaceState({}, '', url);

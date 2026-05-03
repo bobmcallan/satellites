@@ -85,10 +85,13 @@ func TestProjectDetail_SectionOrder(t *testing.T) {
 }
 
 // TestProjectDetail_SectionToggle (story_25695308 AC5+AC6, sty_70c0f7a3
-// for the URL-state migration) — clicking a section header collapses it
-// and the state is preserved across page reloads via the `?expand=` URL
-// param (replacing sessionStorage). chromedp.Reload() preserves the URL
-// so the assertion shape is unchanged.
+// URL-state migration, sty_43d72112 layered-defaults model) — opening a
+// default-CLOSED section (contracts) writes the open state to `?expand=`
+// and the URL pin survives a reload. The inverse direction (closing a
+// default-OPEN panel persisting across reload) is intentionally NOT
+// preserved per sty_43d72112: defaults always layer on top of the URL
+// state so the bare URL stays bare and the `?expand=sty_*` row pin
+// can never accidentally hide its parent panel.
 func TestProjectDetail_SectionToggle(t *testing.T) {
 	h := StartHarness(t)
 
@@ -108,31 +111,102 @@ func TestProjectDetail_SectionToggle(t *testing.T) {
 	var bodyVisibleAfterClick, bodyVisibleAfterReload bool
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
-		chromedp.WaitVisible(`[data-testid="panel-stories"] .panel-body`, chromedp.ByQuery),
-		// Click the stories section header to collapse it.
-		chromedp.Click(`[data-testid="panel-stories"] .panel-header`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-testid="panel-contracts"]`, chromedp.ByQuery),
+		// Click the contracts header to OPEN it (default-closed).
+		chromedp.Click(`[data-testid="panel-contracts"] .panel-header`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(r => setTimeout(r, 100))`, nil, chromedp.EvalAsValue),
 		chromedp.Evaluate(`(() => {
-			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
+			const body = document.querySelector('[data-testid="panel-contracts"] .panel-body');
 			return body && body.offsetParent !== null;
 		})()`, &bodyVisibleAfterClick),
-		// Reload the page and assert the collapsed state persists.
+		// Reload — the open state rides on `?expand=contracts` and survives.
 		chromedp.Reload(),
-		chromedp.WaitVisible(`[data-testid="panel-stories"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-testid="panel-contracts"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(r => setTimeout(r, 100))`, nil, chromedp.EvalAsValue),
 		chromedp.Evaluate(`(() => {
-			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
+			const body = document.querySelector('[data-testid="panel-contracts"] .panel-body');
 			return body && body.offsetParent !== null;
 		})()`, &bodyVisibleAfterReload),
 	); err != nil {
 		t.Fatalf("section toggle: %v", err)
 	}
 
-	if bodyVisibleAfterClick {
-		t.Errorf("stories panel-body still visible after toggle; expected hidden")
+	if !bodyVisibleAfterClick {
+		t.Errorf("contracts panel-body not visible after toggle; expected open")
 	}
-	if bodyVisibleAfterReload {
-		t.Errorf("stories panel-body visible after reload; URL `?expand=` state not honoured")
+	if !bodyVisibleAfterReload {
+		t.Errorf("contracts panel-body not visible after reload; `?expand=` URL state not honoured")
+	}
+}
+
+// TestProjectDetail_ExpandStyAutoOpensStoriesPanel (sty_43d72112) —
+// loading the project URL with `?expand=sty_<id>` must auto-open the
+// stories panel so the URL-pinned row is visible. Also asserts the
+// default-open documents panel STAYS open under the layered-defaults
+// model — the URL row pin layers on top of defaults, never replaces.
+func TestProjectDetail_ExpandStyAutoOpensStoriesPanel(t *testing.T) {
+	h := StartHarness(t)
+
+	parent, cancel := withTimeout(context.Background(), browserDeadline)
+	defer cancel()
+	browserCtx, cancelBrowser := newChromedpContext(t, parent)
+	defer cancelBrowser()
+
+	if err := installSessionCookie(browserCtx, h); err != nil {
+		t.Fatalf("install session: %v", err)
+	}
+	projID, err := firstProjectID(browserCtx, h)
+	if err != nil {
+		t.Fatalf("locate project: %v", err)
+	}
+
+	// Discover a real story id on the project so the row-expand match
+	// has a concrete target. firstProjectID returns the first project
+	// the harness owns; the seed creates at least one story per project.
+	var styID string
+	if err := chromedp.Run(browserCtx,
+		chromedp.Navigate(h.BaseURL+"/projects/"+projID),
+		chromedp.WaitVisible(`[data-testid="panel-stories-table"] tr.story-row`, chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const r = document.querySelector('[data-testid="panel-stories-table"] tr.story-row');
+			return r ? r.dataset.id : '';
+		})()`, &styID),
+	); err != nil {
+		t.Fatalf("seed story lookup: %v", err)
+	}
+	if styID == "" {
+		t.Skip("project has no stories; cannot exercise sty_43d72112 path")
+	}
+
+	var storiesVisible, documentsVisible, rowExpanded bool
+	if err := chromedp.Run(browserCtx,
+		chromedp.Navigate(h.BaseURL+"/projects/"+projID+"?expand="+styID),
+		chromedp.WaitVisible(`[data-testid="panel-stories"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`new Promise(r => setTimeout(r, 150))`, nil, chromedp.EvalAsValue),
+		chromedp.Evaluate(`(() => {
+			const body = document.querySelector('[data-testid="panel-stories"] .panel-body');
+			return body && body.offsetParent !== null;
+		})()`, &storiesVisible),
+		chromedp.Evaluate(`(() => {
+			const body = document.querySelector('[data-testid="panel-documents"] .panel-body');
+			return body && body.offsetParent !== null;
+		})()`, &documentsVisible),
+		chromedp.Evaluate(`(() => {
+			const detail = document.querySelector('tr.story-detail[data-detail-for="`+styID+`"]');
+			return detail && detail.offsetParent !== null;
+		})()`, &rowExpanded),
+	); err != nil {
+		t.Fatalf("expand=sty navigate: %v", err)
+	}
+
+	if !storiesVisible {
+		t.Errorf("stories panel collapsed under ?expand=%s; should auto-open via id-prefix routing", styID)
+	}
+	if !documentsVisible {
+		t.Errorf("documents panel collapsed under ?expand=%s; default-open should be preserved (layered-defaults invariant)", styID)
+	}
+	if !rowExpanded {
+		t.Errorf("story row %s not expanded under ?expand=%s", styID, styID)
 	}
 }
 
