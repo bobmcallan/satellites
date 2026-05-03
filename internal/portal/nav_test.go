@@ -409,10 +409,10 @@ func TestDisplayWorkspaceName(t *testing.T) {
 		{"Personal (u_google:bobmcallan@gmail.com)", "Personal"},
 		{"Personal (u_alice)", "Personal"},
 		{workspace.DefaultNamePrefix + " (u_xyz)", workspace.DefaultNamePrefix},
-		{"Personal", "Personal"},               // no parens — pass through
-		{"alpha-ws", "alpha-ws"},               // custom name — pass through
-		{"Team (eng)", "Team (eng)"},           // not the seeded prefix — pass through
-		{"Personal Stuff", "Personal Stuff"},   // prefix without "(" — pass through
+		{"Personal", "Personal"},                     // no parens — pass through
+		{"alpha-ws", "alpha-ws"},                     // custom name — pass through
+		{"Team (eng)", "Team (eng)"},                 // not the seeded prefix — pass through
+		{"Personal Stuff", "Personal Stuff"},         // prefix without "(" — pass through
 		{"Personal (no-close", "Personal (no-close"}, // unbalanced — pass through
 		{"", ""},
 	}
