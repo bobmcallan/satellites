@@ -112,8 +112,14 @@ func TestMobileView_HamburgerSurfacesPrimaryNavLinks(t *testing.T) {
 		`data-testid="nav-mobile-links"`,
 		`data-testid="nav-mobile-link-projects"`,
 		`data-testid="nav-mobile-link-tasks"`,
+		`data-testid="nav-mobile-link-documents"`,
+		`data-testid="nav-mobile-link-repo"`,
+		`data-testid="nav-mobile-link-ledger"`,
 		`data-testid="nav-mobile-link-config"`,
 		`data-testid="nav-mobile-link-help"`,
+		`data-testid="nav-mobile-link-roles"`,
+		`data-testid="nav-mobile-link-agents"`,
+		`data-testid="nav-mobile-link-grants"`,
 		`data-testid="nav-mobile-workspace-active"`,
 	} {
 		if !strings.Contains(body, want) {
