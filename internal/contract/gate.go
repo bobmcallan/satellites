@@ -33,7 +33,16 @@ func (e *GateRejection) Error() string {
 // must be terminal" invariant. Returns nil when target can be claimed.
 // peers is the full CI list for target's story; sequence ordering is
 // decided by slot, not by peers slice order.
+//
+// Iteration-loop awareness (sty_c3bd5e6c): a `failed` CI is treated as
+// relieved when a peer with the same `(ContractName, Sequence)` exists
+// in `passed` or `skipped`. This is the rejection-append loop: when a
+// review rejects iteration N, CommitReviewVerdict creates iteration
+// N+1 at the same slot with the same sequence + a PriorCIID pointer.
+// Without this carve-out, a single review rejection on a
+// required_for_close slot would permanently block every downstream CI.
 func PredecessorGate(peers []ContractInstance, target ContractInstance) error {
+	relieved := slotRelieved(peers)
 	for _, p := range peers {
 		if p.ID == target.ID {
 			continue
@@ -47,9 +56,35 @@ func PredecessorGate(peers []ContractInstance, target ContractInstance) error {
 		if p.Status == StatusPassed || p.Status == StatusSkipped {
 			continue
 		}
+		if p.Status == StatusFailed && relieved[slotKey{Name: p.ContractName, Sequence: p.Sequence}] {
+			// A passed/skipped iteration successor exists at the same
+			// slot — the loop is resolved at this position.
+			continue
+		}
 		return &GateRejection{Kind: "predecessor_not_terminal", Blocking: p.ID, Current: p.Status}
 	}
 	return nil
+}
+
+// slotKey identifies a workflow slot — a (ContractName, Sequence)
+// pair. Multiple CIs share the same slotKey when the rejection-append
+// loop produces iteration N+1 at the prior CI's slot.
+type slotKey struct {
+	Name     string
+	Sequence int
+}
+
+// slotRelieved returns the set of slots for which at least one peer is
+// in `passed` or `skipped`. Used by PredecessorGate to ignore failed
+// peers whose loop has since produced a passing successor.
+func slotRelieved(peers []ContractInstance) map[slotKey]bool {
+	out := map[slotKey]bool{}
+	for _, p := range peers {
+		if p.Status == StatusPassed || p.Status == StatusSkipped {
+			out[slotKey{Name: p.ContractName, Sequence: p.Sequence}] = true
+		}
+	}
+	return out
 }
 
 // CheckCIReady rejects claims on CIs that are not in the ready state,
