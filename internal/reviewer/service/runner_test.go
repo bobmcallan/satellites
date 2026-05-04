@@ -10,12 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/reviewer/service"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -36,24 +34,22 @@ func (s *stubReviewer) Review(ctx context.Context, req reviewer.Request) (review
 	return s.verdict, reviewer.UsageCost{}, nil
 }
 
-// fixture wires the in-memory stores and seeds a CI in pending_review,
-// a parent kind:work task, and a kind:review task linked to both
-// (ContractInstanceID + ParentTaskID), so tests can assert on the full
-// commit flow: verdict ledger row, CI status flip, review-task close,
-// and successor-work spawn on rejection.
+// fixture wires the in-memory stores and seeds a parent kind:work task
+// + paired kind:review task referencing it via ParentTaskID. sty_c6d76a5b
+// checkpoint 14: contract.Store is gone; the reviewer service reads
+// everything it needs from the task + the ledger.
 type fixture struct {
 	tasks         task.Store
-	contracts     contract.Store
 	docs          document.Store
 	ledger        ledger.Store
-	stories       story.Store
+	reviewerAgent document.Document
 	contractDoc   document.Document
-	ci            contract.ContractInstance
+	storyID       string
+	workspaceID   string
+	projectID     string
 	parentWork    task.Task
 	reviewTask    task.Task
 	reviewer      *stubReviewer
-	reviewerAgent document.Document
-	storyDoc      story.Story
 }
 
 func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixture {
@@ -63,8 +59,6 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 	docs := document.NewMemoryStore()
 	tasks := task.NewMemoryStore()
 	led := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(led)
-	contracts := contract.NewMemoryStore(docs, stories)
 
 	contractDoc, err := docs.Create(ctx, document.Document{
 		WorkspaceID: "wksp_a",
@@ -86,105 +80,73 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 	}, now)
 	require.NoError(t, err)
 
-	storyDoc, err := stories.Create(ctx, story.Story{
-		WorkspaceID: "wksp_a",
-		ProjectID:   "proj_a",
-		Title:       "test story",
-		Description: "test",
-		Status:      story.StatusInProgress,
-		Priority:    "medium",
-		Category:    "feature",
-		CreatedBy:   "system",
-	}, now)
-	require.NoError(t, err)
-
-	ci, err := contracts.Create(ctx, contract.ContractInstance{
-		WorkspaceID:      "wksp_a",
-		ProjectID:        "proj_a",
-		StoryID:          storyDoc.ID,
-		ContractID:       contractDoc.ID,
-		ContractName:     "develop",
-		Sequence:         1,
-		RequiredForClose: true,
-		Status:           contract.StatusPendingReview,
-	}, now)
-	require.NoError(t, err)
-
-	_, err = led.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: "wksp_a",
-		ProjectID:   "proj_a",
-		ContractID:  ledger.StringPtr(ci.ID),
-		Type:        ledger.TypeEvidence,
-		Tags:        []string{"kind:evidence"},
-		Content:     "developer evidence body",
-	}, now)
-	require.NoError(t, err)
-
-	_, err = led.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: "wksp_a",
-		ProjectID:   "proj_a",
-		ContractID:  ledger.StringPtr(ci.ID),
-		Type:        ledger.TypeCloseRequest,
-		Tags:        []string{"kind:close-request"},
-		Content:     "developer close request",
-	}, now)
-	require.NoError(t, err)
+	storyID := "sty_a1"
+	workspaceID := "wksp_a"
+	projectID := "proj_a"
 
 	parentWork, err := tasks.Enqueue(ctx, task.Task{
-		WorkspaceID:        "wksp_a",
-		ProjectID:          "proj_a",
-		StoryID:            storyDoc.ID,
-		ContractInstanceID: ci.ID,
-		Kind:               task.KindWork,
-		Action:             task.ContractAction("develop"),
-		AgentID:            "agent_developer",
-		Description:        "implement develop",
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
-		Status:             task.StatusPublished,
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		StoryID:     storyID,
+		Kind:        task.KindWork,
+		Action:      task.ContractAction("develop"),
+		AgentID:     "agent_developer",
+		Description: "implement develop",
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
+		Status:      task.StatusPublished,
 	}, now)
 	require.NoError(t, err)
 	parentWork, err = tasks.Close(ctx, parentWork.ID, task.OutcomeSuccess, now, nil)
 	require.NoError(t, err)
 
+	// Seed an evidence ledger row tagged to the parent work task — the
+	// reviewer service should pick this up via task_id:<parent.ID>.
+	_, err = led.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		StoryID:     ledger.StringPtr(storyID),
+		Type:        ledger.TypeEvidence,
+		Tags:        []string{"kind:evidence", "task_id:" + parentWork.ID},
+		Content:     "developer evidence body",
+	}, now)
+	require.NoError(t, err)
+
 	reviewTask, err := tasks.Enqueue(ctx, task.Task{
-		WorkspaceID:        "wksp_a",
-		ProjectID:          "proj_a",
-		StoryID:            storyDoc.ID,
-		ContractInstanceID: ci.ID,
-		Kind:               task.KindReview,
-		Action:             task.ContractAction("develop"),
-		AgentID:            rubric.ID,
-		ParentTaskID:       parentWork.ID,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
+		WorkspaceID:  workspaceID,
+		ProjectID:    projectID,
+		StoryID:      storyID,
+		Kind:         task.KindReview,
+		Action:       task.ContractAction("develop"),
+		AgentID:      rubric.ID,
+		ParentTaskID: parentWork.ID,
+		Origin:       task.OriginStoryStage,
+		Priority:     task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 
 	return &fixture{
 		tasks:         tasks,
-		contracts:     contracts,
 		docs:          docs,
 		ledger:        led,
-		stories:       stories,
+		reviewerAgent: rubric,
 		contractDoc:   contractDoc,
-		ci:            ci,
+		storyID:       storyID,
+		workspaceID:   workspaceID,
+		projectID:     projectID,
 		parentWork:    parentWork,
 		reviewTask:    reviewTask,
 		reviewer:      &stubReviewer{verdict: verdict, err: reviewerErr},
-		reviewerAgent: rubric,
-		storyDoc:      storyDoc,
 	}
 }
 
 func (f *fixture) newService(t *testing.T) *service.Service {
 	t.Helper()
 	svc, err := service.New(service.Config{}, service.Deps{
-		Tasks:     f.tasks,
-		Contracts: f.contracts,
-		Docs:      f.docs,
-		Ledger:    f.ledger,
-		Reviewer:  f.reviewer,
+		Tasks:    f.tasks,
+		Docs:     f.docs,
+		Ledger:   f.ledger,
+		Reviewer: f.reviewer,
 	})
 	require.NoError(t, err)
 	return svc
@@ -236,16 +198,11 @@ func TestService_Tick_HappyPath_AcceptedCommit(t *testing.T) {
 	assert.Contains(t, row.Tags, "kind:verdict")
 	assert.Contains(t, row.Tags, "task_id:"+f.reviewTask.ID)
 	assert.Contains(t, row.Tags, "phase:develop")
-	assert.Contains(t, row.Tags, "ci:"+f.ci.ID)
 
 	closed, err := f.tasks.GetByID(context.Background(), f.reviewTask.ID, nil)
 	require.NoError(t, err)
 	assert.Equal(t, task.StatusClosed, closed.Status)
 	assert.Equal(t, task.OutcomeSuccess, closed.Outcome)
-
-	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
-	require.NoError(t, err)
-	assert.Equal(t, contract.StatusPassed, ciAfter.Status, "accepted verdict must flip CI to passed (transitional)")
 
 	// Accepted path must NOT spawn a successor work task.
 	rows, err := f.tasks.List(context.Background(), task.ListOptions{Kind: task.KindWork}, nil)
@@ -270,10 +227,6 @@ func TestService_Tick_RejectedCommit_SpawnsSuccessorPair(t *testing.T) {
 	assert.Equal(t, task.StatusClosed, closed.Status)
 	assert.Equal(t, task.OutcomeFailure, closed.Outcome)
 
-	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
-	require.NoError(t, err)
-	assert.Equal(t, contract.StatusFailed, ciAfter.Status, "rejected verdict must flip CI to failed (transitional)")
-
 	successor := findSuccessorWork(t, f.tasks, f.parentWork.ID)
 	assert.Equal(t, task.KindWork, successor.Kind)
 	assert.Equal(t, f.parentWork.Action, successor.Action)
@@ -295,17 +248,15 @@ func TestService_Tick_RejectedCommit_SpawnsSuccessorPair(t *testing.T) {
 func TestService_Tick_RejectedCommit_NoParentSkipsSpawn(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictRejected, Rationale: "legacy review"}, nil)
-	// Simulate a legacy review task that lacks the ParentTaskID anchor
-	// (created via contract_close before story_task_submit landed).
+	// Simulate a legacy review task that lacks the ParentTaskID anchor.
 	legacyReview, err := f.tasks.Enqueue(context.Background(), task.Task{
-		WorkspaceID:        "wksp_a",
-		ProjectID:          "proj_a",
-		StoryID:            f.storyDoc.ID,
-		ContractInstanceID: f.ci.ID,
-		Kind:               task.KindReview,
-		Action:             task.ContractAction("develop"),
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
+		WorkspaceID: f.workspaceID,
+		ProjectID:   f.projectID,
+		StoryID:     f.storyID,
+		Kind:        task.KindReview,
+		Action:      task.ContractAction("develop"),
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
 	}, time.Now().UTC())
 	require.NoError(t, err)
 
@@ -317,7 +268,7 @@ func TestService_Tick_RejectedCommit_NoParentSkipsSpawn(t *testing.T) {
 	assert.Equal(t, task.StatusClosed, closed.Status)
 	assert.Equal(t, task.OutcomeFailure, closed.Outcome)
 
-	// No successor for legacy review (no PriorTaskID anchor).
+	// No successor for legacy review (no ParentTaskID anchor).
 	rows, err := f.tasks.List(context.Background(), task.ListOptions{Kind: task.KindWork}, nil)
 	require.NoError(t, err)
 	for _, r := range rows {
@@ -340,21 +291,23 @@ func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
 	assert.Contains(t, row.Content, "q2")
 
 	// Each question must also land as its own kind:review-question
-	// ledger row so contract_respond can address it (story_224621bd).
+	// ledger row tagged with the parent work task's id. ledger.List
+	// tags filter is OR — list by kind, then assert the parent task tag
+	// is present on every match.
 	rows, err := f.ledger.List(context.Background(), "", ledger.ListOptions{
 		Tags: []string{"kind:review-question"},
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, rows, 2, "needs_more must post one kind:review-question row per question")
-	contents := []string{rows[0].Content, rows[1].Content}
+	contents := []string{}
+	for _, r := range rows {
+		contents = append(contents, r.Content)
+		assert.Contains(t, r.Tags, "task_id:"+f.parentWork.ID, "review-question rows must carry parent work task id")
+	}
 	assert.Contains(t, contents, "q1")
 	assert.Contains(t, contents, "q2")
 
-	// needs_more is coerced to rejected → CI flips to failed and a
-	// successor spawns.
-	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
-	require.NoError(t, err)
-	assert.Equal(t, contract.StatusFailed, ciAfter.Status)
+	// needs_more is coerced to rejected → successor spawns.
 	_ = findSuccessorWork(t, f.tasks, f.parentWork.ID)
 }
 
@@ -384,16 +337,13 @@ func TestService_HandleTaskEvent_NotFound(t *testing.T) {
 	docs := document.NewMemoryStore()
 	tasks := task.NewMemoryStore()
 	led := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(led)
-	contracts := contract.NewMemoryStore(docs, stories)
 	rev := &stubReviewer{verdict: reviewer.Verdict{Outcome: reviewer.VerdictAccepted}}
 
 	svc, err := service.New(service.Config{}, service.Deps{
-		Tasks:     tasks,
-		Contracts: contracts,
-		Docs:      docs,
-		Ledger:    led,
-		Reviewer:  rev,
+		Tasks:    tasks,
+		Docs:     docs,
+		Ledger:   led,
+		Reviewer: rev,
 	})
 	require.NoError(t, err)
 
@@ -404,38 +354,30 @@ func TestService_HandleTaskEvent_NotFound(t *testing.T) {
 
 // TestService_OnEmit_KindFilter verifies the listener filter: emits
 // for non-review tasks (or review tasks at non-claimable status) are
-// silently ignored. Under sty_c6d76a5b the substrate fans every emit
-// out to every listener; the kind-filter is the listener's concern.
+// silently ignored.
 func TestService_OnEmit_KindFilter(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictAccepted}, nil)
 	ctx := context.Background()
 
-	// Inject a separate task with kind=work; the service must not
-	// pick it up via OnEmit.
 	other, err := f.tasks.Enqueue(ctx, task.Task{
-		WorkspaceID:        "wksp_a",
-		ProjectID:          "proj_a",
-		ContractInstanceID: f.ci.ID,
-		Kind:               task.KindWork,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityCritical,
+		WorkspaceID: f.workspaceID,
+		ProjectID:   f.projectID,
+		StoryID:     f.storyID,
+		Kind:        task.KindWork,
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityCritical,
 	}, time.Now().UTC())
 	require.NoError(t, err)
 
 	svc := f.newService(t)
 
-	// Direct OnEmit with the kind=work task — listener must skip it.
 	svc.OnEmit(ctx, other)
 	assert.Equal(t, int32(0), f.reviewer.calls.Load(), "reviewer must not be invoked on kind=work emits")
 
-	// Direct OnEmit with the seeded review task — listener processes it.
 	svc.OnEmit(ctx, f.reviewTask)
 	assert.Equal(t, int32(1), f.reviewer.calls.Load(), "reviewer should be invoked exactly once on kind=review emit")
 
-	// Non-review task remains enqueued; review task got closed (the
-	// commit path now closes it directly rather than leaving it
-	// claimed for the legacy CommitFn to wrap up).
 	otherAfter, err := f.tasks.GetByID(ctx, other.ID, nil)
 	require.NoError(t, err)
 	assert.Equal(t, task.StatusEnqueued, otherAfter.Status)
@@ -454,7 +396,6 @@ func TestService_Run_ContextCancellationStops(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- svc.Run(ctx) }()
 
-	// Give the loop a chance to claim the seeded task.
 	require.Eventually(t, func() bool {
 		return f.reviewer.calls.Load() == 1
 	}, time.Second, 10*time.Millisecond, "service should claim the seeded task within 1 s")
@@ -473,19 +414,16 @@ func TestService_New_RejectsMissingDeps(t *testing.T) {
 	docs := document.NewMemoryStore()
 	tasks := task.NewMemoryStore()
 	led := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(led)
-	contracts := contract.NewMemoryStore(docs, stories)
 	rev := &stubReviewer{}
 
 	cases := []struct {
 		name string
 		deps service.Deps
 	}{
-		{"missing tasks", service.Deps{Contracts: contracts, Docs: docs, Ledger: led, Reviewer: rev}},
-		{"missing contracts", service.Deps{Tasks: tasks, Docs: docs, Ledger: led, Reviewer: rev}},
-		{"missing docs", service.Deps{Tasks: tasks, Contracts: contracts, Ledger: led, Reviewer: rev}},
-		{"missing ledger", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Reviewer: rev}},
-		{"missing reviewer", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Ledger: led}},
+		{"missing tasks", service.Deps{Docs: docs, Ledger: led, Reviewer: rev}},
+		{"missing docs", service.Deps{Tasks: tasks, Ledger: led, Reviewer: rev}},
+		{"missing ledger", service.Deps{Tasks: tasks, Docs: docs, Reviewer: rev}},
+		{"missing reviewer", service.Deps{Tasks: tasks, Docs: docs, Ledger: led}},
 	}
 	for _, tc := range cases {
 		tc := tc

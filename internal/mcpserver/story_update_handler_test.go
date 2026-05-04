@@ -13,7 +13,6 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -30,7 +29,6 @@ func newStoryUpdateTestServer(t *testing.T) *Server {
 	docs := document.NewMemoryStore()
 	stories := story.NewMemoryStore(led)
 	projects := project.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	wss := workspace.NewMemoryStore()
 	sessions := session.NewMemoryStore()
 	return New(cfg, satarbor.New("info"), now, Deps{
@@ -38,7 +36,6 @@ func newStoryUpdateTestServer(t *testing.T) *Server {
 		ProjectStore:   projects,
 		LedgerStore:    led,
 		StoryStore:     stories,
-		ContractStore:  contracts,
 		WorkspaceStore: wss,
 		SessionStore:   sessions,
 	})

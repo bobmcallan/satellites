@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/session"
@@ -38,10 +37,9 @@ const (
 //     for this session_id (story_488b8223).
 //  3. None — deny with reason="no_resolved_permissions".
 type Resolver struct {
-	Sessions  session.Store
-	Ledger    ledger.Store
-	Contracts contract.Store
-	Docs      document.Store
+	Sessions session.Store
+	Ledger   ledger.Store
+	Docs     document.Store
 }
 
 // Result captures a resolution outcome.

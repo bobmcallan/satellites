@@ -10,7 +10,6 @@ import (
 
 	"github.com/ternarybob/arbor"
 
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/reviewer"
@@ -33,27 +32,27 @@ type Config struct {
 }
 
 // Service is the embedded reviewer worker. Construct via New, run via
-// Run (blocks until the supplied context is cancelled).
+// Run (blocks until the supplied context is cancelled). sty_c6d76a5b
+// checkpoint 14: the contract.Store dependency is gone — the service
+// reads everything it needs from the task + the ledger.
 type Service struct {
-	cfg       Config
-	tasks     task.Store
-	contracts contract.Store
-	docs      document.Store
-	ledger    ledger.Store
-	reviewer  reviewer.Reviewer
-	logger    arbor.ILogger
-	nowUTC    func() time.Time
+	cfg      Config
+	tasks    task.Store
+	docs     document.Store
+	ledger   ledger.Store
+	reviewer reviewer.Reviewer
+	logger   arbor.ILogger
+	nowUTC   func() time.Time
 }
 
 // Deps bundles the service's required collaborators.
 type Deps struct {
-	Tasks     task.Store
-	Contracts contract.Store
-	Docs      document.Store
-	Ledger    ledger.Store
-	Reviewer  reviewer.Reviewer
-	Logger    arbor.ILogger
-	Now       func() time.Time // injectable clock for tests
+	Tasks    task.Store
+	Docs     document.Store
+	Ledger   ledger.Store
+	Reviewer reviewer.Reviewer
+	Logger   arbor.ILogger
+	Now      func() time.Time // injectable clock for tests
 }
 
 // New constructs a Service and validates the deps. Returns an error
@@ -63,9 +62,6 @@ type Deps struct {
 func New(cfg Config, deps Deps) (*Service, error) {
 	if deps.Tasks == nil {
 		return nil, errors.New("reviewer/service: tasks store is required")
-	}
-	if deps.Contracts == nil {
-		return nil, errors.New("reviewer/service: contracts store is required")
 	}
 	if deps.Docs == nil {
 		return nil, errors.New("reviewer/service: docs store is required")
@@ -90,14 +86,13 @@ func New(cfg Config, deps Deps) (*Service, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		cfg:       cfg,
-		tasks:     deps.Tasks,
-		contracts: deps.Contracts,
-		docs:      deps.Docs,
-		ledger:    deps.Ledger,
-		reviewer:  deps.Reviewer,
-		logger:    deps.Logger,
-		nowUTC:    now,
+		cfg:      cfg,
+		tasks:    deps.Tasks,
+		docs:     deps.Docs,
+		ledger:   deps.Ledger,
+		reviewer: deps.Reviewer,
+		logger:   deps.Logger,
+		nowUTC:   now,
 	}, nil
 }
 
@@ -195,49 +190,28 @@ func (s *Service) HandleTaskEvent(ctx context.Context, t task.Task) bool {
 }
 
 // processClaimed assembles the review packet, runs the reviewer, and
-// commits the verdict via s.commit. Errors are recorded as a rejected
-// verdict carrying the failure rationale so the CI doesn't sit
-// pending_review forever.
-//
-// sty_c6d76a5b: tasks no longer carry a Payload pointing at close /
-// evidence ledger rows. The reviewer sources its inputs by walking
-// the ledger filtered by ContractInstanceID and picking the most
-// recent kind:evidence (or kind:close-request as fallback).
+// commits the verdict. The review task carries Action (canonical
+// `contract:<name>`) directly — the contract doc is resolved by name
+// rather than by joining through a CI row. Evidence is sourced from
+// kind:evidence ledger rows tagged with the parent work task id; the
+// agent stamps that tag when it writes evidence alongside its close
+// submission.
 func (s *Service) processClaimed(ctx context.Context, t task.Task) {
-	if t.ContractInstanceID == "" {
-		s.commitFailure(ctx, "", "review task missing contract_instance_id", t.ID, "task: missing ci linkage")
-		return
-	}
-	ci, err := s.contracts.GetByID(ctx, t.ContractInstanceID, nil)
-	if err != nil {
-		s.commitFailure(ctx, t.ContractInstanceID, fmt.Sprintf("ci %s unresolvable: %v", t.ContractInstanceID, err), t.ID, "ci lookup failed")
-		return
-	}
-	contractDoc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
-	if err != nil {
-		s.commitFailure(ctx, ci.ID, fmt.Sprintf("contract doc %s unresolvable: %v", ci.ContractID, err), t.ID, "contract doc lookup failed")
-		return
-	}
-
-	evidenceMD := s.findCIArtifact(ctx, ci, "kind:evidence")
-	if evidenceMD == "" {
-		// Fall back to the close-request markdown when no separate
-		// evidence row was written.
-		evidenceMD = s.findCIArtifact(ctx, ci, "kind:close-request")
-	}
-	rubric := s.lookupReviewerRubric(ctx, ci.ContractName)
+	contractName := contractNameFromAction(t.Action)
+	contractDoc := s.findContractDocByName(ctx, contractName)
+	rubric := s.lookupReviewerRubric(ctx, contractName)
+	evidenceMD := s.findTaskEvidence(ctx, t)
 
 	req := reviewer.Request{
 		ContractID:       contractDoc.ID,
-		ContractName:     contractDoc.Name,
+		ContractName:     contractName,
 		AgentInstruction: contractDoc.Body,
 		ReviewerRubric:   rubric,
 		EvidenceMarkdown: evidenceMD,
-		ACScope:          ci.ACScope,
 	}
 	verdict, _, err := s.reviewer.Review(ctx, req)
 	if err != nil {
-		s.commitFailure(ctx, ci.ID, fmt.Sprintf("reviewer error: %v", err), t.ID, "reviewer call failed")
+		s.commitFailure(ctx, t, fmt.Sprintf("reviewer error: %v", err), "reviewer call failed")
 		return
 	}
 	outcome := verdict.Outcome
@@ -251,12 +225,7 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 		// rationale so the next iteration carries the context.
 		outcome = reviewer.VerdictRejected
 		if len(verdict.ReviewQuestions) > 0 {
-			// story_224621bd: post review-question ledger rows so
-			// contract_respond can address them. Each question gets its
-			// own row tagged kind:review-question, scoped to the CI, so
-			// findLatestReviewQuestion (close_handlers.go:584) can
-			// resolve the latest unresolved question.
-			s.writeReviewQuestionRows(ctx, ci, verdict.ReviewQuestions)
+			s.writeReviewQuestionRows(ctx, t, verdict.ReviewQuestions)
 			rationale = strings.TrimSpace(rationale + "\n\nReview questions:\n- " + strings.Join(verdict.ReviewQuestions, "\n- "))
 		}
 	default:
@@ -264,48 +233,23 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 		rationale = fmt.Sprintf("reviewer returned unexpected outcome %q; rejecting (rationale: %s)", verdict.Outcome, rationale)
 	}
 
-	s.commitVerdict(ctx, t, ci, outcome, rationale)
+	s.commitVerdict(ctx, t, contractName, outcome, rationale)
 }
 
-// commitVerdict is the new task-centric commit path (sty_c6d76a5b
-// slice A): write a kind:verdict ledger row tagged to the review task,
-// close the review task with the matching outcome, and on rejection
-// spawn a successor kind:work + paired planned-review task pair so the
-// rejection-loop continues as a task chain. CI status is also flipped
-// (passed/failed) when ContractInstanceID is set — transitional
-// support for the legacy contract_close path until slice E removes
-// contract_instance entirely. Replaces the prior CommitFn injection
-// that wrapped mcpserver.Server.CommitReviewVerdict.
-func (s *Service) commitVerdict(ctx context.Context, reviewTask task.Task, ci contract.ContractInstance, outcome, rationale string) {
+// commitVerdict writes a kind:verdict ledger row tagged to the review
+// task, closes the review task, and on rejection spawns a successor
+// work + paired planned-review task pair so the rejection-loop
+// continues as a task chain.
+func (s *Service) commitVerdict(ctx context.Context, reviewTask task.Task, contractName, outcome, rationale string) {
 	now := s.nowUTC()
 
-	if _, err := s.writeVerdictLedgerRow(ctx, reviewTask, ci, outcome, rationale, now); err != nil {
+	if _, err := s.writeVerdictLedgerRow(ctx, reviewTask, contractName, outcome, rationale, now); err != nil {
 		s.logWarn("reviewer service verdict ledger append failed", err, map[string]string{
 			"task_id": reviewTask.ID,
-			"ci_id":   ci.ID,
 			"verdict": outcome,
 		})
-		// Best-effort task close so the queue isn't stuck on the
-		// failed-write task.
 		_, _ = s.tasks.Close(ctx, reviewTask.ID, task.OutcomeFailure, now, nil)
 		return
-	}
-
-	// Transitional CI status flip — keeps the legacy contract_close
-	// path's downstream consumers (contract_next gate, portal CI
-	// views) functional until slice E removes contract_instance.
-	if ci.ID != "" {
-		target := contract.StatusPassed
-		if outcome == reviewer.VerdictRejected {
-			target = contract.StatusFailed
-		}
-		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, target, s.cfg.UserID, now, nil); err != nil {
-			s.logWarn("reviewer service ci status flip failed", err, map[string]string{
-				"ci_id":   ci.ID,
-				"task_id": reviewTask.ID,
-				"target":  target,
-			})
-		}
 	}
 
 	taskOutcome := task.OutcomeSuccess
@@ -335,26 +279,20 @@ func (s *Service) commitVerdict(ctx context.Context, reviewTask task.Task, ci co
 
 	if s.logger != nil {
 		s.logger.Info().
-			Str("ci_id", ci.ID).
 			Str("task_id", reviewTask.ID).
 			Str("verdict", outcome).
-			Str("contract", ci.ContractName).
+			Str("contract", contractName).
 			Msg("reviewer service committed verdict")
 	}
 }
 
 // writeVerdictLedgerRow records the reviewer's verdict as a
-// kind:verdict ledger row tagged to the review task (task_id:<id>).
-// When the review task carries a CI binding the row is also stamped
-// with the CI's contract id + ci:<id> tag for cross-referencing
-// while CIs still exist.
-func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Task, ci contract.ContractInstance, outcome, rationale string, now time.Time) (string, error) {
+// kind:verdict ledger row tagged with the review task id and contract
+// phase.
+func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Task, contractName, outcome, rationale string, now time.Time) (string, error) {
 	tags := []string{"kind:verdict", "task_id:" + reviewTask.ID}
-	if ci.ContractName != "" {
-		tags = append(tags, "phase:"+ci.ContractName)
-	}
-	if ci.ID != "" {
-		tags = append(tags, "ci:"+ci.ID)
+	if contractName != "" {
+		tags = append(tags, "phase:"+contractName)
 	}
 	structured, _ := json.Marshal(map[string]any{
 		"verdict":        outcome,
@@ -363,9 +301,9 @@ func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Tas
 		"mode":           reviewer.ModeTask,
 	})
 	entry := ledger.LedgerEntry{
-		WorkspaceID: workspaceFor(reviewTask, ci),
-		ProjectID:   projectFor(reviewTask, ci),
-		StoryID:     ledger.StringPtr(storyIDFor(reviewTask, ci)),
+		WorkspaceID: reviewTask.WorkspaceID,
+		ProjectID:   reviewTask.ProjectID,
+		StoryID:     ledger.StringPtr(reviewTask.StoryID),
 		Type:        ledger.TypeVerdict,
 		Tags:        tags,
 		Content:     rationale,
@@ -374,9 +312,6 @@ func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Tas
 		SourceType:  ledger.SourceSystem,
 		Status:      ledger.StatusActive,
 		CreatedBy:   s.cfg.UserID,
-	}
-	if ci.ID != "" {
-		entry.ContractID = ledger.StringPtr(ci.ID)
 	}
 	row, err := s.ledger.Append(ctx, entry, now)
 	if err != nil {
@@ -387,12 +322,8 @@ func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Tas
 
 // spawnSuccessorWorkPair emits a fresh kind:work task with PriorTaskID
 // pointing at the rejected work task, plus its paired planned
-// kind:review sibling. The successor work lands at status=published
-// (immediately claimable); the review at status=planned (gated until
-// the work closes). Returns the successor work task id, or empty when
-// the review task lacks a ParentTaskID anchor (legacy review without
-// the work-task linkage — manual contract_cancel remains the recovery
-// path for those).
+// kind:review sibling. Returns the successor work task id, or empty
+// when the review task lacks a ParentTaskID anchor.
 func (s *Service) spawnSuccessorWorkPair(ctx context.Context, reviewTask task.Task, now time.Time) (string, error) {
 	if reviewTask.ParentTaskID == "" {
 		return "", nil
@@ -402,37 +333,35 @@ func (s *Service) spawnSuccessorWorkPair(ctx context.Context, reviewTask task.Ta
 		return "", fmt.Errorf("lookup parent work task %s: %w", reviewTask.ParentTaskID, err)
 	}
 	successor := task.Task{
-		WorkspaceID:        parentWork.WorkspaceID,
-		ProjectID:          parentWork.ProjectID,
-		StoryID:            parentWork.StoryID,
-		ContractInstanceID: parentWork.ContractInstanceID,
-		Kind:               task.KindWork,
-		Action:             parentWork.Action,
-		AgentID:            parentWork.AgentID,
-		Description:        fmt.Sprintf("retry %s after rejected review", parentWork.Action),
-		ParentTaskID:       parentWork.ParentTaskID,
-		PriorTaskID:        parentWork.ID,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
-		Status:             task.StatusPublished,
+		WorkspaceID:  parentWork.WorkspaceID,
+		ProjectID:    parentWork.ProjectID,
+		StoryID:      parentWork.StoryID,
+		Kind:         task.KindWork,
+		Action:       parentWork.Action,
+		AgentID:      parentWork.AgentID,
+		Description:  fmt.Sprintf("retry %s after rejected review", parentWork.Action),
+		ParentTaskID: parentWork.ParentTaskID,
+		PriorTaskID:  parentWork.ID,
+		Origin:       task.OriginStoryStage,
+		Priority:     task.PriorityMedium,
+		Status:       task.StatusPublished,
 	}
 	created, err := s.tasks.Enqueue(ctx, successor, now)
 	if err != nil {
 		return "", fmt.Errorf("enqueue successor work task: %w", err)
 	}
 	pairedReview := task.Task{
-		WorkspaceID:        parentWork.WorkspaceID,
-		ProjectID:          parentWork.ProjectID,
-		StoryID:            parentWork.StoryID,
-		ContractInstanceID: parentWork.ContractInstanceID,
-		Kind:               task.KindReview,
-		Action:             parentWork.Action,
-		AgentID:            reviewTask.AgentID,
-		Description:        fmt.Sprintf("review retry of %s", parentWork.Action),
-		ParentTaskID:       created.ID,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
-		Status:             task.StatusPlanned,
+		WorkspaceID:  parentWork.WorkspaceID,
+		ProjectID:    parentWork.ProjectID,
+		StoryID:      parentWork.StoryID,
+		Kind:         task.KindReview,
+		Action:       parentWork.Action,
+		AgentID:      reviewTask.AgentID,
+		Description:  fmt.Sprintf("review retry of %s", parentWork.Action),
+		ParentTaskID: created.ID,
+		Origin:       task.OriginStoryStage,
+		Priority:     task.PriorityMedium,
+		Status:       task.StatusPlanned,
 	}
 	if _, err := s.tasks.Enqueue(ctx, pairedReview, now); err != nil {
 		return created.ID, fmt.Errorf("enqueue paired review for successor: %w", err)
@@ -440,45 +369,58 @@ func (s *Service) spawnSuccessorWorkPair(ctx context.Context, reviewTask task.Ta
 	return created.ID, nil
 }
 
-// workspaceFor / projectFor / storyIDFor pick the best non-empty
-// scoping value across (review task, ci). Review tasks created via
-// story_task_submit carry the story scoping directly; legacy tasks
-// created via contract_close inherit theirs from the bound CI.
-func workspaceFor(t task.Task, ci contract.ContractInstance) string {
-	if t.WorkspaceID != "" {
-		return t.WorkspaceID
-	}
-	return ci.WorkspaceID
-}
-
-func projectFor(t task.Task, ci contract.ContractInstance) string {
-	if t.ProjectID != "" {
-		return t.ProjectID
-	}
-	return ci.ProjectID
-}
-
-func storyIDFor(t task.Task, ci contract.ContractInstance) string {
-	if t.StoryID != "" {
-		return t.StoryID
-	}
-	return ci.StoryID
-}
-
-// findCIArtifact returns the most recent ledger row tagged kindTag
-// scoped to ci's project + contract_id. Empty when no row matches.
-// Used by processClaimed to source close-request + evidence markdown
-// without relying on a per-task Payload (sty_c6d76a5b).
-func (s *Service) findCIArtifact(ctx context.Context, ci contract.ContractInstance, kindTag string) string {
-	rows, err := s.ledger.List(ctx, ci.ProjectID, ledger.ListOptions{
-		ContractID: ci.ID,
-		Tags:       []string{kindTag},
-	}, nil)
-	if err != nil || len(rows) == 0 {
+// findTaskEvidence returns the most recent kind:evidence ledger row
+// tagged with the parent work task's id (`task_id:<id>`). Falls back
+// to the kind:close-request body when no separate evidence row was
+// written. Empty when neither resolves.
+func (s *Service) findTaskEvidence(ctx context.Context, reviewTask task.Task) string {
+	if s.ledger == nil || reviewTask.ParentTaskID == "" || reviewTask.ProjectID == "" {
 		return ""
 	}
-	// ledger.List returns rows in newest-first order; pick the latest.
-	return rows[0].Content
+	taskTag := "task_id:" + reviewTask.ParentTaskID
+	for _, kind := range []string{"kind:evidence", "kind:close-request"} {
+		rows, err := s.ledger.List(ctx, reviewTask.ProjectID, ledger.ListOptions{
+			Tags: []string{kind, taskTag},
+		}, nil)
+		if err == nil && len(rows) > 0 {
+			return rows[0].Content
+		}
+	}
+	return ""
+}
+
+// findContractDocByName resolves the active system-scope contract doc
+// with the given name. Returns the empty document when nothing
+// matches; the reviewer copes with empty contract bodies gracefully
+// (the rubric carries the load-bearing instructions).
+func (s *Service) findContractDocByName(ctx context.Context, name string) document.Document {
+	if name == "" || s.docs == nil {
+		return document.Document{}
+	}
+	rows, err := s.docs.List(ctx, document.ListOptions{
+		Type:  document.TypeContract,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
+		return document.Document{}
+	}
+	for _, r := range rows {
+		if r.Status == document.StatusActive && r.Name == name {
+			return r
+		}
+	}
+	return document.Document{}
+}
+
+// contractNameFromAction unwraps `contract:<name>` actions into the
+// bare contract name. Empty when the action is empty or doesn't carry
+// the contract prefix.
+func contractNameFromAction(action string) string {
+	const prefix = "contract:"
+	if len(action) <= len(prefix) || action[:len(prefix)] != prefix {
+		return ""
+	}
+	return action[len(prefix):]
 }
 
 // lookupReviewerRubric returns the body of the system-scope agent
@@ -489,9 +431,7 @@ func (s *Service) findCIArtifact(ctx context.Context, ci contract.ContractInstan
 //  2. Legacy name-match fallback: `develop` → `development_reviewer`,
 //     else → `story_reviewer`.
 //
-// Empty when neither resolution finds a doc. Mirrors the lookup in
-// internal/mcpserver/close_handlers.go::findReviewerAgent — kept in
-// lockstep until that helper is promoted to a shared package.
+// Empty when neither resolution finds a doc.
 func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string) string {
 	rows, err := s.docs.List(ctx, document.ListOptions{
 		Type:  document.TypeAgent,
@@ -526,57 +466,47 @@ func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string)
 }
 
 // commitFailure records a rejected verdict for the given task when
-// the service couldn't reach a real reviewer verdict (CI gone,
-// contract doc unreadable, gemini error, missing CI linkage). Goes
-// through commitVerdict so the same ledger-row + task-close + spawn
-// behavior applies — the verdict is just synthesised by the service
-// rather than the reviewer.
-func (s *Service) commitFailure(ctx context.Context, ciID, rationale, taskID, logReason string) {
+// the service couldn't reach a real reviewer verdict (gemini error,
+// missing context, etc.).
+func (s *Service) commitFailure(ctx context.Context, reviewTask task.Task, rationale, logReason string) {
 	if s.logger != nil {
 		s.logger.Warn().
-			Str("ci_id", ciID).
-			Str("task_id", taskID).
+			Str("task_id", reviewTask.ID).
 			Str("reason", logReason).
 			Str("rationale", rationale).
 			Msg("reviewer service rejecting (failure path)")
 	}
-	reviewTask, gerr := s.tasks.GetByID(ctx, taskID, nil)
-	if gerr != nil {
-		// Task vanished mid-process — nothing to record. The reviewer
-		// already received the failure rationale via the log line above.
-		return
-	}
-	ci := contract.ContractInstance{}
-	if ciID != "" {
-		if found, err := s.contracts.GetByID(ctx, ciID, nil); err == nil {
-			ci = found
-		}
-	}
-	s.commitVerdict(ctx, reviewTask, ci, reviewer.VerdictRejected, rationale)
+	contractName := contractNameFromAction(reviewTask.Action)
+	s.commitVerdict(ctx, reviewTask, contractName, reviewer.VerdictRejected, rationale)
 }
 
 // writeReviewQuestionRows records each question as its own
-// kind:review-question ledger row scoped to the CI. story_224621bd:
-// addresses the AC requirement that needs_more verdicts post review-
-// question rows that contract_respond (close_handlers.go) can find via
-// findLatestReviewQuestion.
-func (s *Service) writeReviewQuestionRows(ctx context.Context, ci contract.ContractInstance, questions []string) {
+// kind:review-question ledger row tagged with the parent work task id
+// so the agent's next attempt can address them.
+func (s *Service) writeReviewQuestionRows(ctx context.Context, reviewTask task.Task, questions []string) {
 	if s.ledger == nil {
 		return
 	}
 	now := s.nowUTC()
+	contractName := contractNameFromAction(reviewTask.Action)
+	tags := []string{"kind:review-question"}
+	if contractName != "" {
+		tags = append(tags, "phase:"+contractName)
+	}
+	if reviewTask.ParentTaskID != "" {
+		tags = append(tags, "task_id:"+reviewTask.ParentTaskID)
+	}
 	for i, q := range questions {
 		structured, _ := json.Marshal(map[string]any{
 			"index":    i,
 			"question": q,
 		})
 		_, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-			WorkspaceID: ci.WorkspaceID,
-			ProjectID:   ci.ProjectID,
-			StoryID:     ledger.StringPtr(ci.StoryID),
-			ContractID:  ledger.StringPtr(ci.ID),
+			WorkspaceID: reviewTask.WorkspaceID,
+			ProjectID:   reviewTask.ProjectID,
+			StoryID:     ledger.StringPtr(reviewTask.StoryID),
 			Type:        ledger.TypeDecision,
-			Tags:        []string{"kind:review-question", "phase:" + ci.ContractName},
+			Tags:        tags,
 			Content:     q,
 			Structured:  structured,
 			Durability:  ledger.DurabilityDurable,
@@ -586,7 +516,7 @@ func (s *Service) writeReviewQuestionRows(ctx context.Context, ci contract.Contr
 		}, now)
 		if err != nil {
 			s.logWarn("reviewer service review-question append failed", err, map[string]string{
-				"ci_id": ci.ID,
+				"task_id": reviewTask.ID,
 			})
 		}
 	}

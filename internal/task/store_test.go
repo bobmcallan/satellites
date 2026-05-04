@@ -245,47 +245,46 @@ func TestMemoryStore_CloseAndReclaim(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestMemoryStore_ContractInstanceAndKindBinding: Tasks persist
-// ContractInstanceID and Kind, and List filters on both.
-func TestMemoryStore_ContractInstanceAndKindBinding(t *testing.T) {
+// TestMemoryStore_StoryAndKindBinding: tasks persist StoryID and Kind,
+// and List filters on both. sty_c6d76a5b checkpoint 14 retired the
+// ContractInstanceID binding.
+func TestMemoryStore_StoryAndKindBinding(t *testing.T) {
 	t.Parallel()
 	store := task.NewMemoryStore()
 	now := time.Now().UTC()
 	ctx := context.Background()
 
-	// Three tasks: two bound to ci_plan_x (work + review); one bound
-	// to ci_plan_y (work).
 	planXWork, err := store.Enqueue(ctx, task.Task{
-		WorkspaceID:        "w",
-		ContractInstanceID: "ci_plan_x",
-		Kind:               task.KindWork,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
+		WorkspaceID: "w",
+		StoryID:     "sty_x",
+		Kind:        task.KindWork,
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 	planXRev, err := store.Enqueue(ctx, task.Task{
-		WorkspaceID:        "w",
-		ContractInstanceID: "ci_plan_x",
-		Kind:               task.KindReview,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
+		WorkspaceID: "w",
+		StoryID:     "sty_x",
+		Kind:        task.KindReview,
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 	planYWork, err := store.Enqueue(ctx, task.Task{
-		WorkspaceID:        "w",
-		ContractInstanceID: "ci_plan_y",
-		Kind:               task.KindWork,
-		Origin:             task.OriginStoryStage,
-		Priority:           task.PriorityMedium,
+		WorkspaceID: "w",
+		StoryID:     "sty_y",
+		Kind:        task.KindWork,
+		Origin:      task.OriginStoryStage,
+		Priority:    task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 
 	got, err := store.GetByID(ctx, planXWork.ID, []string{"w"})
 	require.NoError(t, err)
-	assert.Equal(t, "ci_plan_x", got.ContractInstanceID)
+	assert.Equal(t, "sty_x", got.StoryID)
 	assert.Equal(t, task.KindWork, got.Kind)
 
-	xRows, err := store.List(ctx, task.ListOptions{ContractInstanceID: "ci_plan_x"}, []string{"w"})
+	xRows, err := store.List(ctx, task.ListOptions{StoryID: "sty_x"}, []string{"w"})
 	require.NoError(t, err)
 	require.Len(t, xRows, 2)
 	xIDs := map[string]bool{xRows[0].ID: true, xRows[1].ID: true}
@@ -298,8 +297,8 @@ func TestMemoryStore_ContractInstanceAndKindBinding(t *testing.T) {
 	require.Len(t, workRows, 2)
 
 	combined, err := store.List(ctx, task.ListOptions{
-		ContractInstanceID: "ci_plan_x",
-		Kind:               task.KindReview,
+		StoryID: "sty_x",
+		Kind:    task.KindReview,
 	}, []string{"w"})
 	require.NoError(t, err)
 	require.Len(t, combined, 1)

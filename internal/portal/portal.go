@@ -20,7 +20,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -42,7 +41,6 @@ type Portal struct {
 	projects          project.Store
 	ledger            ledger.Store
 	stories           story.Store
-	contracts         contract.Store
 	tasks             task.Store
 	documents         document.Store
 	repos             repo.Store
@@ -74,12 +72,10 @@ func (p *Portal) SetChangelogStore(s changelog.Store) {
 // disable the corresponding page group (the handlers render a "disabled"
 // panel or 404). A nil workspaces store keeps the pre-tenant behaviour
 // (membership scoping disabled) — used by tests that don't need it. A
-// nil contracts store renders the story-view CI timeline as empty
-// (slice 11.1: contract instances panel needs the store; absence means
-// no panel content rather than a 500). A nil tasks store keeps the
-// /tasks page reachable but renders empty columns (slice 11.2 same
-// degradation pattern).
-func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, users auth.UserStoreByID, projects project.Store, ledgerStore ledger.Store, stories story.Store, contracts contract.Store, tasks task.Store, documents document.Store, repos repo.Store, indexer codeindex.Indexer, workspaces workspace.Store, startedAt time.Time) (*Portal, error) {
+// nil tasks store keeps the /tasks page reachable but renders empty
+// columns (sty_c6d76a5b checkpoint 14 retired the contract-instance
+// panel; the contract walk now projects from tasks).
+func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, users auth.UserStoreByID, projects project.Store, ledgerStore ledger.Store, stories story.Store, tasks task.Store, documents document.Store, repos repo.Store, indexer codeindex.Indexer, workspaces workspace.Store, startedAt time.Time) (*Portal, error) {
 	tmpl, err := pages.Templates()
 	if err != nil {
 		return nil, err
@@ -93,7 +89,6 @@ func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, u
 		projects:          projects,
 		ledger:            ledgerStore,
 		stories:           stories,
-		contracts:         contracts,
 		tasks:             tasks,
 		documents:         documents,
 		repos:             repos,
@@ -276,8 +271,6 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/repos/{id}/diff", p.handleRepoDiff)
 	mux.HandleFunc("POST /api/repos/{id}/reindex", p.handleRepoReindex)
 	mux.HandleFunc("POST /api/stories/{id}/status", p.handleStoryStatusUpdate)
-	mux.HandleFunc("POST /api/contracts/{id}/close", p.handleContractComplete)
-	mux.HandleFunc("POST /api/contracts/{id}/review-close", p.handleContractReview)
 	mux.HandleFunc("GET /agents", p.handleAgents)
 	mux.HandleFunc("GET /workspaces/select", p.handleWorkspaceSelect)
 	mux.HandleFunc("POST /theme", p.handleThemeSet)
@@ -554,7 +547,7 @@ func (p *Portal) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	filters := parseProjectWorkspaceFilters(r)
 	isAdmin := p.isWorkspaceAdmin(r.Context(), active.ID, user.ID)
-	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.contracts, p.repos, p.ledger, p.changelog, pr.ID, filters, memberships, isAdmin)
+	composite := buildProjectWorkspaceComposite(r.Context(), p.stories, p.documents, p.repos, p.ledger, p.changelog, pr.ID, filters, memberships, isAdmin)
 	data := projectDetailData{
 		Title:           buildPageTitle(active, pr.Name, ""),
 		Version:         config.Version,
@@ -827,7 +820,7 @@ func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	composite, err := buildStoryComposite(r.Context(), p.stories, p.contracts, p.documents, p.ledger, storyID, memberships)
+	composite, err := buildStoryComposite(r.Context(), p.stories, p.documents, p.ledger, storyID, memberships)
 	if err != nil || composite.Story.ID == "" || composite.Story.ID != storyID {
 		http.NotFound(w, r)
 		return
@@ -891,7 +884,7 @@ func (p *Portal) handleStoryComposite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	composite, err := buildStoryComposite(r.Context(), p.stories, p.contracts, p.documents, p.ledger, storyID, memberships)
+	composite, err := buildStoryComposite(r.Context(), p.stories, p.documents, p.ledger, storyID, memberships)
 	if err != nil || composite.Story.ID == "" || composite.Story.ID != storyID {
 		http.NotFound(w, r)
 		return

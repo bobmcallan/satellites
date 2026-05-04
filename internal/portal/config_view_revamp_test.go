@@ -21,7 +21,7 @@ import (
 func TestConfigPage_HeadingsDropSystemPrefix(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -83,7 +83,7 @@ func TestConfigPage_HeadingsDropSystemPrefix(t *testing.T) {
 func TestConfigPage_WorkflowsAboveContracts(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -133,7 +133,7 @@ func TestConfigPage_WorkflowsAboveContracts(t *testing.T) {
 func TestConfigPage_CreateAffordancesPerScope(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 

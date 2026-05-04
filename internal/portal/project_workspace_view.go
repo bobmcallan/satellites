@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/changelog"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/repo"
@@ -125,7 +124,7 @@ func parseProjectWorkspaceFilters(r *http.Request) projectWorkspaceFilters {
 // gracefully when running without a backing store. Documents are loaded
 // twice (project scope + system scope) and merged so global content
 // (principles, reviewer notes) shows alongside the project's own.
-func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, contracts contract.Store, repos repo.Store, led ledger.Store, changelogs changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
+func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, docs document.Store, repos repo.Store, led ledger.Store, changelogs changelog.Store, projectID string, f projectWorkspaceFilters, memberships []string, isAdmin bool) projectWorkspaceComposite {
 	if f.Limit <= 0 {
 		f.Limit = projectWorkspaceDefaultLimit
 	}
@@ -133,7 +132,9 @@ func buildProjectWorkspaceComposite(ctx context.Context, stories story.Store, do
 
 	out.Stories = collectStoryCards(ctx, stories, projectID, f, memberships)
 	out.StoryTotal = len(out.Stories)
-	attachStoryContracts(ctx, out.Stories, contracts, docs, memberships)
+	// sty_c6d76a5b checkpoint 14: contract_instance rows retired; the
+	// per-story contracts sub-table has no backing data. Stories
+	// expose their task chain via /stories/{id}/walk now.
 
 	out.Documents = collectDocumentCards(ctx, docs, projectID, f, memberships)
 	out.DocTotal = len(out.Documents)
@@ -353,48 +354,3 @@ func storyCardFor(s story.Story) storyCard {
 	}
 }
 
-// attachStoryContracts loads each story's contracts and stamps the
-// per-row sub-table (id, sequence, contract_name, status, agent). Nil
-// contracts store leaves every story's Contracts empty so the panel
-// degrades to the SSR empty-state. Agent docs are resolved once per
-// unique agent_id across the whole panel so a 25-row panel only does
-// one document.GetByID per distinct agent.
-func attachStoryContracts(ctx context.Context, cards []storyCard, contracts contract.Store, docs document.Store, memberships []string) {
-	if len(cards) == 0 || contracts == nil {
-		return
-	}
-	agentNames := make(map[string]string)
-	for i := range cards {
-		cis, err := contracts.List(ctx, cards[i].ID, memberships)
-		if err != nil || len(cis) == 0 {
-			continue
-		}
-		out := make([]storyContractCard, 0, len(cis))
-		for _, ci := range cis {
-			name := ""
-			if ci.AgentID != "" && docs != nil {
-				if cached, ok := agentNames[ci.AgentID]; ok {
-					name = cached
-				} else if d, err := docs.GetByID(ctx, ci.AgentID, memberships); err == nil {
-					name = d.Name
-					agentNames[ci.AgentID] = name
-				} else {
-					agentNames[ci.AgentID] = ""
-				}
-			}
-			row := storyContractCard{
-				ID:           ci.ID,
-				Sequence:     ci.Sequence,
-				ContractName: ci.ContractName,
-				Status:       ci.Status,
-				AgentID:      ci.AgentID,
-				AgentName:    name,
-			}
-			if ci.AgentID != "" {
-				row.AgentHref = "/documents/" + ci.AgentID
-			}
-			out = append(out, row)
-		}
-		cards[i].Contracts = out
-	}
-}

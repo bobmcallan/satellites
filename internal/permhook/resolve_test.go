@@ -6,24 +6,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/session"
-	"github.com/bobmcallan/satellites/internal/story"
 )
 
-// resolveFixture wires the four memory stores the resolver needs.
+// resolveFixture wires the three memory stores the resolver needs.
 type resolveFixture struct {
-	r         *Resolver
-	ctx       context.Context
-	now       time.Time
-	userID    string
-	sessID    string
-	wsID      string
-	docs      document.Store
-	ledger    ledger.Store
-	contracts contract.Store
+	r      *Resolver
+	ctx    context.Context
+	now    time.Time
+	userID string
+	sessID string
+	wsID   string
+	docs   document.Store
+	ledger ledger.Store
 }
 
 func newResolveFixture(t *testing.T) *resolveFixture {
@@ -32,8 +29,6 @@ func newResolveFixture(t *testing.T) *resolveFixture {
 	now := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 	docs := document.NewMemoryStore()
 	led := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(led)
-	cs := contract.NewMemoryStore(docs, stories)
 	ses := session.NewMemoryStore()
 
 	userID := "u_alice"
@@ -44,19 +39,17 @@ func newResolveFixture(t *testing.T) *resolveFixture {
 
 	return &resolveFixture{
 		r: &Resolver{
-			Sessions:  ses,
-			Ledger:    led,
-			Contracts: cs,
-			Docs:      docs,
+			Sessions: ses,
+			Ledger:   led,
+			Docs:     docs,
 		},
-		ctx:       ctx,
-		now:       now,
-		userID:    userID,
-		sessID:    sessID,
-		wsID:      "wksp_x",
-		docs:      docs,
-		ledger:    led,
-		contracts: cs,
+		ctx:    ctx,
+		now:    now,
+		userID: userID,
+		sessID: sessID,
+		wsID:   "wksp_x",
+		docs:   docs,
+		ledger: led,
 	}
 }
 

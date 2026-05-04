@@ -8,7 +8,6 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -43,7 +42,6 @@ func newImpersonationFixture(t *testing.T, callerGlobalAdmin bool) *impersonatio
 	ledStore := ledger.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledStore)
 	projStore := project.NewMemoryStore()
-	contractStore := contract.NewMemoryStore(docStore, storyStore)
 	sessionStore := session.NewMemoryStore()
 
 	home, err := wsStore.Create(ctx, "u_alice", "home", now)
@@ -68,7 +66,6 @@ func newImpersonationFixture(t *testing.T, callerGlobalAdmin bool) *impersonatio
 		ProjectStore:   projStore,
 		LedgerStore:    ledStore,
 		StoryStore:     storyStore,
-		ContractStore:  contractStore,
 		WorkspaceStore: wsStore,
 		SessionStore:   sessionStore,
 	})

@@ -69,7 +69,7 @@ func TestKVList_CSSRulePresent(t *testing.T) {
 func renderProjectDetailWithPublic(t *testing.T, publicURL string) (string, string) {
 	t.Helper()
 	cfg := &config.Config{Env: "dev", PublicURL: publicURL}
-	p, users, sessions, projects, _, _, _, _, _ := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, projects, _, _, _, _ := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 

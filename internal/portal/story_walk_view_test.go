@@ -10,9 +10,8 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
-	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/task"
 )
 
 // renderStoryWalk drives a GET /stories/{sid}/walk request against p.
@@ -30,9 +29,15 @@ func renderStoryWalk(t *testing.T, p *Portal, storyID, sessionCookie string) *ht
 // TestStoryWalk_LoopGroupsByContractName verifies sty_557df61e — a
 // 3-lap develop story renders one group header carrying "develop ×3"
 // with three nested cards, plus a separate push group with one card.
+// sty_c6d76a5b checkpoint 14: the walk projects from kind:work tasks
+// instead of contract_instance rows; cards group by Action.
 func TestStoryWalk_LoopGroupsByContractName(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, projects, _, stories, contracts, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, projects, _, stories := newTestPortal(t, &config.Config{Env: "dev"})
+	tasks := p.tasks
+	if tasks == nil {
+		t.Fatalf("portal fixture missing task store")
+	}
 	ctx := context.Background()
 	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
 
@@ -41,26 +46,6 @@ func TestStoryWalk_LoopGroupsByContractName(t *testing.T) {
 	proj, err := projects.Create(ctx, user.ID, "", "alpha", now)
 	if err != nil {
 		t.Fatalf("project create: %v", err)
-	}
-	developDoc, err := docs.Create(ctx, document.Document{
-		Type:       document.TypeContract,
-		Scope:      document.ScopeSystem,
-		Name:       "develop",
-		Status:     document.StatusActive,
-		Structured: []byte(`{"required_role":"developer"}`),
-	}, now)
-	if err != nil {
-		t.Fatalf("seed develop doc: %v", err)
-	}
-	pushDoc, err := docs.Create(ctx, document.Document{
-		Type:       document.TypeContract,
-		Scope:      document.ScopeSystem,
-		Name:       "push",
-		Status:     document.StatusActive,
-		Structured: []byte(`{"required_role":"releaser"}`),
-	}, now)
-	if err != nil {
-		t.Fatalf("seed push doc: %v", err)
 	}
 	st, err := stories.Create(ctx, story.Story{
 		ProjectID: proj.ID,
@@ -74,43 +59,52 @@ func TestStoryWalk_LoopGroupsByContractName(t *testing.T) {
 		t.Fatalf("story create: %v", err)
 	}
 
-	dev1, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID: st.ID, ContractID: developDoc.ID, ContractName: "develop",
-		Sequence: 1, Status: contract.StatusReady,
+	// Three develop work tasks (rejection-append loop) + one push.
+	dev1, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID: "ws", ProjectID: proj.ID, StoryID: st.ID,
+		Kind: task.KindWork, Action: task.ContractAction("develop"),
+		Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
+		Status: task.StatusPublished,
 	}, now)
 	if err != nil {
-		t.Fatalf("ci dev1: %v", err)
+		t.Fatalf("dev1 enqueue: %v", err)
 	}
-	if _, err := contracts.Claim(ctx, dev1.ID, "g1", now.Add(time.Minute), nil); err != nil {
+	if _, err := tasks.ClaimByID(ctx, dev1.ID, "worker", now.Add(time.Minute), nil); err != nil {
 		t.Fatalf("dev1 claim: %v", err)
 	}
-	if _, err := contracts.UpdateStatus(ctx, dev1.ID, contract.StatusFailed, user.ID, now.Add(2*time.Minute), nil); err != nil {
-		t.Fatalf("dev1 fail: %v", err)
+	if _, err := tasks.Close(ctx, dev1.ID, task.OutcomeFailure, now.Add(2*time.Minute), nil); err != nil {
+		t.Fatalf("dev1 close failure: %v", err)
 	}
-	dev2, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID: st.ID, ContractID: developDoc.ID, ContractName: "develop",
-		Sequence: 1, Status: contract.StatusReady, PriorCIID: dev1.ID,
+	dev2, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID: "ws", ProjectID: proj.ID, StoryID: st.ID,
+		Kind: task.KindWork, Action: task.ContractAction("develop"),
+		PriorTaskID: dev1.ID,
+		Origin:      task.OriginStoryStage, Priority: task.PriorityMedium,
+		Status: task.StatusPublished,
 	}, now.Add(3*time.Minute))
 	if err != nil {
-		t.Fatalf("ci dev2: %v", err)
+		t.Fatalf("dev2 enqueue: %v", err)
 	}
-	if _, err := contracts.Claim(ctx, dev2.ID, "g2", now.Add(4*time.Minute), nil); err != nil {
+	if _, err := tasks.ClaimByID(ctx, dev2.ID, "worker", now.Add(4*time.Minute), nil); err != nil {
 		t.Fatalf("dev2 claim: %v", err)
 	}
-	dev3, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID: st.ID, ContractID: developDoc.ID, ContractName: "develop",
-		Sequence: 1, Status: contract.StatusReady, PriorCIID: dev2.ID,
-	}, now.Add(5*time.Minute))
-	if err != nil {
-		t.Fatalf("ci dev3: %v", err)
+	if _, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID: "ws", ProjectID: proj.ID, StoryID: st.ID,
+		Kind: task.KindWork, Action: task.ContractAction("develop"),
+		PriorTaskID: dev2.ID,
+		Origin:      task.OriginStoryStage, Priority: task.PriorityMedium,
+		Status: task.StatusPublished,
+	}, now.Add(5*time.Minute)); err != nil {
+		t.Fatalf("dev3 enqueue: %v", err)
 	}
-	if _, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID: st.ID, ContractID: pushDoc.ID, ContractName: "push",
-		Sequence: 2, Status: contract.StatusReady,
+	if _, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID: "ws", ProjectID: proj.ID, StoryID: st.ID,
+		Kind: task.KindWork, Action: task.ContractAction("push"),
+		Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
+		Status: task.StatusPublished,
 	}, now.Add(6*time.Minute)); err != nil {
-		t.Fatalf("ci push: %v", err)
+		t.Fatalf("push enqueue: %v", err)
 	}
-	_ = dev3
 
 	sess, err := sessions.Create(user.ID, auth.DefaultSessionTTL)
 	if err != nil {

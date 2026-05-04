@@ -36,7 +36,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/httpserver"
 	"github.com/bobmcallan/satellites/internal/hub"
@@ -83,7 +82,6 @@ type Harness struct {
 	Projects  *project.MemoryStore
 	Stories   *story.MemoryStore
 	Ledger    *ledger.MemoryStore
-	Contracts *contract.MemoryStore
 	Tasks     *task.MemoryStore
 	Documents *document.MemoryStore
 	Repos     *repo.MemoryStore
@@ -149,12 +147,11 @@ func StartHarness(t *testing.T) *Harness {
 		t.Fatalf("seed harness project: %v", err)
 	}
 	docStore := document.NewMemoryStore()
-	contractStore := contract.NewMemoryStore(docStore, storyStore)
 	taskStore := task.NewMemoryStore()
 	repoStore := repo.NewMemoryStore()
 	grantStore := rolegrant.NewMemoryStore(docStore)
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projectStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, codeindex.NewStub(), grantStore, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projectStore, ledgerStore, storyStore, taskStore, docStore, repoStore, codeindex.NewStub(), wsStore, startedAt)
 	if err != nil {
 		t.Fatalf("portal.New: %v", err)
 	}
@@ -206,7 +203,6 @@ func StartHarness(t *testing.T) *Harness {
 		Projects:     projectStore,
 		Stories:      storyStore,
 		Ledger:       ledgerStore,
-		Contracts:    contractStore,
 		Tasks:        taskStore,
 		Documents:    docStore,
 		Repos:        repoStore,

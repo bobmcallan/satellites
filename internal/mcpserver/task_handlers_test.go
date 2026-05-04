@@ -131,41 +131,41 @@ func TestTaskList_FiltersByStatus(t *testing.T) {
 	}
 }
 
-// TestTaskList_FiltersByCIAndKind: task_list filters on
-// contract_instance_id and kind. Replaces TestTaskEnqueue_BindsCIAndKind
-// (the enqueue verb is gone; the filter behaviour stays).
-func TestTaskList_FiltersByCIAndKind(t *testing.T) {
+// TestTaskList_FiltersByStoryAndKind: task_list filters on
+// story_id and kind. sty_c6d76a5b checkpoint 14 retired the
+// contract_instance_id filter; tasks bind to stories directly.
+func TestTaskList_FiltersByStoryAndKind(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
 
 	seedTask(t, s, task.Task{
-		WorkspaceID:        "wksp_a",
-		ContractInstanceID: "ci_plan_x",
-		Kind:               task.KindWork,
-		Origin:             task.OriginStoryStage,
+		WorkspaceID: "wksp_a",
+		StoryID:     "sty_x",
+		Kind:        task.KindWork,
+		Origin:      task.OriginStoryStage,
 	})
 	seedTask(t, s, task.Task{
-		WorkspaceID:        "wksp_a",
-		ContractInstanceID: "ci_plan_x",
-		Kind:               task.KindReview,
-		Origin:             task.OriginStoryStage,
+		WorkspaceID: "wksp_a",
+		StoryID:     "sty_x",
+		Kind:        task.KindReview,
+		Origin:      task.OriginStoryStage,
 	})
 	seedTask(t, s, task.Task{
-		WorkspaceID:        "wksp_a",
-		ContractInstanceID: "ci_plan_y",
-		Kind:               task.KindWork,
-		Origin:             task.OriginStoryStage,
+		WorkspaceID: "wksp_a",
+		StoryID:     "sty_y",
+		Kind:        task.KindWork,
+		Origin:      task.OriginStoryStage,
 	})
 
 	listRes := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
-		"contract_instance_id": "ci_plan_x",
+		"story_id": "sty_x",
 	})
 	require.False(t, listRes.IsError)
 	var rows []map[string]any
 	require.NoError(t, json.Unmarshal([]byte(listRes.Content[0].(mcpgo.TextContent).Text), &rows))
 	assert.Len(t, rows, 2)
 	for _, r := range rows {
-		assert.Equal(t, "ci_plan_x", r["contract_instance_id"])
+		assert.Equal(t, "sty_x", r["story_id"])
 	}
 
 	listRes2 := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
@@ -180,13 +180,13 @@ func TestTaskList_FiltersByCIAndKind(t *testing.T) {
 	}
 
 	listRes3 := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
-		"contract_instance_id": "ci_plan_x",
-		"kind":                 task.KindReview,
+		"story_id": "sty_x",
+		"kind":     task.KindReview,
 	})
 	require.False(t, listRes3.IsError)
 	var rows3 []map[string]any
 	require.NoError(t, json.Unmarshal([]byte(listRes3.Content[0].(mcpgo.TextContent).Text), &rows3))
 	assert.Len(t, rows3, 1)
-	assert.Equal(t, "ci_plan_x", rows3[0]["contract_instance_id"])
+	assert.Equal(t, "sty_x", rows3[0]["story_id"])
 	assert.Equal(t, task.KindReview, rows3[0]["kind"])
 }

@@ -27,7 +27,7 @@ type helpFixture struct {
 
 func newHelpFixture(t *testing.T) *helpFixture {
 	t.Helper()
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 

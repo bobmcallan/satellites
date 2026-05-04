@@ -70,7 +70,7 @@ func TestDocumentsList_Empty(t *testing.T) {
 
 func TestDocumentsList_TypeTabFilters(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
@@ -105,7 +105,7 @@ func TestDocumentsList_TypeTabFilters(t *testing.T) {
 
 func TestDocumentDetail_LinkedStoriesByTag(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, projects, _, stories, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, projects, _, stories, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
@@ -166,7 +166,7 @@ func TestDocumentDetail_404OnUnknownID(t *testing.T) {
 
 func TestDocumentDetail_VersionHistoryPopulatedAfterUpdate(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
@@ -210,7 +210,7 @@ func TestDocumentDetail_VersionHistoryPopulatedAfterUpdate(t *testing.T) {
 
 func TestDocumentVersionDetail_RendersHistoricalBody(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)
@@ -252,7 +252,7 @@ func TestDocumentVersionDetail_RendersHistoricalBody(t *testing.T) {
 
 func TestDocumentVersionDetail_404OnUnknownVersion(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	user := auth.User{ID: "u_alice", Email: "alice@local"}
 	users.Add(user)
 	sess, _ := sessions.Create(user.ID, auth.DefaultSessionTTL)

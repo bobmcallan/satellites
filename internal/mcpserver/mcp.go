@@ -21,7 +21,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/portalreplicate"
@@ -49,7 +48,6 @@ type Server struct {
 	ledger           ledger.Store
 	stories          story.Store
 	workspaces       workspace.Store
-	contracts        contract.Store
 	sessions         session.Store
 	reviewer         reviewer.Reviewer
 	tasks            task.Store
@@ -94,7 +92,6 @@ type Deps struct {
 	LedgerStore      ledger.Store
 	StoryStore       story.Store
 	WorkspaceStore   workspace.Store
-	ContractStore    contract.Store
 	SessionStore     session.Store
 	Reviewer         reviewer.Reviewer
 	// TaskStore is optional; nil disables the task_* MCP verbs.
@@ -136,7 +133,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		ledger:           deps.LedgerStore,
 		stories:          deps.StoryStore,
 		workspaces:       deps.WorkspaceStore,
-		contracts:        deps.ContractStore,
 		sessions:         deps.SessionStore,
 		reviewer:         deps.Reviewer,
 		tasks:            deps.TaskStore,
@@ -456,7 +452,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(templateListTool, s.handleStoryTemplateList)
 	}
 
-	if s.contracts != nil && s.stories != nil && s.ledger != nil && s.docs != nil && s.projects != nil {
+	if s.stories != nil && s.ledger != nil && s.docs != nil && s.projects != nil {
 		// project_workflow_spec_get / _set were removed by
 		// epic:configuration-over-code-mandate (story_af79cf95). The
 		// substrate no longer enforces a per-project workflow shape; the
@@ -632,10 +628,9 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
-			mcpgo.WithString("contract_instance_id", mcpgo.Description("Optional CI this task belongs to. Plan agents bind their child tasks to the plan CI so the story view groups work per CI.")),
 			mcpgo.WithString("kind", mcpgo.Description("Optional task kind discriminator. Today: \"review\" (consumed by the embedded reviewer service) vs \"work\" (everything else).")),
 			mcpgo.WithString("agent_id", mcpgo.Description("Document id of the agent that should execute this task. Stamped on the task row; used to authorise claim and to route the conversation. Inherited from parent_task_id when omitted.")),
-			mcpgo.WithString("parent_task_id", mcpgo.Description("Anchors this task to the conversation thread it extends — typically the implement task whose close emitted this successor. The substrate inherits contract_instance_id / project_id / agent_id from the parent when those args are omitted.")),
+			mcpgo.WithString("parent_task_id", mcpgo.Description("Anchors this task to the conversation thread it extends — typically the implement task whose close emitted this successor. The substrate inherits project_id / agent_id from the parent when those args are omitted.")),
 			mcpgo.WithString("prior_task_id", mcpgo.Description("Links a fresh implement task to the prior implement task it succeeds in the rejection-append loop. Distinct from parent_task_id (the conversation anchor): prior_task_id is the same-slot retry pointer.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
@@ -653,12 +648,12 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(getTaskTool, s.handleTaskGet)
 
 		listTaskTool := mcpgo.NewTool("task_list",
-			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id and kind. Archived rows (sty_dc2998c5 retention sweep) are excluded by default; pass include_archived=true to opt in."),
+			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on story_id and kind. Archived rows (sty_dc2998c5 retention sweep) are excluded by default; pass include_archived=true to opt in."),
 			mcpgo.WithString("origin", mcpgo.Description("Filter by origin.")),
 			mcpgo.WithString("status", mcpgo.Description("Filter by status.")),
 			mcpgo.WithString("priority", mcpgo.Description("Filter by priority.")),
 			mcpgo.WithString("claimed_by", mcpgo.Description("Filter by claimed_by worker id.")),
-			mcpgo.WithString("contract_instance_id", mcpgo.Description("Filter by owning contract instance.")),
+			mcpgo.WithString("story_id", mcpgo.Description("Filter by owning story.")),
 			mcpgo.WithString("kind", mcpgo.Description("Filter by task kind (review | work).")),
 			mcpgo.WithBoolean("include_archived", mcpgo.Description("Include rows with status=archived. Default false — the retention sweep moves closed rows older than the project window into archived; opt in to include them in history queries.")),
 			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),

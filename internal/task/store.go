@@ -31,15 +31,14 @@ var ErrNoTaskAvailable = errors.New("task: no task available")
 // need history (closed-pane "Load more", admin audit) opt in by
 // setting it to true. sty_dc2998c5.
 type ListOptions struct {
-	Origin             string
-	Status             string
-	Priority           string
-	ClaimedBy          string
-	ContractInstanceID string
-	StoryID            string
-	Kind               string
-	IncludeArchived    bool
-	Limit              int
+	Origin          string
+	Status          string
+	Priority        string
+	ClaimedBy       string
+	StoryID         string
+	Kind            string
+	IncludeArchived bool
+	Limit           int
 }
 
 // Store is the persistence surface for tasks.
@@ -246,9 +245,6 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 			continue
 		}
 		if opts.ClaimedBy != "" && t.ClaimedBy != opts.ClaimedBy {
-			continue
-		}
-		if opts.ContractInstanceID != "" && t.ContractInstanceID != opts.ContractInstanceID {
 			continue
 		}
 		if opts.StoryID != "" && t.StoryID != opts.StoryID {

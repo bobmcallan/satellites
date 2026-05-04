@@ -47,7 +47,6 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 		priority = task.PriorityMedium
 	}
 	projectID := getString(args, "project_id")
-	contractInstanceID := getString(args, "contract_instance_id")
 	kind := getString(args, "kind")
 	agentID := getString(args, "agent_id")
 	parentTaskID := getString(args, "parent_task_id")
@@ -62,14 +61,11 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 		}
 	}
 	// sty_c6d76a5b: when parent_task_id resolves to a known task and the
-	// caller didn't override, inherit the parent's contract_instance_id /
-	// project_id / agent_id so successor tasks form a coherent thread
-	// without the caller restating each field.
+	// caller didn't override, inherit the parent's project_id / agent_id
+	// so successor tasks form a coherent thread without the caller
+	// restating each field.
 	if parentTaskID != "" && s.tasks != nil {
 		if parent, perr := s.tasks.GetByID(ctx, parentTaskID, memberships); perr == nil {
-			if contractInstanceID == "" {
-				contractInstanceID = parent.ContractInstanceID
-			}
 			if projectID == "" {
 				projectID = parent.ProjectID
 			}
@@ -79,21 +75,20 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 		}
 	}
 	now := time.Now().UTC()
-	seed := s.stampTaskIteration(ctx, task.Task{
-		WorkspaceID:        workspaceID,
-		ProjectID:          projectID,
-		ContractInstanceID: contractInstanceID,
-		Kind:               kind,
-		AgentID:            agentID,
-		ParentTaskID:       parentTaskID,
-		PriorTaskID:        priorTaskID,
-		Status:             status,
-		Origin:             origin,
-		Trigger:            triggerRaw,
-		Payload:            payloadRaw,
-		Priority:           priority,
-		ExpectedDuration:   expected,
-	}, memberships)
+	seed := task.Task{
+		WorkspaceID:      workspaceID,
+		ProjectID:        projectID,
+		Kind:             kind,
+		AgentID:          agentID,
+		ParentTaskID:     parentTaskID,
+		PriorTaskID:      priorTaskID,
+		Status:           status,
+		Origin:           origin,
+		Trigger:          triggerRaw,
+		Payload:          payloadRaw,
+		Priority:         priority,
+		ExpectedDuration: expected,
+	}
 	t, err := s.tasks.Enqueue(ctx, seed, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(fmt.Sprintf("%s: %s", verbName, err)), nil
@@ -165,12 +160,12 @@ func (s *Server) handleTaskList(ctx context.Context, req mcpgo.CallToolRequest) 
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	args := req.GetArguments()
 	opts := task.ListOptions{
-		Origin:             getString(args, "origin"),
-		Status:             getString(args, "status"),
-		Priority:           getString(args, "priority"),
-		ClaimedBy:          getString(args, "claimed_by"),
-		ContractInstanceID: getString(args, "contract_instance_id"),
-		Kind:               getString(args, "kind"),
+		Origin:    getString(args, "origin"),
+		Status:    getString(args, "status"),
+		Priority:  getString(args, "priority"),
+		ClaimedBy: getString(args, "claimed_by"),
+		StoryID:   getString(args, "story_id"),
+		Kind:      getString(args, "kind"),
 	}
 	if v, ok := args["include_archived"].(bool); ok {
 		opts.IncludeArchived = v

@@ -25,7 +25,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/configseed"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/dispatcher"
 	"github.com/bobmcallan/satellites/internal/document"
@@ -44,7 +43,6 @@ import (
 	reviewerservice "github.com/bobmcallan/satellites/internal/reviewer/service"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
-	"github.com/bobmcallan/satellites/internal/storystatus"
 	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/internal/wshandler"
@@ -115,7 +113,6 @@ func main() {
 		ledgerStore      ledger.Store
 		storyStore       story.Store
 		wsStore          workspace.Store
-		contractStore    contract.Store
 		sessionStore     session.Store
 		taskStore        task.Store
 		repoStore        repo.Store
@@ -198,7 +195,6 @@ func main() {
 		surrealLedgerChunks = ledger.NewSurrealChunkStore(conn)
 		storyStore = story.NewSurrealStore(conn, ledgerStore)
 		wsStore = workspace.NewSurrealStore(conn)
-		contractStore = contract.NewSurrealStore(conn, docStore, storyStore)
 		sessionStore = session.NewSurrealStore(conn)
 		// story_0ab83f82: replace MemorySessionStore with the durable
 		// Surreal-backed implementation when SATELLITES_DB_DSN is set so cookie
@@ -308,17 +304,6 @@ func main() {
 		// docs exist.
 		document.MigrateSkillContractBindings(ctx, docStore, logger, time.Now().UTC())
 
-		// epic:roleless-agents — pre-6.5 grant-backed claim columns are
-		// no longer migrated. Contracts now stamp agent_id directly via
-		// orchestrator_compose_plan (sty_e8d49554, sty_63361520). The
-		// SurrealStore drops the legacy session column on next boot if
-		// still present.
-		if surrealContracts, ok := contractStore.(*contract.SurrealStore); ok {
-			if err := surrealContracts.DropLegacySessionColumn(ctx); err != nil {
-				logger.Warn().Str("error", err.Error()).Msg("contract drop legacy session column failed")
-			}
-		}
-
 		if surrealLedger, ok := ledgerStore.(*ledger.SurrealStore); ok {
 			if n, err := surrealLedger.MigrateLegacyRows(ctx, time.Now().UTC()); err != nil {
 				logger.Warn().Str("error", err.Error()).Msg("ledger migrate legacy rows failed")
@@ -331,19 +316,6 @@ func main() {
 		// boot — second invocation finds no rows with empty workspace_id.
 		if _, err := workspace.BackfillPrimitives(ctx, wsStore, projStore, storyStore, ledgerStore, docStore, logger, time.Now().UTC()); err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("workspace backfill failed")
-		}
-
-		// sty_78ddc67b: stamp task.iteration on legacy rows whose value
-		// is zero/missing. Each task is matched to its CI's lap number
-		// among same-named CIs on the same story. Idempotent — rows with
-		// iteration > 0 are skipped.
-		if surrealTasks, ok := taskStore.(*task.SurrealStore); ok && contractStore != nil {
-			lookup := buildTaskIterationLookup(ctx, contractStore, logger)
-			if n, err := surrealTasks.BackfillIteration(ctx, lookup); err != nil {
-				logger.Warn().Str("error", err.Error()).Msg("task iteration backfill failed")
-			} else if n > 0 {
-				logger.Info().Int("rows", n).Msg("task iteration backfilled")
-			}
 		}
 
 		// Wire user-creation → workspace.EnsureDefault. Each new user gets
@@ -384,7 +356,7 @@ func main() {
 
 	}
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, repoIndexer, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, taskStore, docStore, repoStore, repoIndexer, wsStore, startedAt)
 	if err != nil {
 		logger.Error().Str("error", err.Error()).Msg("portal init failed")
 		os.Exit(1)
@@ -416,25 +388,12 @@ func main() {
 			Logger:   logger,
 		})
 
-		// Attach the store-layer publisher so ledger / task / contract /
-		// story mutations fan to the hub on every write.
+		// Attach the store-layer publisher so ledger / task / story
+		// mutations fan to the hub on every write.
 		publisher := &hubPublisher{authHub: authHub}
 		attachPublisher(ledgerStore, publisher)
 		attachPublisher(taskStore, publisher)
-		attachPublisher(contractStore, publisher)
 		attachPublisher(storyStore, publisher)
-
-		// sty_e805a01a — derived story status. The reconciler subscribes
-		// to the workspace-agnostic ledger.Listener bus, recomputes
-		// status from CI rows on every CI-state-transition event, and
-		// writes back via stories.UpdateStatus. Boot-time backfill
-		// repairs drift accumulated before this wiring landed; runs
-		// in the background so startup does not block on it.
-		if storyStore != nil && contractStore != nil {
-			recon := storystatus.New(storyStore, contractStore, logger)
-			attachLedgerListener(ledgerStore, recon)
-			go runStoryStatusBackfill(ctx, recon, projStore, storyStore, logger)
-		}
 	}
 
 	// sty_dc2998c5: nightly sweep that flips closed tasks older than
@@ -470,13 +429,12 @@ func main() {
 	// story_c08856b2: /hooks/enforce HTTP handler resolves a tool
 	// call's allow/deny via the active CI's allocated agent (or the
 	// session-default-install row when no CI is claimed).
-	if sessionStore != nil && ledgerStore != nil && contractStore != nil && docStore != nil {
+	if sessionStore != nil && ledgerStore != nil && docStore != nil {
 		permHandler := &permhook.Handler{
 			Resolver: &permhook.Resolver{
-				Sessions:  sessionStore,
-				Ledger:    ledgerStore,
-				Contracts: contractStore,
-				Docs:      docStore,
+				Sessions: sessionStore,
+				Ledger:   ledgerStore,
+				Docs:     docStore,
 			},
 			Logger: logger,
 		}
@@ -498,7 +456,6 @@ func main() {
 		LedgerStore:      ledgerStore,
 		StoryStore:       storyStore,
 		WorkspaceStore:   wsStore,
-		ContractStore:    contractStore,
 		SessionStore:     sessionStore,
 		TaskStore:        taskStore,
 		RepoStore:        repoStore,
@@ -561,12 +518,11 @@ func main() {
 	// earlier at boot.
 	if reviewerServiceMode == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
 		revSvc, err := reviewerservice.New(reviewerservice.Config{}, reviewerservice.Deps{
-			Tasks:     taskStore,
-			Contracts: contractStore,
-			Docs:      docStore,
-			Ledger:    ledgerStore,
-			Reviewer:  rev,
-			Logger:    logger,
+			Tasks:    taskStore,
+			Docs:     docStore,
+			Ledger:   ledgerStore,
+			Reviewer: rev,
+			Logger:   logger,
 		})
 		if err != nil {
 			logger.Warn().Str("error", err.Error()).Msg("reviewer service construction failed")
@@ -778,48 +734,6 @@ type projectListAller interface {
 	ListAll(ctx context.Context) ([]project.Project, error)
 }
 
-// buildTaskIterationLookup returns a closure mapping a contract_instance_id
-// to its 1-based lap number among same-named CIs on the same story
-// (sty_78ddc67b). Memoised: the closure caches story → CI list scans so a
-// large backfill makes O(stories) reads, not O(tasks).
-func buildTaskIterationLookup(ctx context.Context, contracts contract.Store, logger arbor.ILogger) func(string) int {
-	storyCache := make(map[string][]contract.ContractInstance)
-	return func(ciID string) int {
-		if contracts == nil || ciID == "" {
-			return 0
-		}
-		ci, err := contracts.GetByID(ctx, ciID, nil)
-		if err != nil {
-			return 0
-		}
-		peers, ok := storyCache[ci.StoryID]
-		if !ok {
-			peers, err = contracts.List(ctx, ci.StoryID, nil)
-			if err != nil {
-				if logger != nil {
-					logger.Warn().Str("story_id", ci.StoryID).Str("error", err.Error()).Msg("task iteration backfill: peer list failed")
-				}
-				return 0
-			}
-			storyCache[ci.StoryID] = peers
-		}
-		n := 0
-		for _, p := range peers {
-			if p.ContractName != ci.ContractName {
-				continue
-			}
-			if p.CreatedAt.After(ci.CreatedAt) {
-				continue
-			}
-			n++
-		}
-		if n == 0 {
-			return 1
-		}
-		return n
-	}
-}
-
 // runTaskRetentionSweep is the boot-time goroutine that runs the task
 // retention sweep on a 24h cadence (sty_dc2998c5). The cutoff is
 // SATELLITES_TASKS_RETENTION_DAYS days back (default 90). The sweep
@@ -884,37 +798,3 @@ func strconvAtoiSafe(s string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(s))
 }
 
-// runStoryStatusBackfill walks every active project's stories and runs
-// the reconciler on each so derived status flips don't lag the live
-// CI state on a freshly-deployed build (sty_e805a01a). Best-effort —
-// errors are logged, never fatal.
-func runStoryStatusBackfill(ctx context.Context, recon *storystatus.Reconciler, projects project.Store, stories story.Store, logger arbor.ILogger) {
-	if recon == nil || projects == nil || stories == nil {
-		return
-	}
-	listAller, ok := projects.(projectListAller)
-	if !ok {
-		return
-	}
-	allProjects, err := listAller.ListAll(ctx)
-	if err != nil {
-		logger.Warn().Str("error", err.Error()).Msg("storystatus backfill: project list failed")
-		return
-	}
-	totalTouched, totalErrored := 0, 0
-	for _, p := range allProjects {
-		ss, err := stories.List(ctx, p.ID, story.ListOptions{Limit: 500}, nil)
-		if err != nil {
-			totalErrored++
-			continue
-		}
-		t, e := recon.Backfill(ctx, ss)
-		totalTouched += t
-		totalErrored += e
-	}
-	logger.Info().
-		Int("projects", len(allProjects)).
-		Int("touched", totalTouched).
-		Int("errored", totalErrored).
-		Msg("storystatus backfill complete")
-}

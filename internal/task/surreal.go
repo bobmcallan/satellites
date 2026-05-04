@@ -153,10 +153,6 @@ func (s *SurrealStore) List(ctx context.Context, opts ListOptions, memberships [
 		conds = append(conds, "claimed_by = $claimed_by")
 		vars["claimed_by"] = opts.ClaimedBy
 	}
-	if opts.ContractInstanceID != "" {
-		conds = append(conds, "contract_instance_id = $contract_instance_id")
-		vars["contract_instance_id"] = opts.ContractInstanceID
-	}
 	if opts.StoryID != "" {
 		conds = append(conds, "story_id = $story_id")
 		vars["story_id"] = opts.StoryID
@@ -430,43 +426,6 @@ func (s *SurrealStore) write(ctx context.Context, t Task) error {
 		return fmt.Errorf("task: upsert: %w", err)
 	}
 	return nil
-}
-
-// BackfillIteration stamps Iteration on rows whose value is zero or
-// missing. The lookup callback resolves a contract_instance_id to its
-// 1-based lap number among CIs of the same contract_name on the same
-// story; zero means the caller couldn't resolve and the row is skipped.
-// Idempotent: rows with Iteration > 0 are untouched. sty_78ddc67b.
-func (s *SurrealStore) BackfillIteration(ctx context.Context, lookup func(ciID string) int) (int, error) {
-	if lookup == nil {
-		return 0, nil
-	}
-	sql := fmt.Sprintf(
-		"SELECT %s FROM tasks WHERE iteration IS NONE OR iteration = 0 OR iteration = NONE",
-		selectCols,
-	)
-	results, err := surrealdb.Query[[]Task](ctx, s.db, sql, map[string]any{})
-	if err != nil {
-		return 0, fmt.Errorf("task: backfill iteration select: %w", err)
-	}
-	if results == nil || len(*results) == 0 {
-		return 0, nil
-	}
-	stamped := 0
-	for _, t := range (*results)[0].Result {
-		iter := 1
-		if t.ContractInstanceID != "" {
-			if n := lookup(t.ContractInstanceID); n > 0 {
-				iter = n
-			}
-		}
-		t.Iteration = iter
-		if err := s.write(ctx, t); err != nil {
-			return stamped, err
-		}
-		stamped++
-	}
-	return stamped, nil
 }
 
 // Compile-time assertion.

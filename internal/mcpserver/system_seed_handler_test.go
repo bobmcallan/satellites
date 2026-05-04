@@ -12,7 +12,6 @@ import (
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/configseed"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -40,7 +39,6 @@ func newSystemSeedFixture(t *testing.T) (*Server, string) {
 	led := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(led)
 	projects := project.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	ws := workspace.NewMemoryStore()
 	sessions := session.NewMemoryStore()
 
@@ -49,7 +47,6 @@ func newSystemSeedFixture(t *testing.T) (*Server, string) {
 		ProjectStore:   projects,
 		LedgerStore:    led,
 		StoryStore:     stories,
-		ContractStore:  contracts,
 		WorkspaceStore: ws,
 		SessionStore:   sessions,
 	})

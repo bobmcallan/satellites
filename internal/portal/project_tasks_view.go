@@ -11,7 +11,6 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -108,7 +107,7 @@ func (p *Portal) handleProjectTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := parseProjectTasksFilter(r.URL.Query().Get("q"))
-	composite := buildProjectTasksComposite(r.Context(), p.tasks, p.contracts, p.stories, p.documents, pr.ID, filter, time.Now().UTC(), memberships)
+	composite := buildProjectTasksComposite(r.Context(), p.tasks, p.stories, p.documents, pr.ID, filter, time.Now().UTC(), memberships)
 	data := projectTasksData{
 		Title:           buildPageTitle(active, pr.Name, "tasks"),
 		Version:         config.Version,
@@ -199,7 +198,6 @@ func parseIterationToken(val string) (string, int) {
 func buildProjectTasksComposite(
 	ctx context.Context,
 	tasks task.Store,
-	contracts contract.Store,
 	stories story.Store,
 	docs document.Store,
 	projectID string,
@@ -228,35 +226,27 @@ func buildProjectTasksComposite(
 			}
 		}
 	}
-	contractCache := map[string]contract.ContractInstance{}
 	contractDocCache := map[string]document.Document{}
-	resolveCI := func(ciID string) (contract.ContractInstance, bool) {
-		if contracts == nil || ciID == "" {
-			return contract.ContractInstance{}, false
-		}
-		if cached, ok := contractCache[ciID]; ok {
-			return cached, true
-		}
-		ci, err := contracts.GetByID(ctx, ciID, memberships)
-		if err != nil {
-			return contract.ContractInstance{}, false
-		}
-		contractCache[ciID] = ci
-		return ci, true
-	}
-	resolveDoc := func(id string) document.Document {
-		if id == "" || docs == nil {
+	resolveContractDoc := func(name string) document.Document {
+		if name == "" || docs == nil {
 			return document.Document{}
 		}
-		if cached, ok := contractDocCache[id]; ok {
+		if cached, ok := contractDocCache[name]; ok {
 			return cached
 		}
-		doc, err := docs.GetByID(ctx, id, nil)
+		ds, err := docs.List(ctx, document.ListOptions{Type: document.TypeContract, Scope: document.ScopeSystem}, nil)
 		if err != nil {
+			contractDocCache[name] = document.Document{}
 			return document.Document{}
 		}
-		contractDocCache[id] = doc
-		return doc
+		for _, d := range ds {
+			if d.Status == document.StatusActive && d.Name == name {
+				contractDocCache[name] = d
+				return d
+			}
+		}
+		contractDocCache[name] = document.Document{}
+		return document.Document{}
 	}
 
 	closedWindowStart := now.Add(-closedPaneDefaultWindow)
@@ -277,7 +267,10 @@ func buildProjectTasksComposite(
 			Outcome:       t.Outcome,
 			CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339),
 		}
-		row.StoryID = storyIDFromPayload(t.Payload)
+		row.StoryID = t.StoryID
+		if row.StoryID == "" {
+			row.StoryID = storyIDFromPayload(t.Payload)
+		}
 		row.StoryTitle = storyTitles[row.StoryID]
 		if row.StoryID != "" {
 			row.StoryHref = fmt.Sprintf("/projects/%s/stories/%s", projectID, row.StoryID)
@@ -286,17 +279,13 @@ func buildProjectTasksComposite(
 		if t.CompletedAt != nil {
 			row.ClosedAt = t.CompletedAt.UTC().Format(time.RFC3339)
 		}
-		// Resolve contract category + name + iteration via the parent
-		// CI when bound. Iteration comes off the task row directly
-		// (sty_78ddc67b); fall back to CI lap when missing.
-		if t.ContractInstanceID != "" {
-			ci, ok := resolveCI(t.ContractInstanceID)
-			if ok {
-				doc := resolveDoc(ci.ContractID)
-				row.ContractCategory = ci.ContractName
-				if cat := jsonStringField(doc.Structured, "category"); cat != "" {
-					row.ContractCategory = cat
-				}
+		// Resolve contract category from the task's Action. The action
+		// is canonical `contract:<name>`; the system contract doc may
+		// override the category via Structured.
+		if cn := contractNameFromAction(t.Action); cn != "" {
+			row.ContractCategory = cn
+			if cat := jsonStringField(resolveContractDoc(cn).Structured, "category"); cat != "" {
+				row.ContractCategory = cat
 			}
 		}
 

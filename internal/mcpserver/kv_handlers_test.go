@@ -8,7 +8,6 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -29,7 +28,6 @@ func newKVTestServer(t *testing.T) *Server {
 	docStore := document.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledStore)
 	projStore := project.NewMemoryStore()
-	contractStore := contract.NewMemoryStore(docStore, storyStore)
 	wsStore := workspace.NewMemoryStore()
 	sessionStore := session.NewMemoryStore()
 	return New(cfg, satarbor.New("info"), now, Deps{
@@ -37,7 +35,6 @@ func newKVTestServer(t *testing.T) *Server {
 		ProjectStore:   projStore,
 		LedgerStore:    ledStore,
 		StoryStore:     storyStore,
-		ContractStore:  contractStore,
 		WorkspaceStore: wsStore,
 		SessionStore:   sessionStore,
 	})

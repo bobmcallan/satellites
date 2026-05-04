@@ -12,7 +12,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -30,21 +29,19 @@ func newTestPortal(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserS
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
 	docs := document.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return p, users, sessions, projects, ledgerStore, stories
 }
 
-// newTestPortalWithContracts mirrors newTestPortal but exposes the
-// contract + document stores so story-view tests can seed CIs. Wires
-// nil for the workspace store to keep memberships unfiltered (matches
-// newTestPortal's pre-tenant test mode).
-func newTestPortalWithContracts(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *project.MemoryStore, *ledger.MemoryStore, *story.MemoryStore, *contract.MemoryStore, *document.MemoryStore, *workspace.MemoryStore) {
+// newTestPortalWithContracts retained as a compat shim for tests that
+// expected it; the contract.Store return value is gone (sty_c6d76a5b
+// checkpoint 14).
+func newTestPortalWithContracts(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserStore, *auth.MemorySessionStore, *project.MemoryStore, *ledger.MemoryStore, *story.MemoryStore, *document.MemoryStore, *workspace.MemoryStore) {
 	t.Helper()
 	users := auth.NewMemoryUserStore()
 	sessions := auth.NewMemorySessionStore()
@@ -52,14 +49,13 @@ func newTestPortalWithContracts(t *testing.T, cfg *config.Config) (*Portal, *aut
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
 	docs := document.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return p, users, sessions, projects, ledgerStore, stories, contracts, docs, nil
+	return p, users, sessions, projects, ledgerStore, stories, docs, nil
 }
 
 // newTestPortalWithTasks mirrors newTestPortal but exposes the task
@@ -72,10 +68,9 @@ func newTestPortalWithTasks(t *testing.T, cfg *config.Config) (*Portal, *auth.Me
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
 	docs := document.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -737,11 +732,10 @@ func newPortalWithWorkspace(t *testing.T, cfg *config.Config) (*Portal, *auth.Me
 	ledgerStore := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(ledgerStore)
 	docs := document.NewMemoryStore()
-	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
 	ws := workspace.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), ws, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, tasks, docs, repos, codeindex.NewStub(), ws, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

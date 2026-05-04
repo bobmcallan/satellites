@@ -19,7 +19,7 @@ import (
 func TestProjectDetail_RealtimeBridgeWiring(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, users, sessions, projects, _, _, _, _, workspaces := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, projects, _, _, _, workspaces := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 

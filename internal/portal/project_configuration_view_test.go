@@ -151,7 +151,7 @@ func TestProjectConfiguration_NilStoreDegrades(t *testing.T) {
 // GET /projects/{id}/configuration.
 func renderConfiguration(t *testing.T, seedFn func(ctx context.Context, projectID string, docs *document.MemoryStore)) *httptest.ResponseRecorder {
 	t.Helper()
-	p, users, sessions, projects, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, projects, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 
@@ -233,7 +233,7 @@ func TestProjectConfigurationRender_RowsRenderForSeededRows(t *testing.T) {
 // Configuration page so the surface is reachable from the workspace.
 func TestProjectConfigurationRender_LinkOnProjectDetail(t *testing.T) {
 	t.Parallel()
-	p, users, sessions, projects, _, _, _, _, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, projects, _, _, _, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 

@@ -8,95 +8,70 @@ import (
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/bobmcallan/satellites/internal/contract"
-	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// taskWalkResponse is the wire shape for task_walk. Field order matches
-// the AC in sty_41488515 — story metadata header, ordered CI list,
-// current pointer, and the configuration the workflow was composed
-// against. sty_41488515.
-//
-// sty_c6d76a5b: Tasks + CurrentTaskID expose the task chain directly so
-// the conversation log is a first-class projection. The slice is
-// ordered by (CI.Sequence ASC, Task.CreatedAt ASC) — the same order
-// the orchestrator emitted them. CurrentTaskID points at the first
-// non-terminal task in that order; consumers may either drive off
-// CurrentCIID (back-compat) or CurrentTaskID (task-driven shape).
+// taskWalkResponse is the wire shape for task_walk (sty_c6d76a5b
+// checkpoint 14). The CI list + per-CI walk are gone; the response is
+// the story header, the ordered task chain, the current task pointer,
+// and a per-action summary for renderers that want a contract-shaped
+// view without the substrate carrying contract_instance rows.
 type taskWalkResponse struct {
-	Story             taskWalkStory  `json:"story"`
-	ContractInstances []taskWalkCI   `json:"contract_instances"`
-	Tasks             []taskWalkTask `json:"tasks,omitempty"`
-	CurrentCIID       string         `json:"current_ci_id,omitempty"`
-	CurrentTaskID     string         `json:"current_task_id,omitempty"`
-	ConfigurationName string         `json:"configuration_name,omitempty"`
+	Story         taskWalkStory     `json:"story"`
+	Tasks         []taskWalkTask    `json:"tasks"`
+	CurrentTaskID string            `json:"current_task_id,omitempty"`
+	ActionSummary []taskWalkActionSummary `json:"action_summary,omitempty"`
 }
 
-// taskWalkTask is the per-task projection in the task_walk response.
-// Mirrors the load-bearing fields on task.Task with the CI's
-// contract_name + sequence stamped so consumers can render the
-// conversation log without joining back to the CI table. sty_c6d76a5b.
-type taskWalkTask struct {
-	ID                 string     `json:"id"`
-	Kind               string     `json:"kind,omitempty"`
-	Origin             string     `json:"origin,omitempty"`
-	Status             string     `json:"status"`
-	Outcome            string     `json:"outcome,omitempty"`
-	Priority           string     `json:"priority,omitempty"`
-	ContractInstanceID string     `json:"contract_instance_id,omitempty"`
-	ContractName       string     `json:"contract_name,omitempty"`
-	CISequence         int        `json:"ci_sequence,omitempty"`
-	AgentID            string     `json:"agent_id,omitempty"`
-	ParentTaskID       string     `json:"parent_task_id,omitempty"`
-	PriorTaskID        string     `json:"prior_task_id,omitempty"`
-	Iteration          int        `json:"iteration,omitempty"`
-	ClaimedBy          string     `json:"claimed_by,omitempty"`
-	ClaimedAt          *time.Time `json:"claimed_at,omitempty"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-}
-
+// taskWalkStory is the story header — id + title + status.
 type taskWalkStory struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
 }
 
-type taskWalkCI struct {
-	ID               string             `json:"id"`
-	ContractName     string             `json:"contract_name"`
-	ContractCategory string             `json:"contract_category,omitempty"`
-	Sequence         int                `json:"sequence"`
-	Iteration        int                `json:"iteration"`
-	Status           string             `json:"status"`
-	ClaimedBySession string             `json:"claimed_by_session,omitempty"`
-	ClaimedByUser    string             `json:"claimed_by_user,omitempty"`
-	ClaimedAt        *time.Time         `json:"claimed_at,omitempty"`
-	ClosedAt         *time.Time         `json:"closed_at,omitempty"`
-	Outcome          string             `json:"outcome,omitempty"`
-	PlanLedgerID     string             `json:"plan_ledger_id,omitempty"`
-	CloseLedgerID    string             `json:"close_ledger_id,omitempty"`
-	LedgerRowCount   int                `json:"ledger_row_count"`
-	TaskSummary      taskWalkTaskCounts `json:"task_summary"`
+// taskWalkTask is the per-task projection. Mirrors the load-bearing
+// fields on task.Task; iteration is derived from action peers on the
+// same story.
+type taskWalkTask struct {
+	ID           string     `json:"id"`
+	Kind         string     `json:"kind,omitempty"`
+	Action       string     `json:"action,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Origin       string     `json:"origin,omitempty"`
+	Status       string     `json:"status"`
+	Outcome      string     `json:"outcome,omitempty"`
+	Priority     string     `json:"priority,omitempty"`
+	AgentID      string     `json:"agent_id,omitempty"`
+	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	PriorTaskID  string     `json:"prior_task_id,omitempty"`
+	Iteration    int        `json:"iteration,omitempty"`
+	ClaimedBy    string     `json:"claimed_by,omitempty"`
+	ClaimedAt    *time.Time `json:"claimed_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
-type taskWalkTaskCounts struct {
-	Enqueued      int `json:"enqueued"`
-	InFlight      int `json:"in_flight"`
-	ClosedSuccess int `json:"closed_success"`
-	ClosedFailure int `json:"closed_failure"`
-	ClosedTimeout int `json:"closed_timeout"`
+// taskWalkActionSummary aggregates tasks by Action so renderers can
+// show "develop ×3" loops without re-deriving the count themselves.
+type taskWalkActionSummary struct {
+	Action        string `json:"action"`
+	WorkTotal     int    `json:"work_total"`
+	WorkOpen      int    `json:"work_open"`
+	WorkClosed    int    `json:"work_closed"`
+	ReviewTotal   int    `json:"review_total"`
+	ReviewOpen    int    `json:"review_open"`
+	ReviewClosed  int    `json:"review_closed"`
+	LedgerRowCount int   `json:"ledger_row_count"`
 }
 
 // handleTaskWalk implements the task_walk MCP verb: returns a single
-// coherent payload describing where a story sits in its contract walk.
-// Replaces the agent-side stitch of story_get + contract_next +
-// task_list. sty_41488515.
+// coherent payload describing where a story sits in its task chain.
+// sty_41488515 / sty_c6d76a5b.
 func (s *Server) handleTaskWalk(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	if s.stories == nil || s.contracts == nil {
-		return mcpgo.NewToolResultError("task_walk unavailable: story or contract store missing"), nil
+	if s.stories == nil || s.tasks == nil {
+		return mcpgo.NewToolResultError("task_walk unavailable: story or task store missing"), nil
 	}
 	storyID, err := req.RequireString("story_id")
 	if err != nil {
@@ -113,17 +88,36 @@ func (s *Server) handleTaskWalk(ctx context.Context, req mcpgo.CallToolRequest) 
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// buildTaskWalk projects the story's contract walk into the wire shape.
-// Shared by handleTaskWalk and handleStoryExportWalk so both surfaces
-// see the same data without re-implementing the projection.
+// buildTaskWalk projects the story's task chain into the wire shape.
+// Shared by handleTaskWalk and handleStoryExportWalk.
 func (s *Server) buildTaskWalk(ctx context.Context, storyID string, memberships []string) (taskWalkResponse, error) {
 	st, err := s.stories.GetByID(ctx, storyID, memberships)
 	if err != nil {
 		return taskWalkResponse{}, errStoryNotFound
 	}
-	cis, err := s.contracts.List(ctx, storyID, memberships)
+
+	tasks, err := s.tasks.List(ctx, task.ListOptions{StoryID: storyID, Limit: 500}, memberships)
 	if err != nil {
 		return taskWalkResponse{}, err
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+	})
+
+	// ledger row counts per action so the action summary can carry an
+	// aggregate "evidence captured" count without per-action queries.
+	ledgerByAction := map[string]int{}
+	if s.ledger != nil && st.ProjectID != "" {
+		rows, lerr := s.ledger.List(ctx, st.ProjectID, ledger.ListOptions{StoryID: storyID, Limit: ledger.MaxListLimit}, memberships)
+		if lerr == nil {
+			for _, r := range rows {
+				for _, tag := range r.Tags {
+					if act, ok := actionFromTag(tag); ok {
+						ledgerByAction[act]++
+					}
+				}
+			}
+		}
 	}
 
 	resp := taskWalkResponse{
@@ -132,154 +126,59 @@ func (s *Server) buildTaskWalk(ctx context.Context, storyID string, memberships 
 			Title:  st.Title,
 			Status: st.Status,
 		},
-		ContractInstances: make([]taskWalkCI, 0, len(cis)),
+		Tasks: make([]taskWalkTask, 0, len(tasks)),
 	}
 
-	// Pre-load ledger rows + tasks scoped to the story project so each
-	// CI can compute its row count + task summary without per-CI list
-	// roundtrips. ledger.List is project-scoped; tasks have no story
-	// filter so we list per-CI.
-	var ledgerByCI map[string]int
-	if s.ledger != nil && st.ProjectID != "" {
-		rows, lerr := s.ledger.List(ctx, st.ProjectID, ledger.ListOptions{StoryID: storyID, Limit: ledger.MaxListLimit}, memberships)
-		if lerr == nil {
-			ledgerByCI = make(map[string]int, len(cis))
-			for _, r := range rows {
-				if r.ContractID == nil {
-					continue
-				}
-				ledgerByCI[*r.ContractID]++
-			}
-		}
-	}
-
-	contractDocCache := map[string]document.Document{}
-	resolveContractDoc := func(id string) document.Document {
-		if id == "" || s.docs == nil {
-			return document.Document{}
-		}
-		if cached, ok := contractDocCache[id]; ok {
-			return cached
-		}
-		doc, err := s.docs.GetByID(ctx, id, nil)
-		if err != nil {
-			return document.Document{}
-		}
-		contractDocCache[id] = doc
-		return doc
-	}
-
-	currentCIID := ""
 	currentTaskID := ""
-	taskRows := make([]taskWalkTask, 0)
-	for _, ci := range cis {
-		iteration := iterationFromPeers(ci, cis)
-		entry := taskWalkCI{
-			ID:             ci.ID,
-			ContractName:   ci.ContractName,
-			Sequence:       ci.Sequence,
-			Iteration:      iteration,
-			Status:         ci.Status,
-			PlanLedgerID:   ci.PlanLedgerID,
-			CloseLedgerID:  ci.CloseLedgerID,
-			LedgerRowCount: ledgerByCI[ci.ID],
-			TaskSummary:    taskSummaryForCI(ctx, s.tasks, ci.ID, memberships),
+	for _, t := range tasks {
+		row := taskWalkTask{
+			ID:           t.ID,
+			Kind:         t.Kind,
+			Action:       t.Action,
+			Description:  t.Description,
+			Origin:       t.Origin,
+			Status:       t.Status,
+			Outcome:      t.Outcome,
+			Priority:     t.Priority,
+			AgentID:      t.AgentID,
+			ParentTaskID: t.ParentTaskID,
+			PriorTaskID:  t.PriorTaskID,
+			Iteration:    iterationForTask(t, tasks),
+			ClaimedBy:    t.ClaimedBy,
+			ClaimedAt:    t.ClaimedAt,
+			CompletedAt:  t.CompletedAt,
+			CreatedAt:    t.CreatedAt,
 		}
-		if !ci.ClaimedAt.IsZero() {
-			ca := ci.ClaimedAt
-			entry.ClaimedAt = &ca
-		}
-		// closed_at is the UpdatedAt timestamp once the CI is in a
-		// terminal state; pre-terminal rows leave it nil.
-		switch ci.Status {
-		case contract.StatusPassed, contract.StatusFailed, contract.StatusSkipped:
-			ua := ci.UpdatedAt
-			entry.ClosedAt = &ua
-			entry.Outcome = ci.Status
-		}
-		// Resolve contract doc for category.
-		doc := resolveContractDoc(ci.ContractID)
-		entry.ContractCategory = extractStructuredString(doc.Structured, "category")
-		entry.ClaimedByUser = lookupActionClaimUser(ctx, s.ledger, st.ProjectID, ci.ID, memberships)
-
-		// Track the first non-terminal CI as the current pointer. Walk
-		// is in workflow order (sequence ASC) so the first match wins.
-		if currentCIID == "" {
-			switch ci.Status {
-			case contract.StatusPassed, contract.StatusFailed, contract.StatusSkipped:
-				// terminal — keep scanning
-			default:
-				currentCIID = ci.ID
-			}
-		}
-		resp.ContractInstances = append(resp.ContractInstances, entry)
-
-		// sty_c6d76a5b: project tasks bound to this CI into the
-		// per-story task chain. Tasks within a CI are ordered by
-		// CreatedAt; CIs are walked in sequence order so the
-		// concatenation is the conversation log.
-		if s.tasks != nil {
-			ciTasks, terr := s.tasks.List(ctx, task.ListOptions{ContractInstanceID: ci.ID, Limit: 500}, memberships)
-			if terr == nil {
-				sort.Slice(ciTasks, func(i, j int) bool {
-					return ciTasks[i].CreatedAt.Before(ciTasks[j].CreatedAt)
-				})
-				for _, t := range ciTasks {
-					row := taskWalkTask{
-						ID:                 t.ID,
-						Kind:               t.Kind,
-						Origin:             t.Origin,
-						Status:             t.Status,
-						Outcome:            t.Outcome,
-						Priority:           t.Priority,
-						ContractInstanceID: t.ContractInstanceID,
-						ContractName:       ci.ContractName,
-						CISequence:         ci.Sequence,
-						AgentID:            t.AgentID,
-						ParentTaskID:       t.ParentTaskID,
-						PriorTaskID:        t.PriorTaskID,
-						Iteration:          t.Iteration,
-						ClaimedBy:          t.ClaimedBy,
-						ClaimedAt:          t.ClaimedAt,
-						CompletedAt:        t.CompletedAt,
-						CreatedAt:          t.CreatedAt,
-					}
-					taskRows = append(taskRows, row)
-					if currentTaskID == "" {
-						switch t.Status {
-						case task.StatusPublished, task.StatusEnqueued, task.StatusClaimed, task.StatusInFlight, task.StatusPlanned:
-							currentTaskID = t.ID
-						}
-					}
-				}
-			}
+		resp.Tasks = append(resp.Tasks, row)
+		if currentTaskID == "" && !isTerminalTaskStatus(t.Status) {
+			currentTaskID = t.ID
 		}
 	}
-	resp.CurrentCIID = currentCIID
-	resp.Tasks = taskRows
 	resp.CurrentTaskID = currentTaskID
+	resp.ActionSummary = summariseActions(tasks, ledgerByAction)
 	return resp, nil
 }
 
 // errStoryNotFound is the sentinel buildTaskWalk returns when the
-// story id does not resolve in the caller's workspaces. Callers
-// translate it to the json error body shape used by their handler.
+// story id does not resolve in the caller's workspaces.
 var errStoryNotFound = errStr("story_not_found")
 
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
 
-// iterationFromPeers counts CIs of the same contract_name on the same
-// story whose CreatedAt is at or before ci's. Returns 1 when no peer
-// is found (defensive default).
-func iterationFromPeers(ci contract.ContractInstance, peers []contract.ContractInstance) int {
+// iterationForTask returns the 1-based lap number of t among tasks
+// with the same Action + Kind on the same story, ordered by CreatedAt.
+func iterationForTask(t task.Task, peers []task.Task) int {
+	if t.Action == "" {
+		return 1
+	}
 	n := 0
 	for _, p := range peers {
-		if p.ContractName != ci.ContractName {
+		if p.Action != t.Action || p.Kind != t.Kind {
 			continue
 		}
-		if p.CreatedAt.After(ci.CreatedAt) {
+		if p.CreatedAt.After(t.CreatedAt) {
 			continue
 		}
 		n++
@@ -290,73 +189,74 @@ func iterationFromPeers(ci contract.ContractInstance, peers []contract.ContractI
 	return n
 }
 
-// taskSummaryForCI buckets tasks scoped to ciID by status/outcome.
-// Returns zeros when the task store is unwired.
-func taskSummaryForCI(ctx context.Context, tasks task.Store, ciID string, memberships []string) taskWalkTaskCounts {
-	out := taskWalkTaskCounts{}
-	if tasks == nil || ciID == "" {
-		return out
+// summariseActions buckets tasks by Action into work/review counts so
+// renderers can show a contract-shaped summary without joining back to
+// any contract_instance row.
+func summariseActions(tasks []task.Task, ledgerByAction map[string]int) []taskWalkActionSummary {
+	type bucket struct {
+		idx     int
+		summary taskWalkActionSummary
 	}
-	rows, err := tasks.List(ctx, task.ListOptions{ContractInstanceID: ciID, Limit: 500}, memberships)
-	if err != nil {
-		return out
-	}
-	for _, t := range rows {
-		switch t.Status {
-		case task.StatusEnqueued:
-			out.Enqueued++
-		case task.StatusClaimed, task.StatusInFlight:
-			out.InFlight++
-		case task.StatusClosed:
-			switch t.Outcome {
-			case task.OutcomeSuccess:
-				out.ClosedSuccess++
-			case task.OutcomeFailure:
-				out.ClosedFailure++
-			case task.OutcomeTimeout:
-				out.ClosedTimeout++
+	order := make([]string, 0)
+	buckets := map[string]*bucket{}
+	for _, t := range tasks {
+		if t.Action == "" {
+			continue
+		}
+		b, ok := buckets[t.Action]
+		if !ok {
+			b = &bucket{idx: len(order), summary: taskWalkActionSummary{Action: t.Action}}
+			buckets[t.Action] = b
+			order = append(order, t.Action)
+		}
+		switch t.Kind {
+		case task.KindReview:
+			b.summary.ReviewTotal++
+			if isTerminalTaskStatus(t.Status) {
+				b.summary.ReviewClosed++
+			} else {
+				b.summary.ReviewOpen++
+			}
+		default:
+			b.summary.WorkTotal++
+			if isTerminalTaskStatus(t.Status) {
+				b.summary.WorkClosed++
+			} else {
+				b.summary.WorkOpen++
 			}
 		}
+	}
+	out := make([]taskWalkActionSummary, len(order))
+	for i, action := range order {
+		b := buckets[action]
+		b.summary.LedgerRowCount = ledgerByAction[action]
+		out[i] = b.summary
 	}
 	return out
 }
 
-// lookupActionClaimUser returns the CreatedBy of the latest action_claim
-// row scoped to ciID, or "" when nothing matches. Used to populate the
-// claimed_by_user response field — the role-grant table does not carry
-// the user id directly so the ledger row is the authoritative source.
-func lookupActionClaimUser(ctx context.Context, led ledger.Store, projectID, ciID string, memberships []string) string {
-	if led == nil || projectID == "" || ciID == "" {
-		return ""
+// isTerminalTaskStatus reports whether a task has reached a terminal
+// status (no further transitions). Closed + archived are terminal;
+// every other status is open.
+func isTerminalTaskStatus(status string) bool {
+	switch status {
+	case task.StatusClosed, task.StatusArchived:
+		return true
 	}
-	rows, err := led.List(ctx, projectID, ledger.ListOptions{
-		Type:       ledger.TypeActionClaim,
-		ContractID: ciID,
-		Limit:      32,
-	}, memberships)
-	if err != nil || len(rows) == 0 {
-		return ""
-	}
-	// Newest first — pick the most recent.
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].CreatedAt.After(rows[j].CreatedAt)
-	})
-	return rows[0].CreatedBy
+	return false
 }
 
-// extractStructuredString reads a single string field from a JSON object
-// payload. Returns "" when the payload is empty, malformed, or the key
-// is absent / non-string.
-func extractStructuredString(raw []byte, key string) string {
-	if len(raw) == 0 || key == "" {
-		return ""
+// actionFromTag pulls the contract action out of `phase:<name>` or
+// `contract:<name>` tags so the ledger summary can roll up by action.
+// Returns ok=false for tags that don't carry an action prefix.
+func actionFromTag(tag string) (string, bool) {
+	const phase = "phase:"
+	const contract = "contract:"
+	switch {
+	case len(tag) > len(phase) && tag[:len(phase)] == phase:
+		return task.ContractAction(tag[len(phase):]), true
+	case len(tag) > len(contract) && tag[:len(contract)] == contract:
+		return tag, true
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
-	}
-	if v, ok := obj[key].(string); ok {
-		return v
-	}
-	return ""
+	return "", false
 }

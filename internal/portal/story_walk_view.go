@@ -8,15 +8,13 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
-	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
 // storyWalkData is the SSR view-model for the contract walk page
-// (sty_557df61e). Cards group by ContractName; each group's lap count
-// is the headline header so loop-iteration is unmistakable.
+// (sty_557df61e). sty_c6d76a5b checkpoint 14 retired contract_instance
+// rows; the walk now projects from the task chain.
 type storyWalkData struct {
 	Title           string
 	Version         string
@@ -37,18 +35,18 @@ type storyWalkData struct {
 	BackHref        string
 }
 
-// walkGroup bundles every CI of one ContractName for the iteration-grouped
-// header rendering. Cards is in workflow order — the first card is the
-// first lap, the last is the most recent.
+// walkGroup bundles every task with one Action for iteration-grouped
+// header rendering. Cards is in workflow order (created_at ascending).
 type walkGroup struct {
 	ContractName string
 	Iterations   int
 	Cards        []walkCard
 }
 
-// walkCard is one CI row in the timeline. Href targets the existing
-// ledger detail view filtered by contract_id so click-through pays out
-// the "evidence is the trust leverage" property.
+// walkCard is one task row in the timeline. ID is the task id (the
+// template binds `data-ci-id` for back-compat with the prior CI-based
+// view). LedgerHref targets the per-task ledger filter so click-through
+// pays out the "evidence is the trust leverage" property.
 type walkCard struct {
 	ID             string
 	ContractName   string
@@ -65,6 +63,8 @@ type walkCard struct {
 	IsCurrent      bool
 }
 
+// walkTaskCounts is a per-card review-side summary so the work card
+// surfaces whether its sibling review has fired and how it landed.
 type walkTaskCounts struct {
 	Enqueued      int
 	InFlight      int
@@ -83,7 +83,7 @@ func (p *Portal) handleStoryWalk(w http.ResponseWriter, r *http.Request) {
 		p.redirectToLogin(w, r)
 		return
 	}
-	if p.stories == nil || p.contracts == nil {
+	if p.stories == nil || p.tasks == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -101,12 +101,12 @@ func (p *Portal) handleStoryWalk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cis, err := p.contracts.List(r.Context(), storyID, memberships)
+	tasks, err := p.tasks.List(r.Context(), task.ListOptions{StoryID: storyID, Limit: 500}, memberships)
 	if err != nil {
 		http.Error(w, "render failed", http.StatusInternalServerError)
 		return
 	}
-	groups, currentCIID := buildStoryWalkGroups(r.Context(), cis, st.ProjectID, p.documents, p.tasks, p.ledger, memberships)
+	groups, currentTaskID := buildStoryWalkGroups(r.Context(), tasks, st.ProjectID, p.ledger, memberships)
 
 	data := storyWalkData{
 		Title:           buildPageTitle(active, st.Title, "walk"),
@@ -124,7 +124,7 @@ func (p *Portal) handleStoryWalk(w http.ResponseWriter, r *http.Request) {
 		ThemePickerNext: r.URL.RequestURI(),
 		WSConfig:        buildWSConfig(active, r),
 		Groups:          groups,
-		CurrentCIID:     currentCIID,
+		CurrentCIID:     currentTaskID,
 	}
 	if proj.ID != "" {
 		data.BackHref = fmt.Sprintf("/projects/%s/stories/%s", proj.ID, st.ID)
@@ -135,91 +135,108 @@ func (p *Portal) handleStoryWalk(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// buildStoryWalkGroups projects the CI list into iteration-grouped
-// cards. Returns the group slice in workflow order plus the
-// current_ci_id (first non-terminal CI).
+// buildStoryWalkGroups projects the task list into action-grouped
+// cards. Returns the group slice in workflow order plus the current
+// task id (first non-terminal task).
 func buildStoryWalkGroups(
 	ctx context.Context,
-	cis []contract.ContractInstance,
+	tasks []task.Task,
 	projectID string,
-	docs document.Store,
-	tasks task.Store,
 	led ledger.Store,
 	memberships []string,
 ) ([]walkGroup, string) {
-	if len(cis) == 0 {
+	if len(tasks) == 0 {
 		return nil, ""
 	}
 
-	ledgerByCI := map[string]int{}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+	})
+
+	// ledger row counts per task — uses the `task_id:<id>` tag the
+	// reviewer service + agent stamp on every task-scoped row.
+	ledgerByTask := map[string]int{}
 	if led != nil && projectID != "" {
 		rows, err := led.List(ctx, projectID, ledger.ListOptions{Limit: ledger.MaxListLimit}, memberships)
 		if err == nil {
 			for _, row := range rows {
-				if row.ContractID == nil {
-					continue
+				for _, tag := range row.Tags {
+					if tid, ok := taskIDFromTag(tag); ok {
+						ledgerByTask[tid]++
+					}
 				}
-				ledgerByCI[*row.ContractID]++
 			}
 		}
 	}
 
-	contractDocCache := map[string]document.Document{}
-	resolveDoc := func(id string) document.Document {
-		if id == "" || docs == nil {
-			return document.Document{}
+	// Aggregate work-task siblings by ParentTaskID so each work card
+	// can show its review-task summary.
+	reviewByParent := map[string]walkTaskCounts{}
+	for _, t := range tasks {
+		if t.Kind != task.KindReview || t.ParentTaskID == "" {
+			continue
 		}
-		if cached, ok := contractDocCache[id]; ok {
-			return cached
+		c := reviewByParent[t.ParentTaskID]
+		switch t.Status {
+		case task.StatusEnqueued, task.StatusPlanned, task.StatusPublished:
+			c.Enqueued++
+		case task.StatusClaimed, task.StatusInFlight:
+			c.InFlight++
+		case task.StatusClosed:
+			switch t.Outcome {
+			case task.OutcomeSuccess:
+				c.ClosedSuccess++
+			case task.OutcomeFailure:
+				c.ClosedFailure++
+			case task.OutcomeTimeout:
+				c.ClosedTimeout++
+			}
 		}
-		doc, err := docs.GetByID(ctx, id, nil)
-		if err != nil {
-			return document.Document{}
-		}
-		contractDocCache[id] = doc
-		return doc
+		reviewByParent[t.ParentTaskID] = c
 	}
 
-	currentCIID := ""
+	currentTaskID := ""
 	groupIndex := map[string]int{}
 	groups := make([]walkGroup, 0)
 
-	for _, ci := range cis {
-		iter := iterationFromPeers(ci, cis)
+	for _, t := range tasks {
+		// Show work tasks as the principal cards; review tasks roll up
+		// into the work card's TaskSummary via reviewByParent.
+		if t.Kind == task.KindReview {
+			continue
+		}
+		contractName := contractNameFromAction(t.Action)
 		card := walkCard{
-			ID:             ci.ID,
-			ContractName:   ci.ContractName,
-			Sequence:       ci.Sequence,
-			Iteration:      iter,
-			Status:         ci.Status,
-			LedgerRowCount: ledgerByCI[ci.ID],
-			LedgerHref:     fmt.Sprintf("/projects/%s/ledger?contract_id=%s", projectID, ci.ID),
+			ID:             t.ID,
+			ContractName:   contractName,
+			Iteration:      walkIterationForTask(t, tasks),
+			Status:         walkCardStatus(t),
+			LedgerRowCount: ledgerByTask[t.ID],
+			LedgerHref:     fmt.Sprintf("/projects/%s/ledger?task_id=%s", projectID, t.ID),
+			ClaimedByUser:  t.ClaimedBy,
+			TaskSummary:    reviewByParent[t.ID],
 		}
-		if !ci.ClaimedAt.IsZero() {
-			card.ClaimedAt = ci.ClaimedAt.UTC().Format("2006-01-02 15:04:05")
+		if t.ClaimedAt != nil {
+			card.ClaimedAt = t.ClaimedAt.UTC().Format("2006-01-02 15:04:05")
 		}
-		switch ci.Status {
-		case contract.StatusPassed, contract.StatusFailed, contract.StatusSkipped:
-			card.ClosedAt = ci.UpdatedAt.UTC().Format("2006-01-02 15:04:05")
-			card.Outcome = ci.Status
+		if t.CompletedAt != nil {
+			card.ClosedAt = t.CompletedAt.UTC().Format("2006-01-02 15:04:05")
+			card.Outcome = t.Outcome
 		}
-		_ = resolveDoc(ci.ContractID)
-		card.TaskSummary = walkTaskSummaryFor(ctx, tasks, ci.ID, memberships)
-		card.ClaimedByUser = walkLookupActionClaimUser(ctx, led, projectID, ci.ID, memberships)
-		if currentCIID == "" {
-			switch ci.Status {
-			case contract.StatusPassed, contract.StatusFailed, contract.StatusSkipped:
-				// terminal — keep scanning
-			default:
-				currentCIID = ci.ID
-				card.IsCurrent = true
-			}
+		if currentTaskID == "" && t.Status != task.StatusClosed && t.Status != task.StatusArchived {
+			currentTaskID = t.ID
+			card.IsCurrent = true
 		}
-		idx, exists := groupIndex[ci.ContractName]
+
+		groupKey := contractName
+		if groupKey == "" {
+			groupKey = "(no contract)"
+		}
+		idx, exists := groupIndex[groupKey]
 		if !exists {
-			groupIndex[ci.ContractName] = len(groups)
+			groupIndex[groupKey] = len(groups)
 			groups = append(groups, walkGroup{
-				ContractName: ci.ContractName,
+				ContractName: groupKey,
 				Iterations:   1,
 				Cards:        []walkCard{card},
 			})
@@ -228,27 +245,38 @@ func buildStoryWalkGroups(
 		groups[idx].Iterations++
 		groups[idx].Cards = append(groups[idx].Cards, card)
 	}
-	// Stable order: groups already follow workflow sequence because
-	// cis is sequence-ordered. Cards within group also follow the same
-	// scan order.
-	return groups, currentCIID
+	return groups, currentTaskID
 }
 
-// iterationFromPeers is intentionally re-defined here even though
-// mcpserver carries the same helper — keeping the two packages
-// independent. Both implementations are pure functions over the same
-// slice and stay aligned by the shared invariant: same ContractName +
-// CreatedAt <= ci's gives the lap number.
-//
-// Re-defined locally to avoid a cross-package import (portal already
-// imports contract; mcpserver doesn't depend on portal).
-func iterationFromPeers(ci contract.ContractInstance, peers []contract.ContractInstance) int {
+// walkCardStatus collapses task status + outcome into the visual
+// status pill. Closed tasks render their outcome (success/failed/timeout)
+// so the timeline reads like the contract walk it replaced.
+func walkCardStatus(t task.Task) string {
+	if t.Status == task.StatusClosed {
+		switch t.Outcome {
+		case task.OutcomeSuccess:
+			return "passed"
+		case task.OutcomeFailure:
+			return "failed"
+		case task.OutcomeTimeout:
+			return "timeout"
+		}
+	}
+	return t.Status
+}
+
+// walkIterationForTask returns the 1-based lap of t among kind:work
+// tasks with the same Action on the same story (created_at ordered).
+func walkIterationForTask(t task.Task, peers []task.Task) int {
+	if t.Action == "" {
+		return 1
+	}
 	n := 0
 	for _, p := range peers {
-		if p.ContractName != ci.ContractName {
+		if p.Action != t.Action || p.Kind != t.Kind {
 			continue
 		}
-		if p.CreatedAt.After(ci.CreatedAt) {
+		if p.CreatedAt.After(t.CreatedAt) {
 			continue
 		}
 		n++
@@ -259,47 +287,21 @@ func iterationFromPeers(ci contract.ContractInstance, peers []contract.ContractI
 	return n
 }
 
-func walkTaskSummaryFor(ctx context.Context, tasks task.Store, ciID string, memberships []string) walkTaskCounts {
-	out := walkTaskCounts{}
-	if tasks == nil || ciID == "" {
-		return out
+// taskIDFromTag pulls the task id out of a `task_id:<id>` tag.
+func taskIDFromTag(tag string) (string, bool) {
+	const prefix = "task_id:"
+	if len(tag) <= len(prefix) || tag[:len(prefix)] != prefix {
+		return "", false
 	}
-	rows, err := tasks.List(ctx, task.ListOptions{ContractInstanceID: ciID, Limit: 500}, memberships)
-	if err != nil {
-		return out
-	}
-	for _, t := range rows {
-		switch t.Status {
-		case task.StatusEnqueued:
-			out.Enqueued++
-		case task.StatusClaimed, task.StatusInFlight:
-			out.InFlight++
-		case task.StatusClosed:
-			switch t.Outcome {
-			case task.OutcomeSuccess:
-				out.ClosedSuccess++
-			case task.OutcomeFailure:
-				out.ClosedFailure++
-			case task.OutcomeTimeout:
-				out.ClosedTimeout++
-			}
-		}
-	}
-	return out
+	return tag[len(prefix):], true
 }
 
-func walkLookupActionClaimUser(ctx context.Context, led ledger.Store, projectID, ciID string, memberships []string) string {
-	if led == nil || projectID == "" || ciID == "" {
+// contractNameFromAction unwraps `contract:<name>` into the bare name.
+// Empty when the action isn't a contract action.
+func contractNameFromAction(action string) string {
+	const prefix = "contract:"
+	if len(action) <= len(prefix) || action[:len(prefix)] != prefix {
 		return ""
 	}
-	rows, err := led.List(ctx, projectID, ledger.ListOptions{
-		Type:       ledger.TypeActionClaim,
-		ContractID: ciID,
-		Limit:      32,
-	}, memberships)
-	if err != nil || len(rows) == 0 {
-		return ""
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
-	return rows[0].CreatedBy
+	return action[len(prefix):]
 }

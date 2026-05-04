@@ -20,7 +20,7 @@ import (
 func TestConfigPage_SystemDocsRenderAsTableWithExpansion(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{Env: "dev", DevMode: true}
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, cfg)
 	mux := http.NewServeMux()
 	p.Register(mux)
 

@@ -7,7 +7,6 @@ import (
 
 	satarbor "github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
@@ -44,7 +43,6 @@ func newContractFixture(t *testing.T) *contractFixture {
 	ledStore := ledger.NewMemoryStore()
 	storyStore := story.NewMemoryStore(ledStore)
 	projStore := project.NewMemoryStore()
-	contractStore := contract.NewMemoryStore(docStore, storyStore)
 
 	ws, err := wsStore.Create(ctx, "user_alice", "alpha", now)
 	if err != nil {
@@ -85,7 +83,6 @@ func newContractFixture(t *testing.T) *contractFixture {
 		LedgerStore:      ledStore,
 		StoryStore:       storyStore,
 		WorkspaceStore:   wsStore,
-		ContractStore:    contractStore,
 	})
 
 	return &contractFixture{

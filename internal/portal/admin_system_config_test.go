@@ -22,7 +22,7 @@ type adminFixture struct {
 func newAdminFixture(t *testing.T, adminEmail string) *adminFixture {
 	t.Helper()
 	t.Setenv(auth.GlobalAdminEmailsEnv, adminEmail)
-	p, users, sessions, _, _, _, _, _, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, _, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 	return &adminFixture{portal: p, mux: mux, users: users, sessions: sessions}

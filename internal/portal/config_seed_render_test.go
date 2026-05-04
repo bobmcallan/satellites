@@ -137,7 +137,7 @@ func TestConfigPage_SeededDocsExistInStore(t *testing.T) {
 func TestConfigPage_RendersSeededItems(t *testing.T) {
 	t.Setenv(auth.GlobalAdminEmailsEnv, "alice@x.io")
 
-	p, users, sessions, _, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
+	p, users, sessions, _, _, _, docs, _ := newTestPortalWithContracts(t, &config.Config{Env: "dev"})
 	mux := http.NewServeMux()
 	p.Register(mux)
 

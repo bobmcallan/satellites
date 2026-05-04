@@ -134,20 +134,16 @@ func PriorityRank(p string) int {
 // verbatim. Trigger + Payload are JSON-encoded raw bytes so the store
 // layer doesn't require compile-time knowledge of every origin's shape.
 //
-// ContractInstanceID binds a task to a parent CI. Plan CIs enqueue
-// child tasks against themselves so the story view groups work per CI
-// and downstream contracts can pull the work the plan agent decomposed.
-//
-// Iteration is the lap number for tasks bound to a contract that appears
-// multiple times in a story's workflow (loop case from rejection-append).
-// First task on (story_id, contract_name) gets iteration=1; the next
-// loop's tasks get iteration=2, etc. Surfaced on task_list so renderers
-// can show "develop #2" without joining through CIs. sty_78ddc67b.
+// Iteration is the lap number for tasks of the same Action on the same
+// story (rejection-append loop). First work-task on (story_id, action)
+// gets iteration=1; successor work tasks spawned by the reviewer
+// service on rejection bump it. Surfaced on task_list / task_walk so
+// renderers can show "develop #2" without joining anywhere.
+// sty_c6d76a5b.
 type Task struct {
-	ID                 string `json:"id"`
-	WorkspaceID        string `json:"workspace_id"`
-	ProjectID          string `json:"project_id,omitempty"`
-	ContractInstanceID string `json:"contract_instance_id,omitempty"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	ProjectID   string `json:"project_id,omitempty"`
 	// StoryID links the task to its story directly. sty_c6d76a5b's
 	// model treats `tasks where story_id=X` as the conversation log
 	// — the story IS the task chain. Set explicitly by

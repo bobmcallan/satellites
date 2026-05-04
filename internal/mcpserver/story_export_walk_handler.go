@@ -11,12 +11,12 @@ import (
 )
 
 // handleStoryExportWalk implements story_export_walk: render a story's
-// contract walk as paste-ready markdown for PR descriptions, delivery
+// task chain as paste-ready markdown for PR descriptions, delivery
 // reports, and stakeholder hand-offs. Reuses buildTaskWalk so the
 // markdown matches the JSON walk verbatim. sty_a248f4df.
 func (s *Server) handleStoryExportWalk(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	if s.stories == nil || s.contracts == nil {
-		return mcpgo.NewToolResultError("story_export_walk unavailable: story or contract store missing"), nil
+	if s.stories == nil || s.tasks == nil {
+		return mcpgo.NewToolResultError("story_export_walk unavailable: story or task store missing"), nil
 	}
 	storyID, err := req.RequireString("story_id")
 	if err != nil {
@@ -39,11 +39,7 @@ func (s *Server) handleStoryExportWalk(ctx context.Context, req mcpgo.CallToolRe
 		body, _ := json.Marshal(map[string]any{"error": err.Error()})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
-	configurationName := walk.ConfigurationName
-	if configurationName == "" {
-		configurationName = "project default"
-	}
-	content := renderWalkMarkdown(walk, st.Description, st.AcceptanceCriteria, st.Priority, st.Tags, configurationName)
+	content := renderWalkMarkdown(walk, st.Description, st.AcceptanceCriteria, st.Priority, st.Tags)
 	body, _ := json.Marshal(map[string]any{
 		"filename": slugifyStoryFilename(st.ID, st.Title) + "-walk.md",
 		"content":  content,
@@ -52,13 +48,12 @@ func (s *Server) handleStoryExportWalk(ctx context.Context, req mcpgo.CallToolRe
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// renderWalkMarkdown formats walk + story metadata into the
-// "process followed" markdown shape from the AC. Iteration loops
-// collapse under one H2 header carrying the ×N suffix; per-CI rows
-// become H3 sections within the group. Deterministic for snapshot
-// testing — the source list is already in workflow order from
-// buildTaskWalk.
-func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string, tags []string, configurationName string) string {
+// renderWalkMarkdown formats the task-chain walk into the
+// "process followed" markdown shape. Tasks are grouped by Action so
+// loops collapse under one H2 ("## contract:develop ×3 (loop)") with
+// per-task H3 entries inside. Deterministic for snapshot testing —
+// the source tasks are already in CreatedAt order from buildTaskWalk.
+func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string, tags []string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s — %s\n", walk.Story.ID, walk.Story.Title)
 	sb.WriteString("\n")
@@ -82,68 +77,80 @@ func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string,
 	}
 	sb.WriteString("---\n\n")
 
-	// Group iteration loops under a single H2 header. The group order
-	// follows first appearance in the workflow; cards within group
-	// follow CreatedAt order (already sorted by buildTaskWalk).
+	// Group by Action; preserve first-seen order so the markdown reads
+	// in workflow sequence.
 	type group struct {
-		name    string
-		entries []taskWalkCI
+		action  string
+		entries []taskWalkTask
 	}
 	groups := []group{}
 	groupIndex := map[string]int{}
-	for _, ci := range walk.ContractInstances {
-		idx, ok := groupIndex[ci.ContractName]
+	for _, t := range walk.Tasks {
+		key := t.Action
+		if key == "" {
+			key = "(no action)"
+		}
+		idx, ok := groupIndex[key]
 		if !ok {
-			groupIndex[ci.ContractName] = len(groups)
-			groups = append(groups, group{name: ci.ContractName, entries: []taskWalkCI{ci}})
+			groupIndex[key] = len(groups)
+			groups = append(groups, group{action: key, entries: []taskWalkTask{t}})
 			continue
 		}
-		groups[idx].entries = append(groups[idx].entries, ci)
+		groups[idx].entries = append(groups[idx].entries, t)
 	}
 	for _, g := range groups {
-		header := fmt.Sprintf("## %s", g.name)
+		header := fmt.Sprintf("## %s", g.action)
 		if len(g.entries) > 1 {
 			header += fmt.Sprintf(" ×%d (loop)", len(g.entries))
 		}
 		sb.WriteString(header)
 		sb.WriteString("\n\n")
-		for _, ci := range g.entries {
-			outcome := ci.Outcome
+		for _, t := range g.entries {
+			outcome := t.Outcome
 			if outcome == "" {
-				outcome = ci.Status
+				outcome = t.Status
 			}
-			fmt.Fprintf(&sb, "### %s #%d   %s", g.name, ci.Iteration, outcome)
-			if ci.ClaimedAt != nil {
-				fmt.Fprintf(&sb, "   %s", formatTimestamp(*ci.ClaimedAt))
-				if ci.ClosedAt != nil {
-					fmt.Fprintf(&sb, " → %s", formatTimestamp(*ci.ClosedAt))
+			label := fmt.Sprintf("### %s #%d   %s", g.action, t.Iteration, outcome)
+			if t.Kind != "" {
+				label += fmt.Sprintf(" (%s)", t.Kind)
+			}
+			sb.WriteString(label)
+			if t.ClaimedAt != nil {
+				fmt.Fprintf(&sb, "   %s", formatTimestamp(*t.ClaimedAt))
+				if t.CompletedAt != nil {
+					fmt.Fprintf(&sb, " → %s", formatTimestamp(*t.CompletedAt))
 				}
-			} else if ci.ClosedAt != nil {
-				fmt.Fprintf(&sb, "   closed %s", formatTimestamp(*ci.ClosedAt))
+			} else if t.CompletedAt != nil {
+				fmt.Fprintf(&sb, "   closed %s", formatTimestamp(*t.CompletedAt))
 			}
-			if ci.ClaimedByUser != "" {
-				fmt.Fprintf(&sb, "   by %s", ci.ClaimedByUser)
-			} else if ci.ClaimedBySession != "" {
-				fmt.Fprintf(&sb, "   session %s", ci.ClaimedBySession)
+			if t.ClaimedBy != "" {
+				fmt.Fprintf(&sb, "   by %s", t.ClaimedBy)
+			} else if t.AgentID != "" {
+				fmt.Fprintf(&sb, "   agent %s", t.AgentID)
 			}
 			sb.WriteString("\n")
-			fmt.Fprintf(&sb, "- ledger rows: %d\n", ci.LedgerRowCount)
-			if ci.PlanLedgerID != "" {
-				fmt.Fprintf(&sb, "- plan: `%s`\n", ci.PlanLedgerID)
+			fmt.Fprintf(&sb, "- task: `%s`\n", t.ID)
+			if t.Description != "" {
+				fmt.Fprintf(&sb, "- description: %s\n", t.Description)
 			}
-			if ci.CloseLedgerID != "" {
-				fmt.Fprintf(&sb, "- close: `%s`\n", ci.CloseLedgerID)
+			if t.PriorTaskID != "" {
+				fmt.Fprintf(&sb, "- prior: `%s`\n", t.PriorTaskID)
 			}
-			summary := ci.TaskSummary
-			if summary.Enqueued+summary.InFlight+summary.ClosedSuccess+summary.ClosedFailure+summary.ClosedTimeout > 0 {
-				fmt.Fprintf(&sb, "- tasks: enqueued=%d in_flight=%d closed_success=%d closed_failure=%d closed_timeout=%d\n",
-					summary.Enqueued, summary.InFlight, summary.ClosedSuccess, summary.ClosedFailure, summary.ClosedTimeout)
+			if t.ParentTaskID != "" {
+				fmt.Fprintf(&sb, "- parent: `%s`\n", t.ParentTaskID)
 			}
 			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString("---\n\n")
-	fmt.Fprintf(&sb, "Process defined by: %s\n", configurationName)
+	if len(walk.ActionSummary) > 0 {
+		sb.WriteString("---\n\n")
+		sb.WriteString("## Action summary\n\n")
+		for _, a := range walk.ActionSummary {
+			fmt.Fprintf(&sb, "- %s — work %d (%d open / %d closed), review %d (%d open / %d closed), ledger rows %d\n",
+				a.Action, a.WorkTotal, a.WorkOpen, a.WorkClosed,
+				a.ReviewTotal, a.ReviewOpen, a.ReviewClosed, a.LedgerRowCount)
+		}
+	}
 	return sb.String()
 }
 
