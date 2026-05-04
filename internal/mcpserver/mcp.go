@@ -703,6 +703,9 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
 			mcpgo.WithString("contract_instance_id", mcpgo.Description("Optional CI this task belongs to. Plan agents bind their child tasks to the plan CI so the story view groups work per CI.")),
 			mcpgo.WithString("kind", mcpgo.Description("Optional task kind discriminator. Today: \"review\" (consumed by the embedded reviewer service) vs \"work\" (everything else).")),
+			mcpgo.WithString("agent_id", mcpgo.Description("Document id of the agent that should execute this task. Stamped on the task row; used to authorise claim and to route the conversation. Inherited from parent_task_id when omitted.")),
+			mcpgo.WithString("parent_task_id", mcpgo.Description("Anchors this task to the conversation thread it extends — typically the implement task whose close emitted this successor. The substrate inherits contract_instance_id / project_id / agent_id from the parent when those args are omitted.")),
+			mcpgo.WithString("prior_task_id", mcpgo.Description("Links a fresh implement task to the prior implement task it succeeds in the rejection-append loop. Distinct from parent_task_id (the conversation anchor): prior_task_id is the same-slot retry pointer.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
 			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload.")),
@@ -753,10 +756,11 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(claimTaskTool, s.handleTaskClaim)
 
 		closeTaskTool := mcpgo.NewTool("task_close",
-			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off). When worker_id is supplied and does not match the task's current ClaimedBy, the close is rejected with stale_claim (story_b4513c8c)."),
+			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off). When worker_id is supplied and does not match the task's current ClaimedBy, the close is rejected with stale_claim (story_b4513c8c). sty_c6d76a5b: optional successor_tasks JSON array — each spawned task inherits parent_task_id (defaults to the closing task), workspace, project, contract_instance, and agent from the closing task when omitted."),
 			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Task id.")),
 			mcpgo.WithString("outcome", mcpgo.Required(), mcpgo.Description("success | failure | timeout")),
 			mcpgo.WithString("worker_id", mcpgo.Description("Optional worker id; when supplied, the handler rejects the close if the task has been reclaimed to a different worker since claim time.")),
+			mcpgo.WithString("successor_tasks", mcpgo.Description("Optional JSON array of successor task specs. Each entry: {origin, kind?, agent_id?, parent_task_id?, prior_task_id?, contract_instance_id?, payload?, priority?, status?}. Successors inherit parent_task_id (defaults to this task's id), workspace_id, project_id, contract_instance_id, and agent_id from the closing task unless overridden. Created atomically after the close — failures surface a successor_error with successor_task_ids of any rows that did write.")),
 		)
 		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
 

@@ -94,6 +94,9 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 	projectID := getString(args, "project_id")
 	contractInstanceID := getString(args, "contract_instance_id")
 	kind := getString(args, "kind")
+	agentID := getString(args, "agent_id")
+	parentTaskID := getString(args, "parent_task_id")
+	priorTaskID := getString(args, "prior_task_id")
 	triggerRaw := []byte(getString(args, "trigger"))
 	payloadRaw := []byte(getString(args, "payload"))
 	expectedStr := getString(args, "expected_duration")
@@ -103,12 +106,32 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 			expected = d
 		}
 	}
+	// sty_c6d76a5b: when parent_task_id resolves to a known task and the
+	// caller didn't override, inherit the parent's contract_instance_id /
+	// project_id / agent_id so successor tasks form a coherent thread
+	// without the caller restating each field.
+	if parentTaskID != "" && s.tasks != nil {
+		if parent, perr := s.tasks.GetByID(ctx, parentTaskID, memberships); perr == nil {
+			if contractInstanceID == "" {
+				contractInstanceID = parent.ContractInstanceID
+			}
+			if projectID == "" {
+				projectID = parent.ProjectID
+			}
+			if agentID == "" {
+				agentID = parent.AgentID
+			}
+		}
+	}
 	now := time.Now().UTC()
 	seed := s.stampTaskIteration(ctx, task.Task{
 		WorkspaceID:        workspaceID,
 		ProjectID:          projectID,
 		ContractInstanceID: contractInstanceID,
 		Kind:               kind,
+		AgentID:            agentID,
+		ParentTaskID:       parentTaskID,
+		PriorTaskID:        priorTaskID,
 		Status:             status,
 		Origin:             origin,
 		Trigger:            triggerRaw,
@@ -255,8 +278,37 @@ func (s *Server) handleTaskClaim(ctx context.Context, req mcpgo.CallToolRequest)
 	return jsonResult(t)
 }
 
+// successorTaskSpec is the shape each entry in task_close's
+// successor_tasks JSON array must satisfy. Mirrors the additive args
+// task_enqueue accepts (origin/kind/agent_id/parent_task_id/etc.). The
+// substrate stamps parent_task_id to the closing task's id when the
+// caller leaves it empty so the successor stays anchored to the
+// conversation thread by default. sty_c6d76a5b.
+type successorTaskSpec struct {
+	Origin             string `json:"origin"`
+	Kind               string `json:"kind,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+	ParentTaskID       string `json:"parent_task_id,omitempty"`
+	PriorTaskID        string `json:"prior_task_id,omitempty"`
+	ContractInstanceID string `json:"contract_instance_id,omitempty"`
+	ProjectID          string `json:"project_id,omitempty"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
+	Priority           string `json:"priority,omitempty"`
+	Payload            string `json:"payload,omitempty"`
+	Trigger            string `json:"trigger,omitempty"`
+	ExpectedDuration   string `json:"expected_duration,omitempty"`
+	Status             string `json:"status,omitempty"` // planned | published | enqueued (default published)
+}
+
 // handleTaskClose implements task_close: transition + kind:task-closed
 // ledger row + stage hand-off when origin=story_stage and outcome=success.
+//
+// sty_c6d76a5b: optional successor_tasks JSON array — when supplied, the
+// substrate creates each successor immediately after the close,
+// stamping parent_task_id to the closing task's id by default so the
+// emitted thread anchors back to the conversation. successor_tasks may
+// be a JSON-encoded string or a native array, depending on the caller's
+// MCP transport.
 func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	if s.tasks == nil {
 		return mcpgo.NewToolResultError("task_close unavailable"), nil
@@ -271,6 +323,14 @@ func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest)
 	outcome, err := req.RequireString("outcome")
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	successors, serr := decodeSuccessorTasks(args["successor_tasks"])
+	if serr != nil {
+		body, _ := json.Marshal(map[string]any{
+			"error":   "successor_tasks_invalid",
+			"message": serr.Error(),
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
 	}
 	// Stale-claim rejection: when the caller supplies worker_id, verify
 	// the task's current ClaimedBy matches. A mismatch means the task
@@ -318,13 +378,163 @@ func (s *Server) handleTaskClose(ctx context.Context, req mcpgo.CallToolRequest)
 		handoffTaskID = s.enqueueStageHandoff(ctx, closed, caller.UserID, now, memberships)
 	}
 
+	successorIDs, sErr := s.emitSuccessorTasks(ctx, closed, successors, caller.UserID, now, memberships)
+	if sErr != nil {
+		// Successor creation failure does not roll back the close —
+		// closing is already recorded. Surface the partial outcome so
+		// the caller can retry the missing successors.
+		body, _ := json.Marshal(map[string]any{
+			"task_id":           closed.ID,
+			"status":            closed.Status,
+			"outcome":           closed.Outcome,
+			"completed_at":      closed.CompletedAt,
+			"handoff_task_id":   handoffTaskID,
+			"successor_task_ids": successorIDs,
+			"successor_error":   sErr.Error(),
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+
 	return jsonResult(map[string]any{
-		"task_id":         closed.ID,
-		"status":          closed.Status,
-		"outcome":         closed.Outcome,
-		"completed_at":    closed.CompletedAt,
-		"handoff_task_id": handoffTaskID,
+		"task_id":            closed.ID,
+		"status":             closed.Status,
+		"outcome":            closed.Outcome,
+		"completed_at":       closed.CompletedAt,
+		"handoff_task_id":    handoffTaskID,
+		"successor_task_ids": successorIDs,
 	})
+}
+
+// decodeSuccessorTasks accepts either a JSON-encoded string or a native
+// []any (depending on MCP transport) and returns the parsed slice.
+// Empty input returns nil with no error.
+func decodeSuccessorTasks(raw any) ([]successorTaskSpec, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	switch v := raw.(type) {
+	case string:
+		if v == "" {
+			return nil, nil
+		}
+		var out []successorTaskSpec
+		if err := json.Unmarshal([]byte(v), &out); err != nil {
+			return nil, fmt.Errorf("parse successor_tasks JSON: %w", err)
+		}
+		return out, nil
+	case []any:
+		if len(v) == 0 {
+			return nil, nil
+		}
+		buf, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("re-encode successor_tasks: %w", err)
+		}
+		var out []successorTaskSpec
+		if err := json.Unmarshal(buf, &out); err != nil {
+			return nil, fmt.Errorf("decode successor_tasks: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("successor_tasks must be a JSON array or JSON string, got %T", raw)
+	}
+}
+
+// emitSuccessorTasks creates each spec as a fresh task, defaulting
+// parent_task_id to closed.ID and inheriting workspace / project /
+// contract_instance / agent from the closing task when the spec leaves
+// them empty. Returns the created task ids in order.
+func (s *Server) emitSuccessorTasks(
+	ctx context.Context,
+	closed task.Task,
+	specs []successorTaskSpec,
+	actor string,
+	now time.Time,
+	memberships []string,
+) ([]string, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(specs))
+	for i, spec := range specs {
+		origin := spec.Origin
+		if origin == "" {
+			origin = task.OriginStoryStage
+		}
+		status := spec.Status
+		if status == "" {
+			status = task.StatusPublished
+		}
+		workspaceID := spec.WorkspaceID
+		if workspaceID == "" {
+			workspaceID = closed.WorkspaceID
+		}
+		projectID := spec.ProjectID
+		if projectID == "" {
+			projectID = closed.ProjectID
+		}
+		contractID := spec.ContractInstanceID
+		if contractID == "" {
+			contractID = closed.ContractInstanceID
+		}
+		agentID := spec.AgentID
+		if agentID == "" {
+			agentID = closed.AgentID
+		}
+		parentID := spec.ParentTaskID
+		if parentID == "" {
+			parentID = closed.ID
+		}
+		priority := spec.Priority
+		if priority == "" {
+			priority = task.PriorityMedium
+		}
+		var expected time.Duration
+		if spec.ExpectedDuration != "" {
+			if d, perr := time.ParseDuration(spec.ExpectedDuration); perr == nil {
+				expected = d
+			}
+		}
+		seed := s.stampTaskIteration(ctx, task.Task{
+			WorkspaceID:        workspaceID,
+			ProjectID:          projectID,
+			ContractInstanceID: contractID,
+			Kind:               spec.Kind,
+			AgentID:            agentID,
+			ParentTaskID:       parentID,
+			PriorTaskID:        spec.PriorTaskID,
+			Status:             status,
+			Origin:             origin,
+			Trigger:            []byte(spec.Trigger),
+			Payload:            []byte(spec.Payload),
+			Priority:           priority,
+			ExpectedDuration:   expected,
+		}, memberships)
+		t, err := s.tasks.Enqueue(ctx, seed, now)
+		if err != nil {
+			return out, fmt.Errorf("successor[%d]: %w", i, err)
+		}
+		out = append(out, t.ID)
+		if s.ledger != nil {
+			_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+				WorkspaceID: t.WorkspaceID,
+				ProjectID:   t.ProjectID,
+				Type:        ledger.TypeDecision,
+				Tags: []string{
+					"kind:task-successor",
+					"task_id:" + t.ID,
+					"parent_task_id:" + parentID,
+				},
+				Content:    fmt.Sprintf("successor task spawned: parent=%s child=%s kind=%s", parentID, t.ID, spec.Kind),
+				Structured: t.Payload,
+				Durability: ledger.DurabilityDurable,
+				SourceType: ledger.SourceAgent,
+				Status:     ledger.StatusActive,
+				CreatedBy:  actor,
+			}, now)
+		}
+	}
+	return out, nil
 }
 
 // enqueueStageHandoff: when a story_stage task closes successfully and

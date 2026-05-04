@@ -145,7 +145,16 @@ type Task struct {
 	// PriorTaskID links a fresh implement task to the prior implement
 	// task it succeeds in the rejection-append loop (sty_c6d76a5b).
 	// Empty for the first attempt.
-	PriorTaskID      string        `json:"prior_task_id,omitempty"`
+	PriorTaskID string `json:"prior_task_id,omitempty"`
+	// ParentTaskID anchors this task to the conversation thread it
+	// extends — typically the implement task whose close emitted this
+	// successor (review verdict task → fresh implement task; reviewer
+	// proposal → orchestrator response; etc.). Together with the
+	// per-story (sequence, created_at) ordering, the parent_task_id
+	// chain reconstructs the conversation log. Empty when the task
+	// is a thread root (e.g. the initial implement task per CI).
+	// sty_c6d76a5b.
+	ParentTaskID     string        `json:"parent_task_id,omitempty"`
 	Origin           string        `json:"origin"`
 	Trigger          []byte        `json:"trigger,omitempty"`
 	Payload          []byte        `json:"payload,omitempty"`
