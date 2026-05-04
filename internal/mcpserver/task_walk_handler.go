@@ -18,11 +18,44 @@ import (
 // the AC in sty_41488515 — story metadata header, ordered CI list,
 // current pointer, and the configuration the workflow was composed
 // against. sty_41488515.
+//
+// sty_c6d76a5b: Tasks + CurrentTaskID expose the task chain directly so
+// the conversation log is a first-class projection. The slice is
+// ordered by (CI.Sequence ASC, Task.CreatedAt ASC) — the same order
+// the orchestrator emitted them. CurrentTaskID points at the first
+// non-terminal task in that order; consumers may either drive off
+// CurrentCIID (back-compat) or CurrentTaskID (task-driven shape).
 type taskWalkResponse struct {
-	Story             taskWalkStory `json:"story"`
-	ContractInstances []taskWalkCI  `json:"contract_instances"`
-	CurrentCIID       string        `json:"current_ci_id,omitempty"`
-	ConfigurationName string        `json:"configuration_name,omitempty"`
+	Story             taskWalkStory  `json:"story"`
+	ContractInstances []taskWalkCI   `json:"contract_instances"`
+	Tasks             []taskWalkTask `json:"tasks,omitempty"`
+	CurrentCIID       string         `json:"current_ci_id,omitempty"`
+	CurrentTaskID     string         `json:"current_task_id,omitempty"`
+	ConfigurationName string         `json:"configuration_name,omitempty"`
+}
+
+// taskWalkTask is the per-task projection in the task_walk response.
+// Mirrors the load-bearing fields on task.Task with the CI's
+// contract_name + sequence stamped so consumers can render the
+// conversation log without joining back to the CI table. sty_c6d76a5b.
+type taskWalkTask struct {
+	ID                 string     `json:"id"`
+	Kind               string     `json:"kind,omitempty"`
+	Origin             string     `json:"origin,omitempty"`
+	Status             string     `json:"status"`
+	Outcome            string     `json:"outcome,omitempty"`
+	Priority           string     `json:"priority,omitempty"`
+	ContractInstanceID string     `json:"contract_instance_id,omitempty"`
+	ContractName       string     `json:"contract_name,omitempty"`
+	CISequence         int        `json:"ci_sequence,omitempty"`
+	AgentID            string     `json:"agent_id,omitempty"`
+	ParentTaskID       string     `json:"parent_task_id,omitempty"`
+	PriorTaskID        string     `json:"prior_task_id,omitempty"`
+	Iteration          int        `json:"iteration,omitempty"`
+	ClaimedBy          string     `json:"claimed_by,omitempty"`
+	ClaimedAt          *time.Time `json:"claimed_at,omitempty"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 type taskWalkStory struct {
@@ -137,6 +170,8 @@ func (s *Server) buildTaskWalk(ctx context.Context, storyID string, memberships 
 	}
 
 	currentCIID := ""
+	currentTaskID := ""
+	taskRows := make([]taskWalkTask, 0)
 	for _, ci := range cis {
 		iteration := iterationFromPeers(ci, cis)
 		entry := taskWalkCI{
@@ -178,8 +213,51 @@ func (s *Server) buildTaskWalk(ctx context.Context, storyID string, memberships 
 			}
 		}
 		resp.ContractInstances = append(resp.ContractInstances, entry)
+
+		// sty_c6d76a5b: project tasks bound to this CI into the
+		// per-story task chain. Tasks within a CI are ordered by
+		// CreatedAt; CIs are walked in sequence order so the
+		// concatenation is the conversation log.
+		if s.tasks != nil {
+			ciTasks, terr := s.tasks.List(ctx, task.ListOptions{ContractInstanceID: ci.ID, Limit: 500}, memberships)
+			if terr == nil {
+				sort.Slice(ciTasks, func(i, j int) bool {
+					return ciTasks[i].CreatedAt.Before(ciTasks[j].CreatedAt)
+				})
+				for _, t := range ciTasks {
+					row := taskWalkTask{
+						ID:                 t.ID,
+						Kind:               t.Kind,
+						Origin:             t.Origin,
+						Status:             t.Status,
+						Outcome:            t.Outcome,
+						Priority:           t.Priority,
+						ContractInstanceID: t.ContractInstanceID,
+						ContractName:       ci.ContractName,
+						CISequence:         ci.Sequence,
+						AgentID:            t.AgentID,
+						ParentTaskID:       t.ParentTaskID,
+						PriorTaskID:        t.PriorTaskID,
+						Iteration:          t.Iteration,
+						ClaimedBy:          t.ClaimedBy,
+						ClaimedAt:          t.ClaimedAt,
+						CompletedAt:        t.CompletedAt,
+						CreatedAt:          t.CreatedAt,
+					}
+					taskRows = append(taskRows, row)
+					if currentTaskID == "" {
+						switch t.Status {
+						case task.StatusPublished, task.StatusEnqueued, task.StatusClaimed, task.StatusInFlight, task.StatusPlanned:
+							currentTaskID = t.ID
+						}
+					}
+				}
+			}
+		}
 	}
 	resp.CurrentCIID = currentCIID
+	resp.Tasks = taskRows
+	resp.CurrentTaskID = currentTaskID
 	return resp, nil
 }
 
