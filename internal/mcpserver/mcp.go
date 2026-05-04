@@ -516,16 +516,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(kvListTool, s.handleKVList)
 
-		workflowClaimTool := mcpgo.NewTool("workflow_claim",
-			mcpgo.WithDescription("Lock a workflow shape for a story. Validates proposed_contracts against the project's workflow_spec, resolves each contract_name to a document{type=contract}, creates one contract_instance per slot (all status=ready), and writes a kind:workflow-claim ledger row. When proposed_contracts is omitted, falls back to the project workflow_spec default. Idempotent: re-calling with an existing workflow returns the existing CIs."),
-			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
-			mcpgo.WithArray("proposed_contracts", mcpgo.Description("Ordered list of contract_name slots. When omitted, the resolution precedence above selects the workflow shape."),
-				mcpgo.Items(map[string]any{"type": "string"})),
-			mcpgo.WithString("claim_markdown", mcpgo.Description("Agent's workflow-shape rationale.")),
-			mcpgo.WithString("agent_id", mcpgo.Description("Optional document id of an active type=agent in the same workspace. Recorded on the action_claim row for audit.")),
-		)
-		s.mcp.AddTool(workflowClaimTool, s.handleWorkflowClaim)
-
 		agentComposeTool := mcpgo.NewTool("agent_compose",
 			mcpgo.WithDescription("Create a type=agent document carrying explicit skill_refs + permission_patterns. When ephemeral=true the agent is scoped to story_id and the project_status sweeper archives it after SATELLITES_EPHEMERAL_AGENT_RETENTION_HOURS once the story reaches a terminal state. Writes a kind:agent-compose ledger row capturing {agent_id, name, skill_refs, permission_patterns, story_id, ephemeral, reason} in Structured. story_b19260d8."),
 			mcpgo.WithString("name", mcpgo.Required(), mcpgo.Description("Agent document name. Must be unique within scope.")),
@@ -546,60 +536,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(agentSummaryTool, s.handleAgentEphemeralSummary)
 
-		planAmendTool := mcpgo.NewTool("plan_amend",
-			mcpgo.WithDescription("Append new contract_instances to a story's existing plan tree (story_d5d88a64). Each entry in add_invocations carries an optional ac_scope (1-based AC indices the new CI covers) and an optional parent_invocation_id (the CI whose close triggered this amend). Validates: workflow_spec slot constraints across existing+amended names; per-AC iteration cap (SATELLITES_MAX_AC_ITERATIONS, default 5). On success writes a kind:plan-amend ledger row carrying {reason, added_cis, slot_validation_result}."),
-			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id whose plan is being amended.")),
-			mcpgo.WithString("add_invocations", mcpgo.Required(), mcpgo.Description("JSON array of {contract_name, ac_scope?, parent_invocation_id?, agent_id?} entries.")),
-			mcpgo.WithString("reason", mcpgo.Description("Orchestrator's rationale; written verbatim to the kind:plan-amend ledger row.")),
-		)
-		s.mcp.AddTool(planAmendTool, s.handlePlanAmend)
-
-		contractNextTool := mcpgo.NewTool("contract_next",
-			mcpgo.WithDescription("Return the lowest-sequence contract_instance with status=ready for a story, plus any document{type=skill} rows whose contract_binding matches the contract's id. Read-only — does NOT claim."),
-			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story id.")),
-		)
-		s.mcp.AddTool(contractNextTool, s.handleContractNext)
-
 		if s.sessions != nil {
-			claimTool := mcpgo.NewTool("contract_claim",
-				mcpgo.WithDescription("Claim a contract instance — runs the process-order gate, verifies the session is registered + not stale, writes action-claim and optional plan ledger rows, and transitions the CI to claimed. Same-session re-claim is an amend (prior rows dereferenced; amended=true). story_b39b393f: when agent_id is supplied, the action_claim row's permission_patterns are sourced from the agent document and the CI is stamped with the agent_id."),
-				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("session_id", mcpgo.Description("Optional session id override. Streamable HTTP callers should let the Mcp-Session-Id header carry the id; stdio/test callers may pass it as a body arg. story_31975268.")),
-				mcpgo.WithString("agent_id", mcpgo.Required(), mcpgo.Description("Document id of an active type=agent the orchestrator allocated to this CI (story_cc55e093). The action_claim ledger row's permission_patterns are sourced from this agent doc; the CI's AgentID column is stamped. Required as of story_cc55e093.")),
-				mcpgo.WithArray("permissions_claim", mcpgo.Description("Retired (story_cc55e093). Calls passing this argument are rejected with a structured permissions_claim_retired error directing the caller to allocate an agent."),
-					mcpgo.Items(map[string]any{"type": "string"})),
-				mcpgo.WithArray("skills_used", mcpgo.Description("Skill IDs / names the agent is applying (informational)."),
-					mcpgo.Items(map[string]any{"type": "string"})),
-				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown. Written as a kind:plan ledger row and stamped on the CI's PlanLedgerID.")),
-			)
-			s.mcp.AddTool(claimTool, s.handleContractClaim)
-
-			closeTool := mcpgo.NewTool("contract_close",
-				mcpgo.WithDescription("Close a contract instance. Writes a phase:close kind:close-request row plus an optional kind:evidence row. When the contract document's validation_mode=task, the handler enqueues a kind:review task and flips the CI to pending_review; the embedded reviewer service then claims the task, runs the reviewer, and writes the verdict ledger row + closes the task + on rejection spawns a successor work task (sty_c6d76a5b). Otherwise the inline reviewer dispatches and the CI flips directly to passed/failed."),
-				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("close_markdown", mcpgo.Description("Close summary markdown.")),
-				mcpgo.WithString("evidence_markdown", mcpgo.Description("Optional evidence markdown; writes a kind:evidence row when non-empty.")),
-				mcpgo.WithArray("evidence_ledger_ids", mcpgo.Description("IDs of prior evidence rows referenced from the close."),
-					mcpgo.Items(map[string]any{"type": "string"})),
-				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — used when the CI was claimed without a plan (deferred plan path).")),
-			)
-			s.mcp.AddTool(closeTool, s.handleContractClose)
-
-			respondTool := mcpgo.NewTool("contract_respond",
-				mcpgo.WithDescription("Write a kind:review-response ledger row addressing the latest unresolved review-question on a CI. Reviewer re-invocation happens on the next close."),
-				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("response_markdown", mcpgo.Required(), mcpgo.Description("Agent's response markdown.")),
-			)
-			s.mcp.AddTool(respondTool, s.handleContractRespond)
-
-			resumeTool := mcpgo.NewTool("contract_resume",
-				mcpgo.WithDescription("Resume a CI. When the CI is claimed, rebinds the session. When the CI is passed, reopens it: flips it back to claimed, dereferences its prior plan + action-claim rows, and flips downstream required CIs back to ready. Enforces per-CI + per-story resume caps (SATELLITES_MAX_RESUMES_PER_CI / _PER_STORY)."),
-				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id.")),
-				mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("Session to bind onto the CI.")),
-				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Human-readable reason written to the resume row.")),
-			)
-			s.mcp.AddTool(resumeTool, s.handleContractResume)
-
 			storyTaskSubmitTool := mcpgo.NewTool("story_task_submit",
 				mcpgo.WithDescription("Submit an agent-authored task list to a story (sty_c6d76a5b). The orchestrator agent composes the full plan; the substrate validates structural invariants and rejects on violations — it does not silently mutate the list. Modes via `kind`: `plan` (initial plan submission with tasks[]); `close` (close a task; publishes the sibling review task when the closed task is kind=work). Tasks are thin — rich content (plan markdown, evidence, verdicts) lives on linked ledger rows, not task fields. Validators reject `plan_first_task_must_be_plan`, `missing_review_for:<action>`, `invalid_action_format`, `review_action_mismatch`, `task_not_found`, `task_story_mismatch`, `task_already_terminal`, `invalid_outcome`."),
 				mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to submit against.")),
@@ -611,13 +548,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 				mcpgo.WithString("evidence_ledger_ids", mcpgo.Description("JSON array of ledger row ids referenced as evidence by the close. The agent writes those ledger rows separately (ledger_append) and references them here.")),
 			)
 			s.mcp.AddTool(storyTaskSubmitTool, s.handleStoryTaskSubmit)
-
-			cancelTool := mcpgo.NewTool("contract_cancel",
-				mcpgo.WithDescription("Manual escape hatch for unrecoverable CI states (sty_3a59a6d7). Accepts CIs in claimed | pending_review | failed | passed. Mid-flight states (claimed/pending_review) flip to terminal cancelled; already-terminal failed/passed are preserved for audit. In every case a successor CI is minted at the same workflow slot (status=ready, PriorCIID=prior.ID), mirroring the rejection-append loop, and a kind:cancellation ledger row is written naming the prior CI by id. When the story is in blocked state (iteration cap exhaustion) it is reset to in_progress so the successor is claimable. AC5 forbids silent retry — this verb is operator/agent-invoked only."),
-				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id to cancel.")),
-				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Why the cancellation is being invoked. Recorded on the kind:cancellation ledger row.")),
-			)
-			s.mcp.AddTool(cancelTool, s.handleContractCancel)
 
 			whoamiTool := mcpgo.NewTool("session_whoami",
 				mcpgo.WithDescription("Return the caller's session registry row. session_id resolves from the Mcp-Session-Id header by default (story_31975268); pass session_id as a body arg to override. Returns a structured session_not_registered error when the resolved session is not in the registry."),
@@ -764,18 +694,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("format", mcpgo.Description("Output format. Currently only \"markdown\" (default).")),
 		)
 		s.mcp.AddTool(exportWalkTool, s.handleStoryExportWalk)
-
-		// Story_66d4249f (S6): orchestrator dynamic plan composition.
-		// Wires the orchestrator role at the story-implement entry path —
-		// reads the resolved scope mandate stack + active principles +
-		// catalogs and emits per-slot tasks plus a kind:plan ledger row
-		// before invoking workflow_claim.
-		composeTool := mcpgo.NewTool("orchestrator_compose_plan",
-			mcpgo.WithDescription("Compose a per-story plan from the resolved scope mandate stack. Writes a kind:plan ledger row, enqueues one task per slot (origin=story_stage, payload={contract_name, agent_ref, sequence}), and calls workflow_claim. Idempotent — returns the existing CIs when the story already has a workflow claim. Story_66d4249f."),
-			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to compose a plan for.")),
-			mcpgo.WithString("agent_overrides", mcpgo.Description("Optional JSON object mapping contract_name -> agent_ref (document id) when the caller wants to pin a non-default agent for a specific slot.")),
-		)
-		s.mcp.AddTool(composeTool, s.handleOrchestratorComposePlan)
 
 	}
 
