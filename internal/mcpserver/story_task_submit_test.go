@@ -90,8 +90,15 @@ func TestStoryTaskSubmit_HappyPath_PlanKind(t *testing.T) {
 		if got.Description != inputs[i].Description {
 			t.Errorf("task[%d] description: got %q want %q", i, got.Description, inputs[i].Description)
 		}
-		if got.Status != task.StatusPublished {
-			t.Errorf("task[%d] status: got %q want %q", i, got.Status, task.StatusPublished)
+		// Work tasks land at published (claimable now); review tasks
+		// land at planned (subscriber-invisible until the matching
+		// work task closes).
+		wantStatus := task.StatusPublished
+		if inputs[i].Kind == task.KindReview {
+			wantStatus = task.StatusPlanned
+		}
+		if got.Status != wantStatus {
+			t.Errorf("task[%d] (%s/%s) status: got %q want %q", i, inputs[i].Kind, inputs[i].Action, got.Status, wantStatus)
 		}
 	}
 }
@@ -278,7 +285,7 @@ func TestStoryTaskSubmit_UnsupportedKind(t *testing.T) {
 
 	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
 		"story_id": f.storyID,
-		"kind":     "close",
+		"kind":     "spawn",
 	}))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -287,6 +294,239 @@ func TestStoryTaskSubmit_UnsupportedKind(t *testing.T) {
 		t.Fatalf("expected rejection; got: %s", firstText(res))
 	}
 	if !strings.Contains(firstText(res), "unsupported kind") {
+		t.Errorf("unexpected rejection text: %s", firstText(res))
+	}
+}
+
+// submitMinimalPlan submits the baseline minimalPlanTasks() list
+// against the fixture's story and returns the resulting task ids
+// in submission order. Used by close tests to set up a story with
+// a known task chain.
+func submitMinimalPlan(t *testing.T, f *orchestratorFixture) []string {
+	t.Helper()
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindPlan,
+		"tasks":    tasksJSON(t, minimalPlanTasks()),
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("setup submit: err=%v body=%s", err, firstText(res))
+	}
+	var body struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("setup parse: %v", err)
+	}
+	return body.TaskIDs
+}
+
+// TestStoryTaskSubmit_CloseKind_PublishesSiblingReview verifies the
+// happy path for kind=close: closing a kind=work task publishes the
+// kind=review sibling that was sitting at status=planned, so the
+// reviewer service's subscribe path can claim it.
+func TestStoryTaskSubmit_CloseKind_PublishesSiblingReview(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	ids := submitMinimalPlan(t, f)
+	planWorkID := ids[0]
+	planReviewID := ids[1]
+
+	// Sanity: review starts planned.
+	rv, err := f.taskStore.GetByID(f.ctx, planReviewID, []string{f.wsID})
+	if err != nil {
+		t.Fatalf("review pre-check: %v", err)
+	}
+	if rv.Status != task.StatusPlanned {
+		t.Fatalf("review pre-check status: got %q want %q", rv.Status, task.StatusPlanned)
+	}
+
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  planWorkID,
+		"outcome":  task.OutcomeSuccess,
+	}))
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("close error: %s", firstText(res))
+	}
+
+	var body struct {
+		TaskID            string `json:"task_id"`
+		Status            string `json:"status"`
+		Outcome           string `json:"outcome"`
+		PublishedReviewID string `json:"published_review_id"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.Status != task.StatusClosed {
+		t.Errorf("status: got %q want %q", body.Status, task.StatusClosed)
+	}
+	if body.Outcome != task.OutcomeSuccess {
+		t.Errorf("outcome: got %q want %q", body.Outcome, task.OutcomeSuccess)
+	}
+	if body.PublishedReviewID != planReviewID {
+		t.Errorf("published_review_id: got %q want %q", body.PublishedReviewID, planReviewID)
+	}
+
+	rv2, err := f.taskStore.GetByID(f.ctx, planReviewID, []string{f.wsID})
+	if err != nil {
+		t.Fatalf("review post-check: %v", err)
+	}
+	if rv2.Status != task.StatusPublished {
+		t.Errorf("review post-check status: got %q want %q", rv2.Status, task.StatusPublished)
+	}
+}
+
+// TestStoryTaskSubmit_CloseKind_OnReviewTask doesn't publish anything
+// — review tasks have no review sibling. Confirms the close path
+// doesn't error when no sibling exists.
+func TestStoryTaskSubmit_CloseKind_OnReviewTask(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	ids := submitMinimalPlan(t, f)
+	planWorkID, planReviewID := ids[0], ids[1]
+
+	// Close the work first so the review is published and claimable.
+	if _, err := f.taskStore.Close(f.ctx, planWorkID, task.OutcomeSuccess, f.now, []string{f.wsID}); err != nil {
+		t.Fatalf("setup close work: %v", err)
+	}
+	if _, err := f.taskStore.Publish(f.ctx, planReviewID, f.now, []string{f.wsID}); err != nil {
+		t.Fatalf("setup publish review: %v", err)
+	}
+
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  planReviewID,
+	}))
+	if err != nil {
+		t.Fatalf("close review: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("close review error: %s", firstText(res))
+	}
+	var body struct {
+		PublishedReviewID string `json:"published_review_id"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.PublishedReviewID != "" {
+		t.Errorf("published_review_id should be empty when closing a review task, got %q", body.PublishedReviewID)
+	}
+}
+
+// TestStoryTaskSubmit_CloseKind_RejectsWrongStory verifies a task
+// belonging to a different story is rejected.
+func TestStoryTaskSubmit_CloseKind_RejectsWrongStory(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	ids := submitMinimalPlan(t, f)
+
+	// Make a second story; close the first story's task against it.
+	otherStoryID := f.storyID + "_other"
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": otherStoryID,
+		"kind":     SubmitKindClose,
+		"task_id":  ids[0],
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected rejection")
+	}
+	// The story_id is unknown so the verb fails at story lookup
+	// before reaching task_story_mismatch — both rejections are
+	// acceptable.
+	got := firstText(res)
+	if !strings.Contains(got, "story not found") && !strings.Contains(got, "task_story_mismatch") {
+		t.Errorf("unexpected rejection text: %s", got)
+	}
+}
+
+// TestStoryTaskSubmit_CloseKind_RejectsTerminal verifies closing an
+// already-closed task is rejected, not silently accepted.
+func TestStoryTaskSubmit_CloseKind_RejectsTerminal(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	ids := submitMinimalPlan(t, f)
+	planWorkID := ids[0]
+
+	// First close — succeeds.
+	first, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  planWorkID,
+	}))
+	if err != nil || first.IsError {
+		t.Fatalf("first close: err=%v body=%s", err, firstText(first))
+	}
+
+	// Second close — rejected.
+	second, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  planWorkID,
+	}))
+	if err != nil {
+		t.Fatalf("second close handler: %v", err)
+	}
+	if !second.IsError {
+		t.Fatalf("expected rejection on terminal task")
+	}
+	if !strings.Contains(firstText(second), "task_already_terminal") {
+		t.Errorf("unexpected rejection text: %s", firstText(second))
+	}
+}
+
+// TestStoryTaskSubmit_CloseKind_RejectsBadOutcome verifies invalid
+// outcome strings are rejected up-front.
+func TestStoryTaskSubmit_CloseKind_RejectsBadOutcome(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	ids := submitMinimalPlan(t, f)
+
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  ids[0],
+		"outcome":  "bogus",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected rejection")
+	}
+	if !strings.Contains(firstText(res), "invalid_outcome") {
+		t.Errorf("unexpected rejection text: %s", firstText(res))
+	}
+}
+
+// TestStoryTaskSubmit_CloseKind_TaskNotFound verifies a missing
+// task id is rejected cleanly.
+func TestStoryTaskSubmit_CloseKind_TaskNotFound(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindClose,
+		"task_id":  "task_deadbeef",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected rejection")
+	}
+	if !strings.Contains(firstText(res), "task_not_found") {
 		t.Errorf("unexpected rejection text: %s", firstText(res))
 	}
 }

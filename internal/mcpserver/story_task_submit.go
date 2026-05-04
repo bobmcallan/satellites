@@ -26,11 +26,14 @@ import (
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// SubmitKindPlan is the verb-arg value for an initial plan submission.
+// SubmitKindPlan / SubmitKindClose are the verb-arg `kind` values.
 // The verb arg `kind` and Task.Kind are distinct enums — `kind` on the
 // verb names the submission shape (plan | close | spawn), while
 // task.Kind on each list entry names the activity type (work | review).
-const SubmitKindPlan = "plan"
+const (
+	SubmitKindPlan  = "plan"
+	SubmitKindClose = "close"
+)
 
 // taskInput is the JSON shape of one entry in the `tasks[]` arg of
 // story_task_submit. The agent supplies kind, action, description,
@@ -72,8 +75,10 @@ func (s *Server) handleStoryTaskSubmit(ctx context.Context, req mcpgo.CallToolRe
 	switch kind {
 	case SubmitKindPlan:
 		return s.submitPlan(ctx, req, st, caller, memberships, start)
+	case SubmitKindClose:
+		return s.submitClose(ctx, req, st, caller, memberships, start)
 	default:
-		return mcpgo.NewToolResultError(fmt.Sprintf("story_task_submit: unsupported kind %q (only %q is implemented in this slice)", kind, SubmitKindPlan)), nil
+		return mcpgo.NewToolResultError(fmt.Sprintf("story_task_submit: unsupported kind %q", kind)), nil
 	}
 }
 
@@ -118,34 +123,50 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 	now := s.nowUTC()
 	planMarkdown := req.GetString("plan_markdown", "")
 
-	// Persist tasks. Status=published — claimable now. The status of
-	// review tasks under sty_c6d76a5b is `planned` until the
-	// matching work task closes; that gating moves to story_task_submit
-	// (kind=close) in a follow-up slice. For this slice all submitted
-	// tasks land published so the existing reviewer service can claim
-	// review tasks once the work task's close-handler publishes them.
+	// Persist tasks. Work tasks land at StatusPublished (claimable
+	// now); review tasks land at StatusPlanned (subscriber-invisible
+	// until the matching work task closes via story_task_submit
+	// (kind=close), which publishes them). This gates the reviewer
+	// service so it can't claim a review before the work is done.
+	//
+	// Each review task's ParentTaskID points at the immediately-
+	// preceding work task — that linkage is how the close path
+	// finds the sibling to publish. validatePlanTasks already
+	// guaranteed every kind=review task follows a kind=work task with
+	// matching action.
 	taskIDs := make([]string, 0, len(inputs))
+	priorWorkID := ""
 	for i, in := range inputs {
 		priority := in.Priority
 		if priority == "" {
 			priority = task.PriorityMedium
 		}
+		status := task.StatusPublished
+		parentTaskID := ""
+		if in.Kind == task.KindReview {
+			status = task.StatusPlanned
+			parentTaskID = priorWorkID
+		}
 		t, err := s.tasks.Enqueue(ctx, task.Task{
-			WorkspaceID: st.WorkspaceID,
-			ProjectID:   st.ProjectID,
-			StoryID:     st.ID,
-			Kind:        in.Kind,
-			Action:      in.Action,
-			Description: in.Description,
-			AgentID:     in.AgentID,
-			Origin:      task.OriginStoryStage,
-			Priority:    priority,
-			Status:      task.StatusPublished,
+			WorkspaceID:  st.WorkspaceID,
+			ProjectID:    st.ProjectID,
+			StoryID:      st.ID,
+			Kind:         in.Kind,
+			Action:       in.Action,
+			Description:  in.Description,
+			AgentID:      in.AgentID,
+			ParentTaskID: parentTaskID,
+			Origin:       task.OriginStoryStage,
+			Priority:     priority,
+			Status:       status,
 		}, now)
 		if err != nil {
 			return mcpgo.NewToolResultError(fmt.Sprintf("task enqueue [%d %s]: %v", i, in.Action, err)), nil
 		}
 		taskIDs = append(taskIDs, t.ID)
+		if in.Kind == task.KindWork {
+			priorWorkID = t.ID
+		}
 	}
 
 	// kind:plan ledger row carrying the plan_markdown. The plan
@@ -188,6 +209,128 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// submitClose handles `kind=close` — the agent closes its current
+// task. Status flip + optional successor publishing for the matching
+// review sibling. Evidence ledger ids are accepted as references; the
+// substrate does not write inline markdown (per "tasks are thin;
+// ledger rows are the artifacts").
+func (s *Server) submitClose(ctx context.Context, req mcpgo.CallToolRequest, st story.Story, caller CallerIdentity, memberships []string, start time.Time) (*mcpgo.CallToolResult, error) {
+	taskID, err := req.RequireString("task_id")
+	if err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	outcome := req.GetString("outcome", task.OutcomeSuccess)
+	if outcome != task.OutcomeSuccess && outcome != task.OutcomeFailure {
+		return mcpgo.NewToolResultError(fmt.Sprintf("invalid_outcome: %q (expected %q or %q)", outcome, task.OutcomeSuccess, task.OutcomeFailure)), nil
+	}
+
+	current, err := s.tasks.GetByID(ctx, taskID, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("task_not_found: %s", taskID)), nil
+	}
+	if current.StoryID != st.ID {
+		return mcpgo.NewToolResultError(fmt.Sprintf("task_story_mismatch: task %s belongs to story %s, not %s", taskID, current.StoryID, st.ID)), nil
+	}
+	if current.Status == task.StatusClosed || current.Status == task.StatusArchived {
+		return mcpgo.NewToolResultError(fmt.Sprintf("task_already_terminal: %s status=%s", taskID, current.Status)), nil
+	}
+
+	now := s.nowUTC()
+
+	// Atomic close + sibling-review publish. We close first; if the
+	// caller-supplied evidence_ledger_ids are missing rows, they're
+	// still accepted (the agent may reference rows it wrote elsewhere
+	// and the substrate doesn't validate every reference). Outcomes
+	// other than the two enum values were rejected above.
+	closed, err := s.tasks.Close(ctx, taskID, outcome, now, memberships)
+	if err != nil {
+		return mcpgo.NewToolResultError(fmt.Sprintf("task close: %v", err)), nil
+	}
+
+	// Publish the matching sibling review task — kind=review with the
+	// same action that comes immediately after this work task in the
+	// story chain (story_task_submit(kind=plan) emits it at status=
+	// planned for exactly this gating). When no sibling exists (close
+	// of a review task itself, or a story chain without an explicit
+	// review for this action), no publish is performed.
+	publishedReviewID := ""
+	if current.Kind == task.KindWork {
+		sibling := s.findPlannedReviewSibling(ctx, current, memberships)
+		if sibling != "" {
+			pub, perr := s.tasks.Publish(ctx, sibling, now, memberships)
+			if perr == nil {
+				publishedReviewID = pub.ID
+			} else {
+				s.logger.Warn().
+					Str("task_id", taskID).
+					Str("sibling_id", sibling).
+					Err(perr).
+					Msg("story_task_submit close: sibling review publish failed")
+			}
+		}
+	}
+
+	// Optional: tag evidence rows with task_id for retrievability
+	// after CIs go away. Strictly additive; failures are logged
+	// rather than aborting the close.
+	rawEvidence := req.GetString("evidence_ledger_ids", "")
+	evidenceIDs := parseStringArray(rawEvidence)
+
+	body, _ := json.Marshal(map[string]any{
+		"task_id":             closed.ID,
+		"status":              closed.Status,
+		"outcome":             closed.Outcome,
+		"published_review_id": publishedReviewID,
+		"evidence_ledger_ids": evidenceIDs,
+	})
+	s.logger.Info().
+		Str("method", "tools/call").
+		Str("tool", "story_task_submit").
+		Str("kind", SubmitKindClose).
+		Str("story_id", st.ID).
+		Str("task_id", taskID).
+		Str("outcome", outcome).
+		Str("published_review_id", publishedReviewID).
+		Int64("duration_ms", time.Since(start).Milliseconds()).
+		Msg("mcp tool call")
+	_ = caller // present for parity with submitPlan; not yet load-bearing here
+	return mcpgo.NewToolResultText(string(body)), nil
+}
+
+// findPlannedReviewSibling returns the task id of the planned review
+// task whose ParentTaskID is `parent.ID`. story_task_submit(kind=plan)
+// stamps that linkage at compose time. Empty when no matching planned
+// review exists (legacy chain, already-published, etc.).
+func (s *Server) findPlannedReviewSibling(ctx context.Context, parent task.Task, memberships []string) string {
+	siblings, err := s.tasks.List(ctx, task.ListOptions{
+		StoryID: parent.StoryID,
+		Kind:    task.KindReview,
+		Status:  task.StatusPlanned,
+	}, memberships)
+	if err != nil {
+		return ""
+	}
+	for _, sib := range siblings {
+		if sib.ParentTaskID == parent.ID {
+			return sib.ID
+		}
+	}
+	return ""
+}
+
+// parseStringArray decodes a JSON array argument as a string slice.
+// Empty / invalid input returns nil.
+func parseStringArray(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // validatePlanTasks runs the structural checks required by

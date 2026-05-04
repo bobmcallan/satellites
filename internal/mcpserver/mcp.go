@@ -610,11 +610,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			s.mcp.AddTool(resumeTool, s.handleContractResume)
 
 			storyTaskSubmitTool := mcpgo.NewTool("story_task_submit",
-				mcpgo.WithDescription("Submit an agent-authored task list to a story (sty_c6d76a5b). The orchestrator agent composes the full plan; the substrate validates structural invariants and rejects on violations — it does not silently mutate the list. Modes via `kind`: `plan` (initial plan submission with tasks[]; only mode in this slice). Validators reject `plan_first_task_must_be_plan`, `missing_review_for:<action>`, `invalid_action_format`, `review_action_mismatch`. Each task carries `kind` (work|review), `action` (e.g. `contract:plan`), and optional `description` + `agent_id`."),
-				mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to submit the plan against.")),
-				mcpgo.WithString("kind", mcpgo.Required(), mcpgo.Description("Submission mode. Today: `plan`.")),
+				mcpgo.WithDescription("Submit an agent-authored task list to a story (sty_c6d76a5b). The orchestrator agent composes the full plan; the substrate validates structural invariants and rejects on violations — it does not silently mutate the list. Modes via `kind`: `plan` (initial plan submission with tasks[]); `close` (close a task; publishes the sibling review task when the closed task is kind=work). Tasks are thin — rich content (plan markdown, evidence, verdicts) lives on linked ledger rows, not task fields. Validators reject `plan_first_task_must_be_plan`, `missing_review_for:<action>`, `invalid_action_format`, `review_action_mismatch`, `task_not_found`, `task_story_mismatch`, `task_already_terminal`, `invalid_outcome`."),
+				mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to submit against.")),
+				mcpgo.WithString("kind", mcpgo.Required(), mcpgo.Description("Submission mode: `plan` | `close`.")),
 				mcpgo.WithString("tasks", mcpgo.Description("JSON array of task descriptors: [{kind, action, description?, agent_id?, priority?}, ...]. Required when kind=plan.")),
 				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — written to the kind:plan ledger row. When omitted, a summary is auto-generated from the action sequence.")),
+				mcpgo.WithString("task_id", mcpgo.Description("Task id to close. Required when kind=close.")),
+				mcpgo.WithString("outcome", mcpgo.Description("`success` (default) | `failure`. Used when kind=close.")),
+				mcpgo.WithString("evidence_ledger_ids", mcpgo.Description("JSON array of ledger row ids referenced as evidence by the close. The agent writes those ledger rows separately (ledger_append) and references them here.")),
 			)
 			s.mcp.AddTool(storyTaskSubmitTool, s.handleStoryTaskSubmit)
 
