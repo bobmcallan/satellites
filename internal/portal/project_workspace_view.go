@@ -83,10 +83,9 @@ type storyCard struct {
 }
 
 // storyContractCard is one row in the panel's contracts sub-table.
-// Fields mirror the dedicated story view's ciCard but only the columns
-// the panel actually renders (sequence, contract_name, status, agent).
-// AgentHref is empty when AgentID is unset; the template falls back to
-// an em-dash.
+// Renders the columns the panel actually shows (sequence, contract
+// name, status, agent). AgentHref is empty when AgentID is unset;
+// the template falls back to an em-dash.
 type storyContractCard struct {
 	ID           string
 	Sequence     int

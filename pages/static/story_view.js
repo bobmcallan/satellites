@@ -66,13 +66,12 @@
                 return '[' + (this.composite.delivery && this.composite.delivery.status || '') + ']';
             },
 
-            get ciCount() { return (this.composite.contract_instances || []).length; },
+            get taskChainCount() { return (this.composite.task_chain || []).length; },
             get verdictsCount() { return (this.composite.verdicts || []).length; },
             get commitsCount() { return (this.composite.commits || []).length; },
             get excerptsCount() { return (this.composite.ledger_excerpts || []).length; },
             get activityCount() { return (this.composite.activity || []).length; },
 
-            get ciEmpty() { return this.ciCount === 0; },
             get verdictsEmpty() { return this.verdictsCount === 0; },
             get commitsEmpty() { return this.commitsCount === 0; },
             get excerptsEmpty() { return this.excerptsCount === 0; },

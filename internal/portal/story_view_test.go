@@ -74,7 +74,7 @@ func TestStoryView_EmptyPanelsRender(t *testing.T) {
 		`data-testid="delivery-strip"`,
 		`data-testid="scope-panel"`,
 		`data-testid="source-docs-panel"`,
-		`data-testid="ci-walk-link-panel"`,
+		`data-testid="task-chain-link-panel"`,
 		`data-testid="verdict-panel"`,
 		`data-testid="repo-provenance-panel"`,
 		`data-testid="excerpts-panel"`,
@@ -155,9 +155,9 @@ func TestStoryView_LinksToWalkPage(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`data-testid="ci-walk-link-panel"`,
+		`data-testid="task-chain-link-panel"`,
 		`href="/stories/` + s.ID + `/walk"`,
-		`View contract walk`,
+		`View task chain`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)

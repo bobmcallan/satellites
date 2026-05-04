@@ -4,11 +4,11 @@
 // struct so the SSR template and the JSON composite endpoint render
 // from the same shape.
 //
-// sty_c6d76a5b checkpoint 14 retired the contract-instance row type;
-// the CIs slice survives as an always-empty placeholder so the SSR
-// template's `len .Composite.CIs` still binds. The contract walk
-// panel was already retired by sty_3132035b — the canonical "what's
-// happening on this story" view lives at /stories/{id}/walk.
+// sty_c6d76a5b retired the contract-instance row type. The
+// TaskChain slice on the composite is an always-empty placeholder:
+// the canonical "what's happening on this story" view lives at
+// /stories/{id}/walk, which renders the task chain via task_walk.
+// Sty_509a46fa renamed the placeholder away from the dead noun.
 package portal
 
 import (
@@ -49,7 +49,7 @@ var distinctLedgerKinds = map[string]string{
 type storyComposite struct {
 	Story         storyRow           `json:"story"`
 	SourceDocs    []sourceDocLink    `json:"source_documents"`
-	CIs           []ciCard           `json:"contract_instances"`
+	TaskChain     []taskChainCard    `json:"task_chain"`
 	Verdicts      []verdictCard      `json:"verdicts"`
 	Commits       []commitCard       `json:"commits"`
 	Excerpts      []ledgerExcerpt    `json:"ledger_excerpts"`
@@ -66,11 +66,9 @@ type sourceDocLink struct {
 	Display string `json:"display"`
 }
 
-// ciCard is retained as an always-empty type for SSR template
-// compatibility (sty_c6d76a5b checkpoint 14). The contract-instance
-// row type is gone; the contract-walk panel reads task chains via
-// /stories/{id}/walk.
-type ciCard struct{}
+// taskChainCard is an always-empty placeholder; the canonical
+// task-chain view lives at /stories/{id}/walk.
+type taskChainCard struct{}
 
 // verdictCard is one reviewer-verdict row scoped to this story. The
 // task_id tag (set by the reviewer service) carries the originating
@@ -136,7 +134,7 @@ func buildStoryComposite(
 	c := storyComposite{
 		Story:      viewStoryRow(s),
 		SourceDocs: sourceDocsForStory(s),
-		CIs:        []ciCard{},
+		TaskChain:  []taskChainCard{},
 		Delivery:   deliveryStrip{Status: s.Status, UpdatedAt: s.UpdatedAt.UTC().Format(time.RFC3339)},
 	}
 	_ = docs

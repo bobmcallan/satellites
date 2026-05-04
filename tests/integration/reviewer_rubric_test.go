@@ -69,7 +69,7 @@ func TestReviewerRubric_PostDriftFix(t *testing.T) {
 		// (mandate compliance / contract sequence section), not just
 		// a passing reference.
 		assert.Regexp(t,
-			`(?s)task_walk.{0,400}(contract_instances|contract sequence|chain|sequence)`,
+			`(?s)task_walk.{0,400}(chain|sequence)`,
 			storyReviewer,
 			"task_walk reference in story_reviewer.md must appear near sequence-verification language")
 	})

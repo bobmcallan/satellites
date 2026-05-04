@@ -667,14 +667,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(claimTaskTool, s.handleTaskClaim)
 
-		// sty_41488515: task_walk returns one coherent payload describing
-		// where a story sits in its contract walk — story metadata,
-		// ordered CI list with per-CI iteration / status / claimer /
-		// ledger row count / task summary, and a current_ci_id pointer.
-		// Replaces the agent-side stitch of story_get + contract_next +
-		// task_list. Read-only — no state mutation.
+		// sty_41488515 / sty_c6d76a5b: task_walk returns one coherent
+		// payload describing where a story sits in its task chain —
+		// story header, ordered task list with per-task action / kind /
+		// status / claimer / iteration, a current_task_id pointer, and
+		// a per-action summary. Read-only — no state mutation.
 		taskWalkTool := mcpgo.NewTool("task_walk",
-			mcpgo.WithDescription("Return where a story sits in its contract walk: ordered contract_instances with status, claimer, role, iteration, ledger row count, task summary, and a current_ci_id pointer. Single roundtrip orientation — replaces story_get + contract_next + task_list. Workspace-scoped. Sty_41488515."),
+			mcpgo.WithDescription("Return where a story sits in its task chain: story header, ordered tasks with action / kind / status / claimer / iteration, a current_task_id pointer, and a per-action summary (work/review counts + ledger row count). Single roundtrip orientation. Workspace-scoped. Sty_41488515."),
 			mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story whose walk should be returned.")),
 		)
 		s.mcp.AddTool(taskWalkTool, s.handleTaskWalk)

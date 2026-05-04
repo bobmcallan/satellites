@@ -77,22 +77,22 @@
       </div>
     </section>
 
-    <!-- Contract walk link panel — sty_3132035b retired the inline
-         contract-instance timeline; the canonical "what's happening on
-         this story" view lives at /stories/{id}/walk now. -->
-    <section class="panel-headed" data-testid="ci-walk-link-panel">
+    <!-- Task chain link panel. The canonical "what's happening on
+         this story" view lives at /stories/{id}/walk, served by the
+         task_walk handler. -->
+    <section class="panel-headed" data-testid="task-chain-link-panel">
       <header class="panel-header">
-        <h2>contract walk</h2>
-        <span class="panel-header-meta" data-testid="ci-count">
-          <code>(<span x-text="ciCount">{{len .Composite.CIs}}</span>)</code>
+        <h2>task chain</h2>
+        <span class="panel-header-meta" data-testid="task-chain-count">
+          <code>(<span x-text="taskChainCount">{{len .Composite.TaskChain}}</span>)</code>
         </span>
       </header>
       <div class="panel-body">
         <p>
-          <a class="walk-link" data-testid="ci-walk-href" href="/stories/{{.Story.ID}}/walk">View contract walk &rarr;</a>
+          <a class="walk-link" data-testid="task-chain-href" href="/stories/{{.Story.ID}}/walk">View task chain &rarr;</a>
         </p>
         <p class="muted">
-          Per-CI status, claim/close timestamps, iteration grouping, and ledger row counts now live on the walk page.
+          Per-task status, claim/close timestamps, iteration grouping, and ledger row counts live on the walk page.
         </p>
       </div>
     </section>

@@ -798,10 +798,10 @@ func viewStoryRow(s story.Story) storyRow {
 
 // handleStoryDetail renders the upgraded five-panel story view per
 // docs/ui-design.md §2.2 (story_3b450d9e). Owner-scoped via project;
-// cross-owner → 404. The composite (CIs + verdicts + commits + ledger
-// excerpts + delivery strip) is built once via buildStoryComposite so
-// the SSR template and the JSON composite endpoint render the same
-// shape.
+// cross-owner → 404. The composite (task chain + verdicts + commits
+// + ledger excerpts + delivery strip) is built once via
+// buildStoryComposite so the SSR template and the JSON composite
+// endpoint render the same shape.
 func (p *Portal) handleStoryDetail(w http.ResponseWriter, r *http.Request) {
 	user, ok := p.resolveUser(r)
 	if !ok {
