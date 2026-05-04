@@ -87,7 +87,6 @@ func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string,
 	// follow CreatedAt order (already sorted by buildTaskWalk).
 	type group struct {
 		name    string
-		role    string
 		entries []taskWalkCI
 	}
 	groups := []group{}
@@ -96,7 +95,7 @@ func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string,
 		idx, ok := groupIndex[ci.ContractName]
 		if !ok {
 			groupIndex[ci.ContractName] = len(groups)
-			groups = append(groups, group{name: ci.ContractName, role: ci.RequiredRole, entries: []taskWalkCI{ci}})
+			groups = append(groups, group{name: ci.ContractName, entries: []taskWalkCI{ci}})
 			continue
 		}
 		groups[idx].entries = append(groups[idx].entries, ci)
@@ -109,15 +108,11 @@ func renderWalkMarkdown(walk taskWalkResponse, description, ac, priority string,
 		sb.WriteString(header)
 		sb.WriteString("\n\n")
 		for _, ci := range g.entries {
-			role := ci.RequiredRole
-			if role == "" {
-				role = "any"
-			}
 			outcome := ci.Outcome
 			if outcome == "" {
 				outcome = ci.Status
 			}
-			fmt.Fprintf(&sb, "### %s #%d   role=%s   %s", g.name, ci.Iteration, role, outcome)
+			fmt.Fprintf(&sb, "### %s #%d   %s", g.name, ci.Iteration, outcome)
 			if ci.ClaimedAt != nil {
 				fmt.Fprintf(&sb, "   %s", formatTimestamp(*ci.ClaimedAt))
 				if ci.ClosedAt != nil {

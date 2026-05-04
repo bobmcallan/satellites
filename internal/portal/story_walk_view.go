@@ -2,7 +2,6 @@ package portal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -12,7 +11,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -44,7 +42,6 @@ type storyWalkData struct {
 // first lap, the last is the most recent.
 type walkGroup struct {
 	ContractName string
-	RequiredRole string
 	Iterations   int
 	Cards        []walkCard
 }
@@ -53,21 +50,19 @@ type walkGroup struct {
 // ledger detail view filtered by contract_id so click-through pays out
 // the "evidence is the trust leverage" property.
 type walkCard struct {
-	ID               string
-	ContractName     string
-	RequiredRole     string
-	Sequence         int
-	Iteration        int
-	Status           string
-	ClaimedBySession string
-	ClaimedByUser    string
-	ClaimedAt        string
-	ClosedAt         string
-	Outcome          string
-	LedgerRowCount   int
-	TaskSummary      walkTaskCounts
-	LedgerHref       string
-	IsCurrent        bool
+	ID             string
+	ContractName   string
+	Sequence       int
+	Iteration      int
+	Status         string
+	ClaimedByUser  string
+	ClaimedAt      string
+	ClosedAt       string
+	Outcome        string
+	LedgerRowCount int
+	TaskSummary    walkTaskCounts
+	LedgerHref     string
+	IsCurrent      bool
 }
 
 type walkTaskCounts struct {
@@ -111,7 +106,7 @@ func (p *Portal) handleStoryWalk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "render failed", http.StatusInternalServerError)
 		return
 	}
-	groups, currentCIID := buildStoryWalkGroups(r.Context(), cis, st.ProjectID, p.documents, p.tasks, p.ledger, p.grants, memberships)
+	groups, currentCIID := buildStoryWalkGroups(r.Context(), cis, st.ProjectID, p.documents, p.tasks, p.ledger, memberships)
 
 	data := storyWalkData{
 		Title:           buildPageTitle(active, st.Title, "walk"),
@@ -150,7 +145,6 @@ func buildStoryWalkGroups(
 	docs document.Store,
 	tasks task.Store,
 	led ledger.Store,
-	grants rolegrant.Store,
 	memberships []string,
 ) ([]walkGroup, string) {
 	if len(cis) == 0 {
@@ -209,14 +203,8 @@ func buildStoryWalkGroups(
 			card.ClosedAt = ci.UpdatedAt.UTC().Format("2006-01-02 15:04:05")
 			card.Outcome = ci.Status
 		}
-		doc := resolveDoc(ci.ContractID)
-		card.RequiredRole = walkExtractStructuredString(doc.Structured, "required_role")
+		_ = resolveDoc(ci.ContractID)
 		card.TaskSummary = walkTaskSummaryFor(ctx, tasks, ci.ID, memberships)
-		if grants != nil && ci.ClaimedViaGrantID != "" {
-			if g, gerr := grants.GetByID(ctx, ci.ClaimedViaGrantID, memberships); gerr == nil && g.GranteeKind == rolegrant.GranteeSession {
-				card.ClaimedBySession = g.GranteeID
-			}
-		}
 		card.ClaimedByUser = walkLookupActionClaimUser(ctx, led, projectID, ci.ID, memberships)
 		if currentCIID == "" {
 			switch ci.Status {
@@ -232,7 +220,6 @@ func buildStoryWalkGroups(
 			groupIndex[ci.ContractName] = len(groups)
 			groups = append(groups, walkGroup{
 				ContractName: ci.ContractName,
-				RequiredRole: card.RequiredRole,
 				Iterations:   1,
 				Cards:        []walkCard{card},
 			})
@@ -315,18 +302,4 @@ func walkLookupActionClaimUser(ctx context.Context, led ledger.Store, projectID,
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
 	return rows[0].CreatedBy
-}
-
-func walkExtractStructuredString(raw []byte, key string) string {
-	if len(raw) == 0 || key == "" {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
-	}
-	if v, ok := obj[key].(string); ok {
-		return v
-	}
-	return ""
 }

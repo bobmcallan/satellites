@@ -11,7 +11,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -36,7 +35,6 @@ type taskWalkCI struct {
 	ID               string             `json:"id"`
 	ContractName     string             `json:"contract_name"`
 	ContractCategory string             `json:"contract_category,omitempty"`
-	RequiredRole     string             `json:"required_role,omitempty"`
 	Sequence         int                `json:"sequence"`
 	Iteration        int                `json:"iteration"`
 	Status           string             `json:"status"`
@@ -164,17 +162,9 @@ func (s *Server) buildTaskWalk(ctx context.Context, storyID string, memberships 
 			entry.ClosedAt = &ua
 			entry.Outcome = ci.Status
 		}
-		// Resolve contract doc for required_role + category.
+		// Resolve contract doc for category.
 		doc := resolveContractDoc(ci.ContractID)
-		entry.RequiredRole = extractStructuredString(doc.Structured, "required_role")
 		entry.ContractCategory = extractStructuredString(doc.Structured, "category")
-		// Resolve session/user from the grant when claimed.
-		if ci.ClaimedViaGrantID != "" && s.grants != nil {
-			grant, gerr := s.grants.GetByID(ctx, ci.ClaimedViaGrantID, memberships)
-			if gerr == nil && grant.GranteeKind == rolegrant.GranteeSession {
-				entry.ClaimedBySession = grant.GranteeID
-			}
-		}
 		entry.ClaimedByUser = lookupActionClaimUser(ctx, s.ledger, st.ProjectID, ci.ID, memberships)
 
 		// Track the first non-terminal CI as the current pointer. Walk

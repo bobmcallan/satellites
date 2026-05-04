@@ -21,13 +21,10 @@ tags: [v4, agents-roles, reviewer]
 # Gemini Reviewer Agent
 
 The embedded reviewer service's delivery-agent configuration.
-provider_chain=gemini/2.5-flash. `permitted_roles` pins
-`role_reviewer` so the boot-time grant-mint path
-(`ensureReviewerServiceGrant`) resolves. The role's
-`allowed_mcp_verbs` covers the verbs the service exercises:
-`task_*` (queue claim/close), `contract_review_close`
-(verdict commits), and the ledger/document reads needed to
-assemble the review packet.
+provider_chain=gemini/2.5-flash. `tool_ceiling` covers the verbs the
+service exercises: `task_*` (queue claim/close),
+`contract_review_close` (verdict commits), and the ledger/document
+reads needed to assemble the review packet.
 
 The service runs alongside the satellites server when the system-tier
 KV row `reviewer.service.mode` resolves to `embedded` (the default).

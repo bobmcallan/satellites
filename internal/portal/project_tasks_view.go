@@ -57,7 +57,7 @@ type projectTaskRow struct {
 	Origin           string `json:"origin"`
 	Status           string `json:"status"`
 	Priority         string `json:"priority"`
-	RequiredRole     string `json:"required_role"`
+	Kind             string `json:"kind,omitempty"`
 	ContractCategory string `json:"contract_category"`
 	Iteration        int    `json:"iteration"`
 	StoryID          string `json:"story_id"`
@@ -75,7 +75,7 @@ type projectTaskRow struct {
 // Each non-empty field narrows the pane; tokens compose AND-style.
 type projectTasksFilter struct {
 	Raw            string
-	Role           string
+	Kind           string
 	Status         string
 	StoryID        string
 	ContractName   string
@@ -147,8 +147,8 @@ func parseProjectTasksFilter(raw string) projectTasksFilter {
 			continue
 		}
 		switch strings.ToLower(key) {
-		case "role":
-			out.Role = val
+		case "kind":
+			out.Kind = val
 		case "status":
 			out.Status = val
 		case "story":
@@ -211,7 +211,7 @@ func buildProjectTasksComposite(
 	if tasks == nil || projectID == "" {
 		return out
 	}
-	rows, err := tasks.List(ctx, task.ListOptions{Limit: 500, RequiredRole: filter.Role}, memberships)
+	rows, err := tasks.List(ctx, task.ListOptions{Limit: 500, Kind: filter.Kind}, memberships)
 	if err != nil {
 		return out
 	}
@@ -270,7 +270,7 @@ func buildProjectTasksComposite(
 			Origin:        t.Origin,
 			Status:        t.Status,
 			Priority:      t.Priority,
-			RequiredRole:  t.RequiredRole,
+			Kind:          t.Kind,
 			Iteration:     t.Iteration,
 			ClaimedByUser: t.ClaimedBy,
 			Age:           humaniseAge(now, t.CreatedAt),

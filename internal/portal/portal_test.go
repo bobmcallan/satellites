@@ -17,7 +17,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/repo"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -34,8 +33,7 @@ func newTestPortal(t *testing.T, cfg *config.Config) (*Portal, *auth.MemoryUserS
 	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	grants := rolegrant.NewMemoryStore(docs)
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -57,8 +55,7 @@ func newTestPortalWithContracts(t *testing.T, cfg *config.Config) (*Portal, *aut
 	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	grants := rolegrant.NewMemoryStore(docs)
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -78,8 +75,7 @@ func newTestPortalWithTasks(t *testing.T, cfg *config.Config) (*Portal, *auth.Me
 	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	grants := rolegrant.NewMemoryStore(docs)
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, nil, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), nil, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -744,9 +740,8 @@ func newPortalWithWorkspace(t *testing.T, cfg *config.Config) (*Portal, *auth.Me
 	contracts := contract.NewMemoryStore(docs, stories)
 	tasks := task.NewMemoryStore()
 	repos := repo.NewMemoryStore()
-	grants := rolegrant.NewMemoryStore(docs)
 	ws := workspace.NewMemoryStore()
-	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), grants, ws, time.Now())
+	p, err := New(cfg, satarbor.New("info"), sessions, users, projects, ledgerStore, stories, contracts, tasks, docs, repos, codeindex.NewStub(), ws, time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

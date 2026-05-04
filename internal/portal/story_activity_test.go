@@ -57,30 +57,27 @@ func TestBuildStoryActivity_FilterAndOrdering(t *testing.T) {
 	seedActivityLedger(t, store, projID, storyID, base, []seedRow{
 		{tags: []string{"kind:plan", "phase:orchestrator"}, content: "plan composed"},
 		{tags: []string{"kind:noise"}, content: "should be filtered out"},
-		{tags: []string{"kind:role-grant", "event:claimed"}, content: "grant claimed"},
 		{tags: []string{"kind:action-claim", "phase:plan"}, content: "plan CI claimed"},
 		{tags: []string{"kind:close-request", "phase:plan"}, content: "plan CI close requested"},
 		{tags: []string{"kind:verdict", "phase:plan"}, content: "verdict approved"},
 	})
 
 	rows := buildStoryActivity(context.Background(), store, projID, storyID, DefaultStoryActivityKinds, nil)
-	if len(rows) != 5 {
-		t.Fatalf("filtered rows = %d, want 5 (excluding kind:noise); rows = %+v", len(rows), rows)
+	if len(rows) != 4 {
+		t.Fatalf("filtered rows = %d, want 4 (excluding kind:noise); rows = %+v", len(rows), rows)
 	}
-	wantOrder := []string{"kind:plan", "kind:role-grant", "kind:action-claim", "kind:close-request", "kind:verdict"}
+	wantOrder := []string{"kind:plan", "kind:action-claim", "kind:close-request", "kind:verdict"}
 	for i, want := range wantOrder {
 		if rows[i].Kind != want {
 			t.Errorf("row[%d].Kind = %q, want %q (oldest-first ordering broken)", i, rows[i].Kind, want)
 		}
 	}
-	// kind_class should drop the kind: prefix for CSS
 	for _, row := range rows {
 		if strings.HasPrefix(row.KindClass, "kind:") {
 			t.Errorf("KindClass leaks prefix: %q", row.KindClass)
 		}
 	}
-	// Phase extraction: action-claim row has phase:plan
-	actionClaim := rows[2]
+	actionClaim := rows[1]
 	if actionClaim.Kind != "kind:action-claim" {
 		t.Fatalf("unexpected ordering: %+v", actionClaim)
 	}
@@ -112,7 +109,7 @@ func TestBuildStoryActivity_KVOverride(t *testing.T) {
 	// override that narrows the filter to just `kind:plan`.
 	seedActivityLedger(t, store, projID, storyID, base, []seedRow{
 		{tags: []string{"kind:plan", "phase:orchestrator"}, content: "plan"},
-		{tags: []string{"kind:role-grant", "event:claimed"}, content: "grant"},
+		{tags: []string{"kind:agent-compose"}, content: "agent composed"},
 		{tags: []string{"kind:verdict", "phase:plan"}, content: "verdict"},
 	})
 
@@ -205,7 +202,7 @@ func TestStoryActivityEndpoint_ReturnsBackfill(t *testing.T) {
 		CreatedBy: user.ID,
 	}, now)
 	storyRef := s.ID
-	for i, kind := range []string{"kind:plan", "kind:role-grant", "kind:action-claim"} {
+	for i, kind := range []string{"kind:plan", "kind:agent-compose", "kind:action-claim"} {
 		_, err := ledgerStore.Append(ctx, ledger.LedgerEntry{
 			ProjectID:  proj.ID,
 			StoryID:    &storyRef,
@@ -245,7 +242,7 @@ func TestStoryActivityEndpoint_ReturnsBackfill(t *testing.T) {
 	if len(body.Rows) != 3 {
 		t.Errorf("rows = %d, want 3", len(body.Rows))
 	}
-	wantKinds := []string{"kind:plan", "kind:role-grant", "kind:action-claim"}
+	wantKinds := []string{"kind:plan", "kind:agent-compose", "kind:action-claim"}
 	for i, want := range wantKinds {
 		if body.Rows[i].Kind != want {
 			t.Errorf("row[%d].kind = %q, want %q", i, body.Rows[i].Kind, want)

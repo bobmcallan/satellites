@@ -128,8 +128,6 @@ func TestStoryWalk_LoopGroupsByContractName(t *testing.T) {
 		`data-testid="walk-group-develop"`,
 		`develop &times;3`,
 		`data-testid="walk-group-push"`,
-		`role: developer`,
-		`role: releaser`,
 		`develop #1`,
 		`develop #2`,
 		`develop #3`,

@@ -101,7 +101,7 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 			body, _ := json.Marshal(map[string]any{
 				"error":                "plan_close_requires_tasks",
 				"contract_instance_id": ci.ID,
-				"message":              "plan close requires at least one task enqueued against this CI; call task_enqueue with contract_instance_id + required_role before close",
+				"message":              "plan close requires at least one task enqueued against this CI; call task_enqueue with contract_instance_id before close",
 			})
 			return mcpgo.NewToolResultError(string(body)), nil
 		}
@@ -406,15 +406,10 @@ func (s *Server) handleContractResume(ctx context.Context, req mcpgo.CallToolReq
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
-	// Resolve the incoming session's orchestrator grant so Claim /
-	// RebindGrant / downstream-rollback writes all carry the grant
-	// binding (story_4608a82c). A gate error here is fatal — resume
-	// onto a session whose grant doesn't cover the CI's required_role
-	// is rejected the same way claim rejects it.
-	newGrantID, gateErr := s.resolveRequiredRoleGrant(ctx, ci, caller.UserID, sessionID)
-	if gateErr != nil {
-		return mcpgo.NewToolResultError(gateErr.Error()), nil
-	}
+	// epic:roleless-agents — grant resolution removed. Claim/RebindGrant
+	// receive an empty grant id; the CI's agent_id (stamped at compose
+	// time) is the authoritative binding.
+	newGrantID := ""
 
 	// Resume caps.
 	capCI := intEnv("SATELLITES_MAX_RESUMES_PER_CI", resumeCapCI)
@@ -624,11 +619,11 @@ func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName strin
 }
 
 // enqueueReviewTask creates a kind:review task targeting the CI being
-// closed. Carries required_role:reviewer so any reviewer-role runtime
-// in the queue's workspace can claim it. Payload references the
-// close-request + evidence rows so the reviewer has the full context
-// without re-querying the ledger. Returns the task id for caller
-// inclusion in the close response.
+// closed. The embedded reviewer service subscribes to kind:review
+// tasks and claims them. Payload references the close-request +
+// evidence rows so the reviewer has the full context without
+// re-querying the ledger. Returns the task id for caller inclusion in
+// the close response.
 func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInstance, closeRowID, evidenceRowID, actor string, now time.Time) (string, error) {
 	payload, _ := json.Marshal(map[string]any{
 		"contract_instance_id": ci.ID,
@@ -641,7 +636,7 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 		WorkspaceID:        ci.WorkspaceID,
 		ProjectID:          ci.ProjectID,
 		ContractInstanceID: ci.ID,
-		RequiredRole:       "reviewer",
+		Kind:               task.KindReview,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 		Payload:            payload,

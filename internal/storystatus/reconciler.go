@@ -70,7 +70,7 @@ func (r *Reconciler) OnAppend(ctx context.Context, entry ledger.LedgerEntry) {
 
 // triggerKind reports whether tags carry a CI-state-transition kind
 // the reconciler must respond to. The set is intentionally narrow:
-// kind:plan / kind:evidence / kind:role-grant / kind:task-* are bus
+// kind:plan / kind:evidence / kind:task-* are bus
 // noise from this story's perspective and are dropped here.
 func triggerKind(tags []string) bool {
 	for _, t := range tags {

@@ -37,8 +37,8 @@ type Config struct {
 	// to 5 s. Set lower in tests for tight polling.
 	PollInterval time.Duration
 
-	// SessionID is the registry session id the boot-time grant binds
-	// to role_reviewer. Defaults to ServiceSessionID.
+	// SessionID is the registry session id the reviewer service runs
+	// under. Defaults to ServiceSessionID.
 	SessionID string
 
 	// UserID is the system identity that owns SessionID. Defaults to
@@ -176,9 +176,9 @@ func (s *Service) Run(ctx context.Context) error {
 // the service deterministically without spawning the loop.
 func (s *Service) Tick(ctx context.Context) bool {
 	candidates, err := s.tasks.List(ctx, task.ListOptions{
-		Status:       task.StatusEnqueued,
-		RequiredRole: "reviewer",
-		Limit:        16,
+		Status: task.StatusEnqueued,
+		Kind:   task.KindReview,
+		Limit:  16,
 	}, nil)
 	if err != nil {
 		s.logWarn("reviewer service list failed", err, nil)

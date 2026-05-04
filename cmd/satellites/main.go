@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -43,7 +42,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	reviewerservice "github.com/bobmcallan/satellites/internal/reviewer/service"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/storystatus"
@@ -119,7 +117,6 @@ func main() {
 		wsStore          workspace.Store
 		contractStore    contract.Store
 		sessionStore     session.Store
-		grantStore       rolegrant.Store
 		taskStore        task.Store
 		repoStore        repo.Store
 		changelogStore   changelog.Store
@@ -213,7 +210,6 @@ func main() {
 		// across restarts, so cookies don't orphan after a deploy.
 		users = auth.NewSurrealUserStore(conn)
 		authHandlers.Users = users
-		grantStore = rolegrant.NewSurrealStore(conn, docStore)
 		taskStore = task.NewSurrealStore(conn)
 		repoStore = repo.NewSurrealStore(conn)
 		changelogStore = changelog.NewSurrealStore(conn)
@@ -300,30 +296,12 @@ func main() {
 		// docs exist.
 		document.MigrateSkillContractBindings(ctx, docStore, logger, time.Now().UTC())
 
-		// epic:roleless-agents — required_role backfill is no longer
-		// invoked. Contracts no longer declare a required_role; the
-		// process-order gate falls through cleanly when the field is
-		// empty (resolveRequiredRoleGrant returns nil). Function kept
-		// for migration paths that still reference it.
-		_ = stampRequiredRoleOnContracts
-
-		// Migrate pre-6.5 contract_instance rows off the legacy
-		// claimed_by_session_id column (story_4608a82c): first stamp
-		// claimed_via_grant_id by resolving each row's legacy session
-		// through the session registry, then UNSET the column. The two
-		// operations are idempotent — a clean DB short-circuits both.
+		// epic:roleless-agents — pre-6.5 grant-backed claim columns are
+		// no longer migrated. Contracts now stamp agent_id directly via
+		// orchestrator_compose_plan (sty_e8d49554, sty_63361520). The
+		// SurrealStore drops the legacy session column on next boot if
+		// still present.
 		if surrealContracts, ok := contractStore.(*contract.SurrealStore); ok {
-			sessionMap, err := buildSessionGrantLookup(ctx, sessionStore)
-			if err != nil {
-				logger.Warn().Str("error", err.Error()).Msg("contract grant backfill: session lookup failed")
-			} else {
-				stamped, missed, err := surrealContracts.BackfillClaimedViaGrant(ctx, sessionMap, time.Now().UTC())
-				if err != nil {
-					logger.Warn().Str("error", err.Error()).Msg("contract grant backfill failed")
-				} else if stamped > 0 || missed > 0 {
-					logger.Info().Int("stamped", stamped).Int("missed", missed).Msg("contract claimed_via_grant_id backfill complete")
-				}
-			}
 			if err := surrealContracts.DropLegacySessionColumn(ctx); err != nil {
 				logger.Warn().Str("error", err.Error()).Msg("contract drop legacy session column failed")
 			}
@@ -397,28 +375,9 @@ func main() {
 		reviewerServiceMode = resolveReviewerServiceMode(ctx, ledgerStore)
 		logger.Info().Str("mode", reviewerServiceMode).Msg("reviewer service mode resolved")
 
-		// epic:v4-lifecycle-refactor sty_62d4b438: when the reviewer
-		// service is wired in embedded mode, mint (or reuse) an active
-		// role-grant pinning the service's session id to role_reviewer.
-		// The grant is the prerequisite for the service goroutine —
-		// without it, task_claim and contract_review_close fail the
-		// session-role gate (sty_8490f906).
-		if reviewerServiceMode == reviewerservice.ModeEmbedded {
-			grantID, err := ensureReviewerServiceGrant(ctx, docStore, grantStore, sessionStore, systemWsID, time.Now().UTC())
-			if err != nil {
-				logger.Warn().Str("error", err.Error()).Msg("reviewer service grant mint failed; service will not start")
-			} else if grantID == "" {
-				logger.Warn().Msg("reviewer service grant skipped: role_reviewer or agent_gemini_reviewer seed missing")
-			} else {
-				logger.Info().
-					Str("grant_id", grantID).
-					Str("session_id", reviewerservice.ServiceSessionID).
-					Msg("reviewer service grant minted")
-			}
-		}
 	}
 
-	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, repoIndexer, grantStore, wsStore, startedAt)
+	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, contractStore, taskStore, docStore, repoStore, repoIndexer, wsStore, startedAt)
 	if err != nil {
 		logger.Error().Str("error", err.Error()).Msg("portal init failed")
 		os.Exit(1)
@@ -534,7 +493,6 @@ func main() {
 		WorkspaceStore:   wsStore,
 		ContractStore:    contractStore,
 		SessionStore:     sessionStore,
-		RoleGrantStore:   grantStore,
 		TaskStore:        taskStore,
 		RepoStore:        repoStore,
 		ChangelogStore:   changelogStore,
@@ -766,152 +724,6 @@ func seedSystemValidationMode(ctx context.Context, ledgerStore ledger.Store, now
 		return fmt.Errorf("seed validation_mode KV: %w", err)
 	}
 	return nil
-}
-
-// ensureReviewerServiceGrant mints (or reuses) an active role-grant
-// pinning the embedded reviewer service's session id to role_reviewer.
-// Returns the grant id on success. Idempotent: an existing active
-// grant for (role_reviewer, agent_gemini_reviewer, session=ServiceSessionID)
-// short-circuits without minting a duplicate. Returns ("", nil) when
-// any seed prerequisite is missing — the caller logs and continues
-// (the reviewer service will simply not start without a grant).
-//
-// The grant is registered against a system-owned session row so the
-// reviewer service's task_claim and contract_review_close calls can
-// resolve through the same session-role gate used by interactive
-// orchestrator sessions.
-//
-// epic:v4-lifecycle-refactor sty_62d4b438.
-func ensureReviewerServiceGrant(
-	ctx context.Context,
-	docStore document.Store,
-	grantStore rolegrant.Store,
-	sessionStore session.Store,
-	workspaceID string,
-	now time.Time,
-) (string, error) {
-	if docStore == nil || grantStore == nil || sessionStore == nil {
-		return "", nil
-	}
-	// epic:roleless-agents — reviewer role doc is no longer required.
-	// The grant binds session→agent directly. We still look up the role
-	// when present (back-compat for envs that haven't re-seeded yet).
-	roleID := ""
-	if role, err := docStore.GetByName(ctx, "", mcpserver.SeedRoleReviewerName, nil); err == nil && role.Type == document.TypeRole && role.Status == document.StatusActive {
-		roleID = role.ID
-	}
-	agent, err := docStore.GetByName(ctx, "", mcpserver.SeedAgentReviewerName, nil)
-	if err != nil || agent.Type != document.TypeAgent || agent.Status != document.StatusActive {
-		return "", nil
-	}
-	sess, err := sessionStore.Register(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, session.SourceSessionStart, now)
-	if err != nil {
-		return "", fmt.Errorf("reviewer service session register: %w", err)
-	}
-	if workspaceID != "" && sess.WorkspaceID != workspaceID {
-		if updated, err := sessionStore.SetWorkspace(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, workspaceID, now); err == nil {
-			sess = updated
-		}
-	}
-	// Idempotence: if the session already carries an active grant for
-	// the reviewer agent, reuse it. A second boot finds the grant minted
-	// by the first boot and short-circuits.
-	if sess.OrchestratorGrantID != "" {
-		existing, gerr := grantStore.GetByID(ctx, sess.OrchestratorGrantID, nil)
-		if gerr == nil && existing.Status == rolegrant.StatusActive && existing.AgentID == agent.ID {
-			return existing.ID, nil
-		}
-	}
-	grant, err := grantStore.Create(ctx, rolegrant.RoleGrant{
-		WorkspaceID: workspaceID,
-		RoleID:      roleID,
-		AgentID:     agent.ID,
-		GranteeKind: rolegrant.GranteeSession,
-		GranteeID:   reviewerservice.ServiceSessionID,
-	}, now)
-	if err != nil {
-		return "", fmt.Errorf("reviewer service grant create: %w", err)
-	}
-	if _, err := sessionStore.SetOrchestratorGrant(ctx, reviewerservice.ServiceUserID, reviewerservice.ServiceSessionID, grant.ID, now); err != nil {
-		return grant.ID, fmt.Errorf("reviewer service session set grant: %w", err)
-	}
-	return grant.ID, nil
-}
-
-// stampRequiredRoleOnContracts scans every active type=contract row and,
-// when the row's structured payload lacks a required_role field, writes
-// an updated payload with required_role=role_orchestrator. Returns the
-// number of rows stamped. Idempotent — a second call finds no rows
-// without required_role. Story_85675c33.
-func stampRequiredRoleOnContracts(ctx context.Context, docStore document.Store, now time.Time) (int, error) {
-	if docStore == nil {
-		return 0, nil
-	}
-	rows, err := docStore.List(ctx, document.ListOptions{Type: document.TypeContract}, nil)
-	if err != nil {
-		return 0, fmt.Errorf("list contracts: %w", err)
-	}
-	stamped := 0
-	for _, row := range rows {
-		updated, ok := addRequiredRoleIfMissing(row.Structured, "role_orchestrator")
-		if !ok {
-			continue
-		}
-		structuredVal := updated
-		if _, err := docStore.Update(ctx, row.ID, document.UpdateFields{Structured: &structuredVal}, "system", now, nil); err != nil {
-			return stamped, fmt.Errorf("update contract %s: %w", row.ID, err)
-		}
-		stamped++
-	}
-	return stamped, nil
-}
-
-// buildSessionGrantLookup walks every registered session and returns a
-// map session_id → orchestrator_grant_id for the subset carrying a
-// grant. Used by the boot-time contract_instance grant backfill in
-// story_4608a82c. Empty map on nil store — the caller tolerates that.
-func buildSessionGrantLookup(ctx context.Context, sessions session.Store) (map[string]string, error) {
-	out := make(map[string]string)
-	if sessions == nil {
-		return out, nil
-	}
-	rows, err := sessions.ListAll(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		if row.OrchestratorGrantID == "" {
-			continue
-		}
-		out[row.SessionID] = row.OrchestratorGrantID
-	}
-	return out, nil
-}
-
-// addRequiredRoleIfMissing inserts `required_role=roleName` into the
-// JSON payload if the key is absent. Returns (newPayload, true) when a
-// mutation is needed; (nil, false) when the key already exists or the
-// payload is not a JSON object. Malformed JSON (non-object, non-empty)
-// is left untouched — the caller logs via the return value.
-func addRequiredRoleIfMissing(raw []byte, roleName string) ([]byte, bool) {
-	if len(raw) == 0 {
-		// Synthesize a minimal payload so the claim gate can resolve it.
-		out, _ := json.Marshal(map[string]any{"required_role": roleName})
-		return out, true
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
-		return nil, false
-	}
-	if _, exists := obj["required_role"]; exists {
-		return nil, false
-	}
-	obj["required_role"] = roleName
-	out, err := json.Marshal(obj)
-	if err != nil {
-		return nil, false
-	}
-	return out, true
 }
 
 // buildReviewer wires the production Reviewer for the MCP server.

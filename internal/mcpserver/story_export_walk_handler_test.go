@@ -35,11 +35,11 @@ func TestStoryExportWalk_MarkdownShape(t *testing.T) {
 		"# " + f.storyID,
 		"loop story",
 		"## develop ×3 (loop)",
-		"### develop #1   role=developer",
-		"### develop #2   role=developer",
-		"### develop #3   role=developer",
+		"### develop #1",
+		"### develop #2",
+		"### develop #3",
 		"## push",
-		"### push #1   role=releaser",
+		"### push #1",
 		"Process defined by: project default",
 	} {
 		if !strings.Contains(content, want) {

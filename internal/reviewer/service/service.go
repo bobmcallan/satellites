@@ -28,11 +28,9 @@ const (
 	ModeDisabled = "disabled"
 )
 
-// ServiceSessionID is the stable session-registry id minted at boot
-// for the embedded reviewer service. main.go binds a role_reviewer
-// grant to this session so the service's task_claim and
-// contract_review_close calls pass the session-role gate
-// (sty_62d4b438).
+// ServiceSessionID is the stable session-registry id used at boot for
+// the embedded reviewer service. The service's task_claim and
+// contract_review_close calls run under this session id.
 const ServiceSessionID = "session_reviewer_embedded"
 
 // ServiceUserID is the system identity that owns the reviewer

@@ -101,8 +101,6 @@ func kindSubdir(kind Kind) string {
 		return "story_templates"
 	case KindReplicateVocabulary:
 		return "replicate_vocabulary"
-	case KindRole:
-		return "roles"
 	case KindArtifact:
 		return "artifacts"
 	case KindHelp:
@@ -128,8 +126,6 @@ func buildInput(kind Kind, fm Frontmatter, body []byte, workspaceID, actor strin
 		return storyTemplateToInput(fm, body, workspaceID, actor)
 	case KindReplicateVocabulary:
 		return replicateVocabularyToInput(fm, body, workspaceID, actor)
-	case KindRole:
-		return roleToInput(fm, body, workspaceID, actor)
 	case KindArtifact:
 		return artifactToInput(fm, body, workspaceID, actor)
 	case KindHelp:

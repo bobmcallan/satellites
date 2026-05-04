@@ -27,7 +27,7 @@ func TestSystemDefaultSeedFile_PinsContractTokens(t *testing.T) {
 		"story is the unit",
 		"workflow is a list of contract",
 		"process order",
-		"session = one role",
+		"session = one agent",
 		"five primitives",
 		// Routing rules.
 		"satellites_project_set",

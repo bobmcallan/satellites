@@ -245,21 +245,20 @@ func TestMemoryStore_CloseAndReclaim(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestMemoryStore_ContractInstanceAndRoleBinding covers
-// epic:v4-lifecycle-refactor sty_0c21a0cf: Tasks persist
-// ContractInstanceID and RequiredRole, and List filters on both.
-func TestMemoryStore_ContractInstanceAndRoleBinding(t *testing.T) {
+// TestMemoryStore_ContractInstanceAndKindBinding: Tasks persist
+// ContractInstanceID and Kind, and List filters on both.
+func TestMemoryStore_ContractInstanceAndKindBinding(t *testing.T) {
 	t.Parallel()
 	store := task.NewMemoryStore()
 	now := time.Now().UTC()
 	ctx := context.Background()
 
-	// Three tasks: two bound to ci_plan_x with developer / reviewer
-	// roles; one bound to ci_plan_y with developer role.
-	planXDev, err := store.Enqueue(ctx, task.Task{
+	// Three tasks: two bound to ci_plan_x (work + review); one bound
+	// to ci_plan_y (work).
+	planXWork, err := store.Enqueue(ctx, task.Task{
 		WorkspaceID:        "w",
 		ContractInstanceID: "ci_plan_x",
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 	}, now)
@@ -267,44 +266,40 @@ func TestMemoryStore_ContractInstanceAndRoleBinding(t *testing.T) {
 	planXRev, err := store.Enqueue(ctx, task.Task{
 		WorkspaceID:        "w",
 		ContractInstanceID: "ci_plan_x",
-		RequiredRole:       "reviewer",
+		Kind:               task.KindReview,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
-	planYDev, err := store.Enqueue(ctx, task.Task{
+	planYWork, err := store.Enqueue(ctx, task.Task{
 		WorkspaceID:        "w",
 		ContractInstanceID: "ci_plan_y",
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 
-	// Round-trip: fields persist on GetByID.
-	got, err := store.GetByID(ctx, planXDev.ID, []string{"w"})
+	got, err := store.GetByID(ctx, planXWork.ID, []string{"w"})
 	require.NoError(t, err)
 	assert.Equal(t, "ci_plan_x", got.ContractInstanceID)
-	assert.Equal(t, "developer", got.RequiredRole)
+	assert.Equal(t, task.KindWork, got.Kind)
 
-	// Filter by ContractInstanceID returns the two tasks bound to ci_plan_x.
 	xRows, err := store.List(ctx, task.ListOptions{ContractInstanceID: "ci_plan_x"}, []string{"w"})
 	require.NoError(t, err)
 	require.Len(t, xRows, 2)
 	xIDs := map[string]bool{xRows[0].ID: true, xRows[1].ID: true}
-	assert.True(t, xIDs[planXDev.ID])
+	assert.True(t, xIDs[planXWork.ID])
 	assert.True(t, xIDs[planXRev.ID])
-	assert.False(t, xIDs[planYDev.ID])
+	assert.False(t, xIDs[planYWork.ID])
 
-	// Filter by RequiredRole returns the two developer tasks.
-	devRows, err := store.List(ctx, task.ListOptions{RequiredRole: "developer"}, []string{"w"})
+	workRows, err := store.List(ctx, task.ListOptions{Kind: task.KindWork}, []string{"w"})
 	require.NoError(t, err)
-	require.Len(t, devRows, 2)
+	require.Len(t, workRows, 2)
 
-	// Combined filter: ci_plan_x + reviewer = exactly one row.
 	combined, err := store.List(ctx, task.ListOptions{
 		ContractInstanceID: "ci_plan_x",
-		RequiredRole:       "reviewer",
+		Kind:               task.KindReview,
 	}, []string{"w"})
 	require.NoError(t, err)
 	require.Len(t, combined, 1)

@@ -56,8 +56,8 @@ func UnmarshalAgentSettings(payload []byte) (AgentSettings, error) {
 // accepted. Mistyped values for known AgentSettings fields fail —
 // e.g. permission_patterns:"oops" returns an error. Unknown fields
 // pass through to allow legacy orchestrator-agent payloads
-// (provider_chain / tier / permitted_roles / tool_ceiling) to coexist
-// alongside the typed v4 fields without a coordinated migration.
+// (provider_chain / tier / tool_ceiling) to coexist alongside the
+// typed v4 fields without a coordinated migration.
 // Story_b39b393f.
 func validateAgentStructured(payload []byte) error {
 	if len(payload) == 0 {

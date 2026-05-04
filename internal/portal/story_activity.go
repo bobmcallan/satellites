@@ -1,6 +1,6 @@
 // Per-story activity-log composite for sty_e55f335e. The activity panel
 // renders a curated subset of ledger rows scoped to one story — the
-// substrate-internal lifecycle events (plan, role-grant, agent-compose,
+// substrate-internal lifecycle events (plan, agent-compose,
 // action-claim, close-request, evidence, artifact, verdict, review
 // q/a) — in time order. Distinct from the ledger-excerpts panel, which
 // shows every row regardless of kind.
@@ -35,7 +35,6 @@ var DefaultStoryActivityKinds = []string{
 	"kind:plan",
 	"kind:plan-approved",
 	"kind:plan-amend",
-	"kind:role-grant",
 	"kind:agent-compose",
 	"kind:action-claim",
 	"kind:close-request",
@@ -175,8 +174,8 @@ func extractTagValue(tags []string, prefix string) string {
 }
 
 // kindCSSClass maps an activity-kind tag to a stable CSS-friendly slug
-// the template uses for per-row styling. e.g. "kind:role-grant" →
-// "role-grant". Empty input → empty output.
+// the template uses for per-row styling. e.g. "kind:plan" → "plan".
+// Empty input → empty output.
 func kindCSSClass(kind string) string {
 	if kind == "" {
 		return ""

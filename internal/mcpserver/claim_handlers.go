@@ -87,41 +87,18 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
-	// CI fetch moved up so the agent-id resolution chain (sty_63361520)
-	// can consult the CI's stamped AgentID before falling back to the
-	// session's bound agent. Per epic:roleless-agents:
-	//   1. Explicit agent_id arg (kept for callers that want override / for tests).
-	//   2. CI's stamped AgentID (set by orchestrator_compose_plan via
-	//      mintTaskAgentForContract; sty_e8d49554).
-	//   3. Session's ACTIVE bound agent via OrchestratorGrantID → grant.AgentID.
-	//      A released grant does NOT resolve — callers must rebind first.
-	//   4. Structured agent_required error.
 	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
-	if err == nil {
-		// CI exists; its stamped AgentID joins the resolution chain.
-	}
 	agentID := req.GetString("agent_id", "")
 	if agentID == "" && err == nil && ci.AgentID != "" {
 		agentID = ci.AgentID
 	}
-	if agentID == "" && s.sessions != nil && s.grants != nil {
-		caller2, _ := UserFrom(ctx)
-		if sess, serr := s.sessions.Get(ctx, caller2.UserID, sessionID); serr == nil && sess.OrchestratorGrantID != "" {
-			if grant, gerr := s.grants.GetByID(ctx, sess.OrchestratorGrantID, nil); gerr == nil && grant.AgentID != "" && grant.Status == "active" {
-				agentID = grant.AgentID
-			}
-		}
-	}
 	if agentID == "" {
 		body, _ := json.Marshal(map[string]any{
 			"error":   "agent_required",
-			"message": "contract_claim could not resolve an agent — supply agent_id arg, ensure the CI has a stamped AgentID (orchestrator_compose_plan), or bind the session to an agent first",
+			"message": "contract_claim could not resolve an agent — supply agent_id arg or ensure the CI has a stamped AgentID (orchestrator_compose_plan)",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
-	// CI fetch error gate — moved here from below the agent-id chain
-	// because the chain now consults ci.AgentID. Order preserved:
-	// missing CI → ci_not_found error before the rest of the flow.
 	if err != nil {
 		body, _ := json.Marshal(map[string]any{"error": "ci_not_found", "contract_instance_id": ciID})
 		return mcpgo.NewToolResultError(string(body)), nil
@@ -193,27 +170,14 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
-	// Role-grant gate. When the contract's structured payload names a
-	// required_role AND we have the grant/doc machinery wired, verify
-	// the caller's active orchestrator grant's role id matches. No
-	// required_role OR no wiring = grantID stays empty (legacy path for
-	// tests that don't wire grants).
-	grantID, gateErr := s.resolveRequiredRoleGrant(ctx, ci, caller.UserID, sessionID)
-	if gateErr != nil {
-		return mcpgo.NewToolResultError(gateErr.Error()), nil
-	}
-
-	// Same-grant amend path: CI already claimed, claimer's grant id
-	// matches the one bound on the CI → dereference prior action_claim
-	// + plan rows and write fresh ones. A missing grantID (unwired
-	// tests) falls back to the empty-string match so unit tests that
-	// re-claim without grant plumbing still exercise the amend branch.
-	amend := ci.Status == contract.StatusClaimed && ci.ClaimedViaGrantID == grantID
+	// Same-agent amend path: CI already claimed by the same agent_id →
+	// dereference prior action_claim + plan rows and write fresh ones.
+	amend := ci.Status == contract.StatusClaimed && ci.AgentID == agentID
 	if ci.Status == contract.StatusClaimed && !amend {
 		body, _ := json.Marshal(map[string]any{
-			"error":                "grant_mismatch",
+			"error":                "agent_mismatch",
 			"contract_instance_id": ciID,
-			"claimed_via_grant_id": ci.ClaimedViaGrantID,
+			"claimed_agent_id":     ci.AgentID,
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
@@ -286,7 +250,7 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 
 	if !amend {
-		if _, err := s.contracts.Claim(ctx, ci.ID, grantID, now, memberships); err != nil {
+		if _, err := s.contracts.Claim(ctx, ci.ID, "", now, memberships); err != nil {
 			return mcpgo.NewToolResultError(err.Error()), nil
 		}
 	}
@@ -321,15 +285,9 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 }
 
 // handleSessionWhoami returns the caller's registered session row, or
-// a structured not-registered error. Used by tests + agents to verify
-// the SessionStart hook populated the registry. When an
-// OrchestratorGrantID is stamped on the row, the response also includes
-// effective_verbs derived from the seeded role's allowed_mcp_verbs
-// intersected with the agent's tool_ceiling.
+// a structured not-registered error.
 func (s *Server) handleSessionWhoami(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	caller, _ := UserFrom(ctx)
-	// session_id is sourced from the Mcp-Session-Id header by default
-	// (story_31975268); body arg accepted as override for stdio/tests.
 	sessionID := resolveSessionID(ctx, req.GetString("session_id", ""))
 	if sessionID == "" {
 		body, _ := json.Marshal(map[string]any{
@@ -353,92 +311,14 @@ func (s *Server) handleSessionWhoami(ctx context.Context, req mcpgo.CallToolRequ
 	if sess.WorkspaceID != "" {
 		payload["workspace_id"] = sess.WorkspaceID
 	}
-	if sess.OrchestratorGrantID != "" {
-		payload["orchestrator_grant_id"] = sess.OrchestratorGrantID
-		if verbs := s.resolveGrantEffectiveVerbs(ctx, sess.OrchestratorGrantID); len(verbs) > 0 {
-			payload["effective_verbs"] = verbs
-		}
-		// story_488b8223: write a kind:session-default-install ledger
-		// row when this whoami is the first observation of the session
-		// inside the staleness window. The audit trail records which
-		// orchestrator agent the session inherited so the eventual
-		// enforce-hook resolution path has a verifiable source.
-		if rowID := s.installSessionDefaultIfNeeded(ctx, sess, caller.UserID); rowID != "" {
-			payload["session_default_install_ledger_id"] = rowID
-		}
-	}
 	body, _ := json.Marshal(payload)
 	return mcpgo.NewToolResultText(string(body)), nil
-}
-
-// installSessionDefaultIfNeeded writes a kind:session-default-install
-// ledger row tying the session to the orchestrator agent's
-// permission_patterns when no row from the current staleness window
-// exists yet. Returns the new row's id, or "" when the install was
-// skipped (no agent resolvable, idempotent skip, or write failure).
-// story_488b8223.
-func (s *Server) installSessionDefaultIfNeeded(ctx context.Context, sess session.Session, userID string) string {
-	if s.ledger == nil || s.docs == nil || s.grants == nil {
-		return ""
-	}
-	grant, err := s.grants.GetByID(ctx, sess.OrchestratorGrantID, nil)
-	if err != nil || grant.AgentID == "" {
-		return ""
-	}
-	agentDoc, err := s.docs.GetByID(ctx, grant.AgentID, nil)
-	if err != nil {
-		return ""
-	}
-	settings, _ := document.UnmarshalAgentSettings(agentDoc.Structured)
-	now := s.nowUTC()
-	staleness := resolveSessionStaleness()
-	cutoff := now.Add(-staleness)
-	rows, _ := s.ledger.List(ctx, "", ledger.ListOptions{
-		Type: ledger.TypeDecision,
-		Tags: []string{"kind:session-default-install", "session:" + sess.SessionID},
-	}, nil)
-	for _, r := range rows {
-		if r.Status != ledger.StatusActive {
-			continue
-		}
-		if r.CreatedAt.After(cutoff) {
-			return ""
-		}
-	}
-	structured, _ := json.Marshal(map[string]any{
-		"session_id":          sess.SessionID,
-		"agent_id":            agentDoc.ID,
-		"agent_name":          agentDoc.Name,
-		"permission_patterns": settings.PermissionPatterns,
-		"installed_at":        now.UTC().Format(time.RFC3339),
-	})
-	row, err := s.ledger.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: agentDoc.WorkspaceID,
-		Type:        ledger.TypeDecision,
-		Tags:        []string{"kind:session-default-install", "session:" + sess.SessionID},
-		Content:     "session default action_claim installed from orchestrator agent",
-		Structured:  structured,
-		CreatedBy:   userID,
-	}, now)
-	if err != nil {
-		return ""
-	}
-	return row.ID
 }
 
 // handleSessionRegister lets the SessionStart hook and API-key flows
 // populate the registry. In production this is driven by the harness;
 // exposing it as a verb keeps tests honest and gives callers a way to
 // re-register after an unexpected restart.
-//
-// When the RoleGrantStore + document store are both wired AND the
-// system-scope orchestrator docs (role_orchestrator + agent_claude_orchestrator)
-// resolve, Register also mints a role-grant on behalf of the session
-// and stamps the returned grant_id on the session row. Failure in the
-// grant-issuance path is non-fatal: the session row is still created,
-// but the orchestrator_grant_id field stays empty. Rationale: the hook
-// is a hot path and we prefer a session without a grant over a failed
-// registration. Story_7d9c4b1b.
 func (s *Server) handleSessionRegister(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	caller, _ := UserFrom(ctx)
 	// story_31975268: server-mint session_id when neither the body arg
@@ -482,12 +362,6 @@ func (s *Server) handleSessionRegister(ctx context.Context, req mcpgo.CallToolRe
 			sess = updated
 		}
 	}
-	// Per epic:agent-process-v1 (Option 1, sty_a4074d21): the session
-	// holds no role at registration. Roles are claimed explicitly via
-	// agent_role_claim. The previous auto-grant path was load-bearing
-	// for the §1.2 effective_verbs surface but coupled session
-	// registration to role grant issuance — incompatible with the
-	// release/claim cycle the substrate now enforces.
 	payload := map[string]any{
 		"user_id":       sess.UserID,
 		"session_id":    sess.SessionID,
@@ -501,9 +375,6 @@ func (s *Server) handleSessionRegister(ctx context.Context, req mcpgo.CallToolRe
 	}
 	if sess.ActiveProjectID != "" {
 		payload["active_project_id"] = sess.ActiveProjectID
-	}
-	if sess.OrchestratorGrantID != "" {
-		payload["orchestrator_grant_id"] = sess.OrchestratorGrantID
 	}
 	body, _ := json.Marshal(payload)
 	return mcpgo.NewToolResultText(string(body)), nil

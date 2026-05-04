@@ -99,20 +99,6 @@ func (s *SurrealStore) ListAll(ctx context.Context) ([]Session, error) {
 	return (*results)[0].Result, nil
 }
 
-// SetOrchestratorGrant implements Store for SurrealStore.
-func (s *SurrealStore) SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error) {
-	sess, err := s.Get(ctx, userID, sessionID)
-	if err != nil {
-		return Session{}, err
-	}
-	sess.OrchestratorGrantID = grantID
-	sess.LastSeenAt = now
-	if err := s.write(ctx, sess); err != nil {
-		return Session{}, err
-	}
-	return sess, nil
-}
-
 // SetWorkspace implements Store for SurrealStore.
 func (s *SurrealStore) SetWorkspace(ctx context.Context, userID, sessionID, workspaceID string, now time.Time) (Session, error) {
 	sess, err := s.Get(ctx, userID, sessionID)

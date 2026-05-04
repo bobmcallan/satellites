@@ -177,7 +177,7 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 		WorkspaceID:        "wksp_a",
 		ProjectID:          "proj_a",
 		ContractInstanceID: ci.ID,
-		RequiredRole:       "reviewer",
+		Kind:               task.KindReview,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
 		Payload:            payload,
@@ -324,13 +324,13 @@ func TestService_Tick_SkipsNonReviewerTasks(t *testing.T) {
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictAccepted}, nil)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	// Inject a separate task without required_role=reviewer; the
-	// service must not pick it up.
+	// Inject a separate task with kind=work; the service must not
+	// pick it up.
 	other, err := f.tasks.Enqueue(ctx, task.Task{
 		WorkspaceID:        "wksp_a",
 		ProjectID:          "proj_a",
 		ContractInstanceID: f.ci.ID,
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityCritical,
 	}, now)

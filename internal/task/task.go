@@ -54,6 +54,12 @@ const (
 	OutcomeTimeout = "timeout"
 )
 
+// Kind enum values. Empty defaults to KindWork.
+const (
+	KindWork   = "work"
+	KindReview = "review"
+)
+
 var validOrigins = map[string]struct{}{
 	OriginStoryStage: {}, OriginScheduled: {}, OriginStoryProducing: {},
 	OriginEvent: {},
@@ -93,10 +99,9 @@ func PriorityRank(p string) int {
 // verbatim. Trigger + Payload are JSON-encoded raw bytes so the store
 // layer doesn't require compile-time knowledge of every origin's shape.
 //
-// ContractInstanceID + RequiredRole bind a task to a parent CI and tag
-// it with the role required to claim it. Plan CIs enqueue child tasks
-// against themselves so downstream contracts (develop, push, ...) can
-// pull the role-tagged work the plan agent decomposed.
+// ContractInstanceID binds a task to a parent CI. Plan CIs enqueue
+// child tasks against themselves so the story view groups work per CI
+// and downstream contracts can pull the work the plan agent decomposed.
 //
 // Iteration is the lap number for tasks bound to a contract that appears
 // multiple times in a story's workflow (loop case from rejection-append).
@@ -104,25 +109,30 @@ func PriorityRank(p string) int {
 // loop's tasks get iteration=2, etc. Surfaced on task_list so renderers
 // can show "develop #2" without joining through CIs. sty_78ddc67b.
 type Task struct {
-	ID                 string        `json:"id"`
-	WorkspaceID        string        `json:"workspace_id"`
-	ProjectID          string        `json:"project_id,omitempty"`
-	ContractInstanceID string        `json:"contract_instance_id,omitempty"`
-	RequiredRole       string        `json:"required_role,omitempty"`
-	Iteration          int           `json:"iteration,omitempty"`
-	Origin             string        `json:"origin"`
-	Trigger            []byte        `json:"trigger,omitempty"`
-	Payload            []byte        `json:"payload,omitempty"`
-	Status             string        `json:"status"`
-	Priority           string        `json:"priority"`
-	ClaimedBy          string        `json:"claimed_by,omitempty"`
-	ClaimedAt          *time.Time    `json:"claimed_at,omitempty"`
-	CompletedAt        *time.Time    `json:"completed_at,omitempty"`
-	Outcome            string        `json:"outcome,omitempty"`
-	LedgerRootID       string        `json:"ledger_root_id,omitempty"`
-	ExpectedDuration   time.Duration `json:"expected_duration,omitempty"`
-	ReclaimCount       int           `json:"reclaim_count,omitempty"`
-	CreatedAt          time.Time     `json:"created_at"`
+	ID                 string `json:"id"`
+	WorkspaceID        string `json:"workspace_id"`
+	ProjectID          string `json:"project_id,omitempty"`
+	ContractInstanceID string `json:"contract_instance_id,omitempty"`
+	// Kind classifies the task by its purpose so subscribers can filter
+	// the queue without inspecting payloads. Today: "review" (consumed
+	// by the embedded reviewer service) vs "" / "work" (everything
+	// else). The taxonomy is deliberately small; sty_c1200f75 expands
+	// it into a proper seed-driven lifecycle.
+	Kind             string        `json:"kind,omitempty"`
+	Iteration        int           `json:"iteration,omitempty"`
+	Origin           string        `json:"origin"`
+	Trigger          []byte        `json:"trigger,omitempty"`
+	Payload          []byte        `json:"payload,omitempty"`
+	Status           string        `json:"status"`
+	Priority         string        `json:"priority"`
+	ClaimedBy        string        `json:"claimed_by,omitempty"`
+	ClaimedAt        *time.Time    `json:"claimed_at,omitempty"`
+	CompletedAt      *time.Time    `json:"completed_at,omitempty"`
+	Outcome          string        `json:"outcome,omitempty"`
+	LedgerRootID     string        `json:"ledger_root_id,omitempty"`
+	ExpectedDuration time.Duration `json:"expected_duration,omitempty"`
+	ReclaimCount     int           `json:"reclaim_count,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
 }
 
 // NewID returns a fresh task id in the canonical `task_<8hex>` form.

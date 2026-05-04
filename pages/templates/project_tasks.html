@@ -78,7 +78,7 @@
     {{range .}}
     <tr data-task-id="{{.ID}}" data-testid="project-task-row">
       <td><code>{{.ID}}</code></td>
-      <td>{{if .RequiredRole}}<code class="walk-role-chip">{{.RequiredRole}}</code>{{end}}</td>
+      <td>{{if .Kind}}<code class="walk-kind-chip">{{.Kind}}</code>{{end}}</td>
       <td>{{.ContractCategory}}{{if gt .Iteration 1}} #{{.Iteration}}{{end}}</td>
       <td>{{.Iteration}}</td>
       <td>{{if .StoryHref}}<a href="{{.WalkHref}}">{{.StoryTitle}}</a>{{else}}—{{end}}</td>

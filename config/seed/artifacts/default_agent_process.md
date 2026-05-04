@@ -25,9 +25,8 @@ two routing rules you must apply before any project-scoped work.
   convention. Predecessor CIs must be `passed` or `skipped` before
   a successor can claim. Evidence on the ledger is the trust
   leverage (`pr_0c11b762`).
-- **session = one role.** `agent_role_claim` precedes
-  `contract_claim`; sessions don't drift between hats. Reviewer is
-  a separate runtime claiming review tasks, not a mode the
+- **session = one agent.** Sessions don't drift between hats. Reviewer
+  is a separate runtime claiming review tasks, not a mode the
   orchestrator switches into.
 - **five primitives per project** — projects, stories, contracts
   (instances + documents), documents, ledger.

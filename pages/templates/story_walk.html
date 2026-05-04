@@ -37,7 +37,6 @@
             <li class="walk-group" data-testid="walk-group-{{.ContractName}}">
               <header class="walk-group-header">
                 <span class="walk-group-name">{{.ContractName}}{{if gt .Iterations 1}} &times;{{.Iterations}}{{end}}</span>
-                {{if .RequiredRole}}<code class="walk-role-chip">role: {{.RequiredRole}}</code>{{end}}
               </header>
               <ul class="walk-card-list">
                 {{range .Cards}}
@@ -51,7 +50,6 @@
                       {{if .ClaimedAt}}<dt>claimed</dt><dd><code>{{.ClaimedAt}}</code></dd>{{end}}
                       {{if .ClosedAt}}<dt>closed</dt><dd><code>{{.ClosedAt}}</code></dd>{{end}}
                       {{if .ClaimedByUser}}<dt>by</dt><dd>{{.ClaimedByUser}}</dd>{{end}}
-                      {{if .ClaimedBySession}}<dt>session</dt><dd><code>{{.ClaimedBySession}}</code></dd>{{end}}
                       <dt>ledger rows</dt><dd>{{.LedgerRowCount}}</dd>
                       <dt>tasks</dt>
                       <dd>

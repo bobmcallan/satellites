@@ -1,5 +1,12 @@
 # Agent process: Claude session start → `implement sty_xxx` → story close
 
+> **[ARCHIVED]** This document references the role-grant ceremony
+> (`agent_role_claim`, `role_orchestrator`, `required_role`) that has
+> been deleted from the substrate. For the current process see
+> `docs/agent_process_v3.md`. This file is preserved for the contract
+> definitions in §6 and the historical narrative around the
+> "Today / Proposed" split. Do not follow the role-grant flow.
+
 The end-to-end MCP call sequence an agent runs to take a story from
 `backlog` to `done`. Each step lists the satellites MCP verbs in the
 order they're invoked. Steps 1–3 happen once per session; steps
@@ -164,15 +171,14 @@ File edits, shell commands, etc. — bounded by the agent's
 2. **The internal Gemini reviewer runtime** (sty_224621bd, run as an
    in-server goroutine when the system-tier KV row
    `reviewer.service.mode` resolves to `embedded` — the default)
-   then claims the queued `kind:review` task on its own session +
-   `role_reviewer` grant, runs the rubric against the close evidence,
-   and calls `contract_review_close` with `verdict ∈ {accepted,
-   rejected}`. The CI flips through `pending_review → passed`
-   (accepted) or `pending_review → failed` (rejected) without the
-   orchestrator session ever holding `reviewer`. `needs_more`
-   reviewer outputs are coerced to `rejected`, and each review
-   question is posted as its own `kind:review-question` ledger row
-   so the orchestrator can address it via `contract_respond`.
+   then claims the queued `kind:review` task on its own session,
+   runs the rubric against the close evidence, and calls
+   `contract_review_close` with `verdict ∈ {accepted, rejected}`. The
+   CI flips through `pending_review → passed` (accepted) or
+   `pending_review → failed` (rejected). `needs_more` reviewer
+   outputs are coerced to `rejected`, and each review question is
+   posted as its own `kind:review-question` ledger row so the
+   orchestrator can address it via `contract_respond`.
 3. **On `failed`**: the substrate appends a fresh CI of the same
    contract type with `PriorCIID` set (sty_bbe732af). Read the latest
    `kind:review-question` row, then:
@@ -295,19 +301,13 @@ state we are working toward.
 - **Session resume after cancel/fail.** Delivered: `session_register({project_id})` — see §1 step 2 (sty_cef068fe). A new MCP connection from the same `(user, project)` resolves to the most recent non-stale session row, reusing the same `session_id` (and its stamped orchestrator grant). CIs left in `claimed` state by the prior connection are reclaimable via the same-grant amend path (`claim_handlers.go:132`).
 - **Internal reviewer in place from day one.** Satellites publishes
   a task list; a satellites-internal Gemini runtime claims and
-  processes `kind:review` tasks bound to the `reviewer` role.
-  The orchestrator session never claims `reviewer`.
-- **`required_role` gate compares apples to apples.** The gate at
-  `grant_handlers.go:492` resolves the contract's `required_role`
-  (a doc name like `role_orchestrator`) to the corresponding role
-  doc's id before comparing against `grant.RoleID`. Or store the
-  role's id on the contract row at seed-load time. Either fix
-  unblocks `contract_claim` for every seeded lifecycle contract.
+  processes `kind:review` tasks. The orchestrator session never
+  reviews its own work.
 
 ### Limitations
 
-- **Sequential roles are a mild pain for the agent.** Every
-  contract whose `required_role` differs from the prior CI's
+- **Sequential agents are a mild pain for the agent.** Every
+  contract whose agent differs from the prior CI's
   forces a release + claim round-trip. Accepted as the trade for
   substrate-enforced *one role per session*. Mitigation: a run of
   contracts that share a role (e.g. `plan` + `develop` both want

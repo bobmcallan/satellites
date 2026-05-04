@@ -28,7 +28,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/reviewer"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -53,7 +52,6 @@ type Server struct {
 	contracts        contract.Store
 	sessions         session.Store
 	reviewer         reviewer.Reviewer
-	grants           rolegrant.Store
 	tasks            task.Store
 	repos            repo.Store
 	changelog        changelog.Store
@@ -99,10 +97,6 @@ type Deps struct {
 	ContractStore    contract.Store
 	SessionStore     session.Store
 	Reviewer         reviewer.Reviewer
-	// RoleGrantStore is optional; nil disables the agent_role_* MCP
-	// verbs and forces the grant middleware into pass-through mode even
-	// when Config.GrantsEnforced is true. Story_1efbfc48.
-	RoleGrantStore rolegrant.Store
 	// TaskStore is optional; nil disables the task_* MCP verbs.
 	// Story_a8fee0cc.
 	TaskStore task.Store
@@ -145,7 +139,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		contracts:        deps.ContractStore,
 		sessions:         deps.SessionStore,
 		reviewer:         deps.Reviewer,
-		grants:           deps.RoleGrantStore,
 		tasks:            deps.TaskStore,
 		repos:            deps.RepoStore,
 		changelog:        deps.ChangelogStore,
@@ -170,10 +163,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithInstructions(resolveHandshakeInstructions(s.docs)),
 	}
-	// Grant middleware is always installed; it's a pass-through unless
-	// Config.GrantsEnforced is true AND the RoleGrantStore is wired.
-	serverOpts = append(serverOpts, mcpserver.WithToolHandlerMiddleware(s.grantMiddleware()))
-
 	s.mcp = mcpserver.NewMCPServer(
 		"satellites",
 		config.Version,
@@ -693,46 +682,14 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	)
 	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
 
-	if s.grants != nil {
-		claimTool := mcpgo.NewTool("agent_role_claim",
-			mcpgo.WithDescription("Claim a role-grant binding a grantee (session/task/worker) to a role under an agent document. Validates role in agent.permitted_roles and that agent.tool_ceiling covers role.allowed_mcp_verbs. Writes a kind:role-grant,event:claimed ledger row. When provider_override=\"mechanical\" OR no agent-document resolves for the role, falls through to the deterministic mechanical runner and tags resulting ledger rows provider:mechanical (story_548ab5a5)."),
-			mcpgo.WithString("workspace_id", mcpgo.Required(), mcpgo.Description("Workspace scope for the grant.")),
-			mcpgo.WithString("role_id", mcpgo.Required(), mcpgo.Description("Role document id (type=role).")),
-			mcpgo.WithString("agent_id", mcpgo.Description("Agent document id (type=agent). Optional when provider_override=\"mechanical\" or when the server should auto-resolve.")),
-			mcpgo.WithString("grantee_kind", mcpgo.Required(), mcpgo.Description("session | task | worker")),
-			mcpgo.WithString("grantee_id", mcpgo.Required(), mcpgo.Description("Stable id for the grantee (chat UUID for session, task id for task, worker id for worker).")),
-			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope for the grant.")),
-			mcpgo.WithString("provider_override", mcpgo.Description("Skip the provider chain when set to \"mechanical\"; routes to the deterministic runner directly.")),
-		)
-		s.mcp.AddTool(claimTool, s.handleAgentRoleClaim)
-
-		releaseTool := mcpgo.NewTool("agent_role_release",
-			mcpgo.WithDescription("Release an active grant. Idempotent: a second call on a released grant returns the released row and writes a redundant-release ledger entry without mutating status."),
-			mcpgo.WithString("grant_id", mcpgo.Required(), mcpgo.Description("Grant id (grant_<8hex>).")),
-			mcpgo.WithString("reason", mcpgo.Description("Free-form release reason (e.g. task_close, session_end).")),
-		)
-		s.mcp.AddTool(releaseTool, s.handleAgentRoleRelease)
-
-		listTool := mcpgo.NewTool("agent_role_list",
-			mcpgo.WithDescription("List role-grants matching the supplied filters. Workspace-scoped."),
-			mcpgo.WithString("role_id", mcpgo.Description("Filter by role id.")),
-			mcpgo.WithString("agent_id", mcpgo.Description("Filter by agent id.")),
-			mcpgo.WithString("grantee_kind", mcpgo.Description("Filter by grantee kind.")),
-			mcpgo.WithString("grantee_id", mcpgo.Description("Filter by grantee id.")),
-			mcpgo.WithString("status", mcpgo.Description("active | released")),
-			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
-		)
-		s.mcp.AddTool(listTool, s.handleAgentRoleList)
-	}
-
 	if s.tasks != nil {
 		enqueueTool := mcpgo.NewTool("task_enqueue",
-			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. The plan agent enqueues child tasks against the plan CI with required_role tags; downstream contracts pull those tasks by role. Story_a8fee0cc."),
+			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. Plan agents bind child tasks to the plan CI; downstream contracts pull tasks by their CI. Story_a8fee0cc."),
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
 			mcpgo.WithString("contract_instance_id", mcpgo.Description("Optional CI this task belongs to. Plan agents bind their child tasks to the plan CI so the story view groups work per CI.")),
-			mcpgo.WithString("required_role", mcpgo.Description("Optional role required to claim this task (e.g. developer, reviewer, releaser). Workers filter the queue by their role on task_claim.")),
+			mcpgo.WithString("kind", mcpgo.Description("Optional task kind discriminator. Today: \"review\" (consumed by the embedded reviewer service) vs \"\"/\"work\" (everything else). sty_c1200f75 expands this into a seed-driven lifecycle.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
 			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload.")),
@@ -747,13 +704,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(getTaskTool, s.handleTaskGet)
 
 		listTaskTool := mcpgo.NewTool("task_list",
-			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id (work bound to a specific CI) and required_role (workers pulling tasks they're authorised to claim). Archived rows (sty_dc2998c5 retention sweep) are excluded by default; pass include_archived=true to opt in."),
+			mcpgo.WithDescription("List tasks matching filters. Workspace-scoped. Supports filtering on contract_instance_id and kind. Archived rows (sty_dc2998c5 retention sweep) are excluded by default; pass include_archived=true to opt in."),
 			mcpgo.WithString("origin", mcpgo.Description("Filter by origin.")),
 			mcpgo.WithString("status", mcpgo.Description("Filter by status.")),
 			mcpgo.WithString("priority", mcpgo.Description("Filter by priority.")),
 			mcpgo.WithString("claimed_by", mcpgo.Description("Filter by claimed_by worker id.")),
 			mcpgo.WithString("contract_instance_id", mcpgo.Description("Filter by owning contract instance.")),
-			mcpgo.WithString("required_role", mcpgo.Description("Filter by required_role tag.")),
+			mcpgo.WithString("kind", mcpgo.Description("Filter by task kind (review | work).")),
 			mcpgo.WithBoolean("include_archived", mcpgo.Description("Include rows with status=archived. Default false — the retention sweep moves closed rows older than the project window into archived; opt in to include them in history queries.")),
 			mcpgo.WithNumber("limit", mcpgo.Description("Max rows to return.")),
 		)

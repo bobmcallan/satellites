@@ -41,7 +41,7 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 	}
 	projectID := getString(args, "project_id")
 	contractInstanceID := getString(args, "contract_instance_id")
-	requiredRole := getString(args, "required_role")
+	kind := getString(args, "kind")
 	triggerRaw := []byte(getString(args, "trigger"))
 	payloadRaw := []byte(getString(args, "payload"))
 	expectedStr := getString(args, "expected_duration")
@@ -56,7 +56,7 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 		WorkspaceID:        workspaceID,
 		ProjectID:          projectID,
 		ContractInstanceID: contractInstanceID,
-		RequiredRole:       requiredRole,
+		Kind:               kind,
 		Origin:             origin,
 		Trigger:            triggerRaw,
 		Payload:            payloadRaw,
@@ -133,7 +133,7 @@ func (s *Server) handleTaskList(ctx context.Context, req mcpgo.CallToolRequest) 
 		Priority:           getString(args, "priority"),
 		ClaimedBy:          getString(args, "claimed_by"),
 		ContractInstanceID: getString(args, "contract_instance_id"),
-		RequiredRole:       getString(args, "required_role"),
+		Kind:               getString(args, "kind"),
 	}
 	if v, ok := args["include_archived"].(bool); ok {
 		opts.IncludeArchived = v

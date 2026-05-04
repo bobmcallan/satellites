@@ -25,7 +25,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/repo"
-	"github.com/bobmcallan/satellites/internal/rolegrant"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -49,7 +48,6 @@ type Portal struct {
 	repos             repo.Store
 	changelog         changelog.Store
 	indexer           codeindex.Indexer
-	grants            rolegrant.Store
 	workspaces        workspace.Store
 	startedAt         time.Time
 	globalAdminEmails map[string]struct{}
@@ -81,7 +79,7 @@ func (p *Portal) SetChangelogStore(s changelog.Store) {
 // no panel content rather than a 500). A nil tasks store keeps the
 // /tasks page reachable but renders empty columns (slice 11.2 same
 // degradation pattern).
-func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, users auth.UserStoreByID, projects project.Store, ledgerStore ledger.Store, stories story.Store, contracts contract.Store, tasks task.Store, documents document.Store, repos repo.Store, indexer codeindex.Indexer, grants rolegrant.Store, workspaces workspace.Store, startedAt time.Time) (*Portal, error) {
+func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, users auth.UserStoreByID, projects project.Store, ledgerStore ledger.Store, stories story.Store, contracts contract.Store, tasks task.Store, documents document.Store, repos repo.Store, indexer codeindex.Indexer, workspaces workspace.Store, startedAt time.Time) (*Portal, error) {
 	tmpl, err := pages.Templates()
 	if err != nil {
 		return nil, err
@@ -100,7 +98,6 @@ func New(cfg *config.Config, logger arbor.ILogger, sessions auth.SessionStore, u
 		documents:         documents,
 		repos:             repos,
 		indexer:           indexer,
-		grants:            grants,
 		workspaces:        workspaces,
 		startedAt:         startedAt,
 		globalAdminEmails: auth.LoadGlobalAdminEmails(),
@@ -281,10 +278,7 @@ func (p *Portal) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/stories/{id}/status", p.handleStoryStatusUpdate)
 	mux.HandleFunc("POST /api/contracts/{id}/close", p.handleContractComplete)
 	mux.HandleFunc("POST /api/contracts/{id}/review-close", p.handleContractReview)
-	mux.HandleFunc("GET /roles", p.handleRoles)
 	mux.HandleFunc("GET /agents", p.handleAgents)
-	mux.HandleFunc("GET /grants", p.handleGrants)
-	mux.HandleFunc("POST /api/grants/{id}/release", p.handleGrantRelease)
 	mux.HandleFunc("GET /workspaces/select", p.handleWorkspaceSelect)
 	mux.HandleFunc("POST /theme", p.handleThemeSet)
 	mux.HandleFunc("GET /settings", p.handleSettings)
@@ -1435,22 +1429,6 @@ func (p *Portal) handleRepoDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type rolesPageData struct {
-	Title           string
-	Version         string
-	Commit          string
-	User            auth.User
-	Composite       rolesComposite
-	Workspaces      []wsChip
-	ActiveWorkspace wsChip
-	DevMode         bool
-	GlobalAdminChip bool
-	IsGlobalAdmin   bool
-	ThemeMode       string
-	ThemePickerNext string
-	WSConfig        WSConfig
-}
-
 type agentsPageData struct {
 	Title           string
 	Version         string
@@ -1465,52 +1443,6 @@ type agentsPageData struct {
 	ThemeMode       string
 	ThemePickerNext string
 	WSConfig        WSConfig
-}
-
-type grantsPageData struct {
-	Title           string
-	Version         string
-	Commit          string
-	User            auth.User
-	Composite       grantsComposite
-	Workspaces      []wsChip
-	ActiveWorkspace wsChip
-	DevMode         bool
-	GlobalAdminChip bool
-	IsGlobalAdmin   bool
-	ThemeMode       string
-	ThemePickerNext string
-	WSConfig        WSConfig
-}
-
-// handleRoles renders the /roles page per ui-design#roles
-// (story_5cc349a9). Lists role documents with active-grant counts.
-func (p *Portal) handleRoles(w http.ResponseWriter, r *http.Request) {
-	user, ok := p.resolveUser(r)
-	if !ok {
-		p.redirectToLogin(w, r)
-		return
-	}
-	active, chips, memberships := p.activeWorkspace(r, user)
-	data := rolesPageData{
-		Title:           buildPageTitle(active, "", "roles"),
-		Version:         config.Version,
-		Commit:          config.GitCommit,
-		User:            user,
-		Composite:       buildRolesComposite(r.Context(), p.documents, p.grants, memberships),
-		Workspaces:      chips,
-		ActiveWorkspace: active,
-		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
-		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
-		IsGlobalAdmin:   p.isGlobalAdmin(user),
-		ThemeMode:       themeFromRequest(r),
-		ThemePickerNext: r.URL.RequestURI(),
-		WSConfig:        buildWSConfig(active, r),
-	}
-	if err := p.tmpl.ExecuteTemplate(w, "roles.html", data); err != nil {
-		p.logger.Error().Str("template", "roles.html").Str("error", err.Error()).Msg("template render failed")
-		http.Error(w, "render failed", http.StatusInternalServerError)
-	}
 }
 
 // handleAgents renders the /agents page.
@@ -1538,36 +1470,6 @@ func (p *Portal) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := p.tmpl.ExecuteTemplate(w, "agents.html", data); err != nil {
 		p.logger.Error().Str("template", "agents.html").Str("error", err.Error()).Msg("template render failed")
-		http.Error(w, "render failed", http.StatusInternalServerError)
-	}
-}
-
-// handleGrants renders the /grants live panel. The IsAdmin flag drives
-// the visibility of the Revoke button.
-func (p *Portal) handleGrants(w http.ResponseWriter, r *http.Request) {
-	user, ok := p.resolveUser(r)
-	if !ok {
-		p.redirectToLogin(w, r)
-		return
-	}
-	active, chips, memberships := p.activeWorkspace(r, user)
-	data := grantsPageData{
-		Title:           buildPageTitle(active, "", "grants"),
-		Version:         config.Version,
-		Commit:          config.GitCommit,
-		User:            user,
-		Composite:       buildGrantsComposite(r.Context(), p.grants, p.documents, memberships, p.isWorkspaceAdmin(r.Context(), active.ID, user.ID)),
-		Workspaces:      chips,
-		ActiveWorkspace: active,
-		DevMode:         p.cfg.Env != "prod" && p.cfg.DevMode,
-		GlobalAdminChip: p.globalAdminChip(user, active, memberships),
-		IsGlobalAdmin:   p.isGlobalAdmin(user),
-		ThemeMode:       themeFromRequest(r),
-		ThemePickerNext: r.URL.RequestURI(),
-		WSConfig:        buildWSConfig(active, r),
-	}
-	if err := p.tmpl.ExecuteTemplate(w, "grants.html", data); err != nil {
-		p.logger.Error().Str("template", "grants.html").Str("error", err.Error()).Msg("template render failed")
 		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
 }
@@ -1620,33 +1522,6 @@ func (p *Portal) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error().Str("template", "configuration.html").Str("error", err.Error()).Msg("template render failed")
 		http.Error(w, "render failed", http.StatusInternalServerError)
 	}
-}
-
-// handleGrantRelease releases a role-grant on behalf of an admin
-// caller. Non-admins receive 403; missing grants return 404.
-func (p *Portal) handleGrantRelease(w http.ResponseWriter, r *http.Request) {
-	user, ok := p.resolveUser(r)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if p.grants == nil {
-		http.NotFound(w, r)
-		return
-	}
-	active, _, memberships := p.activeWorkspace(r, user)
-	if !p.isWorkspaceAdmin(r.Context(), active.ID, user.ID) {
-		http.Error(w, "admin only", http.StatusForbidden)
-		return
-	}
-	id := r.PathValue("id")
-	if _, err := p.grants.Release(r.Context(), id, "revoked via portal", time.Now().UTC(), memberships); err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 // isWorkspaceAdmin returns true when the user holds RoleAdmin in

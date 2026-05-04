@@ -33,7 +33,6 @@ var DefaultStoryActivityKindTags = []string{
 	"kind:plan",
 	"kind:plan-approved",
 	"kind:plan-amend",
-	"kind:role-grant",
 	"kind:agent-compose",
 	"kind:action-claim",
 	"kind:close-request",

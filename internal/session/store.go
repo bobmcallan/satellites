@@ -24,13 +24,6 @@ type Store interface {
 	// verifying the session is alive.
 	Touch(ctx context.Context, userID, sessionID string, now time.Time) (Session, error)
 
-	// SetOrchestratorGrant stamps the orchestrator_grant_id on an
-	// existing session row. Called by the SessionStart hook path after
-	// minting a role-grant for the freshly-registered session
-	// (story_7d9c4b1b). Returns ErrNotFound if the session does not
-	// exist.
-	SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error)
-
 	// SetWorkspace stamps the workspace_id on an existing session row.
 	// Called by session_register when the caller supplies a workspace_id
 	// (e.g. via .mcp.json default_workspace) and by future verbs that
@@ -45,10 +38,8 @@ type Store interface {
 	// project_id. Returns ErrNotFound if the session does not exist.
 	SetActiveProject(ctx context.Context, userID, sessionID, projectID string, now time.Time) (Session, error)
 
-	// ListAll returns every registered session row. Used by the
-	// boot-time CI grant-backfill migration in story_4608a82c to build a
-	// session_id → orchestrator_grant_id lookup. Unscoped read — callers
-	// must handle cross-user rows themselves.
+	// ListAll returns every registered session row. Unscoped read —
+	// callers must handle cross-user rows themselves.
 	ListAll(ctx context.Context) ([]Session, error)
 }
 
@@ -126,21 +117,6 @@ func (m *MemoryStore) ListAll(ctx context.Context) ([]Session, error) {
 		out = append(out, sess)
 	}
 	return out, nil
-}
-
-// SetOrchestratorGrant implements Store for MemoryStore.
-func (m *MemoryStore) SetOrchestratorGrant(ctx context.Context, userID, sessionID, grantID string, now time.Time) (Session, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := memKey(userID, sessionID)
-	sess, ok := m.rows[key]
-	if !ok {
-		return Session{}, ErrNotFound
-	}
-	sess.OrchestratorGrantID = grantID
-	sess.LastSeenAt = now
-	m.rows[key] = sess
-	return sess, nil
 }
 
 // SetWorkspace implements Store for MemoryStore.

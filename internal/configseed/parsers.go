@@ -10,8 +10,8 @@ import (
 // agentToInput builds a document.UpsertInput for a kind=agent file.
 // Frontmatter carries the agent's structured payload directly:
 // permission_patterns + skill_refs flow into AgentSettings; any other
-// keys (e.g. permitted_roles, tool_ceiling for the orchestrator) are
-// merged into the raw JSON structured payload alongside.
+// keys (e.g. tool_ceiling for the orchestrator) are merged into the
+// raw JSON structured payload alongside.
 func agentToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
 	name := fm.String("name")
 	if name == "" {
@@ -19,7 +19,7 @@ func agentToInput(fm Frontmatter, body []byte, workspaceID, actor string) (docum
 	}
 	// AgentSettings is the documented narrow subset; serialize that
 	// first, then layer non-AgentSettings keys on top so callers like
-	// the orchestrator (permitted_roles, tool_ceiling) round-trip too.
+	// the orchestrator (tool_ceiling) round-trip too.
 	settings := document.AgentSettings{
 		PermissionPatterns: fm.StringSlice("permission_patterns"),
 		SkillRefs:          fm.StringSlice("skill_refs"),
@@ -47,14 +47,10 @@ func agentToInput(fm Frontmatter, body []byte, workspaceID, actor string) (docum
 
 // contractToInput builds a document.UpsertInput for a kind=contract file.
 //
-// story_b7bf3a5f: contract documents carry only contract-level concerns —
-// category, required_role, required_categories, evidence_required, and
-// validation_mode. The historic `permitted_actions` field has been removed
-// here because the action-claim path in
-// internal/mcpserver/claim_handlers.go sources permission_patterns
-// exclusively from the claiming agent document (story_b39b393f /
-// story_cc55e093). Contract-side permitted_actions was dead data; this
-// stops writing it into the Structured payload.
+// Contract documents carry only contract-level concerns: category,
+// required_categories, evidence_required, and validation_mode. The
+// action-claim path sources permission_patterns exclusively from the
+// claiming agent document (story_b39b393f / story_cc55e093).
 func contractToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
 	name := fm.String("name")
 	if name == "" {
@@ -62,7 +58,6 @@ func contractToInput(fm Frontmatter, body []byte, workspaceID, actor string) (do
 	}
 	payload := map[string]any{
 		"category":            fm.String("category"),
-		"required_role":       fm.String("required_role"),
 		"required_categories": fm.StringSlice("required_categories"),
 		"evidence_required":   fm.String("evidence_required"),
 		"validation_mode":     fm.String("validation_mode"),
@@ -280,55 +275,6 @@ func replicateVocabularyToInput(fm Frontmatter, body []byte, workspaceID, actor 
 		Structured:  structured,
 		Scope:       document.ScopeSystem,
 		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed", "replicate-vocabulary"),
-		Actor:       actor,
-	}, nil
-}
-
-// roleToInput builds a document.UpsertInput for a kind=role file. The
-// frontmatter carries the role's authorisation bundle:
-//
-//	allowed_mcp_verbs   []string  — verbs the role's grant covers
-//	required_hooks      []string  — hooks the substrate enforces while role active
-//	claim_requirements  []string  — preconditions before agent_role_claim succeeds
-//	default_context_policy string — fresh-per-claim | inherited
-//
-// Body is the role's prose description. Sty_a1a77518.
-func roleToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
-	name := fm.String("name")
-	if name == "" {
-		return document.UpsertInput{}, fmt.Errorf("role: name required")
-	}
-	payload := map[string]any{
-		"allowed_mcp_verbs":      fm.StringSlice("allowed_mcp_verbs"),
-		"required_hooks":         fm.StringSlice("required_hooks"),
-		"claim_requirements":     fm.StringSlice("claim_requirements"),
-		"default_context_policy": fm.String("default_context_policy"),
-	}
-	// Preserve empty arrays + the empty default_context_policy so the
-	// payload byte-matches the in-Go seed shape (which writes the keys
-	// even when their values are zero). Don't pruneEmpty here.
-	if payload["allowed_mcp_verbs"] == nil {
-		payload["allowed_mcp_verbs"] = []string{}
-	}
-	if payload["required_hooks"] == nil {
-		payload["required_hooks"] = []string{}
-	}
-	if payload["claim_requirements"] == nil {
-		payload["claim_requirements"] = []string{}
-	}
-	structured, err := json.Marshal(payload)
-	if err != nil {
-		return document.UpsertInput{}, fmt.Errorf("role %q: marshal: %w", name, err)
-	}
-	return document.UpsertInput{
-		WorkspaceID: workspaceID,
-		ProjectID:   nil,
-		Type:        document.TypeRole,
-		Name:        name,
-		Body:        body,
-		Structured:  structured,
-		Scope:       document.ScopeSystem,
-		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
 		Actor:       actor,
 	}, nil
 }

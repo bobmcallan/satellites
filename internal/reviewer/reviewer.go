@@ -26,9 +26,9 @@ const (
 // ValidationMode enum values read from contract document structured.
 //
 // ModeTask (epic:v4-lifecycle-refactor sty_b6b2de01) routes the close
-// through the task queue: the close handler creates a kind:review task
-// with required_role:reviewer, flips the CI to pending_review, and
-// returns. A reviewer-role runtime claims the review task and calls
+// through the task queue: the close handler creates a kind:review task,
+// flips the CI to pending_review, and returns. The embedded reviewer
+// service subscribes to kind:review tasks, claims them, and calls
 // contract_review_close to flip the CI to passed/failed. Replaces the
 // inline gemini dispatch for contracts that opt in.
 const (

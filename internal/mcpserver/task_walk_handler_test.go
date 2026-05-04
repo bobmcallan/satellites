@@ -242,11 +242,7 @@ func TestTaskWalk_HappyPath(t *testing.T) {
 	for _, ci := range resp.ContractInstances {
 		if ci.ContractName == "push" {
 			assert.Equal(t, 1, ci.Iteration, "push is its first iteration")
-			assert.Equal(t, "releaser", ci.RequiredRole)
 			assert.Equal(t, "release", ci.ContractCategory)
-		}
-		if ci.ContractName == "develop" {
-			assert.Equal(t, "developer", ci.RequiredRole)
 		}
 	}
 

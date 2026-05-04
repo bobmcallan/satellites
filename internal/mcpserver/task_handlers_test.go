@@ -351,36 +351,31 @@ func TestTaskClose_LedgerRowWritten(t *testing.T) {
 	assert.True(t, foundClosed, "expected kind:task-closed ledger row")
 }
 
-// TestTaskEnqueue_BindsCIAndRequiredRole covers
-// epic:v4-lifecycle-refactor sty_0c21a0cf — task_enqueue accepts and
-// persists contract_instance_id + required_role; task_list filters
-// on both round-trip through the handler.
-func TestTaskEnqueue_BindsCIAndRequiredRole(t *testing.T) {
+// TestTaskEnqueue_BindsCIAndKind: task_enqueue accepts and persists
+// contract_instance_id + kind; task_list filters on both.
+func TestTaskEnqueue_BindsCIAndKind(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
 
-	// Enqueue two tasks against ci_plan_x with different roles, plus a
-	// third bound to ci_plan_y for negative filter coverage.
 	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
 		"origin":               task.OriginStoryStage,
 		"workspace_id":         "wksp_a",
 		"contract_instance_id": "ci_plan_x",
-		"required_role":        "developer",
+		"kind":                 task.KindWork,
 	})
 	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
 		"origin":               task.OriginStoryStage,
 		"workspace_id":         "wksp_a",
 		"contract_instance_id": "ci_plan_x",
-		"required_role":        "reviewer",
+		"kind":                 task.KindReview,
 	})
 	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
 		"origin":               task.OriginStoryStage,
 		"workspace_id":         "wksp_a",
 		"contract_instance_id": "ci_plan_y",
-		"required_role":        "developer",
+		"kind":                 task.KindWork,
 	})
 
-	// Filter by contract_instance_id — should return the two ci_plan_x rows.
 	listRes := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
 		"contract_instance_id": "ci_plan_x",
 	})
@@ -392,27 +387,25 @@ func TestTaskEnqueue_BindsCIAndRequiredRole(t *testing.T) {
 		assert.Equal(t, "ci_plan_x", r["contract_instance_id"])
 	}
 
-	// Filter by required_role — should return the two developer rows.
 	listRes2 := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
-		"required_role": "developer",
+		"kind": task.KindWork,
 	})
 	require.False(t, listRes2.IsError)
 	var rows2 []map[string]any
 	require.NoError(t, json.Unmarshal([]byte(listRes2.Content[0].(mcpgo.TextContent).Text), &rows2))
 	assert.Len(t, rows2, 2)
 	for _, r := range rows2 {
-		assert.Equal(t, "developer", r["required_role"])
+		assert.Equal(t, task.KindWork, r["kind"])
 	}
 
-	// Combined filter — exactly one row.
 	listRes3 := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
 		"contract_instance_id": "ci_plan_x",
-		"required_role":        "reviewer",
+		"kind":                 task.KindReview,
 	})
 	require.False(t, listRes3.IsError)
 	var rows3 []map[string]any
 	require.NoError(t, json.Unmarshal([]byte(listRes3.Content[0].(mcpgo.TextContent).Text), &rows3))
 	assert.Len(t, rows3, 1)
 	assert.Equal(t, "ci_plan_x", rows3[0]["contract_instance_id"])
-	assert.Equal(t, "reviewer", rows3[0]["required_role"])
+	assert.Equal(t, task.KindReview, rows3[0]["kind"])
 }

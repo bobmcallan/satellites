@@ -36,7 +36,7 @@ type ListOptions struct {
 	Priority           string
 	ClaimedBy          string
 	ContractInstanceID string
-	RequiredRole       string
+	Kind               string
 	IncludeArchived    bool
 	Limit              int
 }
@@ -192,7 +192,7 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 		if opts.ContractInstanceID != "" && t.ContractInstanceID != opts.ContractInstanceID {
 			continue
 		}
-		if opts.RequiredRole != "" && t.RequiredRole != opts.RequiredRole {
+		if opts.Kind != "" && t.Kind != opts.Kind {
 			continue
 		}
 		out = append(out, t)

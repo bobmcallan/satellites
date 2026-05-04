@@ -70,7 +70,7 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		WorkspaceID:        proj.WorkspaceID,
 		ProjectID:          proj.ID,
 		ContractInstanceID: ci.ID,
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Iteration:          2,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityHigh,
@@ -83,7 +83,7 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		WorkspaceID:        proj.WorkspaceID,
 		ProjectID:          proj.ID,
 		ContractInstanceID: ci.ID,
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Iteration:          1,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
@@ -94,7 +94,7 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		WorkspaceID:        proj.WorkspaceID,
 		ProjectID:          proj.ID,
 		ContractInstanceID: ci.ID,
-		RequiredRole:       "developer",
+		Kind:               task.KindWork,
 		Iteration:          1,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityLow,
@@ -148,14 +148,14 @@ func TestProjectTasks_FilterByRole(t *testing.T) {
 	payload, _ := json.Marshal(map[string]string{"story_id": st.ID})
 	if _, err := taskStore.Enqueue(ctx, task.Task{
 		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID,
-		RequiredRole: "developer", Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
+		Kind: task.KindWork, Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
 		Payload: payload,
 	}, now); err != nil {
 		t.Fatalf("enq dev: %v", err)
 	}
 	if _, err := taskStore.Enqueue(ctx, task.Task{
 		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID,
-		RequiredRole: "reviewer", Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
+		Kind: task.KindReview, Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
 		Payload: payload,
 	}, now); err != nil {
 		t.Fatalf("enq rev: %v", err)

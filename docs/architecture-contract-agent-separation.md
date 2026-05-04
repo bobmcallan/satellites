@@ -137,11 +137,6 @@ remains pure audit shape regardless.
   applies regardless of the executing agent. It is not "agent
   instruction" — it's the contract's documentation of itself, which
   belongs on the contract.
-- **`required_role`** stays on the contract. It's the contract's
-  declared role binding (e.g. `role_orchestrator`); agents are checked
-  against it at allocation time. Keeping it on the contract preserves
-  the audit chain "this CI demanded role X and the bound agent has
-  role X".
 - **`evidence_required`** stays on the contract. It's the canonical
   description of what the reviewer expects at close — the audit shape
   itself.
