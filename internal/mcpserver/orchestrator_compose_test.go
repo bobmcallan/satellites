@@ -50,8 +50,13 @@ func newOrchestratorFixture(t *testing.T) *orchestratorFixture {
 
 	// Seed system agents matching the role-mapping convention
 	// (story_87b46d01): one row per role agent, multiple contracts
-	// resolve to the same row.
-	for _, name := range []string{"developer_agent", "releaser_agent", "story_close_agent"} {
+	// resolve to the same row. story_reviewer + development_reviewer
+	// are required by sty_c6d76a5b's paired-task emission so the
+	// review task's AgentID can be stamped at compose time.
+	for _, name := range []string{
+		"developer_agent", "releaser_agent", "story_close_agent",
+		"story_reviewer", "development_reviewer",
+	} {
 		settings, _ := document.MarshalAgentSettings(document.AgentSettings{
 			PermissionPatterns: []string{"Read:**"},
 		})
@@ -116,33 +121,67 @@ func TestOrchestratorComposePlan_EndToEnd(t *testing.T) {
 		}
 	}
 
-	// AC3 — tasks enqueued, payload shape correct.
-	if len(body.TaskIDs) != len(wantNames) {
-		t.Fatalf("task_ids len: got %d want %d", len(body.TaskIDs), len(wantNames))
+	// AC3 — paired implement+review tasks enqueued per CI (sty_c6d76a5b).
+	// Default 5-slot workflow yields 10 task ids in compose order:
+	// implement[0], review[0], implement[1], review[1], …
+	if len(body.TaskIDs) != 2*len(wantNames) {
+		t.Fatalf("task_ids len: got %d want %d (paired)", len(body.TaskIDs), 2*len(wantNames))
 	}
-	for i, taskID := range body.TaskIDs {
-		gotTask, gerr := f.taskStore.GetByID(context.Background(), taskID, []string{f.wsID})
+	for slot, name := range wantNames {
+		implementID := body.TaskIDs[2*slot]
+		reviewID := body.TaskIDs[2*slot+1]
+
+		implTask, gerr := f.taskStore.GetByID(context.Background(), implementID, []string{f.wsID})
 		if gerr != nil {
-			t.Fatalf("task[%d] %s: %v", i, taskID, gerr)
+			t.Fatalf("implement task[%d] %s: %v", slot, implementID, gerr)
 		}
-		if gotTask.Origin != task.OriginStoryStage {
-			t.Errorf("task[%d] origin: got %q want %q", i, gotTask.Origin, task.OriginStoryStage)
+		if implTask.Kind != task.KindWork {
+			t.Errorf("implement task[%d] kind: got %q want %q", slot, implTask.Kind, task.KindWork)
+		}
+		if implTask.Origin != task.OriginStoryStage {
+			t.Errorf("implement task[%d] origin: got %q want %q", slot, implTask.Origin, task.OriginStoryStage)
+		}
+		if implTask.Status != task.StatusEnqueued {
+			t.Errorf("implement task[%d] status: got %q want %q", slot, implTask.Status, task.StatusEnqueued)
+		}
+		if implTask.AgentID == "" {
+			t.Errorf("implement task[%d] agent_id empty; expected per-CI ephemeral", slot)
+		}
+		if implTask.ContractInstanceID == "" {
+			t.Errorf("implement task[%d] contract_instance_id empty", slot)
 		}
 		var payload orchestratorTaskPayload
-		if err := json.Unmarshal(gotTask.Payload, &payload); err != nil {
-			t.Fatalf("task[%d] payload parse: %v", i, err)
+		if err := json.Unmarshal(implTask.Payload, &payload); err != nil {
+			t.Fatalf("implement task[%d] payload parse: %v", slot, err)
 		}
-		if payload.ContractName != wantNames[i] {
-			t.Errorf("task[%d] contract_name: got %q want %q", i, payload.ContractName, wantNames[i])
+		if payload.ContractName != name {
+			t.Errorf("implement task[%d] contract_name: got %q want %q", slot, payload.ContractName, name)
 		}
-		if payload.Sequence != i {
-			t.Errorf("task[%d] sequence: got %d want %d", i, payload.Sequence, i)
+		if payload.Sequence != slot {
+			t.Errorf("implement task[%d] sequence: got %d want %d", slot, payload.Sequence, slot)
 		}
-		if payload.AgentRef == "" {
-			t.Errorf("task[%d] agent_ref empty; expected matching <contract>_agent doc", i)
+
+		reviewTask, gerr := f.taskStore.GetByID(context.Background(), reviewID, []string{f.wsID})
+		if gerr != nil {
+			t.Fatalf("review task[%d] %s: %v", slot, reviewID, gerr)
 		}
-		if payload.StoryID != f.storyID {
-			t.Errorf("task[%d] story_id: got %q want %q", i, payload.StoryID, f.storyID)
+		if reviewTask.Kind != task.KindReview {
+			t.Errorf("review task[%d] kind: got %q want %q", slot, reviewTask.Kind, task.KindReview)
+		}
+		if reviewTask.Status != task.StatusPlanned {
+			t.Errorf("review task[%d] status: got %q want %q (must wait for implement close)", slot, reviewTask.Status, task.StatusPlanned)
+		}
+		if reviewTask.ParentTaskID != implTask.ID {
+			t.Errorf("review task[%d] parent_task_id: got %q want %q", slot, reviewTask.ParentTaskID, implTask.ID)
+		}
+		if reviewTask.AgentID == "" {
+			t.Errorf("review task[%d] agent_id empty; expected reviewer agent doc id", slot)
+		}
+		if reviewTask.AgentID == implTask.AgentID {
+			t.Errorf("review task[%d] agent_id %q should not equal implement agent_id (reviewer is persistent, implement is ephemeral)", slot, reviewTask.AgentID)
+		}
+		if reviewTask.ContractInstanceID != implTask.ContractInstanceID {
+			t.Errorf("review task[%d] contract_instance_id: got %q want %q", slot, reviewTask.ContractInstanceID, implTask.ContractInstanceID)
 		}
 	}
 
@@ -221,10 +260,11 @@ func TestOrchestratorComposePlan_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	// 5 from the first call (default 5-slot list after preplan
-	// removal), none from the idempotent second call.
-	if len(tasks) != 5 {
-		t.Fatalf("tasks total after idempotent re-invoke: got %d want 5", len(tasks))
+	// 10 from the first call (default 5-slot workflow paired
+	// implement+review per sty_c6d76a5b), none from the idempotent
+	// second call.
+	if len(tasks) != 10 {
+		t.Fatalf("tasks total after idempotent re-invoke: got %d want 10", len(tasks))
 	}
 }
 

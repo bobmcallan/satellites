@@ -618,12 +618,48 @@ func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName strin
 	return ""
 }
 
-// enqueueReviewTask creates a kind:review task targeting the CI being
-// closed. The embedded reviewer service subscribes to kind:review
-// tasks and claims them. Payload references the close-request +
+// lookupReviewerAgentID returns the doc id of the system-scope reviewer
+// agent that reviews the given contract. Mirrors lookupReviewerAgentBody
+// but returns id rather than body — callers that need to stamp
+// AgentID onto a review task (sty_c6d76a5b) use this. Empty when no
+// matching agent doc exists.
+func (s *Server) lookupReviewerAgentID(ctx context.Context, contractName string, _ []string) string {
+	agentName := "story_reviewer"
+	if contractName == "develop" {
+		agentName = "development_reviewer"
+	}
+	if s.docs == nil {
+		return ""
+	}
+	rows, err := s.docs.List(ctx, document.ListOptions{
+		Type:  document.TypeAgent,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
+		return ""
+	}
+	for _, r := range rows {
+		if r.Status == document.StatusActive && r.Name == agentName {
+			return r.ID
+		}
+	}
+	return ""
+}
+
+// enqueueReviewTask makes a kind:review task ready for the embedded
+// reviewer service to claim. The embedded reviewer service subscribes
+// to kind:review tasks. Payload references the close-request +
 // evidence rows so the reviewer has the full context without
 // re-querying the ledger. Returns the task id for caller inclusion in
 // the close response.
+//
+// sty_c6d76a5b: orchestrator_compose_plan now emits a planned review
+// task per CI at compose time. This handler prefers to find that
+// pre-existing task, update its payload with the close + evidence
+// ledger ids, and publish it (planned → published). When no planned
+// review task exists (legacy in-flight CIs created before paired
+// emission landed, or test fixtures that bypass compose_plan), the
+// handler falls back to creating one inline.
 func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInstance, closeRowID, evidenceRowID, actor string, now time.Time) (string, error) {
 	payload, _ := json.Marshal(map[string]any{
 		"contract_instance_id": ci.ID,
@@ -632,6 +668,38 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 		"close_ledger_id":      closeRowID,
 		"evidence_ledger_id":   evidenceRowID,
 	})
+
+	memberships := []string{ci.WorkspaceID}
+	planned, perr := s.tasks.List(ctx, task.ListOptions{
+		ContractInstanceID: ci.ID,
+		Kind:               task.KindReview,
+		Status:             task.StatusPlanned,
+	}, memberships)
+	if perr == nil && len(planned) > 0 {
+		existing := planned[0]
+		existing.Payload = payload
+		if err := s.tasks.Save(ctx, existing, now); err != nil {
+			return "", fmt.Errorf("update planned review task payload: %w", err)
+		}
+		published, err := s.tasks.Publish(ctx, existing.ID, now, memberships)
+		if err != nil {
+			return "", fmt.Errorf("publish planned review task: %w", err)
+		}
+		if s.ledger != nil {
+			_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+				WorkspaceID: ci.WorkspaceID,
+				ProjectID:   ci.ProjectID,
+				StoryID:     ledger.StringPtr(ci.StoryID),
+				ContractID:  ledger.StringPtr(ci.ID),
+				Type:        ledger.TypeDecision,
+				Tags:        []string{"kind:review-task-published", "phase:" + ci.ContractName, "task_id:" + published.ID},
+				Content:     fmt.Sprintf("review task %s published for ci %s (%s)", published.ID, ci.ID, ci.ContractName),
+				CreatedBy:   actor,
+			}, now)
+		}
+		return published.ID, nil
+	}
+
 	seed := s.stampTaskIteration(ctx, task.Task{
 		WorkspaceID:        ci.WorkspaceID,
 		ProjectID:          ci.ProjectID,

@@ -25,6 +25,12 @@ import (
 // orchestratorTaskPayload is the JSON payload encoded onto each
 // per-slot task. Carries the contract_name, the resolved agent_ref
 // (empty when no matching agent was found), and the slot sequence.
+//
+// sty_c6d76a5b: paired implement+review tasks. Implement tasks carry
+// Kind="" (KindWork), agent_ref=per-CI ephemeral. Review tasks carry
+// Kind="review", agent_ref=persistent reviewer agent doc, and start at
+// status=planned — the close path publishes them when the matching
+// implement task closes.
 type orchestratorTaskPayload struct {
 	StoryID      string `json:"story_id"`
 	ContractName string `json:"contract_name"`
@@ -136,32 +142,6 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		return mcpgo.NewToolResultError(fmt.Sprintf("plan ledger append: %v", err)), nil
 	}
 
-	// Enqueue one task per slot — origin=story_stage, payload encodes
-	// {contract_name, agent_ref, sequence}. The task carries the slot
-	// metadata so a worker (or the dispatcher) can later claim it.
-	taskIDs := make([]string, 0, len(proposed))
-	if s.tasks != nil {
-		for i, name := range proposed {
-			payload, _ := json.Marshal(orchestratorTaskPayload{
-				StoryID:      storyID,
-				ContractName: name,
-				AgentRef:     assignments[name],
-				Sequence:     i,
-			})
-			t, terr := s.tasks.Enqueue(ctx, task.Task{
-				WorkspaceID: st.WorkspaceID,
-				ProjectID:   st.ProjectID,
-				Origin:      task.OriginStoryStage,
-				Priority:    task.PriorityMedium,
-				Payload:     payload,
-			}, now)
-			if terr != nil {
-				return mcpgo.NewToolResultError(fmt.Sprintf("task enqueue [%d %s]: %v", i, name, terr)), nil
-			}
-			taskIDs = append(taskIDs, t.ID)
-		}
-	}
-
 	// Plan-approval precondition (story_a5826137): handleWorkflowClaim
 	// requires a kind:plan-approved ledger row scoped to the story. The
 	// orchestrator-compose path is the legacy single-shot entry point —
@@ -230,6 +210,70 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 			return mcpgo.NewToolResultError(fmt.Sprintf("stamp agent on CI [%s]: %v", ci.ID, serr)), nil
 		}
 		stampedCIs = append(stampedCIs, updated)
+	}
+
+	// Paired implement+review task emission per CI (sty_c6d76a5b).
+	// Implement task: kind=work (default), status=enqueued, agent=per-CI
+	// ephemeral, claimable now. Review task: kind=review, status=planned,
+	// agent=persistent reviewer agent doc looked up by contract name,
+	// parent_task_id=implement task id. The close handler publishes the
+	// matching planned review task when the implement task closes — the
+	// reviewer service then claims it via the existing subscribe path.
+	//
+	// Review task is skipped when no reviewer agent doc resolves
+	// (test fixtures that don't seed story_reviewer / development_reviewer);
+	// the close path falls back to creating one inline. AC: 10 tasks for
+	// the default 5-slot workflow.
+	taskIDs := make([]string, 0, 2*len(stampedCIs))
+	if s.tasks != nil {
+		for i, ci := range stampedCIs {
+			implementPayload, _ := json.Marshal(orchestratorTaskPayload{
+				StoryID:      storyID,
+				ContractName: ci.ContractName,
+				AgentRef:     assignments[ci.ContractName],
+				Sequence:     i,
+			})
+			implementTask, terr := s.tasks.Enqueue(ctx, task.Task{
+				WorkspaceID:        st.WorkspaceID,
+				ProjectID:          st.ProjectID,
+				ContractInstanceID: ci.ID,
+				Kind:               task.KindWork,
+				AgentID:            assignments[ci.ContractName],
+				Origin:             task.OriginStoryStage,
+				Priority:           task.PriorityMedium,
+				Payload:            implementPayload,
+			}, now)
+			if terr != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("implement task enqueue [%d %s]: %v", i, ci.ContractName, terr)), nil
+			}
+			taskIDs = append(taskIDs, implementTask.ID)
+
+			reviewerAgentID := s.lookupReviewerAgentID(ctx, ci.ContractName, memberships)
+			if reviewerAgentID == "" {
+				continue
+			}
+			reviewPayload, _ := json.Marshal(map[string]any{
+				"contract_instance_id": ci.ID,
+				"contract_name":        ci.ContractName,
+				"story_id":             storyID,
+			})
+			reviewTask, rerr := s.tasks.Enqueue(ctx, task.Task{
+				WorkspaceID:        st.WorkspaceID,
+				ProjectID:          st.ProjectID,
+				ContractInstanceID: ci.ID,
+				Kind:               task.KindReview,
+				AgentID:            reviewerAgentID,
+				ParentTaskID:       implementTask.ID,
+				Origin:             task.OriginStoryStage,
+				Priority:           task.PriorityMedium,
+				Status:             task.StatusPlanned,
+				Payload:            reviewPayload,
+			}, now)
+			if rerr != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("review task enqueue [%d %s]: %v", i, ci.ContractName, rerr)), nil
+			}
+			taskIDs = append(taskIDs, reviewTask.ID)
+		}
 	}
 
 	body, _ := json.Marshal(map[string]any{
