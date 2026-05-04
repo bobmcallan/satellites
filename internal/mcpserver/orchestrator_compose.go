@@ -18,6 +18,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/contract"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -87,6 +88,15 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	// through orchestrator_submit_plan.
 	proposed := []string{"plan", "develop", "push", "merge_to_main", "story_close"}
 
+	now := s.nowUTC()
+
+	// Per-CI ephemeral agent minting (sty_e8d49554). Replaces the
+	// hardcoded contract→system-agent map. For each contract slot,
+	// either honour an explicit override (skips minting) or mint a
+	// project-scope ephemeral agent doc carrying permission patterns
+	// derived from the contract category. The minted agent's id is
+	// stamped onto the CI via s.contracts.SetAgent after
+	// handleWorkflowClaim creates the CIs.
 	overrides := parseAgentOverrides(req.GetString("agent_overrides", ""))
 	assignments := make(map[string]string, len(proposed))
 	uniqueByContract := make(map[string]struct{}, len(proposed))
@@ -99,10 +109,12 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 			assignments[name] = pinned
 			continue
 		}
-		assignments[name] = s.pickAgentForContract(ctx, name)
+		mintedID, mintErr := s.mintTaskAgentForContract(ctx, st, name, now)
+		if mintErr != nil {
+			return mcpgo.NewToolResultError(fmt.Sprintf("mint agent [%s]: %v", name, mintErr)), nil
+		}
+		assignments[name] = mintedID
 	}
-
-	now := s.nowUTC()
 
 	// kind:plan row — written BEFORE workflow_claim so the audit chain
 	// reads plan → workflow-claim → CIs in order.
@@ -201,6 +213,25 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		}
 	}
 
+	// Stamp the minted/overridden agent_id onto each CI (sty_e8d49554).
+	// handleWorkflowClaim creates CIs without AgentID; the orchestrator
+	// owns the assignment and writes it here. Index by contract_name —
+	// the assignments map is keyed the same way the workflow_claim
+	// produces CIs (one CI per contract_name in proposed order).
+	stampedCIs := make([]contract.ContractInstance, 0, len(claimBody.ContractInstances))
+	for _, ci := range claimBody.ContractInstances {
+		agentID, ok := assignments[ci.ContractName]
+		if !ok || agentID == "" {
+			stampedCIs = append(stampedCIs, ci)
+			continue
+		}
+		updated, serr := s.contracts.SetAgent(ctx, ci.ID, agentID, now, memberships)
+		if serr != nil {
+			return mcpgo.NewToolResultError(fmt.Sprintf("stamp agent on CI [%s]: %v", ci.ID, serr)), nil
+		}
+		stampedCIs = append(stampedCIs, updated)
+	}
+
 	body, _ := json.Marshal(map[string]any{
 		"story_id":                 storyID,
 		"plan_ledger_id":           planRow.ID,
@@ -208,7 +239,7 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 		"task_ids":                 taskIDs,
 		"proposed_contracts":       proposed,
 		"agent_assignments":        assignments,
-		"contract_instances":       claimBody.ContractInstances,
+		"contract_instances":       stampedCIs,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
@@ -221,61 +252,107 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	return mcpgo.NewToolResultText(string(body)), nil
 }
 
-// agentRoleForContract maps a contract_name to the system role agent
-// that drives it. Multiple contracts intentionally resolve to the
-// same role agent: the developer_agent drives plan/develop; the
-// releaser_agent drives push/merge_to_main; the story_close_agent
-// drives story_close. Unknown contract names map to "" (handler then
-// falls back to the legacy <contract>_agent / agent_<contract> name
-// match so project-scope custom contracts still resolve).
-var agentRoleForContract = map[string]string{
-	"plan":          "developer_agent",
-	"develop":       "developer_agent",
-	"push":          "releaser_agent",
-	"merge_to_main": "releaser_agent",
-	"story_close":   "story_close_agent",
+// defaultPermissionPatterns returns the permission_patterns slice an
+// ephemeral agent should carry for a given contract category. Derived
+// from the seeded developer_agent / releaser_agent / story_close_agent
+// patterns under config/seed/agents/ — kept in sync there. Internal
+// default; orchestrator may override per-CI via agent_overrides.
+// sty_e8d49554.
+func defaultPermissionPatterns(contractName string) []string {
+	switch contractName {
+	case "plan", "develop":
+		return []string{
+			"Read:**",
+			"Edit:**",
+			"Write:**",
+			"MultiEdit:**",
+			"Grep:**",
+			"Glob:**",
+			"Bash:git_status",
+			"Bash:git_log",
+			"Bash:git_diff",
+			"Bash:git_show",
+			"Bash:git_add",
+			"Bash:git_commit",
+			"Bash:go_build",
+			"Bash:go_test",
+			"Bash:go_vet",
+			"Bash:go_mod",
+			"Bash:go_run",
+			"Bash:gofmt",
+			"Bash:goimports",
+			"Bash:golangci_lint",
+			"Bash:ls",
+			"Bash:pwd",
+			"Bash:cat",
+			"Bash:echo",
+			"Bash:mkdir",
+			"mcp__satellites__satellites_*",
+			"mcp__jcodemunch__*",
+		}
+	case "push", "merge_to_main":
+		return []string{
+			"Read:**",
+			"Bash:git_status",
+			"Bash:git_log",
+			"Bash:git_diff",
+			"Bash:git_fetch",
+			"Bash:git_push",
+			"Bash:git_checkout",
+			"Bash:git_branch",
+			"Bash:git_merge",
+			"Bash:ls",
+			"Bash:pwd",
+			"mcp__satellites__satellites_*",
+		}
+	case "story_close":
+		return []string{
+			"Read:**",
+			"mcp__satellites__satellites_*",
+		}
+	default:
+		// Unknown contract category — return an empty slice. Caller
+		// can override via agent_overrides; otherwise the minted agent
+		// has no permissions and any tool call will fail closed.
+		return nil
+	}
 }
 
-// pickAgentForContract returns the system agent's id assigned to the
-// given contract slot. The role-based mapping (story_87b46d01) is
-// consulted first — every lifecycle contract resolves to one of three
-// role agents (developer_agent, releaser_agent, story_close_agent).
-// When the contract is not one of the lifecycle slots, the picker
-// falls back to a name-match against `<contract_name>_agent` /
-// `agent_<contract_name>` so project-scope custom contracts still
-// have a deterministic default agent.
-func (s *Server) pickAgentForContract(ctx context.Context, contractName string) string {
+// mintTaskAgentForContract creates a project-scope ephemeral agent
+// document scoped to the story+contract, carrying permission patterns
+// derived from the contract category. Returns the new document id.
+// sty_e8d49554 — replaces the hardcoded agentRoleForContract lookup
+// with on-demand minting so the dispatch surface is data-derived
+// (per pr_mandate_configuration_over_code).
+func (s *Server) mintTaskAgentForContract(ctx context.Context, st story.Story, contractName string, now time.Time) (string, error) {
 	if s.docs == nil {
-		return ""
+		return "", fmt.Errorf("document store not configured")
 	}
-	candidates, err := s.docs.List(ctx, document.ListOptions{
-		Type:  document.TypeAgent,
-		Scope: document.ScopeSystem,
-	}, nil)
+	patterns := defaultPermissionPatterns(contractName)
+	settings, err := document.MarshalAgentSettings(document.AgentSettings{
+		PermissionPatterns: patterns,
+		Ephemeral:          true,
+		StoryID:            ledger.StringPtr(st.ID),
+	})
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("marshal agent settings: %w", err)
 	}
-	if roleName, ok := agentRoleForContract[contractName]; ok {
-		for _, d := range candidates {
-			if d.Status != document.StatusActive {
-				continue
-			}
-			if d.Name == roleName {
-				return d.ID
-			}
-		}
+	projectIDPtr := st.ProjectID
+	doc, err := s.docs.Create(ctx, document.Document{
+		Type:        document.TypeAgent,
+		Scope:       document.ScopeProject,
+		ProjectID:   &projectIDPtr,
+		WorkspaceID: st.WorkspaceID,
+		Name:        fmt.Sprintf("agent_%s_%s", contractName, st.ID),
+		Body:        fmt.Sprintf("Ephemeral agent for %s on story %s. Minted at compose time; archived by sweeper after story terminal.", contractName, st.ID),
+		Status:      document.StatusActive,
+		Structured:  settings,
+		Tags:        []string{"ephemeral", "story:" + st.ID, "ci-bound"},
+	}, now)
+	if err != nil {
+		return "", fmt.Errorf("create agent doc: %w", err)
 	}
-	wantA := contractName + "_agent"
-	wantB := "agent_" + contractName
-	for _, d := range candidates {
-		if d.Status != document.StatusActive {
-			continue
-		}
-		if d.Name == wantA || d.Name == wantB {
-			return d.ID
-		}
-	}
-	return ""
+	return doc.ID, nil
 }
 
 // parseAgentOverrides decodes the optional agent_overrides argument as

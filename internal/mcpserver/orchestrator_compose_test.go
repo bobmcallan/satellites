@@ -268,3 +268,254 @@ func TestOrchestratorComposePlan_AgentOverrides(t *testing.T) {
 		t.Fatalf("override not honored: got %q want %q", body.AgentAssignments["develop"], customAgent.ID)
 	}
 }
+
+// TestComposePlan_MintsAgentPerCI (sty_e8d49554 AC2 + AC3): each
+// composed CI's AgentID points at a freshly-created project-scope
+// ephemeral agent doc carrying ephemeral=true, story_id, and tags
+// [ephemeral, story:<id>, ci-bound].
+func TestComposePlan_MintsAgentPerCI(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	res, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("compose: err=%v body=%s", err, firstText(res))
+	}
+	var body struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(body.ContractInstances) == 0 {
+		t.Fatal("no CIs returned")
+	}
+	for _, ci := range body.ContractInstances {
+		if ci.AgentID == "" {
+			t.Fatalf("CI %s (%s) AgentID empty — minting did not stamp", ci.ID, ci.ContractName)
+		}
+		doc, derr := f.server.docs.GetByID(f.ctx, ci.AgentID, nil)
+		if derr != nil {
+			t.Fatalf("CI %s referenced agent_id %s not found: %v", ci.ID, ci.AgentID, derr)
+		}
+		if doc.Type != document.TypeAgent {
+			t.Errorf("CI %s agent doc type = %q, want agent", ci.ID, doc.Type)
+		}
+		if doc.Scope != document.ScopeProject {
+			t.Errorf("CI %s agent doc scope = %q, want project", ci.ID, doc.Scope)
+		}
+		if doc.ProjectID == nil || *doc.ProjectID != f.projectID {
+			t.Errorf("CI %s agent doc ProjectID = %v, want %q", ci.ID, doc.ProjectID, f.projectID)
+		}
+		settings, perr := document.UnmarshalAgentSettings(doc.Structured)
+		if perr != nil {
+			t.Fatalf("CI %s agent settings parse: %v", ci.ID, perr)
+		}
+		if !settings.Ephemeral {
+			t.Errorf("CI %s agent doc Ephemeral = false, want true", ci.ID)
+		}
+		if settings.StoryID == nil || *settings.StoryID != f.storyID {
+			t.Errorf("CI %s agent doc StoryID = %v, want %q", ci.ID, settings.StoryID, f.storyID)
+		}
+		// AC3 — required tags present.
+		want := map[string]bool{"ephemeral": true, "story:" + f.storyID: true, "ci-bound": true}
+		for _, tag := range doc.Tags {
+			delete(want, tag)
+		}
+		if len(want) > 0 {
+			missing := make([]string, 0, len(want))
+			for k := range want {
+				missing = append(missing, k)
+			}
+			t.Errorf("CI %s agent doc missing tags %v; got %v", ci.ID, missing, doc.Tags)
+		}
+	}
+}
+
+// TestMintTaskAgent_PermissionPatternsByCategory (sty_e8d49554 AC4):
+// minted agent for plan/develop carries the developer pattern set;
+// push/merge_to_main carries releaser; story_close carries closer.
+func TestMintTaskAgent_PermissionPatternsByCategory(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	res, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("compose: err=%v body=%s", err, firstText(res))
+	}
+	var body struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	for _, ci := range body.ContractInstances {
+		doc, derr := f.server.docs.GetByID(f.ctx, ci.AgentID, nil)
+		if derr != nil {
+			t.Fatalf("CI %s agent doc lookup: %v", ci.ID, derr)
+		}
+		settings, _ := document.UnmarshalAgentSettings(doc.Structured)
+		want := defaultPermissionPatterns(ci.ContractName)
+		if len(settings.PermissionPatterns) != len(want) {
+			t.Errorf("CI %s (%s) pattern count = %d, want %d",
+				ci.ID, ci.ContractName, len(settings.PermissionPatterns), len(want))
+			continue
+		}
+		for i, p := range want {
+			if settings.PermissionPatterns[i] != p {
+				t.Errorf("CI %s (%s) pattern[%d] = %q, want %q",
+					ci.ID, ci.ContractName, i, settings.PermissionPatterns[i], p)
+			}
+		}
+	}
+}
+
+// TestComposePlan_AgentOverridesHonoured (sty_e8d49554 AC5): when an
+// override id is supplied for a contract, no minting happens for it
+// — the override id is stamped as-is and no fresh agent doc is
+// created for that contract slot.
+func TestComposePlan_AgentOverridesHonoured(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	// Pre-existing agent the caller pins for the plan slot.
+	existing, err := f.server.docs.Create(f.ctx, document.Document{
+		Type:   document.TypeAgent,
+		Scope:  document.ScopeSystem,
+		Name:   "preexisting_for_override",
+		Body:   "test",
+		Status: document.StatusActive,
+	}, f.now)
+	if err != nil {
+		t.Fatalf("seed override agent: %v", err)
+	}
+
+	preCount := len(listAgentDocs(t, f))
+	overrideJSON, _ := json.Marshal(map[string]string{"plan": existing.ID})
+
+	res, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id":        f.storyID,
+		"agent_overrides": string(overrideJSON),
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("compose: err=%v body=%s", err, firstText(res))
+	}
+	var body struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+		AgentAssignments  map[string]string           `json:"agent_assignments"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// Plan CI carries the pinned id.
+	if body.AgentAssignments["plan"] != existing.ID {
+		t.Errorf("plan assignment = %q, want override %q", body.AgentAssignments["plan"], existing.ID)
+	}
+	for _, ci := range body.ContractInstances {
+		if ci.ContractName == "plan" && ci.AgentID != existing.ID {
+			t.Errorf("plan CI AgentID = %q, want override %q", ci.AgentID, existing.ID)
+		}
+	}
+
+	// Total agent count after compose: 4 minted (develop, push,
+	// merge_to_main, story_close — plan was overridden) on top of
+	// the pre-existing count.
+	postCount := len(listAgentDocs(t, f))
+	wantDelta := 4
+	if got := postCount - preCount; got != wantDelta {
+		t.Errorf("agent doc count delta = %d, want %d (override should skip minting one slot)", got, wantDelta)
+	}
+}
+
+// TestComposePlan_NoReviewerAgentCreated (sty_e8d49554 AC6): the
+// minting flow does NOT create a reviewer agent. The reviewer lives
+// on the embedded reviewer service as a persistent agent — not
+// per-task.
+func TestComposePlan_NoReviewerAgentCreated(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	res, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("compose: err=%v body=%s", err, firstText(res))
+	}
+	for _, doc := range listAgentDocs(t, f) {
+		if strings.Contains(strings.ToLower(doc.Name), "reviewer") {
+			settings, _ := document.UnmarshalAgentSettings(doc.Structured)
+			if settings.Ephemeral {
+				t.Errorf("ephemeral reviewer agent created: %q (id=%s) — reviewer must stay persistent", doc.Name, doc.ID)
+			}
+		}
+	}
+}
+
+// TestComposePlan_IdempotentReturnsExistingAgents (sty_e8d49554 AC7):
+// re-composing a story with existing CIs returns the original CIs
+// (and their stamped AgentIDs) without minting fresh agent docs.
+func TestComposePlan_IdempotentReturnsExistingAgents(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+
+	first, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || first.IsError {
+		t.Fatalf("first compose: err=%v body=%s", err, firstText(first))
+	}
+	var firstBody struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+	}
+	if err := json.Unmarshal([]byte(firstText(first)), &firstBody); err != nil {
+		t.Fatalf("parse first: %v", err)
+	}
+	firstAgentIDs := make(map[string]string, len(firstBody.ContractInstances))
+	for _, ci := range firstBody.ContractInstances {
+		firstAgentIDs[ci.ContractName] = ci.AgentID
+	}
+	agentCountAfterFirst := len(listAgentDocs(t, f))
+
+	second, err := f.server.handleOrchestratorComposePlan(f.callerCtx(), newCallToolReq("orchestrator_compose_plan", map[string]any{
+		"story_id": f.storyID,
+	}))
+	if err != nil || second.IsError {
+		t.Fatalf("second compose: err=%v body=%s", err, firstText(second))
+	}
+	var secondBody struct {
+		ContractInstances []contract.ContractInstance `json:"contract_instances"`
+		Idempotent        bool                        `json:"idempotent"`
+	}
+	if err := json.Unmarshal([]byte(firstText(second)), &secondBody); err != nil {
+		t.Fatalf("parse second: %v", err)
+	}
+	if !secondBody.Idempotent {
+		t.Errorf("second response should be idempotent")
+	}
+	for _, ci := range secondBody.ContractInstances {
+		if got := ci.AgentID; got != firstAgentIDs[ci.ContractName] {
+			t.Errorf("CI %s (%s) AgentID changed: first=%q second=%q",
+				ci.ID, ci.ContractName, firstAgentIDs[ci.ContractName], got)
+		}
+	}
+	if got := len(listAgentDocs(t, f)); got != agentCountAfterFirst {
+		t.Errorf("agent doc count changed across idempotent re-compose: %d → %d", agentCountAfterFirst, got)
+	}
+}
+
+// listAgentDocs returns all agent docs visible to the test fixture,
+// across system + project scopes. Helper for the new minting tests.
+func listAgentDocs(t *testing.T, f *orchestratorFixture) []document.Document {
+	t.Helper()
+	all, err := f.server.docs.List(f.ctx, document.ListOptions{Type: document.TypeAgent}, nil)
+	if err != nil {
+		t.Fatalf("list agent docs: %v", err)
+	}
+	return all
+}
