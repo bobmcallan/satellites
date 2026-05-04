@@ -599,23 +599,11 @@ func (s *Server) writeVerdictRow(ctx context.Context, ci contract.ContractInstan
 // is globally readable inside the workspace, so the lookup passes nil
 // (mirroring `listSystemDocuments` in the portal config view).
 func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName string, _ []string) string {
-	agentName := "story_reviewer"
-	if contractName == "develop" {
-		agentName = "development_reviewer"
-	}
-	rows, err := s.docs.List(ctx, document.ListOptions{
-		Type:  document.TypeAgent,
-		Scope: document.ScopeSystem,
-	}, nil)
-	if err != nil {
+	doc := s.findReviewerAgent(ctx, contractName)
+	if doc == nil {
 		return ""
 	}
-	for _, r := range rows {
-		if r.Status == document.StatusActive && r.Name == agentName {
-			return r.Body
-		}
-	}
-	return ""
+	return doc.Body
 }
 
 // lookupReviewerAgentID returns the doc id of the system-scope reviewer
@@ -624,26 +612,60 @@ func (s *Server) lookupReviewerAgentBody(ctx context.Context, contractName strin
 // AgentID onto a review task (sty_c6d76a5b) use this. Empty when no
 // matching agent doc exists.
 func (s *Server) lookupReviewerAgentID(ctx context.Context, contractName string, _ []string) string {
-	agentName := "story_reviewer"
-	if contractName == "develop" {
-		agentName = "development_reviewer"
-	}
-	if s.docs == nil {
+	doc := s.findReviewerAgent(ctx, contractName)
+	if doc == nil {
 		return ""
+	}
+	return doc.ID
+}
+
+// findReviewerAgent returns the system-scope agent doc that reviews
+// the given contract. Resolution order (sty_c6d76a5b):
+//
+//  1. First active agent whose AgentSettings.Reviews contains the
+//     canonical `contract:<name>` action.
+//  2. Fallback for legacy / unmigrated seeds: name-matching the
+//     historical convention — `develop` → `development_reviewer`,
+//     everything else → `story_reviewer`.
+//
+// Returns nil when neither resolution finds a doc.
+func (s *Server) findReviewerAgent(ctx context.Context, contractName string) *document.Document {
+	if s.docs == nil {
+		return nil
 	}
 	rows, err := s.docs.List(ctx, document.ListOptions{
 		Type:  document.TypeAgent,
 		Scope: document.ScopeSystem,
 	}, nil)
 	if err != nil {
-		return ""
+		return nil
 	}
-	for _, r := range rows {
-		if r.Status == document.StatusActive && r.Name == agentName {
-			return r.ID
+	action := task.ContractAction(contractName)
+	for i := range rows {
+		r := rows[i]
+		if r.Status != document.StatusActive {
+			continue
+		}
+		settings, perr := document.UnmarshalAgentSettings(r.Structured)
+		if perr != nil {
+			continue
+		}
+		if settings.CanReview(action) {
+			return &rows[i]
 		}
 	}
-	return ""
+	// Legacy fallback — pre-capability seeds without delivers/reviews.
+	fallbackName := "story_reviewer"
+	if contractName == "develop" {
+		fallbackName = "development_reviewer"
+	}
+	for i := range rows {
+		r := rows[i]
+		if r.Status == document.StatusActive && r.Name == fallbackName {
+			return &rows[i]
+		}
+	}
+	return nil
 }
 
 // enqueueReviewTask makes a kind:review task ready for the embedded

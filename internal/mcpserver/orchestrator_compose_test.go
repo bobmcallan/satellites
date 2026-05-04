@@ -53,22 +53,50 @@ func newOrchestratorFixture(t *testing.T) *orchestratorFixture {
 	// resolve to the same row. story_reviewer + development_reviewer
 	// are required by sty_c6d76a5b's paired-task emission so the
 	// review task's AgentID can be stamped at compose time.
-	for _, name := range []string{
-		"developer_agent", "releaser_agent", "story_close_agent",
-		"story_reviewer", "development_reviewer",
+	//
+	// sty_c6d76a5b: each agent doc carries the canonical contract
+	// actions it can deliver / review. The substrate's reviewer
+	// lookup picks by capability; falls back to name-matching for
+	// legacy seeds without the lists.
+	type seedAgent struct {
+		Name     string
+		Delivers []string
+		Reviews  []string
+	}
+	for _, sa := range []seedAgent{
+		{Name: "developer_agent", Delivers: []string{
+			task.ContractAction("plan"), task.ContractAction("develop"),
+		}},
+		{Name: "releaser_agent", Delivers: []string{
+			task.ContractAction("push"), task.ContractAction("merge_to_main"),
+		}},
+		{Name: "story_close_agent", Delivers: []string{
+			task.ContractAction("story_close"),
+		}},
+		{Name: "story_reviewer", Reviews: []string{
+			task.ContractAction("plan"),
+			task.ContractAction("push"),
+			task.ContractAction("merge_to_main"),
+			task.ContractAction("story_close"),
+		}},
+		{Name: "development_reviewer", Reviews: []string{
+			task.ContractAction("develop"),
+		}},
 	} {
 		settings, _ := document.MarshalAgentSettings(document.AgentSettings{
 			PermissionPatterns: []string{"Read:**"},
+			Delivers:           sa.Delivers,
+			Reviews:            sa.Reviews,
 		})
 		if _, err := f.server.docs.Create(context.Background(), document.Document{
 			Type:       document.TypeAgent,
 			Scope:      document.ScopeSystem,
-			Name:       name,
-			Body:       "agent body for " + name,
+			Name:       sa.Name,
+			Body:       "agent body for " + sa.Name,
 			Status:     document.StatusActive,
 			Structured: settings,
 		}, f.now); err != nil {
-			t.Fatalf("seed agent %q: %v", name, err)
+			t.Fatalf("seed agent %q: %v", sa.Name, err)
 		}
 	}
 

@@ -318,15 +318,18 @@ func (s *Service) findCIArtifact(ctx context.Context, ci contract.ContractInstan
 	return rows[0].Content
 }
 
-// lookupReviewerRubric mirrors close_handlers.go's
-// lookupReviewerAgentBody — develop CIs are reviewed against the
-// development_reviewer body; everything else against story_reviewer.
-// Empty when neither doc resolves.
+// lookupReviewerRubric returns the body of the system-scope agent
+// that reviews the given contract. Resolution order (sty_c6d76a5b):
+//
+//  1. First active agent whose AgentSettings.Reviews contains
+//     `contract:<contractName>`.
+//  2. Legacy name-match fallback: `develop` → `development_reviewer`,
+//     else → `story_reviewer`.
+//
+// Empty when neither resolution finds a doc. Mirrors the lookup in
+// internal/mcpserver/close_handlers.go::findReviewerAgent — kept in
+// lockstep until that helper is promoted to a shared package.
 func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string) string {
-	agentName := "story_reviewer"
-	if contractName == "develop" {
-		agentName = "development_reviewer"
-	}
 	rows, err := s.docs.List(ctx, document.ListOptions{
 		Type:  document.TypeAgent,
 		Scope: document.ScopeSystem,
@@ -334,8 +337,25 @@ func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string)
 	if err != nil {
 		return ""
 	}
+	action := task.ContractAction(contractName)
 	for _, r := range rows {
-		if r.Status == document.StatusActive && r.Name == agentName {
+		if r.Status != document.StatusActive {
+			continue
+		}
+		settings, perr := document.UnmarshalAgentSettings(r.Structured)
+		if perr != nil {
+			continue
+		}
+		if settings.CanReview(action) {
+			return r.Body
+		}
+	}
+	fallbackName := "story_reviewer"
+	if contractName == "develop" {
+		fallbackName = "development_reviewer"
+	}
+	for _, r := range rows {
+		if r.Status == document.StatusActive && r.Name == fallbackName {
 			return r.Body
 		}
 	}

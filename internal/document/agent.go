@@ -28,6 +28,43 @@ type AgentSettings struct {
 	SkillRefs          []string `json:"skill_refs,omitempty"`
 	Ephemeral          bool     `json:"ephemeral,omitempty"`
 	StoryID            *string  `json:"story_id,omitempty"`
+
+	// Delivers (sty_c6d76a5b): the contract action strings (canonical
+	// `contract:<name>` form) this agent is authorised to deliver. The
+	// substrate's story_task_submit validator checks each Kind=KindWork
+	// task's agent_id has this contract action listed. Empty list means
+	// "no work-task delivery" — the agent is reviewer-only or a legacy
+	// agent that pre-dates capability frontmatter.
+	Delivers []string `json:"delivers,omitempty"`
+
+	// Reviews (sty_c6d76a5b): the contract action strings this agent is
+	// authorised to review. Replaces the hardcoded `if contractName ==
+	// "develop"` reviewer routing in close_handlers.go and
+	// internal/reviewer/service/runner.go. Empty list means
+	// "this agent doesn't do reviews."
+	Reviews []string `json:"reviews,omitempty"`
+}
+
+// CanDeliver reports whether the agent's Delivers list contains the
+// given contract action (canonical `contract:<name>` form).
+func (s AgentSettings) CanDeliver(action string) bool {
+	for _, a := range s.Delivers {
+		if a == action {
+			return true
+		}
+	}
+	return false
+}
+
+// CanReview reports whether the agent's Reviews list contains the
+// given contract action.
+func (s AgentSettings) CanReview(action string) bool {
+	for _, a := range s.Reviews {
+		if a == action {
+			return true
+		}
+	}
+	return false
 }
 
 // MarshalAgentSettings encodes s as the JSON payload suitable for an

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -294,6 +295,97 @@ func TestStoryTaskSubmit_UnsupportedKind(t *testing.T) {
 		t.Fatalf("expected rejection; got: %s", firstText(res))
 	}
 	if !strings.Contains(firstText(res), "unsupported kind") {
+		t.Errorf("unexpected rejection text: %s", firstText(res))
+	}
+}
+
+// TestStoryTaskSubmit_RejectsAgentCannotDeliver covers the
+// `agent_cannot_deliver` rejection class — when a work task names an
+// agent whose AgentSettings.Delivers list doesn't include the
+// task's action.
+func TestStoryTaskSubmit_RejectsAgentCannotDeliver(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	// Find releaser_agent (only delivers push/merge_to_main, NOT plan).
+	agents, err := f.server.docs.List(f.ctx, document.ListOptions{
+		Type:  document.TypeAgent,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	var releaser document.Document
+	for _, a := range agents {
+		if a.Name == "releaser_agent" {
+			releaser = a
+			break
+		}
+	}
+	if releaser.ID == "" {
+		t.Fatal("releaser_agent not seeded")
+	}
+
+	bad := []taskInput{
+		{Kind: task.KindWork, Action: task.ContractAction("plan"), AgentID: releaser.ID},
+		{Kind: task.KindReview, Action: task.ContractAction("plan")},
+	}
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindPlan,
+		"tasks":    tasksJSON(t, bad),
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected rejection")
+	}
+	if !strings.Contains(firstText(res), "agent_cannot_deliver") {
+		t.Errorf("unexpected rejection text: %s", firstText(res))
+	}
+}
+
+// TestStoryTaskSubmit_RejectsAgentCannotReview covers the
+// `agent_cannot_review` rejection class — when a review task names an
+// agent whose AgentSettings.Reviews list doesn't include the action.
+func TestStoryTaskSubmit_RejectsAgentCannotReview(t *testing.T) {
+	t.Parallel()
+	f := newOrchestratorFixture(t)
+	agents, err := f.server.docs.List(f.ctx, document.ListOptions{
+		Type:  document.TypeAgent,
+		Scope: document.ScopeSystem,
+	}, nil)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	// developer_agent has no Reviews list.
+	var dev document.Document
+	for _, a := range agents {
+		if a.Name == "developer_agent" {
+			dev = a
+			break
+		}
+	}
+	if dev.ID == "" {
+		t.Fatal("developer_agent not seeded")
+	}
+
+	bad := []taskInput{
+		{Kind: task.KindWork, Action: task.ContractAction("plan")},
+		{Kind: task.KindReview, Action: task.ContractAction("plan"), AgentID: dev.ID},
+	}
+	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+		"story_id": f.storyID,
+		"kind":     SubmitKindPlan,
+		"tasks":    tasksJSON(t, bad),
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected rejection")
+	}
+	if !strings.Contains(firstText(res), "agent_cannot_review") {
 		t.Errorf("unexpected rejection text: %s", firstText(res))
 	}
 }

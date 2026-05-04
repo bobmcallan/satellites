@@ -21,6 +21,7 @@ import (
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -117,6 +118,9 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 	}
 
 	if err := validatePlanTasks(inputs); err != nil {
+		return mcpgo.NewToolResultError(err.Error()), nil
+	}
+	if err := s.validatePlanCapabilities(ctx, inputs, memberships); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
 
@@ -331,6 +335,50 @@ func parseStringArray(raw string) []string {
 		return nil
 	}
 	return out
+}
+
+// validatePlanCapabilities checks each task's agent_id (when supplied)
+// has the right capability frontmatter for its action — Kind=KindWork
+// requires the agent's AgentSettings.Delivers list to contain the
+// action; Kind=KindReview requires AgentSettings.Reviews. Unknown or
+// archived agent docs reject as `agent_not_found:<id>`.
+//
+// When agent_id is empty the capability check is skipped — the
+// orchestrator may submit a plan without pinning agents up-front, in
+// which case agent allocation falls to a later pass (today: implicit
+// via task_claim's claim-by-id; future: a substrate-managed
+// allocation slot).
+func (s *Server) validatePlanCapabilities(ctx context.Context, inputs []taskInput, memberships []string) error {
+	if s.docs == nil {
+		return nil
+	}
+	for i, in := range inputs {
+		if in.AgentID == "" {
+			continue
+		}
+		// System-scope agent docs are globally readable (pr_0779e5af);
+		// pass nil memberships so the validator finds them regardless
+		// of the caller's workspace scope.
+		doc, err := s.docs.GetByID(ctx, in.AgentID, nil)
+		if err != nil || doc.Status != document.StatusActive || doc.Type != document.TypeAgent {
+			return fmt.Errorf("agent_not_found: tasks[%d].agent_id = %q", i, in.AgentID)
+		}
+		settings, perr := document.UnmarshalAgentSettings(doc.Structured)
+		if perr != nil {
+			return fmt.Errorf("agent_settings_invalid: tasks[%d].agent_id = %q (%v)", i, in.AgentID, perr)
+		}
+		kind := in.Kind
+		if kind == "" {
+			kind = task.KindWork
+		}
+		if kind == task.KindWork && !settings.CanDeliver(in.Action) {
+			return fmt.Errorf("agent_cannot_deliver: tasks[%d] agent_id=%q action=%q (delivers list does not include this action)", i, in.AgentID, in.Action)
+		}
+		if kind == task.KindReview && !settings.CanReview(in.Action) {
+			return fmt.Errorf("agent_cannot_review: tasks[%d] agent_id=%q action=%q (reviews list does not include this action)", i, in.AgentID, in.Action)
+		}
+	}
+	return nil
 }
 
 // validatePlanTasks runs the structural checks required by
