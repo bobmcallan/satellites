@@ -128,13 +128,14 @@ func TestE2E_StoryLifecycle_FullFlow(t *testing.T) {
 	mcpURL := baseURL + "/mcp"
 	rpcInit(t, ctx, mcpURL, "key_e2e")
 
-	// Register the test session + explicit agent_role_claim
-	// (sty_a4074d21: session_register no longer auto-mints a grant).
+	// Register the test session. epic:roleless-agents removed the
+	// agent_role_claim verb (sty_92218a87); per-CI agent assignment is
+	// now stamped at compose time and resolved by contract_claim from
+	// the CI's AgentID field (sty_63361520). No grant minting needed.
 	const sessionID = "sess_e2e_lifecycle"
 	_ = callTool(t, ctx, mcpURL, "key_e2e", "session_register", map[string]any{
 		"session_id": sessionID,
 	})
-	_, _ = claimOrchestratorRole(t, ctx, mcpURL, "key_e2e", sessionID)
 
 	// epic:roleless-agents — contracts no longer carry required_role.
 	// validation_mode=llm so contract_close routes through the reviewer

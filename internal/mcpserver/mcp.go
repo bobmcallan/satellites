@@ -690,9 +690,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
 
 	if s.tasks != nil {
-		// task_enqueue (legacy alias of task_publish): writes a row at
-		// status=published. New callers should prefer task_plan +
-		// task_publish for the explicit lifecycle. sty_c1200f75.
+		// task_enqueue (legacy entry point): writes a row at
+		// status=enqueued. Subscribers still see enqueued AND published
+		// rows (task.SubscriberVisibleStatuses), so existing callers
+		// continue to work; the boot migration MigrateEnqueuedToPublished
+		// drains pre-existing rows on each restart. New callers should
+		// prefer task_plan (drafting) + task_publish (committing) for
+		// the explicit planned→published lifecycle. sty_c1200f75.
 		taskCommonOpts := []mcpgo.ToolOption{
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
@@ -705,7 +709,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
 		}
 
-		enqueueOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Legacy alias of task_publish. Writes a task at status=published. New callers should use task_plan (drafting) or task_publish (committing) explicitly per sty_c1200f75.")}, taskCommonOpts...)
+		enqueueOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Legacy entry point — writes a task at status=enqueued. Subscribers see enqueued and published rows alike (task.SubscriberVisibleStatuses), so existing callers continue to work; the boot-time MigrateEnqueuedToPublished migration drains pre-existing enqueued rows on each restart. New callers should use task_plan (drafting) or task_publish (committing) explicitly per sty_c1200f75.")}, taskCommonOpts...)
 		s.mcp.AddTool(mcpgo.NewTool("task_enqueue", enqueueOpts...), s.handleTaskEnqueue)
 
 		// task_plan: write a task at status=planned. Agent-local —
