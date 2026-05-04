@@ -76,6 +76,47 @@ Every AC the develop CI claims to satisfy must cite specific
 file:line, command output, or commit SHA. Declarative claims trigger
 `needs_more`.
 
+### 7. Evidence model
+
+Cite **pr_evidence**. **`evidence_ledger_ids` are first-class
+evidence.** When the develop close references prior ledger rows
+(typically the plan-md and review-criteria-md from the upstream
+plan CI) by id, dereference each id via `ledger_get` and read
+the row's content. Do NOT reject for missing inline duplication
+when the cited rows contain the content the rubric requires —
+content reachability + traceability is the bar `pr_evidence`
+sets, not duplication.
+
+The exception: when a cited row's content does NOT actually
+satisfy the rubric, reject for the missing CONTENT, not for the
+citation form.
+
+### 8. Substrate evolution and rubric updates
+
+Cite **pr_mandate_configuration_over_code**. When the develop CI's
+diff touches a substrate primitive — `internal/task/`,
+`internal/contract/`, MCP verb signatures
+(`internal/mcpserver/*_handler*.go`), agent doc bodies under
+`config/seed/agents/`, or contract doc bodies under
+`config/seed/contracts/` — the upstream plan-md MUST contain a
+"rubric updates" checklist enumerating which rubric files are
+updated in the SAME commit as the substrate change. The
+develop close evidence MUST cite the plan-md ledger row id
+where that checklist appears.
+
+Without that checklist, return `needs_more` with the question:
+*"Develop CI's diff touches substrate primitive X but the plan-md
+contains no rubric-updates list. Which rubric files
+(`config/seed/agents/story_reviewer.md`,
+`config/seed/agents/development_reviewer.md`, or
+`config/seed/contracts/*.md`) change in this commit, and where
+in plan-md is each change enumerated?"*
+
+This gate keeps the rubric in lockstep with the substrate. Pure
+markdown / docs / test changes that do NOT touch substrate
+primitives are exempt — the gate is about preventing the
+reviewer from enforcing concepts the substrate has retired.
+
 ## Verdict format
 
 Same as `story_reviewer`:

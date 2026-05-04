@@ -431,3 +431,56 @@ queue. Conflating them — as `task_enqueue` did before c1200f75 —
 leaks half-formed plans into the subscriber's view and removes the
 orchestration opportunity. Splitting the states gives the
 orchestrator a place to stand: plan locally, then publish.
+
+
+## Reviewer rubric maintenance (sty_7a061d73)
+
+The reviewer rubric is the union of two markdown sources:
+
+- **`config/seed/agents/story_reviewer.md`** — the rubric the
+  embedded reviewer reads when reviewing plan / push /
+  merge_to_main / story_close closes.
+- **`config/seed/agents/development_reviewer.md`** — same role for
+  develop closes.
+
+Plus the contract instruction the reviewer reads — the body of
+`config/seed/contracts/<contract_name>.md` — is the second half of
+the prompt that shapes the verdict.
+
+**Rubric updates ride with substrate-evolution stories.** When a
+story adds, removes, or renames a substrate primitive — a verb,
+schema field, contract category, MCP signature, or anything else
+the reviewer rubric mentions by name — the rubric MUST be updated
+in the SAME commit as the substrate change. Otherwise the reviewer
+enforces the deleted concept and rejects valid plans on the very
+stories that retire it. This is not a separate "rubric refresh"
+story — there is no such backlog item; the rubric updates are part
+of the substrate-evolution story itself.
+
+**The develop close gate (rubric updates checklist).** When a
+develop CI's diff touches a substrate primitive, the upstream
+plan-md MUST contain a "rubric updates" checklist enumerating
+which rubric files (`story_reviewer.md`, `development_reviewer.md`,
+or any `config/seed/contracts/*.md`) change in the same commit as
+the substrate change, and what each change is. The
+`development_reviewer` rubric returns `needs_more` on a develop
+close whose diff touches substrate primitives but whose plan-md
+omits the checklist. Pure markdown / docs / test changes are
+exempt — the gate fires only when the substrate itself moves.
+
+**`evidence_ledger_ids` are first-class evidence.** When a close
+references prior ledger rows (e.g. plan-md filed at the upstream
+plan CI), the reviewer is instructed to dereference each id via
+`ledger_get` and read the row content. Inlining 600 lines of
+prior plan-md to satisfy a reviewer who would otherwise reject
+"see ldg_…" citations is friction without value; the substrate's
+`evidence_ledger_ids` field is purpose-built for cross-reference,
+and `pr_evidence` is satisfied by content reachability +
+traceability, not duplication.
+
+**Verifying the contract sequence.** The reviewer is instructed to
+call `task_walk({story_id})` and inspect the returned
+`contract_instances[]` rather than demand prose recital of the
+chain in plan-md. The chain is composed at orchestrator-compose
+time and is structurally available; demanding recital duplicates
+state that the substrate already exposes.

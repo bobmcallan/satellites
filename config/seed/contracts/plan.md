@@ -8,8 +8,14 @@ evidence_required: |
   - plan.md  (scope, files-to-change, approach, test-strategy, AC mapping)
   - review-criteria.md  (per-AC verify / evidence / pass-fail boundary)
 
-  Plus at least one child task enqueued against the plan CI, tagged
-  with the role required to execute it (e.g. required_role:developer).
+  Plus at least one downstream task enqueued against the plan CI.
+  Each task is bound to its parent CI's stamped agent_id
+  (sty_e8d49554) — the agent stamp IS the capability binding under
+  the post-sty_92218a87 substrate. A child task carrying an explicit
+  agent_id in its payload (matching the downstream CI's stamped
+  agent) is the clearest signal for the reviewer; the substrate also
+  resolves the agent through the parent CI when the payload is
+  silent.
 tags: [v4, lifecycle, system]
 ---
 # Plan Contract
@@ -30,12 +36,14 @@ readiness assessment.
 - `review-criteria.md` — the per-AC success conditions, written
   before the implementing agent begins so the criteria are
   independent of the implementing agent's choices.
-- **Child tasks** — the plan agent enqueues the work the downstream
-  contracts (develop, push, merge_to_main, story_close) consume.
-  Each task carries the role required to execute it
-  (`required_role:developer`, `required_role:reviewer`,
-  `required_role:releaser`, etc.) and is bound to the plan CI so the
-  story view groups work per CI.
+- **Downstream tasks** — the plan agent enqueues the work the
+  downstream contracts (develop, push, merge_to_main, story_close)
+  consume. Each task is bound to the plan CI so the story view
+  groups work per CI, and inherits its capability scope from the
+  per-CI agent stamped at compose time (sty_e8d49554). Plan agents
+  may include the downstream CI's `agent_id` in the task payload
+  for clarity, but the substrate resolves the binding through the
+  parent CI when the payload is silent.
 
 ## How
 
