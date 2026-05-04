@@ -609,6 +609,15 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			)
 			s.mcp.AddTool(resumeTool, s.handleContractResume)
 
+			storyTaskSubmitTool := mcpgo.NewTool("story_task_submit",
+				mcpgo.WithDescription("Submit an agent-authored task list to a story (sty_c6d76a5b). The orchestrator agent composes the full plan; the substrate validates structural invariants and rejects on violations — it does not silently mutate the list. Modes via `kind`: `plan` (initial plan submission with tasks[]; only mode in this slice). Validators reject `plan_first_task_must_be_plan`, `missing_review_for:<action>`, `invalid_action_format`, `review_action_mismatch`. Each task carries `kind` (work|review), `action` (e.g. `contract:plan`), and optional `description` + `agent_id`."),
+				mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to submit the plan against.")),
+				mcpgo.WithString("kind", mcpgo.Required(), mcpgo.Description("Submission mode. Today: `plan`.")),
+				mcpgo.WithString("tasks", mcpgo.Description("JSON array of task descriptors: [{kind, action, description?, agent_id?, priority?}, ...]. Required when kind=plan.")),
+				mcpgo.WithString("plan_markdown", mcpgo.Description("Optional plan markdown — written to the kind:plan ledger row. When omitted, a summary is auto-generated from the action sequence.")),
+			)
+			s.mcp.AddTool(storyTaskSubmitTool, s.handleStoryTaskSubmit)
+
 			cancelTool := mcpgo.NewTool("contract_cancel",
 				mcpgo.WithDescription("Manual escape hatch for unrecoverable CI states (sty_3a59a6d7). Accepts CIs in claimed | pending_review | failed | passed. Mid-flight states (claimed/pending_review) flip to terminal cancelled; already-terminal failed/passed are preserved for audit. In every case a successor CI is minted at the same workflow slot (status=ready, PriorCIID=prior.ID), mirroring the rejection-append loop, and a kind:cancellation ledger row is written naming the prior CI by id. When the story is in blocked state (iteration cap exhaustion) it is reset to in_progress so the successor is claimable. AC5 forbids silent retry — this verb is operator/agent-invoked only."),
 				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id to cancel.")),

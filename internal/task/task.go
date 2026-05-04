@@ -72,6 +72,28 @@ const (
 	KindReview = "review"
 )
 
+// ActionContractPrefix is the canonical prefix for an Action that
+// names a contract delivery — e.g. `contract:plan`, `contract:develop`.
+// sty_c6d76a5b: Action separates "what does this task deliver" from
+// "what type of activity is this" (Kind).
+const ActionContractPrefix = "contract:"
+
+// ContractAction returns the canonical Action string for a contract
+// name (e.g. "plan" → "contract:plan"). Helper for callers that
+// build Task rows.
+func ContractAction(contractName string) string {
+	return ActionContractPrefix + contractName
+}
+
+// ContractFromAction returns the contract name embedded in an Action,
+// or "" when the Action is empty or doesn't reference a contract.
+func ContractFromAction(action string) string {
+	if len(action) <= len(ActionContractPrefix) || action[:len(ActionContractPrefix)] != ActionContractPrefix {
+		return ""
+	}
+	return action[len(ActionContractPrefix):]
+}
+
 var validOrigins = map[string]struct{}{
 	OriginStoryStage: {}, OriginScheduled: {}, OriginStoryProducing: {},
 	OriginEvent: {},
@@ -126,6 +148,12 @@ type Task struct {
 	WorkspaceID        string `json:"workspace_id"`
 	ProjectID          string `json:"project_id,omitempty"`
 	ContractInstanceID string `json:"contract_instance_id,omitempty"`
+	// StoryID links the task to its story directly. sty_c6d76a5b's
+	// model treats `tasks where story_id=X` as the conversation log
+	// — the story IS the task chain. Set explicitly by
+	// story_task_submit; legacy tasks created via the CI path can
+	// project StoryID from their CI.
+	StoryID string `json:"story_id,omitempty"`
 	// Kind classifies the task by its purpose so subscribers can filter
 	// the queue without inspecting payloads. Today: "review" (consumed
 	// by the embedded reviewer service) vs "" / "work" (everything
@@ -154,7 +182,17 @@ type Task struct {
 	// chain reconstructs the conversation log. Empty when the task
 	// is a thread root (e.g. the initial implement task per CI).
 	// sty_c6d76a5b.
-	ParentTaskID     string        `json:"parent_task_id,omitempty"`
+	ParentTaskID string `json:"parent_task_id,omitempty"`
+	// Action names what the task delivers, in canonical form
+	// `contract:<name>` (e.g. `contract:plan`, `contract:develop`). Set
+	// by the orchestrator at story_task_submit time and validated by
+	// the substrate against the project's contract markdown set
+	// (sty_c6d76a5b). For Kind=KindReview, the action is the contract
+	// being reviewed (the review task is the sibling of a Kind=KindWork
+	// task with the same Action). Empty for legacy tasks predating
+	// sty_c6d76a5b's plan-author flow.
+	Action           string        `json:"action,omitempty"`
+	Description      string        `json:"description,omitempty"`
 	Origin           string        `json:"origin"`
 	Trigger          []byte        `json:"trigger,omitempty"`
 	Payload          []byte        `json:"payload,omitempty"`

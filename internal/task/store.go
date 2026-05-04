@@ -36,6 +36,7 @@ type ListOptions struct {
 	Priority           string
 	ClaimedBy          string
 	ContractInstanceID string
+	StoryID            string
 	Kind               string
 	IncludeArchived    bool
 	Limit              int
@@ -212,6 +213,9 @@ func (m *MemoryStore) List(ctx context.Context, opts ListOptions, memberships []
 			continue
 		}
 		if opts.ContractInstanceID != "" && t.ContractInstanceID != opts.ContractInstanceID {
+			continue
+		}
+		if opts.StoryID != "" && t.StoryID != opts.StoryID {
 			continue
 		}
 		if opts.Kind != "" && t.Kind != opts.Kind {
