@@ -647,28 +647,20 @@ func (s *Server) lookupReviewerAgentID(ctx context.Context, contractName string,
 }
 
 // enqueueReviewTask makes a kind:review task ready for the embedded
-// reviewer service to claim. The embedded reviewer service subscribes
-// to kind:review tasks. Payload references the close-request +
-// evidence rows so the reviewer has the full context without
-// re-querying the ledger. Returns the task id for caller inclusion in
-// the close response.
+// reviewer service to claim. The reviewer service subscribes to
+// kind:review tasks via the task store listener and sources the
+// close-request + evidence rows by walking the ledger filtered by
+// ContractInstanceID — no per-task Payload required (sty_c6d76a5b:
+// "tasks are thin; ledger rows are the artifacts"). Returns the
+// resulting task id for caller inclusion in the close response.
 //
 // sty_c6d76a5b: orchestrator_compose_plan now emits a planned review
 // task per CI at compose time. This handler prefers to find that
-// pre-existing task, update its payload with the close + evidence
-// ledger ids, and publish it (planned → published). When no planned
-// review task exists (legacy in-flight CIs created before paired
-// emission landed, or test fixtures that bypass compose_plan), the
-// handler falls back to creating one inline.
+// pre-existing task and publish it (planned → published). When no
+// planned review task exists (legacy in-flight CIs created before
+// paired emission landed, or test fixtures that bypass compose_plan),
+// the handler falls back to creating one inline.
 func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInstance, closeRowID, evidenceRowID, actor string, now time.Time) (string, error) {
-	payload, _ := json.Marshal(map[string]any{
-		"contract_instance_id": ci.ID,
-		"contract_name":        ci.ContractName,
-		"story_id":             ci.StoryID,
-		"close_ledger_id":      closeRowID,
-		"evidence_ledger_id":   evidenceRowID,
-	})
-
 	memberships := []string{ci.WorkspaceID}
 	planned, perr := s.tasks.List(ctx, task.ListOptions{
 		ContractInstanceID: ci.ID,
@@ -677,10 +669,6 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 	}, memberships)
 	if perr == nil && len(planned) > 0 {
 		existing := planned[0]
-		existing.Payload = payload
-		if err := s.tasks.Save(ctx, existing, now); err != nil {
-			return "", fmt.Errorf("update planned review task payload: %w", err)
-		}
 		published, err := s.tasks.Publish(ctx, existing.ID, now, memberships)
 		if err != nil {
 			return "", fmt.Errorf("publish planned review task: %w", err)
@@ -693,7 +681,7 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 				ContractID:  ledger.StringPtr(ci.ID),
 				Type:        ledger.TypeDecision,
 				Tags:        []string{"kind:review-task-published", "phase:" + ci.ContractName, "task_id:" + published.ID},
-				Content:     fmt.Sprintf("review task %s published for ci %s (%s)", published.ID, ci.ID, ci.ContractName),
+				Content:     fmt.Sprintf("review task %s published for ci %s (%s) — close=%s evidence=%s", published.ID, ci.ID, ci.ContractName, closeRowID, evidenceRowID),
 				CreatedBy:   actor,
 			}, now)
 		}
@@ -703,11 +691,13 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 	seed := s.stampTaskIteration(ctx, task.Task{
 		WorkspaceID:        ci.WorkspaceID,
 		ProjectID:          ci.ProjectID,
+		StoryID:            ci.StoryID,
 		ContractInstanceID: ci.ID,
 		Kind:               task.KindReview,
+		Action:             task.ContractAction(ci.ContractName),
+		Description:        fmt.Sprintf("review %s", ci.ContractName),
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
-		Payload:            payload,
 	}, nil)
 	t, err := s.tasks.Enqueue(ctx, seed, now)
 	if err != nil {
@@ -721,7 +711,7 @@ func (s *Server) enqueueReviewTask(ctx context.Context, ci contract.ContractInst
 			ContractID:  ledger.StringPtr(ci.ID),
 			Type:        ledger.TypeDecision,
 			Tags:        []string{"kind:review-task-enqueued", "phase:" + ci.ContractName, "task_id:" + t.ID},
-			Content:     fmt.Sprintf("review task %s enqueued for ci %s (%s)", t.ID, ci.ID, ci.ContractName),
+			Content:     fmt.Sprintf("review task %s enqueued for ci %s (%s) — close=%s evidence=%s", t.ID, ci.ID, ci.ContractName, closeRowID, evidenceRowID),
 			CreatedBy:   actor,
 		}, now)
 	}

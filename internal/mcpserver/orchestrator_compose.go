@@ -22,21 +22,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// orchestratorTaskPayload is the JSON payload encoded onto each
-// per-slot task. Carries the contract_name, the resolved agent_ref
-// (empty when no matching agent was found), and the slot sequence.
-//
-// sty_c6d76a5b: paired implement+review tasks. Implement tasks carry
-// Kind="" (KindWork), agent_ref=per-CI ephemeral. Review tasks carry
-// Kind="review", agent_ref=persistent reviewer agent doc, and start at
-// status=planned — the close path publishes them when the matching
-// implement task closes.
-type orchestratorTaskPayload struct {
-	StoryID      string `json:"story_id"`
-	ContractName string `json:"contract_name"`
-	AgentRef     string `json:"agent_ref,omitempty"`
-	Sequence     int    `json:"sequence"`
-}
 
 // handleOrchestratorComposePlan implements `orchestrator_compose_plan`.
 // Required arg: story_id. Optional: agent_overrides (JSON object mapping
@@ -227,21 +212,17 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	taskIDs := make([]string, 0, 2*len(stampedCIs))
 	if s.tasks != nil {
 		for i, ci := range stampedCIs {
-			implementPayload, _ := json.Marshal(orchestratorTaskPayload{
-				StoryID:      storyID,
-				ContractName: ci.ContractName,
-				AgentRef:     assignments[ci.ContractName],
-				Sequence:     i,
-			})
 			implementTask, terr := s.tasks.Enqueue(ctx, task.Task{
 				WorkspaceID:        st.WorkspaceID,
 				ProjectID:          st.ProjectID,
+				StoryID:            storyID,
 				ContractInstanceID: ci.ID,
 				Kind:               task.KindWork,
+				Action:             task.ContractAction(ci.ContractName),
+				Description:        fmt.Sprintf("implement %s (slot %d)", ci.ContractName, i),
 				AgentID:            assignments[ci.ContractName],
 				Origin:             task.OriginStoryStage,
 				Priority:           task.PriorityMedium,
-				Payload:            implementPayload,
 			}, now)
 			if terr != nil {
 				return mcpgo.NewToolResultError(fmt.Sprintf("implement task enqueue [%d %s]: %v", i, ci.ContractName, terr)), nil
@@ -252,22 +233,19 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 			if reviewerAgentID == "" {
 				continue
 			}
-			reviewPayload, _ := json.Marshal(map[string]any{
-				"contract_instance_id": ci.ID,
-				"contract_name":        ci.ContractName,
-				"story_id":             storyID,
-			})
 			reviewTask, rerr := s.tasks.Enqueue(ctx, task.Task{
 				WorkspaceID:        st.WorkspaceID,
 				ProjectID:          st.ProjectID,
+				StoryID:            storyID,
 				ContractInstanceID: ci.ID,
 				Kind:               task.KindReview,
+				Action:             task.ContractAction(ci.ContractName),
+				Description:        fmt.Sprintf("review %s (slot %d)", ci.ContractName, i),
 				AgentID:            reviewerAgentID,
 				ParentTaskID:       implementTask.ID,
 				Origin:             task.OriginStoryStage,
 				Priority:           task.PriorityMedium,
 				Status:             task.StatusPlanned,
-				Payload:            reviewPayload,
 			}, now)
 			if rerr != nil {
 				return mcpgo.NewToolResultError(fmt.Sprintf("review task enqueue [%d %s]: %v", i, ci.ContractName, rerr)), nil

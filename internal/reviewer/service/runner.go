@@ -214,32 +214,23 @@ func (s *Service) HandleTaskEvent(ctx context.Context, t task.Task) bool {
 	return true
 }
 
-// reviewTaskPayload is the JSON shape close_handlers.go's
-// enqueueReviewTask writes onto the task's Payload field.
-type reviewTaskPayload struct {
-	ContractInstanceID string `json:"contract_instance_id"`
-	ContractName       string `json:"contract_name"`
-	StoryID            string `json:"story_id"`
-	CloseLedgerID      string `json:"close_ledger_id"`
-	EvidenceLedgerID   string `json:"evidence_ledger_id"`
-}
-
 // processClaimed assembles the review packet, runs the reviewer, and
 // commits the verdict via s.commit. Errors are recorded as a rejected
 // verdict carrying the failure rationale so the CI doesn't sit
 // pending_review forever.
+//
+// sty_c6d76a5b: tasks no longer carry a Payload pointing at close /
+// evidence ledger rows. The reviewer sources its inputs by walking
+// the ledger filtered by ContractInstanceID and picking the most
+// recent kind:evidence (or kind:close-request as fallback).
 func (s *Service) processClaimed(ctx context.Context, t task.Task) {
-	var payload reviewTaskPayload
-	if len(t.Payload) > 0 {
-		_ = json.Unmarshal(t.Payload, &payload)
-	}
-	if payload.ContractInstanceID == "" {
-		s.commitFailure(ctx, "", "review-task payload missing contract_instance_id", t.ID, "task: payload missing ci id")
+	if t.ContractInstanceID == "" {
+		s.commitFailure(ctx, "", "review task missing contract_instance_id", t.ID, "task: missing ci linkage")
 		return
 	}
-	ci, err := s.contracts.GetByID(ctx, payload.ContractInstanceID, nil)
+	ci, err := s.contracts.GetByID(ctx, t.ContractInstanceID, nil)
 	if err != nil {
-		s.commitFailure(ctx, payload.ContractInstanceID, fmt.Sprintf("ci %s unresolvable: %v", payload.ContractInstanceID, err), t.ID, "ci lookup failed")
+		s.commitFailure(ctx, t.ContractInstanceID, fmt.Sprintf("ci %s unresolvable: %v", t.ContractInstanceID, err), t.ID, "ci lookup failed")
 		return
 	}
 	contractDoc, err := s.docs.GetByID(ctx, ci.ContractID, nil)
@@ -248,18 +239,11 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 		return
 	}
 
-	evidenceMD := ""
-	if payload.EvidenceLedgerID != "" {
-		if row, err := s.ledger.GetByID(ctx, payload.EvidenceLedgerID, nil); err == nil {
-			evidenceMD = row.Content
-		}
-	}
-	if evidenceMD == "" && payload.CloseLedgerID != "" {
+	evidenceMD := s.findCIArtifact(ctx, ci, "kind:evidence")
+	if evidenceMD == "" {
 		// Fall back to the close-request markdown when no separate
 		// evidence row was written.
-		if row, err := s.ledger.GetByID(ctx, payload.CloseLedgerID, nil); err == nil {
-			evidenceMD = row.Content
-		}
+		evidenceMD = s.findCIArtifact(ctx, ci, "kind:close-request")
 	}
 	rubric := s.lookupReviewerRubric(ctx, ci.ContractName)
 
@@ -316,6 +300,22 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 			Str("contract", ci.ContractName).
 			Msg("reviewer service committed verdict")
 	}
+}
+
+// findCIArtifact returns the most recent ledger row tagged kindTag
+// scoped to ci's project + contract_id. Empty when no row matches.
+// Used by processClaimed to source close-request + evidence markdown
+// without relying on a per-task Payload (sty_c6d76a5b).
+func (s *Service) findCIArtifact(ctx context.Context, ci contract.ContractInstance, kindTag string) string {
+	rows, err := s.ledger.List(ctx, ci.ProjectID, ledger.ListOptions{
+		ContractID: ci.ID,
+		Tags:       []string{kindTag},
+	}, nil)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	// ledger.List returns rows in newest-first order; pick the latest.
+	return rows[0].Content
 }
 
 // lookupReviewerRubric mirrors close_handlers.go's

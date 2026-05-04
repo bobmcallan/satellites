@@ -150,15 +150,21 @@ func TestOrchestratorComposePlan_EndToEnd(t *testing.T) {
 		if implTask.ContractInstanceID == "" {
 			t.Errorf("implement task[%d] contract_instance_id empty", slot)
 		}
-		var payload orchestratorTaskPayload
-		if err := json.Unmarshal(implTask.Payload, &payload); err != nil {
-			t.Fatalf("implement task[%d] payload parse: %v", slot, err)
+		// sty_c6d76a5b: tasks are thin — no Payload. Action carries
+		// the canonical `contract:<name>` reference; sequence is
+		// implicit in the response order.
+		if len(implTask.Payload) != 0 {
+			t.Errorf("implement task[%d] payload: got %d bytes, want 0 (tasks are thin)", slot, len(implTask.Payload))
 		}
-		if payload.ContractName != name {
-			t.Errorf("implement task[%d] contract_name: got %q want %q", slot, payload.ContractName, name)
+		wantAction := task.ContractAction(name)
+		if implTask.Action != wantAction {
+			t.Errorf("implement task[%d] action: got %q want %q", slot, implTask.Action, wantAction)
 		}
-		if payload.Sequence != slot {
-			t.Errorf("implement task[%d] sequence: got %d want %d", slot, payload.Sequence, slot)
+		if implTask.StoryID != f.storyID {
+			t.Errorf("implement task[%d] story_id: got %q want %q", slot, implTask.StoryID, f.storyID)
+		}
+		if implTask.Description == "" {
+			t.Errorf("implement task[%d] description empty; expected human-readable summary", slot)
 		}
 
 		reviewTask, gerr := f.taskStore.GetByID(context.Background(), reviewID, []string{f.wsID})
@@ -182,6 +188,15 @@ func TestOrchestratorComposePlan_EndToEnd(t *testing.T) {
 		}
 		if reviewTask.ContractInstanceID != implTask.ContractInstanceID {
 			t.Errorf("review task[%d] contract_instance_id: got %q want %q", slot, reviewTask.ContractInstanceID, implTask.ContractInstanceID)
+		}
+		if len(reviewTask.Payload) != 0 {
+			t.Errorf("review task[%d] payload: got %d bytes, want 0 (tasks are thin)", slot, len(reviewTask.Payload))
+		}
+		if reviewTask.Action != wantAction {
+			t.Errorf("review task[%d] action: got %q want %q", slot, reviewTask.Action, wantAction)
+		}
+		if reviewTask.StoryID != f.storyID {
+			t.Errorf("review task[%d] story_id: got %q want %q", slot, reviewTask.StoryID, f.storyID)
 		}
 	}
 
