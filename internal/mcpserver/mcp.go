@@ -693,13 +693,11 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
 
 	if s.tasks != nil {
-		// task_enqueue (legacy entry point): writes a row at
-		// status=enqueued. Subscribers still see enqueued AND published
-		// rows (task.SubscriberVisibleStatuses), so existing callers
-		// continue to work; the boot migration MigrateEnqueuedToPublished
-		// drains pre-existing rows on each restart. New callers should
-		// prefer task_plan (drafting) + task_publish (committing) for
-		// the explicit planned→published lifecycle. sty_c1200f75.
+		// task_plan is the only remaining bare task-creation MCP verb
+		// (sty_c6d76a5b checkpoint 12 retired task_enqueue + task_publish).
+		// The story-scoped plan path lives in story_task_submit
+		// (kind=plan); task_plan covers the rare draft case outside a
+		// story chain.
 		taskCommonOpts := []mcpgo.ToolOption{
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
@@ -715,22 +713,8 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
 		}
 
-		enqueueOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Legacy entry point — writes a task at status=enqueued. Subscribers see enqueued and published rows alike (task.SubscriberVisibleStatuses), so existing callers continue to work; the boot-time MigrateEnqueuedToPublished migration drains pre-existing enqueued rows on each restart. New callers should use task_plan (drafting) or task_publish (committing) explicitly per sty_c1200f75.")}, taskCommonOpts...)
-		s.mcp.AddTool(mcpgo.NewTool("task_enqueue", enqueueOpts...), s.handleTaskEnqueue)
-
-		// task_plan: write a task at status=planned. Agent-local —
-		// subscribers do not see planned rows. sty_c1200f75.
-		planOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Write a task at status=planned (the agent-local drafting state). Subscribers do not see planned rows. Use task_publish to flip the row to published once the orchestrator commits. sty_c1200f75.")}, taskCommonOpts...)
+		planOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Write a task at status=planned (the agent-local drafting state). Subscribers do not see planned rows. The story-scoped plan path lives in story_task_submit (kind=plan); task_plan covers bare drafts outside a story chain. sty_c1200f75.")}, taskCommonOpts...)
 		s.mcp.AddTool(mcpgo.NewTool("task_plan", planOpts...), s.handleTaskPlan)
-
-		// task_publish: flip planned -> published, OR create+publish.
-		publishOpts := []mcpgo.ToolOption{mcpgo.WithDescription("Flip an existing planned task to published, OR (without task_id) create a task directly at status=published. published rows are visible to subscribers. sty_c1200f75.")}
-		publishOpts = append(publishOpts, mcpgo.WithString("task_id", mcpgo.Description("Existing planned task to publish. When omitted, creates a new task at status=published using the same args as task_plan.")))
-		publishOpts = append(publishOpts, taskCommonOpts...)
-		// Strip the Required(origin) when task_id is supplied — but the
-		// schema can't express that conditionally. The handler validates
-		// at runtime: origin is required only when task_id is omitted.
-		s.mcp.AddTool(mcpgo.NewTool("task_publish", publishOpts...), s.handleTaskPublish)
 
 		getTaskTool := mcpgo.NewTool("task_get",
 			mcpgo.WithDescription("Return a task by id. Workspace-scoped."),
@@ -757,15 +741,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("workspace_id", mcpgo.Description("Narrow to one workspace. Defaults to all caller memberships.")),
 		)
 		s.mcp.AddTool(claimTaskTool, s.handleTaskClaim)
-
-		closeTaskTool := mcpgo.NewTool("task_close",
-			mcpgo.WithDescription("Close a task with outcome (success|failure|timeout). Writes a kind:task-closed ledger row. When origin=story_stage and outcome=success, enqueues the parent story's next ready CI as a follow-up task (stage hand-off). When worker_id is supplied and does not match the task's current ClaimedBy, the close is rejected with stale_claim (story_b4513c8c). sty_c6d76a5b: optional successor_tasks JSON array — each spawned task inherits parent_task_id (defaults to the closing task), workspace, project, contract_instance, and agent from the closing task when omitted."),
-			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Task id.")),
-			mcpgo.WithString("outcome", mcpgo.Required(), mcpgo.Description("success | failure | timeout")),
-			mcpgo.WithString("worker_id", mcpgo.Description("Optional worker id; when supplied, the handler rejects the close if the task has been reclaimed to a different worker since claim time.")),
-			mcpgo.WithString("successor_tasks", mcpgo.Description("Optional JSON array of successor task specs. Each entry: {origin, kind?, agent_id?, parent_task_id?, prior_task_id?, contract_instance_id?, payload?, priority?, status?}. Successors inherit parent_task_id (defaults to this task's id), workspace_id, project_id, contract_instance_id, and agent_id from the closing task unless overridden. Created atomically after the close — failures surface a successor_error with successor_task_ids of any rows that did write.")),
-		)
-		s.mcp.AddTool(closeTaskTool, s.handleTaskClose)
 
 		// sty_41488515: task_walk returns one coherent payload describing
 		// where a story sits in its contract walk — story metadata,

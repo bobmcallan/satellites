@@ -11,10 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/bobmcallan/satellites/internal/config"
-	"github.com/bobmcallan/satellites/internal/contract"
-	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
@@ -37,28 +34,23 @@ func callTaskHandler(t *testing.T, handler func(context.Context, mcpgo.CallToolR
 	return res
 }
 
-func TestTaskEnqueue_WritesRowAndLedgerRoot(t *testing.T) {
-	t.Parallel()
-	s := taskTestServer(t)
-	res := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-		"priority":     task.PriorityHigh,
-		"payload":      `{"job":"nightly"}`,
-	})
-	require.False(t, res.IsError, "enqueue: %+v", res)
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(res.Content[0].(mcpgo.TextContent).Text), &out))
-	assert.NotEmpty(t, out["task_id"])
-	assert.NotEmpty(t, out["ledger_root_id"])
-	assert.Equal(t, "enqueued", out["status"])
-	assert.Equal(t, "high", out["priority"])
-
-	// Verify task row exists via GetByID.
-	taskID := out["task_id"].(string)
-	row, err := s.tasks.GetByID(context.Background(), taskID, []string{"wksp_a"})
+// seedTask is the test scaffold for the post-checkpoint-12 world: the
+// task_enqueue MCP verb is gone, so tests that need a task fixture
+// write directly through the store. Returns the task id.
+func seedTask(t *testing.T, s *Server, seed task.Task) string {
+	t.Helper()
+	if seed.Status == "" {
+		seed.Status = task.StatusEnqueued
+	}
+	if seed.Priority == "" {
+		seed.Priority = task.PriorityMedium
+	}
+	if seed.Origin == "" {
+		seed.Origin = task.OriginScheduled
+	}
+	row, err := s.tasks.Enqueue(context.Background(), seed, time.Now().UTC())
 	require.NoError(t, err)
-	assert.Equal(t, "scheduled", row.Origin)
+	return row.ID
 }
 
 func TestTaskClaim_ReturnsNullWhenEmpty(t *testing.T) {
@@ -76,20 +68,18 @@ func TestTaskClaim_ReturnsNullWhenEmpty(t *testing.T) {
 func TestTaskClaim_PicksHighestPriorityFirst(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
-	// Enqueue medium first.
-	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-		"priority":     task.PriorityMedium,
+	// Seed medium first.
+	seedTask(t, s, task.Task{
+		WorkspaceID: "wksp_a",
+		Origin:      task.OriginScheduled,
+		Priority:    task.PriorityMedium,
 	})
 	// Then critical.
-	critRes := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-		"priority":     task.PriorityCritical,
+	critID := seedTask(t, s, task.Task{
+		WorkspaceID: "wksp_a",
+		Origin:      task.OriginScheduled,
+		Priority:    task.PriorityCritical,
 	})
-	var crit map[string]any
-	require.NoError(t, json.Unmarshal([]byte(critRes.Content[0].(mcpgo.TextContent).Text), &crit))
 
 	claimRes := callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
 		"worker_id":    "worker_a",
@@ -98,55 +88,19 @@ func TestTaskClaim_PicksHighestPriorityFirst(t *testing.T) {
 	require.False(t, claimRes.IsError)
 	var claimed map[string]any
 	require.NoError(t, json.Unmarshal([]byte(claimRes.Content[0].(mcpgo.TextContent).Text), &claimed))
-	assert.Equal(t, crit["task_id"], claimed["id"], "critical should claim first even though medium was enqueued earlier")
+	assert.Equal(t, critID, claimed["id"], "critical should claim first even though medium was enqueued earlier")
 	assert.Equal(t, "claimed", claimed["status"])
-}
-
-func TestTaskClose_SuccessfulTransition(t *testing.T) {
-	t.Parallel()
-	s := taskTestServer(t)
-	enq := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-		"priority":     task.PriorityMedium,
-	})
-	var enqOut map[string]any
-	require.NoError(t, json.Unmarshal([]byte(enq.Content[0].(mcpgo.TextContent).Text), &enqOut))
-	taskID := enqOut["task_id"].(string)
-
-	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
-		"worker_id":    "worker_a",
-		"workspace_id": "wksp_a",
-	})
-
-	closeRes := callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
-		"id":      taskID,
-		"outcome": task.OutcomeSuccess,
-	})
-	require.False(t, closeRes.IsError, "close: %+v", closeRes)
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(closeRes.Content[0].(mcpgo.TextContent).Text), &out))
-	assert.Equal(t, "closed", out["status"])
-	assert.Equal(t, "success", out["outcome"])
-	// No stage hand-off because origin=scheduled.
-	assert.Empty(t, out["handoff_task_id"])
 }
 
 func TestTaskGet_WorkspaceIsolation(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
-	enq := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
+	taskID := seedTask(t, s, task.Task{
+		WorkspaceID: "wksp_a",
+		Origin:      task.OriginScheduled,
 	})
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(enq.Content[0].(mcpgo.TextContent).Text), &out))
-	taskID := out["task_id"].(string)
 
-	// Caller's memberships default to empty-set since resolveCallerMemberships
-	// in this test wiring returns nil for the fake caller — so GetByID with
-	// memberships=nil lets it through. Instead, assert that supplying a
-	// different workspace_id on the task doesn't leak into other workspaces.
+	// Get with a different workspace_id must reject.
 	row, err := s.tasks.GetByID(context.Background(), taskID, []string{"wksp_b"})
 	assert.ErrorIs(t, err, task.ErrNotFound)
 	assert.Empty(t, row.ID)
@@ -155,12 +109,9 @@ func TestTaskGet_WorkspaceIsolation(t *testing.T) {
 func TestTaskList_FiltersByStatus(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
-	// Enqueue two tasks, claim one.
+	// Seed two tasks, claim one.
 	for range []int{0, 1} {
-		callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-			"origin":       task.OriginScheduled,
-			"workspace_id": "wksp_a",
-		})
+		seedTask(t, s, task.Task{WorkspaceID: "wksp_a", Origin: task.OriginScheduled})
 	}
 	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
 		"worker_id":    "worker_a",
@@ -180,200 +131,30 @@ func TestTaskList_FiltersByStatus(t *testing.T) {
 	}
 }
 
-func TestTaskClose_StaleClaim_Rejected(t *testing.T) {
+// TestTaskList_FiltersByCIAndKind: task_list filters on
+// contract_instance_id and kind. Replaces TestTaskEnqueue_BindsCIAndKind
+// (the enqueue verb is gone; the filter behaviour stays).
+func TestTaskList_FiltersByCIAndKind(t *testing.T) {
 	t.Parallel()
 	s := taskTestServer(t)
-	enq := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-	})
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(enq.Content[0].(mcpgo.TextContent).Text), &out))
-	taskID := out["task_id"].(string)
 
-	// worker_a claims.
-	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
-		"worker_id":    "worker_a",
-		"workspace_id": "wksp_a",
-	})
-	// Simulate watchdog reclaim: flip status back to enqueued.
-	now := time.Now().UTC()
-	_, err := s.tasks.Reclaim(context.Background(), taskID, "expired", now, nil)
-	require.NoError(t, err)
-	// worker_b picks it up.
-	_ = callTaskHandler(t, s.handleTaskClaim, "apikey", map[string]any{
-		"worker_id":    "worker_b",
-		"workspace_id": "wksp_a",
-	})
-
-	// worker_a's close now supplies worker_id and gets rejected.
-	res := callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
-		"id":        taskID,
-		"outcome":   task.OutcomeSuccess,
-		"worker_id": "worker_a",
-	})
-	assert.True(t, res.IsError, "stale close should be rejected")
-	text := res.Content[0].(mcpgo.TextContent).Text
-	assert.Contains(t, text, "stale_claim")
-}
-
-// TestTaskClose_StageHandoff_InheritsStoryPriority confirms the
-// stage-hand-off enqueue inherits the parent story's priority per
-// story_b4513c8c AC 6.
-func TestTaskClose_StageHandoff_InheritsStoryPriority(t *testing.T) {
-	t.Parallel()
-	// Wire a minimal server with docs + stories + contracts + tasks +
-	// ledger — enough for the stage-handoff code path.
-	docs := document.NewMemoryStore()
-	ldgr := ledger.NewMemoryStore()
-	stories := story.NewMemoryStore(ldgr)
-	contracts := contract.NewMemoryStore(docs, stories)
-	tasks := task.NewMemoryStore()
-	s := &Server{
-		cfg:       &config.Config{},
-		docs:      docs,
-		ledger:    ldgr,
-		stories:   stories,
-		contracts: contracts,
-		tasks:     tasks,
-	}
-
-	ctx := context.Background()
-	now := time.Now().UTC()
-
-	// Seed a contract document so CI Create passes FK validation.
-	contractDoc, err := docs.Create(ctx, document.Document{
-		WorkspaceID: "wksp_a",
-		Type:        document.TypeContract,
-		Name:        "plan-test",
-		Scope:       document.ScopeSystem,
-		Status:      document.StatusActive,
-		Structured:  []byte(`{"category":"plan","required_for_close":true,"validation_mode":"llm"}`),
-	}, now)
-	require.NoError(t, err)
-
-	// Story with explicit priority=critical.
-	storyRow, err := stories.Create(ctx, story.Story{
+	seedTask(t, s, task.Task{
 		WorkspaceID:        "wksp_a",
-		ProjectID:          "proj_a",
-		Title:              "stage-handoff-priority-test",
-		AcceptanceCriteria: "none",
-		Priority:           task.PriorityCritical,
-	}, now)
-	require.NoError(t, err)
-
-	// Two CIs: seq 0 (about to close) + seq 1 (ready, will receive hand-off).
-	ci0, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID:      storyRow.ID,
-		ContractID:   contractDoc.ID,
-		ContractName: "plan",
-		Sequence:     0,
-	}, now)
-	require.NoError(t, err)
-	ci1, err := contracts.Create(ctx, contract.ContractInstance{
-		StoryID:      storyRow.ID,
-		ContractID:   contractDoc.ID,
-		ContractName: "develop",
-		Sequence:     1,
-	}, now)
-	require.NoError(t, err)
-
-	// Enqueue a story_stage task pointing at ci0 with priority=medium
-	// (we're simulating an older stage; the hand-off should pick up the
-	// story's priority, not medium).
-	payloadBytes, err := json.Marshal(map[string]any{
-		"contract_instance_id": ci0.ID,
-		"story_id":             storyRow.ID,
+		ContractInstanceID: "ci_plan_x",
+		Kind:               task.KindWork,
+		Origin:             task.OriginStoryStage,
 	})
-	require.NoError(t, err)
-	enqTask, err := tasks.Enqueue(ctx, task.Task{
-		WorkspaceID: "wksp_a",
-		ProjectID:   "proj_a",
-		Origin:      task.OriginStoryStage,
-		Payload:     payloadBytes,
-		Priority:    task.PriorityMedium,
-	}, now)
-	require.NoError(t, err)
-	_, err = tasks.Claim(ctx, "worker_a", []string{"wksp_a"}, now.Add(time.Second))
-	require.NoError(t, err)
-
-	// Close with outcome=success — expect hand-off enqueue for ci1 with
-	// priority=critical (inherited from the story).
-	closeRes := callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
-		"id":      enqTask.ID,
-		"outcome": task.OutcomeSuccess,
+	seedTask(t, s, task.Task{
+		WorkspaceID:        "wksp_a",
+		ContractInstanceID: "ci_plan_x",
+		Kind:               task.KindReview,
+		Origin:             task.OriginStoryStage,
 	})
-	require.False(t, closeRes.IsError, "close failed: %s", closeRes.Content[0].(mcpgo.TextContent).Text)
-
-	var closeOut map[string]any
-	require.NoError(t, json.Unmarshal([]byte(closeRes.Content[0].(mcpgo.TextContent).Text), &closeOut))
-	handoffID, _ := closeOut["handoff_task_id"].(string)
-	require.NotEmpty(t, handoffID, "expected stage hand-off to enqueue a task")
-
-	handoff, err := tasks.GetByID(ctx, handoffID, []string{"wksp_a"})
-	require.NoError(t, err)
-	assert.Equal(t, task.PriorityCritical, handoff.Priority, "hand-off should inherit story priority (critical), not default medium")
-	// The hand-off's payload must reference a CI on the same story —
-	// exact identity is not asserted (the handler picks the first
-	// status=ready CI, which may be ci0 or ci1 depending on scan order).
-	_ = ci1
-}
-
-// TestTaskClose_LedgerRowWritten verifies the handler writes the
-// kind:task-closed ledger row per AC 5.
-func TestTaskClose_LedgerRowWritten(t *testing.T) {
-	t.Parallel()
-	s := taskTestServer(t)
-	enq := callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":       task.OriginScheduled,
-		"workspace_id": "wksp_a",
-	})
-	var out map[string]any
-	require.NoError(t, json.Unmarshal([]byte(enq.Content[0].(mcpgo.TextContent).Text), &out))
-	taskID := out["task_id"].(string)
-
-	_ = callTaskHandler(t, s.handleTaskClose, "apikey", map[string]any{
-		"id":      taskID,
-		"outcome": task.OutcomeSuccess,
-	})
-
-	rows, err := s.ledger.List(context.Background(), "", ledger.ListOptions{}, nil)
-	require.NoError(t, err)
-	foundClosed := false
-	for _, r := range rows {
-		for _, tag := range r.Tags {
-			if tag == "kind:task-closed" {
-				foundClosed = true
-			}
-		}
-	}
-	_ = time.Now()
-	assert.True(t, foundClosed, "expected kind:task-closed ledger row")
-}
-
-// TestTaskEnqueue_BindsCIAndKind: task_enqueue accepts and persists
-// contract_instance_id + kind; task_list filters on both.
-func TestTaskEnqueue_BindsCIAndKind(t *testing.T) {
-	t.Parallel()
-	s := taskTestServer(t)
-
-	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":               task.OriginStoryStage,
-		"workspace_id":         "wksp_a",
-		"contract_instance_id": "ci_plan_x",
-		"kind":                 task.KindWork,
-	})
-	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":               task.OriginStoryStage,
-		"workspace_id":         "wksp_a",
-		"contract_instance_id": "ci_plan_x",
-		"kind":                 task.KindReview,
-	})
-	callTaskHandler(t, s.handleTaskEnqueue, "apikey", map[string]any{
-		"origin":               task.OriginStoryStage,
-		"workspace_id":         "wksp_a",
-		"contract_instance_id": "ci_plan_y",
-		"kind":                 task.KindWork,
+	seedTask(t, s, task.Task{
+		WorkspaceID:        "wksp_a",
+		ContractInstanceID: "ci_plan_y",
+		Kind:               task.KindWork,
+		Origin:             task.OriginStoryStage,
 	})
 
 	listRes := callTaskHandler(t, s.handleTaskList, "apikey", map[string]any{
