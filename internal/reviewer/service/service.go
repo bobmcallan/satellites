@@ -1,7 +1,9 @@
 // Package service is the standalone reviewer worker that consumes
 // kind:review tasks from the task queue, runs the configured reviewer
-// against the rubric + evidence, and calls contract_review_close to
-// flip the CI to passed/failed.
+// against the rubric + evidence, and writes the verdict directly:
+// a kind:verdict ledger row tagged to the review task, a task close
+// with success/failure outcome, and on rejection a successor work +
+// paired planned-review task pair (sty_c6d76a5b slice A).
 //
 // Today the worker runs as an in-process goroutine wired by
 // cmd/satellites/main.go. The mode is sourced from the system-tier
@@ -29,8 +31,8 @@ const (
 )
 
 // ServiceSessionID is the stable session-registry id used at boot for
-// the embedded reviewer service. The service's task_claim and
-// contract_review_close calls run under this session id.
+// the embedded reviewer service. The service's task_claim and ledger
+// writes run under this session id.
 const ServiceSessionID = "session_reviewer_embedded"
 
 // ServiceUserID is the system identity that owns the reviewer

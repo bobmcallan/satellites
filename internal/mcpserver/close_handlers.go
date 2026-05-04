@@ -664,53 +664,14 @@ type ReviewCommitResult struct {
 	BlockedReason      string
 }
 
-// handleContractReviewClose is the MCP-facing wrapper around
-// CommitReviewVerdict. It parses the request, resolves the caller's
-// memberships, calls the commit, and renders the structured result as
-// a JSON tool response. epic:v4-lifecycle-refactor sty_b6b2de01.
-func (s *Server) handleContractReviewClose(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	caller, _ := UserFrom(ctx)
-	ciID, err := req.RequireString("contract_instance_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	verdictArg, err := req.RequireString("verdict")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	rationale := req.GetString("rationale", "")
-	reviewTaskID := req.GetString("review_task_id", "")
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	res, cerr := s.CommitReviewVerdict(ctx, ciID, verdictArg, rationale, reviewTaskID, caller.UserID, s.nowUTC(), memberships)
-	if cerr != nil {
-		return mcpgo.NewToolResultError(cerr.Error()), nil
-	}
-	body, _ := json.Marshal(map[string]any{
-		"contract_instance_id": res.ContractInstanceID,
-		"story_id":             res.StoryID,
-		"status":               res.Status,
-		"verdict":              res.Verdict,
-		"verdict_ledger_id":    res.VerdictLedgerID,
-		"review_task_id":       res.ReviewTaskID,
-		"story_status":         res.StoryStatus,
-		"appended_ci_id":       res.AppendedCIID,
-		"blocked_reason":       res.BlockedReason,
-	})
-	s.logger.Info().
-		Str("method", "tools/call").
-		Str("tool", "contract_review_close").
-		Str("ci_id", res.ContractInstanceID).
-		Str("verdict", res.Verdict).
-		Str("status", res.Status).
-		Str("appended_ci_id", res.AppendedCIID).
-		Msg("mcp tool call")
-	return mcpgo.NewToolResultText(string(body)), nil
-}
-
 // CommitReviewVerdict applies a reviewer's verdict to a pending_review
-// CI. Shared between the MCP handler (handleContractReviewClose) and
-// the embedded reviewer service goroutine (internal/reviewer/service)
-// so both paths produce identical ledger + state transitions.
+// CI. sty_c6d76a5b slice A: the contract_review_close MCP verb is
+// gone, and the embedded reviewer service no longer routes through
+// here either — it writes its own kind:verdict ledger row + closes
+// the review task + spawns a successor task pair on rejection. This
+// function survives only as the contract_cancel iteration-cap
+// regression scaffold (see contract_cancel_recovery_test.go); it
+// will retire alongside the contract_instance row type in slice E.
 //
 // Steps:
 //

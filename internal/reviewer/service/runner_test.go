@@ -2,9 +2,7 @@ package service_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,43 +36,11 @@ func (s *stubReviewer) Review(ctx context.Context, req reviewer.Request) (review
 	return s.verdict, reviewer.UsageCost{}, nil
 }
 
-// recordingCommit captures every commit call so tests can assert on
-// the verdict path.
-type recordingCommit struct {
-	mu    sync.Mutex
-	calls []commitCall
-	err   error
-}
-
-type commitCall struct {
-	CIID, Verdict, Rationale, TaskID, Actor string
-}
-
-func (r *recordingCommit) fn() service.CommitFn {
-	return func(
-		ctx context.Context,
-		ciID, verdict, rationale, reviewTaskID, actor string,
-		now time.Time,
-		memberships []string,
-	) error {
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		r.calls = append(r.calls, commitCall{ciID, verdict, rationale, reviewTaskID, actor})
-		return r.err
-	}
-}
-
-func (r *recordingCommit) lastCall(t *testing.T) commitCall {
-	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	require.NotEmpty(t, r.calls, "expected at least one commit call")
-	return r.calls[len(r.calls)-1]
-}
-
-// fixture wires the in-memory stores and seeds a CI in pending_review
-// + a kind:review task pointing at it, returning the task id and CI
-// id so tests can assert on outcomes.
+// fixture wires the in-memory stores and seeds a CI in pending_review,
+// a parent kind:work task, and a kind:review task linked to both
+// (ContractInstanceID + ParentTaskID), so tests can assert on the full
+// commit flow: verdict ledger row, CI status flip, review-task close,
+// and successor-work spawn on rejection.
 type fixture struct {
 	tasks         task.Store
 	contracts     contract.Store
@@ -83,10 +49,8 @@ type fixture struct {
 	stories       story.Store
 	contractDoc   document.Document
 	ci            contract.ContractInstance
+	parentWork    task.Task
 	reviewTask    task.Task
-	evidenceMD    string
-	rubricBody    string
-	commitRecord  *recordingCommit
 	reviewer      *stubReviewer
 	reviewerAgent document.Document
 	storyDoc      story.Story
@@ -146,7 +110,7 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 	}, now)
 	require.NoError(t, err)
 
-	evidence, err := led.Append(ctx, ledger.LedgerEntry{
+	_, err = led.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: "wksp_a",
 		ProjectID:   "proj_a",
 		ContractID:  ledger.StringPtr(ci.ID),
@@ -156,7 +120,7 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 	}, now)
 	require.NoError(t, err)
 
-	closeRow, err := led.Append(ctx, ledger.LedgerEntry{
+	_, err = led.Append(ctx, ledger.LedgerEntry{
 		WorkspaceID: "wksp_a",
 		ProjectID:   "proj_a",
 		ContractID:  ledger.StringPtr(ci.ID),
@@ -166,21 +130,34 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 	}, now)
 	require.NoError(t, err)
 
-	payload, _ := json.Marshal(map[string]any{
-		"contract_instance_id": ci.ID,
-		"contract_name":        ci.ContractName,
-		"story_id":             ci.StoryID,
-		"close_ledger_id":      closeRow.ID,
-		"evidence_ledger_id":   evidence.ID,
-	})
-	tk, err := tasks.Enqueue(ctx, task.Task{
+	parentWork, err := tasks.Enqueue(ctx, task.Task{
 		WorkspaceID:        "wksp_a",
 		ProjectID:          "proj_a",
+		StoryID:            storyDoc.ID,
 		ContractInstanceID: ci.ID,
-		Kind:               task.KindReview,
+		Kind:               task.KindWork,
+		Action:             task.ContractAction("develop"),
+		AgentID:            "agent_developer",
+		Description:        "implement develop",
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityMedium,
-		Payload:            payload,
+		Status:             task.StatusPublished,
+	}, now)
+	require.NoError(t, err)
+	parentWork, err = tasks.Close(ctx, parentWork.ID, task.OutcomeSuccess, now, nil)
+	require.NoError(t, err)
+
+	reviewTask, err := tasks.Enqueue(ctx, task.Task{
+		WorkspaceID:        "wksp_a",
+		ProjectID:          "proj_a",
+		StoryID:            storyDoc.ID,
+		ContractInstanceID: ci.ID,
+		Kind:               task.KindReview,
+		Action:             task.ContractAction("develop"),
+		AgentID:            rubric.ID,
+		ParentTaskID:       parentWork.ID,
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
 	}, now)
 	require.NoError(t, err)
 
@@ -192,10 +169,8 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 		stories:       stories,
 		contractDoc:   contractDoc,
 		ci:            ci,
-		reviewTask:    tk,
-		evidenceMD:    evidence.Content,
-		rubricBody:    rubric.Body,
-		commitRecord:  &recordingCommit{},
+		parentWork:    parentWork,
+		reviewTask:    reviewTask,
 		reviewer:      &stubReviewer{verdict: verdict, err: reviewerErr},
 		reviewerAgent: rubric,
 		storyDoc:      storyDoc,
@@ -210,10 +185,41 @@ func (f *fixture) newService(t *testing.T) *service.Service {
 		Docs:      f.docs,
 		Ledger:    f.ledger,
 		Reviewer:  f.reviewer,
-		Commit:    f.commitRecord.fn(),
 	})
 	require.NoError(t, err)
 	return svc
+}
+
+// findVerdictRow returns the kind:verdict ledger row tagged to the
+// given review task id, failing the test if exactly one row is not
+// found.
+func findVerdictRow(t *testing.T, led ledger.Store, taskID string) ledger.LedgerEntry {
+	t.Helper()
+	rows, err := led.List(context.Background(), "", ledger.ListOptions{
+		Type: ledger.TypeVerdict,
+		Tags: []string{"kind:verdict", "task_id:" + taskID},
+	}, nil)
+	require.NoError(t, err)
+	require.Lenf(t, rows, 1, "expected exactly one kind:verdict row tagged task_id:%s, got %d", taskID, len(rows))
+	return rows[0]
+}
+
+// findSuccessorWork returns the kind:work task whose PriorTaskID
+// matches priorID, failing if not exactly one.
+func findSuccessorWork(t *testing.T, tasks task.Store, priorID string) task.Task {
+	t.Helper()
+	rows, err := tasks.List(context.Background(), task.ListOptions{
+		Kind: task.KindWork,
+	}, nil)
+	require.NoError(t, err)
+	matches := make([]task.Task, 0)
+	for _, r := range rows {
+		if r.PriorTaskID == priorID {
+			matches = append(matches, r)
+		}
+	}
+	require.Lenf(t, matches, 1, "expected exactly one kind:work successor with PriorTaskID=%s, got %d", priorID, len(matches))
+	return matches[0]
 }
 
 func TestService_Tick_HappyPath_AcceptedCommit(t *testing.T) {
@@ -224,36 +230,99 @@ func TestService_Tick_HappyPath_AcceptedCommit(t *testing.T) {
 	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask), "expected the service to claim and process the review task")
 
 	assert.Equal(t, int32(1), f.reviewer.calls.Load(), "reviewer should be invoked exactly once")
-	call := f.commitRecord.lastCall(t)
-	assert.Equal(t, f.ci.ID, call.CIID)
-	assert.Equal(t, reviewer.VerdictAccepted, call.Verdict)
-	assert.Equal(t, "ok", call.Rationale)
-	assert.Equal(t, f.reviewTask.ID, call.TaskID)
-	assert.Equal(t, service.ServiceUserID, call.Actor)
 
-	// Reviewer request should carry the rubric + evidence assembled
-	// from the contract doc, the system reviewer agent body, and the
-	// evidence ledger row.
-	// The stub doesn't capture the request shape, but the call count
-	// + commit verdict together prove the path executed end-to-end.
+	row := findVerdictRow(t, f.ledger, f.reviewTask.ID)
+	assert.Equal(t, "ok", row.Content)
+	assert.Contains(t, row.Tags, "kind:verdict")
+	assert.Contains(t, row.Tags, "task_id:"+f.reviewTask.ID)
+	assert.Contains(t, row.Tags, "phase:develop")
+	assert.Contains(t, row.Tags, "ci:"+f.ci.ID)
 
-	// Task should be claimed (the service hasn't called Close — that's
-	// the commit fn's job, which the recording stub no-ops on).
-	claimed, err := f.tasks.GetByID(context.Background(), f.reviewTask.ID, nil)
+	closed, err := f.tasks.GetByID(context.Background(), f.reviewTask.ID, nil)
 	require.NoError(t, err)
-	assert.Equal(t, task.StatusClaimed, claimed.Status)
-	assert.Equal(t, service.WorkerID, claimed.ClaimedBy)
+	assert.Equal(t, task.StatusClosed, closed.Status)
+	assert.Equal(t, task.OutcomeSuccess, closed.Outcome)
+
+	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, contract.StatusPassed, ciAfter.Status, "accepted verdict must flip CI to passed (transitional)")
+
+	// Accepted path must NOT spawn a successor work task.
+	rows, err := f.tasks.List(context.Background(), task.ListOptions{Kind: task.KindWork}, nil)
+	require.NoError(t, err)
+	for _, r := range rows {
+		assert.NotEqual(t, f.parentWork.ID, r.PriorTaskID, "accepted verdict must not spawn a successor for parent work %s", f.parentWork.ID)
+	}
 }
 
-func TestService_Tick_RejectedCommit(t *testing.T) {
+func TestService_Tick_RejectedCommit_SpawnsSuccessorPair(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictRejected, Rationale: "missing evidence"}, nil)
 	svc := f.newService(t)
 
 	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
-	call := f.commitRecord.lastCall(t)
-	assert.Equal(t, reviewer.VerdictRejected, call.Verdict)
-	assert.Contains(t, call.Rationale, "missing evidence")
+
+	row := findVerdictRow(t, f.ledger, f.reviewTask.ID)
+	assert.Contains(t, row.Content, "missing evidence")
+
+	closed, err := f.tasks.GetByID(context.Background(), f.reviewTask.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, task.StatusClosed, closed.Status)
+	assert.Equal(t, task.OutcomeFailure, closed.Outcome)
+
+	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, contract.StatusFailed, ciAfter.Status, "rejected verdict must flip CI to failed (transitional)")
+
+	successor := findSuccessorWork(t, f.tasks, f.parentWork.ID)
+	assert.Equal(t, task.KindWork, successor.Kind)
+	assert.Equal(t, f.parentWork.Action, successor.Action)
+	assert.Equal(t, f.parentWork.AgentID, successor.AgentID)
+	assert.Equal(t, task.StatusPublished, successor.Status, "successor work task must be claimable")
+
+	// The paired planned-review for the successor must exist.
+	allReviews, err := f.tasks.List(context.Background(), task.ListOptions{Kind: task.KindReview}, nil)
+	require.NoError(t, err)
+	plannedSibling := 0
+	for _, r := range allReviews {
+		if r.ParentTaskID == successor.ID && r.Status == task.StatusPlanned {
+			plannedSibling++
+		}
+	}
+	assert.Equal(t, 1, plannedSibling, "successor work must have exactly one planned-review sibling")
+}
+
+func TestService_Tick_RejectedCommit_NoParentSkipsSpawn(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictRejected, Rationale: "legacy review"}, nil)
+	// Simulate a legacy review task that lacks the ParentTaskID anchor
+	// (created via contract_close before story_task_submit landed).
+	legacyReview, err := f.tasks.Enqueue(context.Background(), task.Task{
+		WorkspaceID:        "wksp_a",
+		ProjectID:          "proj_a",
+		StoryID:            f.storyDoc.ID,
+		ContractInstanceID: f.ci.ID,
+		Kind:               task.KindReview,
+		Action:             task.ContractAction("develop"),
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+	}, time.Now().UTC())
+	require.NoError(t, err)
+
+	svc := f.newService(t)
+	require.True(t, svc.HandleTaskEvent(context.Background(), legacyReview))
+
+	closed, err := f.tasks.GetByID(context.Background(), legacyReview.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, task.StatusClosed, closed.Status)
+	assert.Equal(t, task.OutcomeFailure, closed.Outcome)
+
+	// No successor for legacy review (no PriorTaskID anchor).
+	rows, err := f.tasks.List(context.Background(), task.ListOptions{Kind: task.KindWork}, nil)
+	require.NoError(t, err)
+	for _, r := range rows {
+		assert.Empty(t, r.PriorTaskID, "legacy review without ParentTaskID must not spawn a successor (got %s with prior=%s)", r.ID, r.PriorTaskID)
+	}
 }
 
 func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
@@ -266,13 +335,12 @@ func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
 	svc := f.newService(t)
 
 	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
-	call := f.commitRecord.lastCall(t)
-	assert.Equal(t, reviewer.VerdictRejected, call.Verdict, "needs_more must be coerced to rejected for the task path (no contract_respond loop in the queue model)")
-	assert.Contains(t, call.Rationale, "q1")
-	assert.Contains(t, call.Rationale, "q2")
+	row := findVerdictRow(t, f.ledger, f.reviewTask.ID)
+	assert.Contains(t, row.Content, "q1")
+	assert.Contains(t, row.Content, "q2")
 
-	// story_224621bd: each question must also land as its own
-	// kind:review-question ledger row so contract_respond can address it.
+	// Each question must also land as its own kind:review-question
+	// ledger row so contract_respond can address it (story_224621bd).
 	rows, err := f.ledger.List(context.Background(), "", ledger.ListOptions{
 		Tags: []string{"kind:review-question"},
 	}, nil)
@@ -281,6 +349,13 @@ func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
 	contents := []string{rows[0].Content, rows[1].Content}
 	assert.Contains(t, contents, "q1")
 	assert.Contains(t, contents, "q2")
+
+	// needs_more is coerced to rejected → CI flips to failed and a
+	// successor spawns.
+	ciAfter, err := f.contracts.GetByID(context.Background(), f.ci.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, contract.StatusFailed, ciAfter.Status)
+	_ = findSuccessorWork(t, f.tasks, f.parentWork.ID)
 }
 
 func TestService_Tick_GeminiError_RejectsWithRationale(t *testing.T) {
@@ -289,10 +364,15 @@ func TestService_Tick_GeminiError_RejectsWithRationale(t *testing.T) {
 	svc := f.newService(t)
 
 	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
-	call := f.commitRecord.lastCall(t)
-	assert.Equal(t, reviewer.VerdictRejected, call.Verdict, "reviewer error must reject the CI so it doesn't sit pending_review")
-	assert.Contains(t, call.Rationale, "reviewer error")
-	assert.Contains(t, call.Rationale, "gemini api timeout")
+
+	row := findVerdictRow(t, f.ledger, f.reviewTask.ID)
+	assert.Contains(t, row.Content, "reviewer error")
+	assert.Contains(t, row.Content, "gemini api timeout")
+
+	closed, err := f.tasks.GetByID(context.Background(), f.reviewTask.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, task.StatusClosed, closed.Status)
+	assert.Equal(t, task.OutcomeFailure, closed.Outcome)
 }
 
 // TestService_HandleTaskEvent_NotFound covers HandleTaskEvent's
@@ -306,7 +386,6 @@ func TestService_HandleTaskEvent_NotFound(t *testing.T) {
 	led := ledger.NewMemoryStore()
 	stories := story.NewMemoryStore(led)
 	contracts := contract.NewMemoryStore(docs, stories)
-	commit := &recordingCommit{}
 	rev := &stubReviewer{verdict: reviewer.Verdict{Outcome: reviewer.VerdictAccepted}}
 
 	svc, err := service.New(service.Config{}, service.Deps{
@@ -315,7 +394,6 @@ func TestService_HandleTaskEvent_NotFound(t *testing.T) {
 		Docs:      docs,
 		Ledger:    led,
 		Reviewer:  rev,
-		Commit:    commit.fn(),
 	})
 	require.NoError(t, err)
 
@@ -355,13 +433,16 @@ func TestService_OnEmit_KindFilter(t *testing.T) {
 	svc.OnEmit(ctx, f.reviewTask)
 	assert.Equal(t, int32(1), f.reviewer.calls.Load(), "reviewer should be invoked exactly once on kind=review emit")
 
-	// Reviewer task got claimed; non-review task remains enqueued.
+	// Non-review task remains enqueued; review task got closed (the
+	// commit path now closes it directly rather than leaving it
+	// claimed for the legacy CommitFn to wrap up).
 	otherAfter, err := f.tasks.GetByID(ctx, other.ID, nil)
 	require.NoError(t, err)
 	assert.Equal(t, task.StatusEnqueued, otherAfter.Status)
 	reviewAfter, err := f.tasks.GetByID(ctx, f.reviewTask.ID, nil)
 	require.NoError(t, err)
-	assert.Equal(t, task.StatusClaimed, reviewAfter.Status)
+	assert.Equal(t, task.StatusClosed, reviewAfter.Status)
+	assert.Equal(t, task.OutcomeSuccess, reviewAfter.Outcome)
 }
 
 func TestService_Run_ContextCancellationStops(t *testing.T) {
@@ -395,18 +476,16 @@ func TestService_New_RejectsMissingDeps(t *testing.T) {
 	stories := story.NewMemoryStore(led)
 	contracts := contract.NewMemoryStore(docs, stories)
 	rev := &stubReviewer{}
-	commit := &recordingCommit{}
 
 	cases := []struct {
 		name string
 		deps service.Deps
 	}{
-		{"missing tasks", service.Deps{Contracts: contracts, Docs: docs, Ledger: led, Reviewer: rev, Commit: commit.fn()}},
-		{"missing contracts", service.Deps{Tasks: tasks, Docs: docs, Ledger: led, Reviewer: rev, Commit: commit.fn()}},
-		{"missing docs", service.Deps{Tasks: tasks, Contracts: contracts, Ledger: led, Reviewer: rev, Commit: commit.fn()}},
-		{"missing ledger", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Reviewer: rev, Commit: commit.fn()}},
-		{"missing reviewer", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Ledger: led, Commit: commit.fn()}},
-		{"missing commit", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Ledger: led, Reviewer: rev}},
+		{"missing tasks", service.Deps{Contracts: contracts, Docs: docs, Ledger: led, Reviewer: rev}},
+		{"missing contracts", service.Deps{Tasks: tasks, Docs: docs, Ledger: led, Reviewer: rev}},
+		{"missing docs", service.Deps{Tasks: tasks, Contracts: contracts, Ledger: led, Reviewer: rev}},
+		{"missing ledger", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Reviewer: rev}},
+		{"missing reviewer", service.Deps{Tasks: tasks, Contracts: contracts, Docs: docs, Ledger: led}},
 	}
 	for _, tc := range cases {
 		tc := tc

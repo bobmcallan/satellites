@@ -9,9 +9,9 @@ import "errors"
 // pending_review is the intermediate state introduced by
 // epic:v4-lifecycle-refactor (sty_b6b2de01). When the agent calls
 // contract_close the CI moves claimed → pending_review and a
-// kind:review task is enqueued for a reviewer-role runtime to claim.
-// The reviewer calls contract_review_close which moves
-// pending_review → passed | failed.
+// kind:review task is enqueued for the embedded reviewer service to
+// claim. The reviewer service writes a kind:verdict ledger row and
+// flips the CI pending_review → passed | failed (sty_c6d76a5b).
 const (
 	StatusReady         = "ready"
 	StatusClaimed       = "claimed"
@@ -49,9 +49,9 @@ var ErrInvalidTransition = errors.New("contract: invalid status transition")
 //
 // claimed→passed and claimed→failed remain valid for the legacy inline
 // reviewer path (some tests + the close path during the migration to
-// uniform review-task gating still flip CIs directly). Once gemini is
-// a queue consumer the only path to passed/failed is via
-// pending_review + contract_review_close.
+// uniform review-task gating still flip CIs directly). The current
+// production path is pending_review → passed | failed driven by the
+// embedded reviewer service (sty_c6d76a5b).
 func ValidTransition(from, to string) bool {
 	switch from {
 	case StatusReady:

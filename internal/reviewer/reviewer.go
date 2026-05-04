@@ -28,9 +28,11 @@ const (
 // ModeTask (epic:v4-lifecycle-refactor sty_b6b2de01) routes the close
 // through the task queue: the close handler creates a kind:review task,
 // flips the CI to pending_review, and returns. The embedded reviewer
-// service subscribes to kind:review tasks, claims them, and calls
-// contract_review_close to flip the CI to passed/failed. Replaces the
-// inline gemini dispatch for contracts that opt in.
+// service subscribes to kind:review tasks, claims them, runs the
+// reviewer, writes a kind:verdict ledger row tagged to the review
+// task, closes the task, and on rejection spawns a successor work
+// task with PriorTaskID set (sty_c6d76a5b). Replaces the inline gemini
+// dispatch for contracts that opt in.
 const (
 	ModeAgent      = "agent"
 	ModeLLM        = "llm"

@@ -17,20 +17,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// CommitFn applies the reviewer's verdict against the substrate.
-// Bound by main.go to mcpserver.Server.CommitReviewVerdict so the
-// service and the MCP-facing contract_review_close handler share one
-// commit code path.
-//
-// The service passes actor=ServiceUserID and memberships=nil — the
-// service is a system-identity worker that operates cross-workspace.
-type CommitFn func(
-	ctx context.Context,
-	ciID, verdict, rationale, reviewTaskID, actor string,
-	now time.Time,
-	memberships []string,
-) error
-
 // Config carries the reviewer service's wiring.
 type Config struct {
 	// SessionID is the registry session id the reviewer service runs
@@ -55,7 +41,6 @@ type Service struct {
 	docs      document.Store
 	ledger    ledger.Store
 	reviewer  reviewer.Reviewer
-	commit    CommitFn
 	logger    arbor.ILogger
 	nowUTC    func() time.Time
 }
@@ -67,7 +52,6 @@ type Deps struct {
 	Docs      document.Store
 	Ledger    ledger.Store
 	Reviewer  reviewer.Reviewer
-	Commit    CommitFn
 	Logger    arbor.ILogger
 	Now       func() time.Time // injectable clock for tests
 }
@@ -92,9 +76,6 @@ func New(cfg Config, deps Deps) (*Service, error) {
 	if deps.Reviewer == nil {
 		return nil, errors.New("reviewer/service: reviewer is required")
 	}
-	if deps.Commit == nil {
-		return nil, errors.New("reviewer/service: commit fn is required")
-	}
 	if cfg.SessionID == "" {
 		cfg.SessionID = ServiceSessionID
 	}
@@ -115,7 +96,6 @@ func New(cfg Config, deps Deps) (*Service, error) {
 		docs:      deps.Docs,
 		ledger:    deps.Ledger,
 		reviewer:  deps.Reviewer,
-		commit:    deps.Commit,
 		logger:    deps.Logger,
 		nowUTC:    now,
 	}, nil
@@ -284,22 +264,205 @@ func (s *Service) processClaimed(ctx context.Context, t task.Task) {
 		rationale = fmt.Sprintf("reviewer returned unexpected outcome %q; rejecting (rationale: %s)", verdict.Outcome, rationale)
 	}
 
-	if err := s.commit(ctx, ci.ID, outcome, rationale, t.ID, s.cfg.UserID, s.nowUTC(), nil); err != nil {
-		s.logWarn("reviewer service commit failed", err, map[string]string{
+	s.commitVerdict(ctx, t, ci, outcome, rationale)
+}
+
+// commitVerdict is the new task-centric commit path (sty_c6d76a5b
+// slice A): write a kind:verdict ledger row tagged to the review task,
+// close the review task with the matching outcome, and on rejection
+// spawn a successor kind:work + paired planned-review task pair so the
+// rejection-loop continues as a task chain. CI status is also flipped
+// (passed/failed) when ContractInstanceID is set — transitional
+// support for the legacy contract_close path until slice E removes
+// contract_instance entirely. Replaces the prior CommitFn injection
+// that wrapped mcpserver.Server.CommitReviewVerdict.
+func (s *Service) commitVerdict(ctx context.Context, reviewTask task.Task, ci contract.ContractInstance, outcome, rationale string) {
+	now := s.nowUTC()
+
+	if _, err := s.writeVerdictLedgerRow(ctx, reviewTask, ci, outcome, rationale, now); err != nil {
+		s.logWarn("reviewer service verdict ledger append failed", err, map[string]string{
+			"task_id": reviewTask.ID,
 			"ci_id":   ci.ID,
-			"task_id": t.ID,
+			"verdict": outcome,
+		})
+		// Best-effort task close so the queue isn't stuck on the
+		// failed-write task.
+		_, _ = s.tasks.Close(ctx, reviewTask.ID, task.OutcomeFailure, now, nil)
+		return
+	}
+
+	// Transitional CI status flip — keeps the legacy contract_close
+	// path's downstream consumers (contract_next gate, portal CI
+	// views) functional until slice E removes contract_instance.
+	if ci.ID != "" {
+		target := contract.StatusPassed
+		if outcome == reviewer.VerdictRejected {
+			target = contract.StatusFailed
+		}
+		if _, err := s.contracts.UpdateStatus(ctx, ci.ID, target, s.cfg.UserID, now, nil); err != nil {
+			s.logWarn("reviewer service ci status flip failed", err, map[string]string{
+				"ci_id":   ci.ID,
+				"task_id": reviewTask.ID,
+				"target":  target,
+			})
+		}
+	}
+
+	taskOutcome := task.OutcomeSuccess
+	if outcome == reviewer.VerdictRejected {
+		taskOutcome = task.OutcomeFailure
+	}
+	if _, err := s.tasks.Close(ctx, reviewTask.ID, taskOutcome, now, nil); err != nil {
+		s.logWarn("reviewer service review-task close failed", err, map[string]string{
+			"task_id": reviewTask.ID,
 			"verdict": outcome,
 		})
 		return
 	}
+
+	if outcome == reviewer.VerdictRejected {
+		if successorID, err := s.spawnSuccessorWorkPair(ctx, reviewTask, now); err != nil {
+			s.logWarn("reviewer service successor spawn failed", err, map[string]string{
+				"task_id": reviewTask.ID,
+			})
+		} else if s.logger != nil && successorID != "" {
+			s.logger.Info().
+				Str("review_task_id", reviewTask.ID).
+				Str("successor_task_id", successorID).
+				Msg("reviewer service spawned successor work task")
+		}
+	}
+
 	if s.logger != nil {
 		s.logger.Info().
 			Str("ci_id", ci.ID).
-			Str("task_id", t.ID).
+			Str("task_id", reviewTask.ID).
 			Str("verdict", outcome).
 			Str("contract", ci.ContractName).
 			Msg("reviewer service committed verdict")
 	}
+}
+
+// writeVerdictLedgerRow records the reviewer's verdict as a
+// kind:verdict ledger row tagged to the review task (task_id:<id>).
+// When the review task carries a CI binding the row is also stamped
+// with the CI's contract id + ci:<id> tag for cross-referencing
+// while CIs still exist.
+func (s *Service) writeVerdictLedgerRow(ctx context.Context, reviewTask task.Task, ci contract.ContractInstance, outcome, rationale string, now time.Time) (string, error) {
+	tags := []string{"kind:verdict", "task_id:" + reviewTask.ID}
+	if ci.ContractName != "" {
+		tags = append(tags, "phase:"+ci.ContractName)
+	}
+	if ci.ID != "" {
+		tags = append(tags, "ci:"+ci.ID)
+	}
+	structured, _ := json.Marshal(map[string]any{
+		"verdict":        outcome,
+		"rationale":      rationale,
+		"review_task_id": reviewTask.ID,
+		"mode":           reviewer.ModeTask,
+	})
+	entry := ledger.LedgerEntry{
+		WorkspaceID: workspaceFor(reviewTask, ci),
+		ProjectID:   projectFor(reviewTask, ci),
+		StoryID:     ledger.StringPtr(storyIDFor(reviewTask, ci)),
+		Type:        ledger.TypeVerdict,
+		Tags:        tags,
+		Content:     rationale,
+		Structured:  structured,
+		Durability:  ledger.DurabilityDurable,
+		SourceType:  ledger.SourceSystem,
+		Status:      ledger.StatusActive,
+		CreatedBy:   s.cfg.UserID,
+	}
+	if ci.ID != "" {
+		entry.ContractID = ledger.StringPtr(ci.ID)
+	}
+	row, err := s.ledger.Append(ctx, entry, now)
+	if err != nil {
+		return "", err
+	}
+	return row.ID, nil
+}
+
+// spawnSuccessorWorkPair emits a fresh kind:work task with PriorTaskID
+// pointing at the rejected work task, plus its paired planned
+// kind:review sibling. The successor work lands at status=published
+// (immediately claimable); the review at status=planned (gated until
+// the work closes). Returns the successor work task id, or empty when
+// the review task lacks a ParentTaskID anchor (legacy review without
+// the work-task linkage — manual contract_cancel remains the recovery
+// path for those).
+func (s *Service) spawnSuccessorWorkPair(ctx context.Context, reviewTask task.Task, now time.Time) (string, error) {
+	if reviewTask.ParentTaskID == "" {
+		return "", nil
+	}
+	parentWork, err := s.tasks.GetByID(ctx, reviewTask.ParentTaskID, nil)
+	if err != nil {
+		return "", fmt.Errorf("lookup parent work task %s: %w", reviewTask.ParentTaskID, err)
+	}
+	successor := task.Task{
+		WorkspaceID:        parentWork.WorkspaceID,
+		ProjectID:          parentWork.ProjectID,
+		StoryID:            parentWork.StoryID,
+		ContractInstanceID: parentWork.ContractInstanceID,
+		Kind:               task.KindWork,
+		Action:             parentWork.Action,
+		AgentID:            parentWork.AgentID,
+		Description:        fmt.Sprintf("retry %s after rejected review", parentWork.Action),
+		ParentTaskID:       parentWork.ParentTaskID,
+		PriorTaskID:        parentWork.ID,
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+		Status:             task.StatusPublished,
+	}
+	created, err := s.tasks.Enqueue(ctx, successor, now)
+	if err != nil {
+		return "", fmt.Errorf("enqueue successor work task: %w", err)
+	}
+	pairedReview := task.Task{
+		WorkspaceID:        parentWork.WorkspaceID,
+		ProjectID:          parentWork.ProjectID,
+		StoryID:            parentWork.StoryID,
+		ContractInstanceID: parentWork.ContractInstanceID,
+		Kind:               task.KindReview,
+		Action:             parentWork.Action,
+		AgentID:            reviewTask.AgentID,
+		Description:        fmt.Sprintf("review retry of %s", parentWork.Action),
+		ParentTaskID:       created.ID,
+		Origin:             task.OriginStoryStage,
+		Priority:           task.PriorityMedium,
+		Status:             task.StatusPlanned,
+	}
+	if _, err := s.tasks.Enqueue(ctx, pairedReview, now); err != nil {
+		return created.ID, fmt.Errorf("enqueue paired review for successor: %w", err)
+	}
+	return created.ID, nil
+}
+
+// workspaceFor / projectFor / storyIDFor pick the best non-empty
+// scoping value across (review task, ci). Review tasks created via
+// story_task_submit carry the story scoping directly; legacy tasks
+// created via contract_close inherit theirs from the bound CI.
+func workspaceFor(t task.Task, ci contract.ContractInstance) string {
+	if t.WorkspaceID != "" {
+		return t.WorkspaceID
+	}
+	return ci.WorkspaceID
+}
+
+func projectFor(t task.Task, ci contract.ContractInstance) string {
+	if t.ProjectID != "" {
+		return t.ProjectID
+	}
+	return ci.ProjectID
+}
+
+func storyIDFor(t task.Task, ci contract.ContractInstance) string {
+	if t.StoryID != "" {
+		return t.StoryID
+	}
+	return ci.StoryID
 }
 
 // findCIArtifact returns the most recent ledger row tagged kindTag
@@ -362,11 +525,12 @@ func (s *Service) lookupReviewerRubric(ctx context.Context, contractName string)
 	return ""
 }
 
-// commitFailure rejects the CI with the given rationale and closes
-// the originating task with outcome=failure. Used when the service
-// can't reach a real reviewer verdict (CI gone, contract doc
-// unreadable, gemini error). Tolerant of commit failures — the
-// substrate watchdog will eventually reclaim the task.
+// commitFailure records a rejected verdict for the given task when
+// the service couldn't reach a real reviewer verdict (CI gone,
+// contract doc unreadable, gemini error, missing CI linkage). Goes
+// through commitVerdict so the same ledger-row + task-close + spawn
+// behavior applies — the verdict is just synthesised by the service
+// rather than the reviewer.
 func (s *Service) commitFailure(ctx context.Context, ciID, rationale, taskID, logReason string) {
 	if s.logger != nil {
 		s.logger.Warn().
@@ -376,25 +540,19 @@ func (s *Service) commitFailure(ctx context.Context, ciID, rationale, taskID, lo
 			Str("rationale", rationale).
 			Msg("reviewer service rejecting (failure path)")
 	}
-	if ciID == "" {
-		// No CI to reject — close the task as failure so the queue
-		// doesn't loop on it.
-		if s.tasks != nil && taskID != "" {
-			_, _ = s.tasks.Close(ctx, taskID, task.OutcomeFailure, s.nowUTC(), nil)
-		}
+	reviewTask, gerr := s.tasks.GetByID(ctx, taskID, nil)
+	if gerr != nil {
+		// Task vanished mid-process — nothing to record. The reviewer
+		// already received the failure rationale via the log line above.
 		return
 	}
-	if err := s.commit(ctx, ciID, reviewer.VerdictRejected, rationale, taskID, s.cfg.UserID, s.nowUTC(), nil); err != nil {
-		s.logWarn("reviewer service failure-path commit failed", err, map[string]string{
-			"ci_id":   ciID,
-			"task_id": taskID,
-		})
-		// Best-effort task close so the queue isn't stuck on the
-		// failed-commit task.
-		if s.tasks != nil && taskID != "" {
-			_, _ = s.tasks.Close(ctx, taskID, task.OutcomeFailure, s.nowUTC(), nil)
+	ci := contract.ContractInstance{}
+	if ciID != "" {
+		if found, err := s.contracts.GetByID(ctx, ciID, nil); err == nil {
+			ci = found
 		}
 	}
+	s.commitVerdict(ctx, reviewTask, ci, reviewer.VerdictRejected, rationale)
 }
 
 // writeReviewQuestionRows records each question as its own

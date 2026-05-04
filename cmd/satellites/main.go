@@ -553,26 +553,19 @@ func main() {
 	// epic:v4-lifecycle-refactor sty_6077711d: standalone reviewer
 	// service. Runs as an in-process goroutine consuming kind:review
 	// tasks from the queue, invoking the gemini reviewer against the
-	// rubric + evidence, and committing the verdict via
-	// CommitReviewVerdict. Mode is resolved from the system-tier KV row
-	// `reviewer.service.mode` (default "embedded") earlier at boot.
+	// rubric + evidence, and committing the verdict directly as a
+	// kind:verdict ledger row + paired task close + on-rejection
+	// successor spawn (sty_c6d76a5b slice A — reviewer no longer routes
+	// through CommitReviewVerdict). Mode is resolved from the
+	// system-tier KV row `reviewer.service.mode` (default "embedded")
+	// earlier at boot.
 	if reviewerServiceMode == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
-		commitFn := func(
-			ctx context.Context,
-			ciID, verdict, rationale, reviewTaskID, actor string,
-			now time.Time,
-			memberships []string,
-		) error {
-			_, err := mcp.CommitReviewVerdict(ctx, ciID, verdict, rationale, reviewTaskID, actor, now, memberships)
-			return err
-		}
 		revSvc, err := reviewerservice.New(reviewerservice.Config{}, reviewerservice.Deps{
 			Tasks:     taskStore,
 			Contracts: contractStore,
 			Docs:      docStore,
 			Ledger:    ledgerStore,
 			Reviewer:  rev,
-			Commit:    commitFn,
 			Logger:    logger,
 		})
 		if err != nil {
