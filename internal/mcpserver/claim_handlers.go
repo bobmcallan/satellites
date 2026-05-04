@@ -78,13 +78,32 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	}
 	skillsUsed := req.GetStringSlice("skills_used", nil)
 	planMarkdown := req.GetString("plan_markdown", "")
-	// epic:roleless-agents — agent_id is OPTIONAL. Resolution order:
+	if legacy := req.GetStringSlice("permissions_claim", nil); len(legacy) > 0 {
+		body, _ := json.Marshal(map[string]any{
+			"error":   "permissions_claim_retired",
+			"message": "permissions_claim is no longer accepted; allocate a type=agent doc and pass agent_id (story_cc55e093)",
+		})
+		return mcpgo.NewToolResultError(string(body)), nil
+	}
+
+	memberships := s.resolveCallerMemberships(ctx, caller)
+	// CI fetch moved up so the agent-id resolution chain (sty_63361520)
+	// can consult the CI's stamped AgentID before falling back to the
+	// session's bound agent. Per epic:roleless-agents:
 	//   1. Explicit agent_id arg (kept for callers that want override / for tests).
-	//   2. Session's ACTIVE bound agent via OrchestratorGrantID → grant.AgentID.
+	//   2. CI's stamped AgentID (set by orchestrator_compose_plan via
+	//      mintTaskAgentForContract; sty_e8d49554).
+	//   3. Session's ACTIVE bound agent via OrchestratorGrantID → grant.AgentID.
 	//      A released grant does NOT resolve — callers must rebind first.
-	//   3. Structured agent_required error.
-	// The legacy permissions_claim arg remains REJECTED (story_cc55e093).
+	//   4. Structured agent_required error.
+	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
+	if err == nil {
+		// CI exists; its stamped AgentID joins the resolution chain.
+	}
 	agentID := req.GetString("agent_id", "")
+	if agentID == "" && err == nil && ci.AgentID != "" {
+		agentID = ci.AgentID
+	}
 	if agentID == "" && s.sessions != nil && s.grants != nil {
 		caller2, _ := UserFrom(ctx)
 		if sess, serr := s.sessions.Get(ctx, caller2.UserID, sessionID); serr == nil && sess.OrchestratorGrantID != "" {
@@ -96,20 +115,13 @@ func (s *Server) handleContractClaim(ctx context.Context, req mcpgo.CallToolRequ
 	if agentID == "" {
 		body, _ := json.Marshal(map[string]any{
 			"error":   "agent_required",
-			"message": "contract_claim could not resolve an agent — supply agent_id arg or bind the session to an agent first (agent_role_claim)",
+			"message": "contract_claim could not resolve an agent — supply agent_id arg, ensure the CI has a stamped AgentID (orchestrator_compose_plan), or bind the session to an agent first",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
-	if legacy := req.GetStringSlice("permissions_claim", nil); len(legacy) > 0 {
-		body, _ := json.Marshal(map[string]any{
-			"error":   "permissions_claim_retired",
-			"message": "permissions_claim is no longer accepted; allocate a type=agent doc and pass agent_id (story_cc55e093)",
-		})
-		return mcpgo.NewToolResultError(string(body)), nil
-	}
-
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	ci, err := s.contracts.GetByID(ctx, ciID, memberships)
+	// CI fetch error gate — moved here from below the agent-id chain
+	// because the chain now consults ci.AgentID. Order preserved:
+	// missing CI → ci_not_found error before the rest of the flow.
 	if err != nil {
 		body, _ := json.Marshal(map[string]any{"error": "ci_not_found", "contract_instance_id": ciID})
 		return mcpgo.NewToolResultError(string(body)), nil

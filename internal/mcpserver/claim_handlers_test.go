@@ -635,3 +635,98 @@ func TestSessionWhoami(t *testing.T) {
 		t.Fatalf("ghost should be not_registered, got %s", firstText(res))
 	}
 }
+
+// TestContractClaim_AgentIDFromCIStamp (sty_63361520 AC1): when the
+// CI carries a stamped AgentID and the caller does NOT supply
+// agent_id, contract_claim resolves from the stamp and the claim
+// succeeds.
+func TestContractClaim_AgentIDFromCIStamp(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	// Pre-stamp the CI with the agent id (compose_plan does this in
+	// production; the fixture's CIs start without a stamp).
+	wantAgent := f.agentFor(0)
+	if _, err := f.server.contracts.SetAgent(f.ctx, f.cis[0].ID, wantAgent, f.now, nil); err != nil {
+		t.Fatalf("pre-stamp ci: %v", err)
+	}
+	// Call WITHOUT agent_id.
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           f.sessionID,
+		"plan_markdown":        "claim via ci stamp",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("isError unexpected: %s", firstText(res))
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(firstText(res)), &body); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if body.Status != "claimed" {
+		t.Fatalf("status: %q want claimed", body.Status)
+	}
+}
+
+// TestContractClaim_AgentIDFallsBackToSessionGrant (sty_63361520
+// AC2): when the CI has NO stamped AgentID and the caller does not
+// supply agent_id, contract_claim falls through to the session's
+// bound agent via OrchestratorGrantID. Mints a session grant
+// matching the existing test pattern (mintSessionGrant).
+func TestContractClaim_AgentIDFallsBackToSessionGrant(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	// Bind a fresh session to a grant. The fixture's default sessionID
+	// is already minted; mintSessionGrant returns the new grant id and
+	// stamps it on the session row.
+	_ = f.mintSessionGrant(t, "session_with_grant")
+	// CI[0] has no stamped AgentID by default. Call WITHOUT agent_id.
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           "session_with_grant",
+		"plan_markdown":        "claim via session grant fallback",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("isError unexpected (session grant fallback should resolve agent_id): %s", firstText(res))
+	}
+}
+
+// TestContractClaim_AgentRequiredErrorOnEmpty (sty_63361520 AC3):
+// when the CI has no stamped AgentID, the session has no bound
+// grant, and the caller does not supply agent_id, the handler
+// returns the structured agent_required error. Uses a fresh
+// session deliberately not bound to any grant — the fixture's
+// default session is always grant-bound for the happy-path tests.
+func TestContractClaim_AgentRequiredErrorOnEmpty(t *testing.T) {
+	t.Parallel()
+	f := newClaimFixture(t)
+	// Register a fresh session WITHOUT a grant. The fixture's default
+	// sessionID is grant-bound; we need a clean one to exercise the
+	// agent_required path.
+	bareSession := "session_no_grant"
+	if _, err := f.server.sessions.Register(f.ctx, "user_alice", bareSession, session.SourceSessionStart, f.now); err != nil {
+		t.Fatalf("register bare session: %v", err)
+	}
+	// CI has no AgentID; bare session has no grant; no agent_id arg.
+	res, err := f.server.handleContractClaim(f.callerCtx(), newCallToolReq("contract_claim", map[string]any{
+		"contract_instance_id": f.cis[0].ID,
+		"session_id":           bareSession,
+		"plan_markdown":        "should fail",
+	}))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected isError; got %s", firstText(res))
+	}
+	if !strings.Contains(firstText(res), `"error":"agent_required"`) {
+		t.Fatalf("expected agent_required, got %s", firstText(res))
+	}
+}
