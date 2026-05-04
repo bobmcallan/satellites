@@ -71,12 +71,12 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	}
 
 	// Default contract sequence after story_af79cf95 removed the
-	// substrate slot algebra. The orchestrator agent body documents
-	// the floor (plan + close per pr_mandate_reviewer_enforced);
-	// callers may pass a richer plan by way of agent_overrides /
-	// future verb args. For the legacy single-shot orchestrator_compose
-	// path we keep the default to preserve callers that don't go
-	// through orchestrator_submit_plan.
+	// substrate slot algebra. sty_c6d76a5b: the canonical agent-
+	// authored plan path is satellites_story_task_submit (kind=plan).
+	// orchestrator_compose_plan remains as a transitional verb that
+	// emits a hardcoded list — its deletion rides with the
+	// markdown-migration commit that retires the
+	// pre-c6d76a5b lifecycle surface.
 	proposed := []string{"plan", "develop", "push", "merge_to_main", "story_close"}
 
 	now := s.nowUTC()
@@ -131,9 +131,9 @@ func (s *Server) handleOrchestratorComposePlan(ctx context.Context, req mcpgo.Ca
 	// requires a kind:plan-approved ledger row scoped to the story. The
 	// orchestrator-compose path is the legacy single-shot entry point —
 	// it writes the row inline so its existing callers continue to
-	// work. The new entry point (satellites_orchestrator_submit_plan)
-	// is preferred for new stories because it runs the
-	// reviewer-approval loop instead of auto-approving.
+	// work. New stories go through satellites_story_task_submit
+	// (kind=plan) instead — the agent-authored, substrate-validated
+	// path replaces the legacy reviewer-approval loop.
 	planApprovedPayload, _ := json.Marshal(map[string]any{
 		"iteration":          1,
 		"proposed_contracts": proposed,

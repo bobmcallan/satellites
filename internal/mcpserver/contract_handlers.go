@@ -51,7 +51,7 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		body, _ := json.Marshal(map[string]any{
 			"error":    "plan_not_approved",
 			"story_id": storyID,
-			"message":  "story has no kind:plan-approved ledger row; call satellites_orchestrator_submit_plan first",
+			"message":  "story has no kind:plan-approved ledger row; submit a plan via satellites_story_task_submit (kind=plan) first",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
@@ -61,7 +61,7 @@ func (s *Server) handleWorkflowClaim(ctx context.Context, req mcpgo.CallToolRequ
 		body, _ := json.Marshal(map[string]any{
 			"error":    "proposed_contracts_required",
 			"story_id": storyID,
-			"message":  "proposed_contracts must be non-empty; call satellites_orchestrator_submit_plan with the proposed list and approve before claiming",
+			"message":  "proposed_contracts must be non-empty; submit a plan via satellites_story_task_submit (kind=plan) with the proposed task list and approve before claiming",
 		})
 		return mcpgo.NewToolResultError(string(body)), nil
 	}
