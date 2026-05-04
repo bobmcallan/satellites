@@ -53,6 +53,7 @@ func TestRegisteredToolNames_RenameFlatten(t *testing.T) {
 		"contract_claim",
 		"contract_close",
 		"contract_resume",
+		"contract_cancel",
 		"contract_respond",
 	} {
 		if _, ok := tools[want]; !ok {

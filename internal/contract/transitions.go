@@ -19,6 +19,14 @@ const (
 	StatusPassed        = "passed"
 	StatusFailed        = "failed"
 	StatusSkipped       = "skipped"
+	// StatusCancelled is the terminal state a CI takes when an operator
+	// or recovery agent calls contract_cancel on a claimed/pending_review
+	// CI (sty_3a59a6d7). Already-terminal failed/passed CIs are NOT
+	// flipped to cancelled — contract_cancel mints a successor and
+	// leaves the original row untouched for audit. cancelled is treated
+	// like passed/skipped by PredecessorGate's slot-relief logic when a
+	// successor at the same slot exists.
+	StatusCancelled = "cancelled"
 )
 
 // ErrInvalidTransition is returned when UpdateStatus is asked to move a
@@ -49,10 +57,10 @@ func ValidTransition(from, to string) bool {
 	case StatusReady:
 		return to == StatusClaimed || to == StatusSkipped
 	case StatusClaimed:
-		return to == StatusPendingReview || to == StatusPassed || to == StatusFailed || to == StatusSkipped
+		return to == StatusPendingReview || to == StatusPassed || to == StatusFailed || to == StatusSkipped || to == StatusCancelled
 	case StatusPendingReview:
-		return to == StatusPassed || to == StatusFailed
-	case StatusPassed, StatusFailed, StatusSkipped:
+		return to == StatusPassed || to == StatusFailed || to == StatusCancelled
+	case StatusPassed, StatusFailed, StatusSkipped, StatusCancelled:
 		return false
 	default:
 		return false
@@ -63,7 +71,7 @@ func ValidTransition(from, to string) bool {
 // Used by Create to validate an explicitly-supplied initial status.
 func IsKnownStatus(s string) bool {
 	switch s {
-	case StatusReady, StatusClaimed, StatusPendingReview, StatusPassed, StatusFailed, StatusSkipped:
+	case StatusReady, StatusClaimed, StatusPendingReview, StatusPassed, StatusFailed, StatusSkipped, StatusCancelled:
 		return true
 	}
 	return false

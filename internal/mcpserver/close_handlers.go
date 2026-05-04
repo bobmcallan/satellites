@@ -826,29 +826,9 @@ func (s *Server) CommitReviewVerdict(
 				CreatedBy:   actor,
 			}, now)
 		} else {
-			newCI, cerr := s.contracts.Create(ctx, contract.ContractInstance{
-				WorkspaceID:      ci.WorkspaceID,
-				ProjectID:        ci.ProjectID,
-				StoryID:          ci.StoryID,
-				ContractID:       ci.ContractID,
-				ContractName:     ci.ContractName,
-				Sequence:         ci.Sequence,
-				RequiredForClose: ci.RequiredForClose,
-				Status:           contract.StatusReady,
-				PriorCIID:        ci.ID,
-			}, now)
-			if cerr == nil {
+			newCI, _, mintErr := s.mintSuccessorCI(ctx, ci, "kind:rejection-append", sameType+1, fmt.Sprintf("appended fresh %s CI after rejection of %s; reason: %s", ci.ContractName, ci.ID, rationale), actor, now, memberships)
+			if mintErr == nil {
 				out.AppendedCIID = newCI.ID
-				_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
-					WorkspaceID: ci.WorkspaceID,
-					ProjectID:   ci.ProjectID,
-					StoryID:     ledger.StringPtr(ci.StoryID),
-					ContractID:  ledger.StringPtr(newCI.ID),
-					Type:        ledger.TypeDecision,
-					Tags:        []string{"kind:rejection-append", "phase:" + ci.ContractName, "prior_ci_id:" + ci.ID, "iteration:" + strconv.Itoa(sameType+1)},
-					Content:     fmt.Sprintf("appended fresh %s CI after rejection of %s; reason: %s", ci.ContractName, ci.ID, rationale),
-					CreatedBy:   actor,
-				}, now)
 			}
 		}
 	}
@@ -858,6 +838,56 @@ func (s *Server) CommitReviewVerdict(
 	// path no longer races it.
 	_ = verdictArg
 	return out, nil
+}
+
+// mintSuccessorCI creates a fresh CI at the same workflow slot as
+// prior, copying ContractID, ContractName, Sequence, RequiredForClose,
+// and stamping PriorCIID + status=ready. The audit row is written with
+// kindTag (`kind:rejection-append` for the review-rejection loop;
+// `kind:cancellation-append` for the contract_cancel escape hatch).
+// Returns the new CI, the audit row id, and any error from the mint or
+// the audit append.
+//
+// sty_3a59a6d7 — extracted from CommitReviewVerdict so contract_cancel
+// can reuse the same successor-mint contract.
+func (s *Server) mintSuccessorCI(
+	ctx context.Context,
+	prior contract.ContractInstance,
+	kindTag string,
+	iteration int,
+	auditContent string,
+	actor string,
+	now time.Time,
+	memberships []string,
+) (contract.ContractInstance, string, error) {
+	newCI, cerr := s.contracts.Create(ctx, contract.ContractInstance{
+		WorkspaceID:      prior.WorkspaceID,
+		ProjectID:        prior.ProjectID,
+		StoryID:          prior.StoryID,
+		ContractID:       prior.ContractID,
+		ContractName:     prior.ContractName,
+		Sequence:         prior.Sequence,
+		RequiredForClose: prior.RequiredForClose,
+		Status:           contract.StatusReady,
+		PriorCIID:        prior.ID,
+	}, now)
+	if cerr != nil {
+		return contract.ContractInstance{}, "", cerr
+	}
+	row, lerr := s.ledger.Append(ctx, ledger.LedgerEntry{
+		WorkspaceID: prior.WorkspaceID,
+		ProjectID:   prior.ProjectID,
+		StoryID:     ledger.StringPtr(prior.StoryID),
+		ContractID:  ledger.StringPtr(newCI.ID),
+		Type:        ledger.TypeDecision,
+		Tags:        []string{kindTag, "phase:" + prior.ContractName, "prior_ci_id:" + prior.ID, "iteration:" + strconv.Itoa(iteration)},
+		Content:     auditContent,
+		CreatedBy:   actor,
+	}, now)
+	if lerr != nil {
+		return newCI, "", lerr
+	}
+	return newCI, row.ID, nil
 }
 
 // ensureCloseHandlersCompile references the error + fmt packages to

@@ -609,6 +609,13 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			)
 			s.mcp.AddTool(resumeTool, s.handleContractResume)
 
+			cancelTool := mcpgo.NewTool("contract_cancel",
+				mcpgo.WithDescription("Manual escape hatch for unrecoverable CI states (sty_3a59a6d7). Accepts CIs in claimed | pending_review | failed | passed. Mid-flight states (claimed/pending_review) flip to terminal cancelled; already-terminal failed/passed are preserved for audit. In every case a successor CI is minted at the same workflow slot (status=ready, PriorCIID=prior.ID), mirroring the rejection-append loop, and a kind:cancellation ledger row is written naming the prior CI by id. When the story is in blocked state (iteration cap exhaustion) it is reset to in_progress so the successor is claimable. AC5 forbids silent retry — this verb is operator/agent-invoked only."),
+				mcpgo.WithString("contract_instance_id", mcpgo.Required(), mcpgo.Description("Contract instance id to cancel.")),
+				mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Why the cancellation is being invoked. Recorded on the kind:cancellation ledger row.")),
+			)
+			s.mcp.AddTool(cancelTool, s.handleContractCancel)
+
 			whoamiTool := mcpgo.NewTool("session_whoami",
 				mcpgo.WithDescription("Return the caller's session registry row. session_id resolves from the Mcp-Session-Id header by default (story_31975268); pass session_id as a body arg to override. Returns a structured session_not_registered error when the resolved session is not in the registry."),
 				mcpgo.WithString("session_id", mcpgo.Description("Optional session id override. Streamable HTTP callers should let the Mcp-Session-Id header carry the id.")),

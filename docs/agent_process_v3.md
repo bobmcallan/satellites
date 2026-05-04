@@ -261,6 +261,34 @@ The review iteration cap on plan tasks is
 there's no formal cap — the reviewer will loop until the
 evidence package satisfies the rubric.
 
+### 5h-bis. Plan CI failure recovery
+
+When the reviewer rejects an implement task and the
+review-iteration cap (`SATELLITES_REVIEW_ITERATION_CAP`, default 3)
+has not yet been reached, the substrate auto-appends a fresh
+implement task at the same workflow slot — described in §5h above.
+No agent action is required; `task_walk` reveals the new
+`current_task_id` and the loop continues.
+
+When the auto-append cannot fire — cap exhausted (story flips to
+`blocked`), or the CI failed via the legacy `claimed → failed`
+path that bypasses `CommitReviewVerdict`, or the operator wants
+to abandon a `claimed` / `pending_review` CI explicitly — call
+`contract_cancel({contract_instance_id, reason})`. The verb:
+
+- preserves terminal `failed` / `passed` CIs in the audit chain
+  (no flip);
+- transitions mid-flight `claimed` / `pending_review` CIs to a
+  new terminal `cancelled` state;
+- mints a fresh successor CI at the same slot (status=ready,
+  `PriorCIID` set), tagged `kind:cancellation-append` on the
+  ledger;
+- when the story is `blocked`, resets it to `in_progress` so the
+  successor is claimable.
+
+`contract_cancel` is the manual escape hatch — never auto-
+invoked. Use it when there is no other in-MCP path forward.
+
 ### 5i. Move on
 
 `task_walk({story_id})` again — `current_task_id` now points at

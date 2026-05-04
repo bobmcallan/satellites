@@ -143,6 +143,46 @@ func TestPredecessorGate_FailedDifferentSlotStillBlocks(t *testing.T) {
 	}
 }
 
+// TestPredecessorGate_CancelledIterationRelievedByPassedSuccessor verifies
+// sty_3a59a6d7: a cancelled iteration-(N-1) CI must not block downstream
+// claims when a passed iteration-N CI exists at the same workflow slot.
+// contract_cancel always mints a successor at the same slot; the
+// cancelled peer stays in the audit trail without gating the workflow.
+func TestPredecessorGate_CancelledIterationRelievedByPassedSuccessor(t *testing.T) {
+	t.Parallel()
+	peers := []ContractInstance{
+		ciNamed("ci_plan_v1", "plan", 0, true, StatusCancelled),
+		ciNamed("ci_plan_v2", "plan", 0, true, StatusPassed),
+		ciNamed("ci_develop", "develop", 1, true, StatusReady),
+	}
+	if err := PredecessorGate(peers, peers[2]); err != nil {
+		t.Fatalf("expected nil — cancelled iteration relieved by passed successor at slot, got %v", err)
+	}
+}
+
+// TestPredecessorGate_CancelledWithNoPassedSuccessorBlocks confirms a
+// cancelled CI with no passed peer at the same slot continues to gate
+// downstream claims — the cancellation loop is open until the successor
+// reaches passed.
+func TestPredecessorGate_CancelledWithNoPassedSuccessorBlocks(t *testing.T) {
+	t.Parallel()
+	peers := []ContractInstance{
+		ciNamed("ci_plan_v1", "plan", 0, true, StatusCancelled),
+		ciNamed("ci_develop", "develop", 1, true, StatusReady),
+	}
+	err := PredecessorGate(peers, peers[1])
+	if err == nil {
+		t.Fatalf("expected rejection — cancelled predecessor with no successor must still block")
+	}
+	var gr *GateRejection
+	if !errors.As(err, &gr) || gr.Kind != "predecessor_not_terminal" {
+		t.Fatalf("expected predecessor_not_terminal, got %v", err)
+	}
+	if gr.Blocking != "ci_plan_v1" {
+		t.Fatalf("blocking: %q", gr.Blocking)
+	}
+}
+
 func TestCheckCIReady(t *testing.T) {
 	t.Parallel()
 	if err := CheckCIReady(ci("x", 0, true, StatusReady)); err != nil {

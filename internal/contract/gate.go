@@ -41,6 +41,11 @@ func (e *GateRejection) Error() string {
 // N+1 at the same slot with the same sequence + a PriorCIID pointer.
 // Without this carve-out, a single review rejection on a
 // required_for_close slot would permanently block every downstream CI.
+//
+// Cancellation-loop awareness (sty_3a59a6d7): a `cancelled` CI mirrors
+// `failed` for slot-relief purposes. contract_cancel always mints a
+// successor at the same slot (PriorCIID set), so the cancelled peer
+// can be ignored once the successor reaches passed/skipped.
 func PredecessorGate(peers []ContractInstance, target ContractInstance) error {
 	relieved := slotRelieved(peers)
 	for _, p := range peers {
@@ -56,7 +61,7 @@ func PredecessorGate(peers []ContractInstance, target ContractInstance) error {
 		if p.Status == StatusPassed || p.Status == StatusSkipped {
 			continue
 		}
-		if p.Status == StatusFailed && relieved[slotKey{Name: p.ContractName, Sequence: p.Sequence}] {
+		if (p.Status == StatusFailed || p.Status == StatusCancelled) && relieved[slotKey{Name: p.ContractName, Sequence: p.Sequence}] {
 			// A passed/skipped iteration successor exists at the same
 			// slot — the loop is resolved at this position.
 			continue

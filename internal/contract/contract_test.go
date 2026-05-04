@@ -105,6 +105,14 @@ func TestValidTransition(t *testing.T) {
 		{StatusPassed, StatusFailed, false},
 		{StatusFailed, StatusClaimed, false},
 		{StatusSkipped, StatusClaimed, false},
+		{StatusClaimed, StatusCancelled, true},
+		{StatusPendingReview, StatusCancelled, true},
+		{StatusReady, StatusCancelled, false},
+		{StatusPassed, StatusCancelled, false},
+		{StatusFailed, StatusCancelled, false},
+		{StatusCancelled, StatusClaimed, false},
+		{StatusCancelled, StatusReady, false},
+		{StatusCancelled, StatusCancelled, false},
 		{"bogus", StatusReady, false},
 	}
 	for _, c := range cases {
