@@ -47,6 +47,11 @@ const (
 	// order. Seeded from config/seed/replicate_vocabulary/*.md.
 	// Sty_088f6d5c.
 	TypeReplicateVocabulary = "replicate_vocabulary"
+	// TypeLifecycle names a system-scope document declaring a substrate
+	// lifecycle: status enum + transition matrix + subscriber-visibility
+	// rules. One document per primitive (today: task; future: contract).
+	// Seeded from config/seed/lifecycles/*.md. sty_c1200f75.
+	TypeLifecycle = "lifecycle"
 )
 
 // Scope enum values per docs/architecture.md §2.
@@ -79,6 +84,7 @@ var validTypes = map[string]struct{}{
 	TypeHelp:                {},
 	TypeStoryTemplate:       {},
 	TypeReplicateVocabulary: {},
+	TypeLifecycle:           {},
 }
 
 var validScopes = map[string]struct{}{

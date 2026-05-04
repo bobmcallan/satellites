@@ -288,6 +288,35 @@ func main() {
 			}
 		}
 
+		// sty_c1200f75: register the task lifecycle from the seed
+		// document so internal/task ValidTransition and
+		// SubscriberVisibleStatuses follow the seed instead of the
+		// built-in defaults. Failure is non-fatal — defaults stay live.
+		if doc, err := docStore.GetByName(ctx, "", "task_lifecycle", nil); err == nil &&
+			doc.Type == document.TypeLifecycle && doc.Status == document.StatusActive {
+			if lc, lerr := task.LifecycleFromStructured(doc.Structured); lerr == nil && lc != nil {
+				task.RegisterLifecycle(lc)
+				logger.Info().
+					Strs("statuses", lc.Statuses).
+					Strs("subscriber_visible", lc.SubscriberVisibleStatuses).
+					Msg("task lifecycle registered from seed")
+			} else if lerr != nil {
+				logger.Warn().Str("error", lerr.Error()).Msg("task lifecycle parse failed; using defaults")
+			}
+		}
+
+		// sty_c1200f75: migrate any pre-existing tasks at status=enqueued
+		// to status=published. The substrate now distinguishes planned
+		// (agent-local) from published (queue-visible); existing rows
+		// were all queue-visible by definition. Idempotent.
+		if taskStore != nil {
+			if n, err := task.MigrateEnqueuedToPublished(ctx, taskStore, time.Now().UTC()); err != nil {
+				logger.Warn().Str("error", err.Error()).Msg("task migrate enqueued->published failed")
+			} else if n > 0 {
+				logger.Info().Int("rows", n).Msg("task enqueued->published migration complete")
+			}
+		}
+
 		// story_b1108d4a: migrate legacy skill→contract bindings into
 		// agent.skill_refs so the new contract_next resolution path
 		// surfaces skills via the allocated agent. Idempotent — skills

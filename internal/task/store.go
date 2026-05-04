@@ -99,6 +99,20 @@ type Store interface {
 	// row is skipped (no expiry budget to compute against).
 	// Story_b4513c8c.
 	ListExpiring(ctx context.Context, now time.Time, multiplier float64, memberships []string) ([]Task, error)
+
+	// Save persists arbitrary mutations to a task row. Used by
+	// migrations that need to rewrite fields outside the
+	// Enqueue/Claim/Close lifecycle helpers (e.g. enqueued→published
+	// status migration in sty_c1200f75). Validates enum fields and
+	// transition legality via Task.Validate. Caller-supplied UpdatedAt
+	// is implicit in `now`. Memberships-scoped.
+	Save(ctx context.Context, t Task, now time.Time) error
+
+	// Publish flips a task from StatusPlanned to StatusPublished —
+	// the orchestrator's commit step in sty_c1200f75. Returns
+	// ErrInvalidTransition if the task is not currently planned.
+	// Memberships-scoped.
+	Publish(ctx context.Context, id string, now time.Time, memberships []string) (Task, error)
 }
 
 // MemoryStore is a concurrency-safe in-process Store used by unit tests.
@@ -117,6 +131,12 @@ func NewMemoryStore() *MemoryStore {
 func (m *MemoryStore) SetPublisher(p hubemit.Publisher) { m.publisher = p }
 
 // Enqueue implements Store for MemoryStore.
+//
+// Accepts t.Status ∈ {planned, published, enqueued (legacy default)}.
+// Empty defaults to StatusEnqueued for back-compat; new callers should
+// set t.Status=StatusPublished or use task_publish explicitly per
+// sty_c1200f75. Set t.Status=StatusPlanned for the agent-local
+// drafting state.
 func (m *MemoryStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task, error) {
 	if t.Status == "" {
 		t.Status = StatusEnqueued
@@ -130,8 +150,10 @@ func (m *MemoryStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task,
 	if err := t.Validate(); err != nil {
 		return Task{}, err
 	}
-	if t.Status != StatusEnqueued {
-		return Task{}, fmt.Errorf("task: Enqueue requires status=enqueued, got %q", t.Status)
+	switch t.Status {
+	case StatusPlanned, StatusPublished, StatusEnqueued:
+	default:
+		return Task{}, fmt.Errorf("task: Enqueue accepts status ∈ {planned, published, enqueued}, got %q", t.Status)
 	}
 	m.mu.Lock()
 	if t.ID == "" {
@@ -222,7 +244,7 @@ func (m *MemoryStore) Claim(ctx context.Context, workerID string, workspaceIDs [
 	m.mu.Lock()
 	candidates := make([]Task, 0)
 	for _, t := range m.rows {
-		if t.Status != StatusEnqueued {
+		if !isClaimable(t.Status) {
 			continue
 		}
 		if _, ok := allowed[t.WorkspaceID]; !ok {
@@ -259,7 +281,7 @@ func (m *MemoryStore) ClaimByID(ctx context.Context, id, workerID string, now ti
 		m.mu.Unlock()
 		return Task{}, ErrNotFound
 	}
-	if t.Status != StatusEnqueued {
+	if !isClaimable(t.Status) {
 		m.mu.Unlock()
 		return Task{}, ErrNoTaskAvailable
 	}
@@ -369,6 +391,45 @@ func (m *MemoryStore) ListExpiring(ctx context.Context, now time.Time, multiplie
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// Publish implements Store for MemoryStore.
+func (m *MemoryStore) Publish(ctx context.Context, id string, now time.Time, memberships []string) (Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.rows[id]
+	if !ok || !workspaceVisible(t.WorkspaceID, memberships) {
+		return Task{}, ErrNotFound
+	}
+	if !ValidTransition(t.Status, StatusPublished) {
+		return Task{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, t.Status, StatusPublished)
+	}
+	t.Status = StatusPublished
+	m.rows[id] = t
+	pub := m.publisher
+	go emitStatus(context.Background(), pub, t)
+	return t, nil
+}
+
+// Save implements Store for MemoryStore.
+func (m *MemoryStore) Save(ctx context.Context, t Task, now time.Time) error {
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.rows[t.ID]; !ok {
+		return ErrNotFound
+	}
+	m.rows[t.ID] = t
+	return nil
+}
+
+// isClaimable reports whether a task at this status can transition to
+// StatusClaimed via the Claim/ClaimByID path. published is the
+// post-c1200f75 default; enqueued is the legacy pre-migration state.
+func isClaimable(status string) bool {
+	return status == StatusPublished || status == StatusEnqueued
 }
 
 // sortByPriorityThenCreated orders tasks by priority rank (critical

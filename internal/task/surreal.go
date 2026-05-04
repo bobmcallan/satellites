@@ -37,6 +37,9 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 const selectCols = "meta::id(id) AS id, workspace_id, project_id, contract_instance_id, kind, iteration, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
 
 // Enqueue implements Store for SurrealStore.
+//
+// Accepts t.Status ∈ {planned, published, enqueued (legacy default)}.
+// Empty defaults to StatusEnqueued for back-compat. sty_c1200f75.
 func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task, error) {
 	if t.Status == "" {
 		t.Status = StatusEnqueued
@@ -50,8 +53,10 @@ func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task
 	if err := t.Validate(); err != nil {
 		return Task{}, err
 	}
-	if t.Status != StatusEnqueued {
-		return Task{}, fmt.Errorf("task: Enqueue requires status=enqueued, got %q", t.Status)
+	switch t.Status {
+	case StatusPlanned, StatusPublished, StatusEnqueued:
+	default:
+		return Task{}, fmt.Errorf("task: Enqueue accepts status ∈ {planned, published, enqueued}, got %q", t.Status)
 	}
 	if t.ID == "" {
 		t.ID = NewID()
@@ -165,14 +170,14 @@ func (s *SurrealStore) Claim(ctx context.Context, workerID string, workspaceIDs 
 	// already enforces priority order for unit-test parity.
 	// SurrealDB v3's parser needs the ORDER BY field to appear in the
 	// SELECT list — including created_at here keeps it happy.
-	selectSQL := "SELECT meta::id(id) AS id, workspace_id, created_at FROM tasks WHERE status = $status AND workspace_id IN $memberships ORDER BY created_at LIMIT 1"
+	selectSQL := "SELECT meta::id(id) AS id, workspace_id, created_at FROM tasks WHERE status IN $statuses AND workspace_id IN $memberships ORDER BY created_at LIMIT 1"
 	type head struct {
 		ID          string    `json:"id"`
 		WorkspaceID string    `json:"workspace_id"`
 		CreatedAt   time.Time `json:"created_at"`
 	}
 	selectRes, err := surrealdb.Query[[]head](ctx, s.db, selectSQL, map[string]any{
-		"status":      StatusEnqueued,
+		"statuses":    []string{StatusPublished, StatusEnqueued},
 		"memberships": workspaceIDs,
 	})
 	if err != nil {
@@ -187,15 +192,15 @@ func (s *SurrealStore) Claim(ctx context.Context, workerID string, workspaceIDs 
 	// enqueued. Concurrent callers racing on the same id get an empty
 	// Result from the losing UPDATE; they retry the SELECT.
 	updateSQL := fmt.Sprintf(
-		"UPDATE $rid SET status = $new, claimed_by = $by, claimed_at = $at WHERE status = $old RETURN %s",
+		"UPDATE $rid SET status = $new, claimed_by = $by, claimed_at = $at WHERE status IN $oldset RETURN %s",
 		selectCols,
 	)
 	updateRes, err := surrealdb.Query[[]Task](ctx, s.db, updateSQL, map[string]any{
-		"rid": surrealmodels.NewRecordID("tasks", id),
-		"new": StatusClaimed,
-		"old": StatusEnqueued,
-		"by":  workerID,
-		"at":  now,
+		"rid":    surrealmodels.NewRecordID("tasks", id),
+		"new":    StatusClaimed,
+		"oldset": []string{StatusPublished, StatusEnqueued},
+		"by":     workerID,
+		"at":     now,
 	})
 	if err != nil {
 		return Task{}, fmt.Errorf("task: claim update: %w", err)
@@ -220,13 +225,13 @@ func (s *SurrealStore) ClaimByID(ctx context.Context, id, workerID string, now t
 	if memberships != nil && len(memberships) == 0 {
 		return Task{}, ErrNotFound
 	}
-	conds := []string{"status = $old"}
+	conds := []string{"status IN $oldset"}
 	vars := map[string]any{
-		"rid": surrealmodels.NewRecordID("tasks", id),
-		"new": StatusClaimed,
-		"old": StatusEnqueued,
-		"by":  workerID,
-		"at":  now,
+		"rid":    surrealmodels.NewRecordID("tasks", id),
+		"new":    StatusClaimed,
+		"oldset": []string{StatusPublished, StatusEnqueued},
+		"by":     workerID,
+		"at":     now,
 	}
 	if memberships != nil {
 		conds = append(conds, "workspace_id IN $memberships")
@@ -347,6 +352,32 @@ func (s *SurrealStore) ListExpiring(ctx context.Context, now time.Time, multipli
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// Publish implements Store for SurrealStore.
+func (s *SurrealStore) Publish(ctx context.Context, id string, now time.Time, memberships []string) (Task, error) {
+	t, err := s.GetByID(ctx, id, memberships)
+	if err != nil {
+		return Task{}, err
+	}
+	if !ValidTransition(t.Status, StatusPublished) {
+		return Task{}, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, t.Status, StatusPublished)
+	}
+	t.Status = StatusPublished
+	if err := s.write(ctx, t); err != nil {
+		return Task{}, err
+	}
+	emitStatus(ctx, s.publisher, t)
+	return t, nil
+}
+
+// Save implements Store for SurrealStore — generic upsert used by
+// migrations that mutate fields outside the lifecycle helpers.
+func (s *SurrealStore) Save(ctx context.Context, t Task, now time.Time) error {
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	return s.write(ctx, t)
 }
 
 func (s *SurrealStore) write(ctx context.Context, t Task) error {

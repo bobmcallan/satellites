@@ -14,24 +14,76 @@ import (
 	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// handleTaskEnqueue implements task_enqueue: create a new enqueued task
-// + write a kind:task-enqueued ledger row scoped to the caller's
-// workspace.
+// handleTaskEnqueue writes a task at the legacy status=enqueued. New
+// callers should use task_plan (drafting) or task_publish (committing)
+// explicitly per sty_c1200f75. Subscribers see enqueued and published
+// rows alike via task.SubscriberVisibleStatuses.
 func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	return s.createTask(ctx, req, task.StatusEnqueued, "task_enqueue")
+}
+
+// handleTaskPlan implements task_plan: write a task at status=planned —
+// the agent's drafting state. Subscribers do not see planned rows.
+// sty_c1200f75.
+func (s *Server) handleTaskPlan(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	return s.createTask(ctx, req, task.StatusPlanned, "task_plan")
+}
+
+// handleTaskPublish implements task_publish. Two modes:
+//   - With task_id: flips an existing planned task to published.
+//   - Without task_id: same args as task_plan; creates and publishes
+//     in one call (skips the planned step). sty_c1200f75.
+func (s *Server) handleTaskPublish(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	if s.tasks == nil {
-		return mcpgo.NewToolResultError("task_enqueue unavailable: task store not configured"), nil
+		return mcpgo.NewToolResultError("task_publish unavailable: task store not configured"), nil
+	}
+	args := req.GetArguments()
+	if id := getString(args, "task_id"); id != "" {
+		caller, _ := UserFrom(ctx)
+		memberships := s.resolveCallerMemberships(ctx, caller)
+		t, err := s.tasks.Publish(ctx, id, time.Now().UTC(), memberships)
+		if err != nil {
+			return mcpgo.NewToolResultError(fmt.Sprintf("task_publish: %s", err)), nil
+		}
+		if s.ledger != nil {
+			_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
+				WorkspaceID: t.WorkspaceID,
+				ProjectID:   t.ProjectID,
+				Type:        ledger.TypeDecision,
+				Tags:        []string{"kind:task-published", "task_id:" + t.ID},
+				Content:     fmt.Sprintf("task published: id=%s", t.ID),
+				Durability:  ledger.DurabilityDurable,
+				SourceType:  ledger.SourceAgent,
+				Status:      ledger.StatusActive,
+				CreatedBy:   caller.UserID,
+			}, time.Now().UTC())
+		}
+		return jsonResult(map[string]any{
+			"task_id":      t.ID,
+			"workspace_id": t.WorkspaceID,
+			"status":       t.Status,
+		})
+	}
+	return s.createTask(ctx, req, task.StatusPublished, "task_publish")
+}
+
+// createTask is the shared body of task_enqueue / task_plan /
+// task_publish (no-id form). status names the row's initial state.
+func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, status, verbName string) (*mcpgo.CallToolResult, error) {
+	if s.tasks == nil {
+		return mcpgo.NewToolResultError(verbName + " unavailable: task store not configured"), nil
 	}
 	caller, _ := UserFrom(ctx)
 	memberships := s.resolveCallerMemberships(ctx, caller)
 	args := req.GetArguments()
 	origin := getString(args, "origin")
 	if origin == "" {
-		return mcpgo.NewToolResultError("task_enqueue requires origin"), nil
+		return mcpgo.NewToolResultError(verbName + " requires origin"), nil
 	}
 	workspaceID := getString(args, "workspace_id")
 	if workspaceID == "" {
 		if len(memberships) == 0 {
-			return mcpgo.NewToolResultError("task_enqueue: no caller workspace memberships"), nil
+			return mcpgo.NewToolResultError(verbName + ": no caller workspace memberships"), nil
 		}
 		workspaceID = memberships[0]
 	}
@@ -57,6 +109,7 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 		ProjectID:          projectID,
 		ContractInstanceID: contractInstanceID,
 		Kind:               kind,
+		Status:             status,
 		Origin:             origin,
 		Trigger:            triggerRaw,
 		Payload:            payloadRaw,
@@ -65,21 +118,27 @@ func (s *Server) handleTaskEnqueue(ctx context.Context, req mcpgo.CallToolReques
 	}, memberships)
 	t, err := s.tasks.Enqueue(ctx, seed, now)
 	if err != nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("task_enqueue: %s", err)), nil
+		return mcpgo.NewToolResultError(fmt.Sprintf("%s: %s", verbName, err)), nil
 	}
 	ledgerID := ""
 	if s.ledger != nil {
+		ledgerKind := "kind:task-published"
+		if t.Status == task.StatusPlanned {
+			ledgerKind = "kind:task-planned"
+		} else if t.Status == task.StatusEnqueued {
+			ledgerKind = "kind:task-enqueued"
+		}
 		row, lerr := s.ledger.Append(ctx, ledger.LedgerEntry{
 			WorkspaceID: t.WorkspaceID,
 			ProjectID:   t.ProjectID,
 			Type:        ledger.TypeDecision,
 			Tags: []string{
-				"kind:task-enqueued",
+				ledgerKind,
 				"task_id:" + t.ID,
 				"origin:" + t.Origin,
 				"priority:" + t.Priority,
 			},
-			Content:    fmt.Sprintf("task enqueued: id=%s origin=%s priority=%s", t.ID, t.Origin, t.Priority),
+			Content:    fmt.Sprintf("task created: id=%s status=%s origin=%s priority=%s", t.ID, t.Status, t.Origin, t.Priority),
 			Structured: t.Payload,
 			Durability: ledger.DurabilityDurable,
 			SourceType: ledger.SourceAgent,

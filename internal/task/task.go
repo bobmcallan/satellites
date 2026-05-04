@@ -25,18 +25,30 @@ const (
 	OriginEvent          = "event"
 )
 
-// Status enum values per §4 "Lifecycle" diagram.
+// Status enum values. Defaults; the canonical set + transition matrix
+// is loaded at boot from config/seed/lifecycles/task.md (sty_c1200f75)
+// via RegisterLifecycle. The constants below are kept so callers can
+// reference statuses by name in code without string-literal sprawl,
+// and so the runtime has safe defaults if the seed is missing.
+//
+// StatusPlanned (sty_c1200f75) is the agent-local drafting state. Rows
+// at this status are persisted but invisible to subscribers — the
+// orchestrator must call task_publish to flip them to StatusPublished
+// before any worker can claim them.
+//
+// StatusPublished (sty_c1200f75) is the committed-queue state. The
+// pre-c1200f75 substrate used StatusEnqueued for the same purpose; on
+// next boot, existing enqueued rows are migrated to published.
 //
 // StatusArchived is the post-retention state introduced by sty_dc2998c5.
-// The nightly sweep flips closed rows older than the project retention
-// window into archived; the row stays in place + ledger anchors are
-// untouched, but the row falls out of the default task_list query.
 const (
-	StatusEnqueued = "enqueued"
-	StatusClaimed  = "claimed"
-	StatusInFlight = "in_flight"
-	StatusClosed   = "closed"
-	StatusArchived = "archived"
+	StatusPlanned   = "planned"
+	StatusPublished = "published"
+	StatusEnqueued  = "enqueued" // legacy alias; migrated to published on boot
+	StatusClaimed   = "claimed"
+	StatusInFlight  = "in_flight"
+	StatusClosed    = "closed"
+	StatusArchived  = "archived"
 )
 
 // Priority enum values — dispatcher pulls critical before high, etc.
@@ -66,7 +78,8 @@ var validOrigins = map[string]struct{}{
 }
 
 var validStatuses = map[string]struct{}{
-	StatusEnqueued: {}, StatusClaimed: {}, StatusInFlight: {}, StatusClosed: {}, StatusArchived: {},
+	StatusPlanned: {}, StatusPublished: {}, StatusEnqueued: {},
+	StatusClaimed: {}, StatusInFlight: {}, StatusClosed: {}, StatusArchived: {},
 }
 
 var validPriorities = map[string]struct{}{
@@ -175,18 +188,33 @@ func (t Task) Validate() error {
 }
 
 // ValidTransition returns true when moving from → to is a legal Status
-// transition per the §4 lifecycle diagram. Store-layer enforcement so
-// the invariant survives callers that bypass happy-path helpers.
+// transition. Consults the registered Lifecycle (loaded from
+// config/seed/lifecycles/task.md at boot) when present; otherwise
+// falls back to the built-in default matrix below.
 //
-// closed → archived is the retention sweep's transition (sty_dc2998c5).
+// Default matrix (sty_c1200f75):
+//   - planned   → published | closed
+//   - published → claimed   | closed
+//   - enqueued  → published | claimed | closed   (legacy compat)
+//   - claimed   → in_flight | closed | published
+//   - in_flight → closed
+//   - closed    → archived
+//
 // Archived is terminal — the row drops out of the default task_list
 // query but the ledger anchors persist for audit.
 func ValidTransition(from, to string) bool {
+	if lc := registeredLifecycle(); lc != nil {
+		return lc.AllowTransition(from, to)
+	}
 	switch from {
-	case StatusEnqueued:
+	case StatusPlanned:
+		return to == StatusPublished || to == StatusClosed
+	case StatusPublished:
 		return to == StatusClaimed || to == StatusClosed
+	case StatusEnqueued:
+		return to == StatusPublished || to == StatusClaimed || to == StatusClosed
 	case StatusClaimed:
-		return to == StatusInFlight || to == StatusClosed || to == StatusEnqueued
+		return to == StatusInFlight || to == StatusClosed || to == StatusPublished || to == StatusEnqueued
 	case StatusInFlight:
 		return to == StatusClosed
 	case StatusClosed:
@@ -194,4 +222,28 @@ func ValidTransition(from, to string) bool {
 	default:
 		return false
 	}
+}
+
+// SubscriberVisibleStatuses returns the set of statuses subscribers
+// (reviewer service, future task-claim workers) may see. Reads the
+// registered Lifecycle when present; otherwise the built-in default
+// of {published, claimed, in_flight}. Planned rows are agent-local —
+// never visible to subscribers.
+func SubscriberVisibleStatuses() map[string]struct{} {
+	if lc := registeredLifecycle(); lc != nil {
+		return lc.SubscriberVisible()
+	}
+	return map[string]struct{}{
+		StatusPublished: {},
+		StatusEnqueued:  {}, // legacy compat — pre-migration rows
+		StatusClaimed:   {},
+		StatusInFlight:  {},
+	}
+}
+
+// IsSubscriberVisible reports whether a worker subscribed to the task
+// queue should see a row at this status.
+func IsSubscriberVisible(status string) bool {
+	_, ok := SubscriberVisibleStatuses()[status]
+	return ok
 }

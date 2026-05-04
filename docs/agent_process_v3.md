@@ -358,3 +358,49 @@ rules until proven otherwise.
     the review-task lane. Manually claiming a review task from
     the orchestrator session is a bug — let the publish/subscribe
     flow run.
+
+
+## Task lifecycle (sty_c1200f75)
+
+Tasks flow through a small set of statuses defined by
+`config/seed/lifecycles/task.md` and resolved at boot via
+`task.RegisterLifecycle`.
+
+**States:**
+
+- `planned` — drafted by an agent, persisted, **invisible to
+  subscribers**. The agent owns the row; it can edit, reorder, or
+  cancel without affecting downstream consumers.
+- `published` — committed to the work queue. The reviewer service
+  and any future task-claim worker sees the row on the next scan.
+- `claimed` — a subscriber has taken ownership.
+- `in_flight` — actively being processed (optional intermediate).
+- `closed` — terminal with an outcome (success / failure /
+  timeout). Eventually moved to `archived` by the retention sweep.
+- `enqueued` — pre-c1200f75 legacy state. Treated as
+  subscriber-visible during the migration window. New rows should
+  not use it.
+
+**Verbs:**
+
+- `task_plan(...)` — write a row at status=planned. Agent's
+  drafting state.
+- `task_publish(task_id)` — flip a planned row to published. The
+  orchestrator's commit step.
+- `task_publish(...)` (no `task_id`) — create + publish in one
+  call when the agent doesn't need the staging step.
+- `task_enqueue(...)` — legacy alias; writes at status=enqueued.
+  Kept for back-compat. New code should use `task_plan` +
+  `task_publish` explicitly.
+
+**Subscriber rule:** workers (reviewer service, future task-claim
+runtimes) filter by `task.SubscriberVisibleStatuses()` —
+`{published, enqueued, claimed, in_flight}` by default. `planned`
+rows are never visible.
+
+**Why a separate planned state:** an agent's working list
+(drafting, reordering, batching) is not the same as the committed
+queue. Conflating them — as `task_enqueue` did before c1200f75 —
+leaks half-formed plans into the subscriber's view and removes the
+orchestration opportunity. Splitting the states gives the
+orchestrator a place to stand: plan locally, then publish.

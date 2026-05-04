@@ -683,19 +683,37 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
 
 	if s.tasks != nil {
-		enqueueTool := mcpgo.NewTool("task_enqueue",
-			mcpgo.WithDescription("Enqueue a new task. Writes a kind:task-enqueued ledger row. Returns {task_id, ledger_root_id}. Plan agents bind child tasks to the plan CI; downstream contracts pull tasks by their CI. Story_a8fee0cc."),
+		// task_enqueue (legacy alias of task_publish): writes a row at
+		// status=published. New callers should prefer task_plan +
+		// task_publish for the explicit lifecycle. sty_c1200f75.
+		taskCommonOpts := []mcpgo.ToolOption{
 			mcpgo.WithString("origin", mcpgo.Required(), mcpgo.Description("story_stage | scheduled | story_producing | event")),
 			mcpgo.WithString("workspace_id", mcpgo.Description("Workspace scope. Defaults to caller's first membership.")),
 			mcpgo.WithString("project_id", mcpgo.Description("Optional project scope.")),
 			mcpgo.WithString("contract_instance_id", mcpgo.Description("Optional CI this task belongs to. Plan agents bind their child tasks to the plan CI so the story view groups work per CI.")),
-			mcpgo.WithString("kind", mcpgo.Description("Optional task kind discriminator. Today: \"review\" (consumed by the embedded reviewer service) vs \"\"/\"work\" (everything else). sty_c1200f75 expands this into a seed-driven lifecycle.")),
+			mcpgo.WithString("kind", mcpgo.Description("Optional task kind discriminator. Today: \"review\" (consumed by the embedded reviewer service) vs \"work\" (everything else).")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
 			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload.")),
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
-		)
-		s.mcp.AddTool(enqueueTool, s.handleTaskEnqueue)
+		}
+
+		enqueueOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Legacy alias of task_publish. Writes a task at status=published. New callers should use task_plan (drafting) or task_publish (committing) explicitly per sty_c1200f75.")}, taskCommonOpts...)
+		s.mcp.AddTool(mcpgo.NewTool("task_enqueue", enqueueOpts...), s.handleTaskEnqueue)
+
+		// task_plan: write a task at status=planned. Agent-local —
+		// subscribers do not see planned rows. sty_c1200f75.
+		planOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Write a task at status=planned (the agent-local drafting state). Subscribers do not see planned rows. Use task_publish to flip the row to published once the orchestrator commits. sty_c1200f75.")}, taskCommonOpts...)
+		s.mcp.AddTool(mcpgo.NewTool("task_plan", planOpts...), s.handleTaskPlan)
+
+		// task_publish: flip planned -> published, OR create+publish.
+		publishOpts := []mcpgo.ToolOption{mcpgo.WithDescription("Flip an existing planned task to published, OR (without task_id) create a task directly at status=published. published rows are visible to subscribers. sty_c1200f75.")}
+		publishOpts = append(publishOpts, mcpgo.WithString("task_id", mcpgo.Description("Existing planned task to publish. When omitted, creates a new task at status=published using the same args as task_plan.")))
+		publishOpts = append(publishOpts, taskCommonOpts...)
+		// Strip the Required(origin) when task_id is supplied — but the
+		// schema can't express that conditionally. The handler validates
+		// at runtime: origin is required only when task_id is omitted.
+		s.mcp.AddTool(mcpgo.NewTool("task_publish", publishOpts...), s.handleTaskPublish)
 
 		getTaskTool := mcpgo.NewTool("task_get",
 			mcpgo.WithDescription("Return a task by id. Workspace-scoped."),

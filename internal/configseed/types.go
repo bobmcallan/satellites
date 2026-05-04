@@ -20,6 +20,11 @@ const (
 	KindPrinciple           Kind = "principle"
 	KindStoryTemplate       Kind = "story_template"
 	KindReplicateVocabulary Kind = "replicate_vocabulary"
+	// KindLifecycle loads `lifecycles/*.md` into type=lifecycle, scope=system
+	// documents. Each lifecycle doc declares a substrate-internal status
+	// enum + transition matrix (e.g. task lifecycle, contract lifecycle)
+	// that the runtime resolves at boot. sty_c1200f75.
+	KindLifecycle Kind = "lifecycle"
 	// KindArtifact loads `artifacts/*.md` into type=artifact, scope=system
 	// documents. The body is the artifact's content; frontmatter carries
 	// `name` (required) and `tags`. Used today for the `default_agent_process`
