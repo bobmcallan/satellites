@@ -129,10 +129,23 @@ type Task struct {
 	// Kind classifies the task by its purpose so subscribers can filter
 	// the queue without inspecting payloads. Today: "review" (consumed
 	// by the embedded reviewer service) vs "" / "work" (everything
-	// else). The taxonomy is deliberately small; sty_c1200f75 expands
-	// it into a proper seed-driven lifecycle.
-	Kind             string        `json:"kind,omitempty"`
-	Iteration        int           `json:"iteration,omitempty"`
+	// else). sty_c6d76a5b promotes "work" → "implement" semantics: implement
+	// tasks are claimed by the orchestrator; review tasks are claimed by
+	// the embedded reviewer subscriber. The pair (implement, review)
+	// per CI is the unit of progress.
+	Kind      string `json:"kind,omitempty"`
+	Iteration int    `json:"iteration,omitempty"`
+	// AgentID stamps the per-task agent doc this task is bound to
+	// (sty_c6d76a5b). The orchestrator's task_claim verb verifies that
+	// the caller-supplied agent_id matches this stamped value. For
+	// implement tasks: copied from the parent CI's agent_id at compose
+	// time (set by mintTaskAgentForContract per sty_e8d49554). For
+	// review tasks: the persistent reviewer agent's id.
+	AgentID string `json:"agent_id,omitempty"`
+	// PriorTaskID links a fresh implement task to the prior implement
+	// task it succeeds in the rejection-append loop (sty_c6d76a5b).
+	// Empty for the first attempt.
+	PriorTaskID      string        `json:"prior_task_id,omitempty"`
 	Origin           string        `json:"origin"`
 	Trigger          []byte        `json:"trigger,omitempty"`
 	Payload          []byte        `json:"payload,omitempty"`
