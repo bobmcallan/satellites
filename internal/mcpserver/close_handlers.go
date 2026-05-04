@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -36,21 +35,6 @@ const (
 	resumeCapStory     = 10
 	reviewIterationCap = 3
 )
-
-// validationModeKVKey is the KV row key the close handler resolves to
-// pick the per-CI validation mode (epic:v4-lifecycle-refactor
-// sty_e20e1537). The system-tier seed at boot writes "task" so the
-// production default goes through the review-task gate; project /
-// user / workspace overrides flip individual CIs back to the legacy
-// inline reviewer modes.
-const validationModeKVKey = "lifecycle.validation_mode"
-
-// DefaultValidationMode is the legacy fallback applied when no KV
-// row resolves AND the contract document carries no validation_mode
-// field. Production defaults to ModeTask via the system-tier KV seed
-// (see configseed in cmd/satellites/main.go); this constant is the
-// "didn't even get the seed" backstop.
-var DefaultValidationMode = reviewer.ModeTask
 
 func intEnv(key string, fallback int) int {
 	if raw := os.Getenv(key); raw != "" {
@@ -188,16 +172,11 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		}
 	}
 
-	// epic:v4-lifecycle-refactor sty_e20e1537: every close goes through
-	// the review-task gate. resolveValidationMode walks the KV chain
-	// (system → user → project → workspace, default ModeTask) and
-	// falls back to the contract doc's validation_mode field. When the
-	// resolved mode is ModeTask AND a task store is wired, the close
-	// enqueues a kind:review task and flips the CI to pending_review;
-	// a reviewer-role runtime then calls contract_review_close to
-	// commit the verdict.
-	mode := s.resolveValidationMode(ctx, ci, caller.UserID, memberships)
-	if mode == reviewer.ModeTask && s.tasks != nil {
+	// sty_c6d76a5b: validation_mode is gone. Every close goes through
+	// the review-task gate when a task store is wired (production
+	// always is). The "no task store" fallback below is preserved for
+	// unit tests that exercise the close path without the queue.
+	if s.tasks != nil {
 		reviewTaskID, terr := s.enqueueReviewTask(ctx, ci, closeRow.ID, evidenceRowID, caller.UserID, now)
 		if terr != nil {
 			return mcpgo.NewToolResultError(fmt.Sprintf("review-task enqueue: %v", terr)), nil
@@ -213,7 +192,6 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 			"evidence_ledger_id":   evidenceRowID,
 			"plan_ledger_id":       planRowID,
 			"review_task_id":       reviewTaskID,
-			"validation_mode":      mode,
 		})
 		s.logger.Info().
 			Str("method", "tools/call").
@@ -221,20 +199,14 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 			Str("ci_id", ci.ID).
 			Str("status", contract.StatusPendingReview).
 			Str("review_task_id", reviewTaskID).
-			Str("validation_mode", mode).
 			Int64("duration_ms", time.Since(start).Milliseconds()).
 			Msg("mcp tool call")
 		return mcpgo.NewToolResultText(string(body)), nil
 	}
 
-	// Fallback path (no task store wired, or non-task mode resolved
-	// despite the inline reviewer's removal): auto-pass the CI after
-	// writing the close-request + evidence rows. Per sty_e20e1537 the
-	// inline reviewer (runReviewer) is gone — non-task modes survive
-	// only as a deprecated tag on the contract doc / ledger; the close
-	// path no longer dispatches to gemini in-line. Tests that don't
-	// wire a task store rely on this branch; production always wires
-	// tasks so the task-gate above is the only live path.
+	// No-task-store fallback (unit-test only): auto-pass the CI after
+	// writing the close-request + evidence rows. Production always
+	// wires a task store so this branch never executes.
 	if _, err := s.contracts.UpdateStatus(ctx, ci.ID, contract.StatusPassed, caller.UserID, now, memberships); err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
 	}
@@ -256,77 +228,14 @@ func (s *Server) handleContractClose(ctx context.Context, req mcpgo.CallToolRequ
 		"evidence_ledger_id":   evidenceRowID,
 		"plan_ledger_id":       planRowID,
 		"story_status":         storyStatus,
-		"validation_mode":      mode,
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
 		Str("tool", "contract_close").
 		Str("ci_id", ci.ID).
-		Str("validation_mode", mode).
 		Int64("duration_ms", time.Since(start).Milliseconds()).
 		Msg("mcp tool call")
 	return mcpgo.NewToolResultText(string(body)), nil
-}
-
-// resolveValidationMode picks the validation_mode for ci by walking
-// the KV chain in override-friendly order (user → project →
-// workspace → system), then falling back to the contract document's
-// structured `validation_mode` field, then to DefaultValidationMode
-// (ModeTask).
-//
-// The walk order differs from ledger.KVResolveScoped's "system always
-// wins" semantic: per sty_e20e1537 the system seed is the production
-// *default*, but project / user / workspace overrides MUST be able to
-// pin a CI back to the legacy reviewer modes for projects that aren't
-// ready to migrate. epic:v4-lifecycle-refactor sty_e20e1537.
-func (s *Server) resolveValidationMode(ctx context.Context, ci contract.ContractInstance, callerUserID string, memberships []string) string {
-	if s.ledger != nil {
-		// Append the system sentinel so KV system-tier rows
-		// (workspace_id="") are visible to the projection scans below.
-		kvMembers := append([]string{""}, memberships...)
-
-		tiers := []ledger.KVProjectionOptions{}
-		if callerUserID != "" && ci.WorkspaceID != "" {
-			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeUser, WorkspaceID: ci.WorkspaceID, UserID: callerUserID})
-		}
-		if ci.ProjectID != "" {
-			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeProject, WorkspaceID: ci.WorkspaceID, ProjectID: ci.ProjectID})
-		}
-		if ci.WorkspaceID != "" {
-			tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeWorkspace, WorkspaceID: ci.WorkspaceID})
-		}
-		tiers = append(tiers, ledger.KVProjectionOptions{Scope: ledger.KVScopeSystem})
-
-		for _, tier := range tiers {
-			rows, err := ledger.KVProjectionScoped(ctx, s.ledger, tier, kvMembers)
-			if err != nil {
-				continue
-			}
-			if row, present := rows[validationModeKVKey]; present {
-				if v := strings.TrimSpace(row.Value); v != "" {
-					return v
-				}
-			}
-		}
-	}
-	// Deprecated tier-3 fallback: contract document's structured
-	// validation_mode field (the pre-sty_e20e1537 shape). New seeds
-	// should not carry this; existing rows continue to work until
-	// migrated.
-	if s.docs != nil && ci.ContractID != "" {
-		if doc, err := s.docs.GetByID(ctx, ci.ContractID, nil); err == nil {
-			var payload struct {
-				ValidationMode string `json:"validation_mode"`
-			}
-			if len(doc.Structured) > 0 {
-				_ = json.Unmarshal(doc.Structured, &payload)
-			}
-			if v := strings.TrimSpace(payload.ValidationMode); v != "" {
-				return v
-			}
-		}
-	}
-	return DefaultValidationMode
 }
 
 // handleContractRespond writes a kind:review-response ledger row

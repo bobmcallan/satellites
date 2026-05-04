@@ -367,14 +367,9 @@ func main() {
 			logger.Warn().Str("error", err.Error()).Msg("archive legacy defaults failed")
 		}
 
-		// epic:v4-lifecycle-refactor sty_e20e1537: seed the system-tier
-		// `lifecycle.validation_mode = task` KV row so production closes
-		// flow through the review-task gate by default. Idempotent —
-		// existing rows (including project / user / workspace overrides)
-		// are left untouched on re-seed.
-		if err := seedSystemValidationMode(ctx, ledgerStore, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("validation_mode KV seed failed")
-		}
+		// sty_c6d76a5b retired the lifecycle.validation_mode KV row —
+		// every close now goes through the review-task gate
+		// unconditionally; mode resolution is gone.
 
 		// Reviewer service mode lives on the system-tier KV row
 		// `reviewer.service.mode` (default "embedded"). Application
@@ -702,40 +697,6 @@ func resolveReviewerServiceMode(ctx context.Context, ledgerStore ledger.Store) s
 		return reviewerservice.ModeEmbedded
 	}
 	return v
-}
-
-// seedSystemValidationMode appends a system-tier
-// `lifecycle.validation_mode = task` KV row when none already exists
-// at scope=system. Idempotent — a second invocation finds the
-// previous seed and short-circuits without writing a duplicate.
-//
-// epic:v4-lifecycle-refactor sty_e20e1537: this is the production
-// default that flips every close into the review-task gate. Project
-// / user / workspace overrides via kv_set continue to take precedence
-// at resolve time.
-func seedSystemValidationMode(ctx context.Context, ledgerStore ledger.Store, now time.Time) error {
-	if ledgerStore == nil {
-		return nil
-	}
-	const validationModeKey = "lifecycle.validation_mode"
-	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, validationModeKey, ledger.KVResolveOptions{}, []string{""})
-	if err != nil {
-		return fmt.Errorf("resolve existing validation_mode: %w", err)
-	}
-	if found && row.Scope == ledger.KVScopeSystem {
-		return nil
-	}
-	_, err = ledgerStore.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: "",
-		Type:        ledger.TypeKV,
-		Tags:        []string{"scope:system", "key:" + validationModeKey},
-		Content:     mcpserver.DefaultValidationMode,
-		CreatedBy:   "system",
-	}, now)
-	if err != nil {
-		return fmt.Errorf("seed validation_mode KV: %w", err)
-	}
-	return nil
 }
 
 // buildReviewer wires the production Reviewer for the MCP server.
