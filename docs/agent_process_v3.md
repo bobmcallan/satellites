@@ -362,9 +362,8 @@ rules until proven otherwise.
 
 ## Task lifecycle (sty_c1200f75)
 
-Tasks flow through a small set of statuses defined by
-`config/seed/lifecycles/task.md` and resolved at boot via
-`task.RegisterLifecycle`.
+Tasks flow through a small set of statuses defined in
+`internal/task/task.go`.
 
 **States:**
 

@@ -279,48 +279,6 @@ func replicateVocabularyToInput(fm Frontmatter, body []byte, workspaceID, actor 
 	}, nil
 }
 
-// lifecycleToInput builds a document.UpsertInput for a kind=lifecycle
-// file. Frontmatter carries the substrate-internal status enum +
-// transition matrix the runtime resolves at boot. Required keys:
-//
-//	name                       string  — lifecycle id (e.g. task_lifecycle)
-//	kind                       string  — primitive name (task, contract, ...)
-//	statuses                   []string — legal status values
-//	transitions                map[string][]string — allowed from -> [to...]
-//	default_status_on_create   string
-//	subscriber_visible_statuses []string
-//
-// Sty_c1200f75.
-func lifecycleToInput(fm Frontmatter, body []byte, workspaceID, actor string) (document.UpsertInput, error) {
-	name := fm.String("name")
-	if name == "" {
-		return document.UpsertInput{}, fmt.Errorf("lifecycle: name required")
-	}
-	payload := map[string]any{
-		"kind":                        fm.String("kind"),
-		"statuses":                    fm.StringSlice("statuses"),
-		"transitions":                 fm["transitions"],
-		"default_status_on_create":    fm.String("default_status_on_create"),
-		"subscriber_visible_statuses": fm.StringSlice("subscriber_visible_statuses"),
-	}
-	pruneEmpty(payload)
-	structured, err := json.Marshal(payload)
-	if err != nil {
-		return document.UpsertInput{}, fmt.Errorf("lifecycle %q: marshal: %w", name, err)
-	}
-	return document.UpsertInput{
-		WorkspaceID: workspaceID,
-		ProjectID:   nil,
-		Type:        document.TypeLifecycle,
-		Name:        name,
-		Body:        body,
-		Structured:  structured,
-		Scope:       document.ScopeSystem,
-		Tags:        appendDistinct(fm.StringSlice("tags"), "seed", "configseed"),
-		Actor:       actor,
-	}, nil
-}
-
 // artifactToInput builds a document.UpsertInput for a kind=artifact file.
 // Frontmatter carries `name` (required) and `tags`; the body is the
 // artifact content. Used today for the system-scope `default_agent_process`

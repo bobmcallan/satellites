@@ -188,11 +188,9 @@ func (t Task) Validate() error {
 }
 
 // ValidTransition returns true when moving from → to is a legal Status
-// transition. Consults the registered Lifecycle (loaded from
-// config/seed/lifecycles/task.md at boot) when present; otherwise
-// falls back to the built-in default matrix below.
+// transition.
 //
-// Default matrix (sty_c1200f75):
+// Matrix (sty_c1200f75):
 //   - planned   → published | closed
 //   - published → claimed   | closed
 //   - enqueued  → published | claimed | closed   (legacy compat)
@@ -203,9 +201,6 @@ func (t Task) Validate() error {
 // Archived is terminal — the row drops out of the default task_list
 // query but the ledger anchors persist for audit.
 func ValidTransition(from, to string) bool {
-	if lc := registeredLifecycle(); lc != nil {
-		return lc.AllowTransition(from, to)
-	}
 	switch from {
 	case StatusPlanned:
 		return to == StatusPublished || to == StatusClosed
@@ -225,14 +220,9 @@ func ValidTransition(from, to string) bool {
 }
 
 // SubscriberVisibleStatuses returns the set of statuses subscribers
-// (reviewer service, future task-claim workers) may see. Reads the
-// registered Lifecycle when present; otherwise the built-in default
-// of {published, claimed, in_flight}. Planned rows are agent-local —
-// never visible to subscribers.
+// (reviewer service, future task-claim workers) may see. Planned rows
+// are agent-local — never visible to subscribers.
 func SubscriberVisibleStatuses() map[string]struct{} {
-	if lc := registeredLifecycle(); lc != nil {
-		return lc.SubscriberVisible()
-	}
 	return map[string]struct{}{
 		StatusPublished: {},
 		StatusEnqueued:  {}, // legacy compat — pre-migration rows

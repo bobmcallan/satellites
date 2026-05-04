@@ -288,23 +288,6 @@ func main() {
 			}
 		}
 
-		// sty_c1200f75: register the task lifecycle from the seed
-		// document so internal/task ValidTransition and
-		// SubscriberVisibleStatuses follow the seed instead of the
-		// built-in defaults. Failure is non-fatal — defaults stay live.
-		if doc, err := docStore.GetByName(ctx, "", "task_lifecycle", nil); err == nil &&
-			doc.Type == document.TypeLifecycle && doc.Status == document.StatusActive {
-			if lc, lerr := task.LifecycleFromStructured(doc.Structured); lerr == nil && lc != nil {
-				task.RegisterLifecycle(lc)
-				logger.Info().
-					Strs("statuses", lc.Statuses).
-					Strs("subscriber_visible", lc.SubscriberVisibleStatuses).
-					Msg("task lifecycle registered from seed")
-			} else if lerr != nil {
-				logger.Warn().Str("error", lerr.Error()).Msg("task lifecycle parse failed; using defaults")
-			}
-		}
-
 		// sty_c1200f75: migrate any pre-existing tasks at status=enqueued
 		// to status=published. The substrate now distinguishes planned
 		// (agent-local) from published (queue-visible); existing rows
