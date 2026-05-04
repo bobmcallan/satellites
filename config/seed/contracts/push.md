@@ -1,10 +1,10 @@
 ---
 name: push
 category: push
-required_categories: [push]
-validation_mode: llm
+delivers_by: releaser_agent
+reviewed_by: story_reviewer
 evidence_required: |
-  Inline in close markdown:
+  Ledger rows tagged task_id:<push_task>, kind:evidence:
   1. Commit SHA + subject being pushed.
   2. `git push` output verbatim (or the "X..Y main -> main" line).
   3. Confirmation .version was NOT re-bumped (develop's bump stands).

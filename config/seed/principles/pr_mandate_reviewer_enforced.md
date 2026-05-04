@@ -14,11 +14,11 @@ Every story must flow `plan → orchestrator-composed contracts → story_close`
 
 The mandate is enforced in two places, both reviewer-driven:
 
-- **Plan-approval loop.** When the orchestrator submits its proposed plan via `satellites_orchestrator_submit_plan`, the `story_reviewer` agent (Gemini-backed) checks that the proposed contract list begins with `plan` and ends with `story_close`. A plan missing the floor is rejected with `needs_more` and the orchestrator revises and resubmits. The loop is bounded by a KV-configurable cap (`plan_review_max_iterations`, default 5).
+- **Plan submission.** When the orchestrator submits its proposed plan via `story_task_submit(kind=plan, tasks=[…])`, the substrate validates structural invariants (plan task first, every work paired with a review, agent capability matches) and rejects on violation. The `story_reviewer` agent then runs against the published plan task and checks that the action list begins with `contract:plan` and ends with `contract:story_close`. A plan missing the floor is rejected; the substrate spawns a successor work + paired planned-review pair so the orchestrator can revise and resubmit.
 
-- **Per-contract close loop.** When each contract closes, the appropriate reviewer (`development_reviewer` for `develop`; `story_reviewer` for everything else) reads the evidence against the contract's rubric and either accepts or returns `needs_more`. The mandate is implicit at this layer — the reviewer cannot accept a `story_close` for a story that never had a `plan` because there is no evidence chain to point at.
+- **Per-task close loop.** When each work task closes via `story_task_submit(kind=close)`, the substrate publishes the paired review task. The autonomous reviewer service (`internal/reviewer/service`) claims it, looks up the rubric by capability match (`reviews:` list on agent docs), reads the evidence against the contract's rubric, and either accepts or rejects. The mandate is implicit at this layer — the reviewer cannot accept a `story_close` for a story that never had a `plan` because there is no evidence chain to point at.
 
-The substrate has no `mandatory_slot_missing` gate, no `required_slots` resolver, no per-tier workflow merge. Those surfaces were removed by `epic:configuration-over-code-mandate` story_af79cf95 in favour of this principle and the reviewer agents that cite it.
+The substrate has no `mandatory_slot_missing` gate, no `required_slots` resolver, no per-tier workflow merge. Those surfaces are gone in favour of this principle and the reviewer agents that cite it.
 
 ## Why configuration, not code
 
@@ -28,12 +28,12 @@ Moving the mandate into a principle the reviewer cites means: adding a new manda
 
 ## How to apply
 
-- **Orchestrator.** When composing a plan, ensure `plan` leads the contract list and `story_close` ends it. Other contracts (`develop`, `push`, `merge_to_main`, project-defined slots) are the orchestrator's choice based on the story's shape. Submit the plan via `satellites_orchestrator_submit_plan` and loop on `needs_more` until accepted; on iteration-cap exceeded, escalate to the user.
+- **Orchestrator.** When composing a plan, ensure `contract:plan` leads the task list and `contract:story_close` ends it. Other contracts (`contract:develop`, `contract:push`, `contract:merge_to_main`, project-defined actions) are the orchestrator's choice based on the story's shape. Submit the plan via `story_task_submit(kind=plan, tasks=[…])`; on rejection from a downstream review, the substrate spawns a successor task pair — dispatch a fresh attempt.
 
-- **Reviewer agents.** Cite this principle (`pr_mandate_reviewer_enforced`) when rejecting a plan that omits the floor. On per-contract closes, treat the mandate as a precondition — the chain of accepted CIs is what makes the closing review valid.
+- **Reviewer agents.** Cite this principle (`pr_mandate_reviewer_enforced`) when rejecting a plan that omits the floor. On per-task closes, treat the mandate as a precondition — the chain of accepted task closes is what makes the closing review valid.
 
 - **Authors of new contracts.** A new mandatory contract is added by editing this principle and the reviewer agent rubrics, not by changing Go code. A new optional contract needs no principle change — the orchestrator can include it whenever the story warrants.
 
 ## Citation
 
-This principle backs `epic:configuration-over-code-mandate`. See `docs/architecture-configuration-over-code-mandate.md` (story_4362afb7) for the full design. Story story_af79cf95 removes the substrate enforcement surface; story story_6d259b99 seeds the reviewer agents that cite this principle; story story_0932c700 rewrites the orchestrator agent body to match.
+This principle backs `epic:configuration-over-code-mandate`. See `docs/architecture-configuration-over-code-mandate.md` for the full design. The task-chain orchestration model (sty_c6d76a5b) replaced the prior CI-instance lifecycle; this principle's enforcement surface moved with it.

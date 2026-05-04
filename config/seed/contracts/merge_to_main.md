@@ -1,10 +1,10 @@
 ---
 name: merge_to_main
 category: merge_to_main
-required_categories: [merge_to_main]
-validation_mode: llm
+delivers_by: releaser_agent
+reviewed_by: story_reviewer
 evidence_required: |
-  Inline in close markdown:
+  Ledger rows tagged task_id:<merge_to_main_task>, kind:evidence:
   1. Source branch (or "direct on main").
   2. Pre-merge log + post-merge SHA.
   3. `git status -uno` clean.

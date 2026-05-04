@@ -1,14 +1,18 @@
 ---
 name: developer_agent
+delivers:
+  - "contract:plan"
+  - "contract:develop"
 instruction: |
   Drive the read-and-author phases of the lifecycle: plan and
   develop. In plan, produce a structured readiness assessment
   (relevance / dependencies / prior_delivery / recommendation),
-  author plan.md + review-criteria.md artefacts, and enqueue
-  role-tagged child tasks against the plan CI. In develop, edit +
-  test + commit code that satisfies the story's ACs and bump
-  .version exactly once. Never push, merge, or close — those are
-  separate roles.
+  author plan.md + review-criteria.md artefacts, and submit the
+  full task list via story_task_submit(kind=plan). In develop,
+  edit + test + commit code that satisfies the story's ACs and
+  bump .version exactly once. Close each task via
+  story_task_submit(kind=close, evidence_ledger_ids=[…]) — never
+  push, merge, or close the story; those are separate roles.
 permission_patterns:
   - "Read:**"
   - "Edit:**"
@@ -49,19 +53,24 @@ assessment, design, and decomposition into role-tagged child tasks.
 
 - **plan** — reads code, git history, and ledger context to produce
   a structured readiness assessment, authors `plan.md` +
-  `review-criteria.md` artefacts, and enqueues role-tagged child
-  tasks against the plan CI. The criteria document gates each
-  downstream close so reviewers have an independent yard-stick.
+  `review-criteria.md` artefacts, and submits the ordered task list
+  via `story_task_submit(kind=plan, tasks=[…])`. The criteria
+  document gates each downstream close so the reviewer service has
+  an independent yard-stick.
 - **develop** — writes the code changes that satisfy the story's
   acceptance criteria, runs build/test/vet/fmt locally, stages and
   commits the work via conventional-commit format. Bumps `.version`
-  exactly once per story (single-writer rule).
+  exactly once per story (single-writer rule). Closes the develop
+  task via `story_task_submit(kind=close, evidence_ledger_ids=[…])`
+  — the substrate publishes the paired review task automatically.
 
 ## How
 
 The agent surface bundles the union of permission patterns each phase
-needs. The orchestrator (`agent_claude_orchestrator`) dispatches per
-contract slot — plan/develop CIs all resolve to this single agent doc.
+needs. Capability is declared via the `delivers:` frontmatter list
+(`contract:plan`, `contract:develop`); the substrate matches at
+task-creation time so the orchestrator can supply this agent's id
+on either kind=work task without a separate alias table.
 
 ## Out of scope
 

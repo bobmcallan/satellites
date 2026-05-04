@@ -6,30 +6,25 @@ tags: [v4, agents-roles, orchestrator]
 # Claude Orchestrator Agent
 
 The orchestrator agent represents the Claude Code session driving
-work interactively. The session inherits this agent's role-grant at
-SessionStart, which is what gives the session permission to claim
-contracts and coordinate the lifecycle.
+work interactively. The session inherits this agent's profile at
+SessionStart, which is what gives the session permission to compose
+plans and dispatch the lifecycle.
 
 ## What it does
 
-- Provides the role-grant the session_register path mints when the
-  SessionStart hook registers a fresh chat UUID.
+- Composes the per-story plan as an ordered list of tasks and
+  submits it via `story_task_submit(kind=plan, tasks=[…])`. The
+  substrate validates structural invariants (plan first, every
+  work task paired with a review sibling, agents have the right
+  capability) and rejects on violation — it does not silently mutate.
 - Carries the `tool_ceiling` that bounds what verbs the session may
   call (today: unrestricted within the orchestrator role).
-- Composes the per-story plan dynamically and runs the plan-approval
-  loop with the reviewer (`epic:configuration-over-code-mandate`,
-  story_a5826137) before any contract is claimed.
-- Dispatches each contract close to the appropriate reviewer agent
-  (story_b4d1107c).
+- Dispatches the operator's `implement <story_id>` requests by
+  reading `task_walk` to see where the story sits and choosing the
+  next move (compose plan if empty; advise on the current task if
+  one is already mid-flight).
 
 ## Role spec — inputs and outputs
-
-The orchestrator's plan-composition path runs in the Claude session
-(per principle pr_f81f60ca: "satellites-agent is the worker;
-orchestration lives elsewhere") and is implemented by the
-`satellites_orchestrator_compose_plan` MCP verb (legacy single-shot)
-and the `satellites_orchestrator_submit_plan` verb (loop-style
-plan approval introduced by `epic:configuration-over-code-mandate`).
 
 ### Inputs
 
@@ -37,85 +32,93 @@ plan approval introduced by `epic:configuration-over-code-mandate`).
 |---|---|
 | Story description + acceptance criteria | `satellites_story_get(id)` |
 | User prompt / runtime intent | The current Claude session message stream (the `implement story_xxx` request and any clarifications) |
-| Default workflow document (prose context) | `type=workflow`, scope=system, name=`default` — read for context only; the substrate no longer enforces a slot list (story_af79cf95). |
-| Active principles | `satellites_principle_list(active_only=true, project_id=...)` — includes `pr_mandate_reviewer_enforced` (story_e0833aea). |
-| Contracts catalog | `type=contract` documents at scope=system + scope=project, listed via `satellites_contract_list` |
-| Agents catalog | `type=agent` documents at scope=system + scope=project, listed via `satellites_internal_agent_list`. Includes the reviewer agents `story_reviewer` and `development_reviewer`. |
-| Skills catalog | `type=skill` documents (currently surfaced via the `skills` field on contract responses) |
+| Default workflow document (prose context) | `type=workflow`, scope=system, name=`default` — read for context only; the substrate no longer enforces a slot list. |
+| Active principles | `satellites_principle_list(active_only=true, project_id=...)` — includes `pr_mandate_reviewer_enforced`. |
+| Contracts catalog | `type=contract` documents at scope=system + scope=project, listed via `satellites_document_list(type=contract)` |
+| Agents catalog | `type=agent` documents at scope=system + scope=project. Capability is declared on each agent's `delivers:` / `reviews:` lists; the substrate matches at task-creation time. Reviewer agents (`story_reviewer`, `development_reviewer`) carry the rubrics the autonomous reviewer service reads. |
+| Skills catalog | `type=skill` documents (referenced from contract `skills_required:` lists). |
+| Current task chain | `satellites_task_walk(story_id=...)` — returns the ordered task list, action summary, and `current_task_id` pointer. |
 
 ### Outputs
 
 | Output | Substrate target |
 |---|---|
-| Per-story plan as ordered tasks | The `task` queue (per principle pr_75826278). Each task carries `{contract_name, agent_ref, sequence}` in its Payload (origin=story_stage). |
-| `kind:plan` ledger row | One ledger row scoped to the story, written **before** plan submission. Structured payload mirrors the `proposed_contracts` list and the agent assignments. |
-| `kind:plan-approved` ledger row | Written by `satellites_orchestrator_submit_plan` when the reviewer accepts. The row's existence is the precondition for `workflow_claim`. |
-| Workflow claim | `satellites_story_workflow_claim(story_id, proposed_contracts=[...], claim_markdown=...)` — emits the `ContractInstance` rows + the `kind:workflow-claim` ledger row. Rejected with `plan_not_approved` when no plan-approved row exists. |
+| Per-story plan as an ordered task list | `story_task_submit(kind=plan, tasks=[{kind, action, description?, agent_id?}, …])`. The substrate writes a `kind:plan` ledger row carrying the markdown + structured payload, persists each task, and returns the new task ids. |
+| Close on a claimed work task | `story_task_submit(kind=close, task_id=<id>, outcome=success|failure, evidence_ledger_ids=[…])`. The substrate closes the task and publishes the paired planned-review sibling for the reviewer service. |
+| Per-task evidence | `ledger_append` rows tagged `task_id:<id>` + `kind:evidence`. The reviewer service picks them up via the parent task linkage on the review task. |
 
 ### Constraints
 
-The mandate principle `pr_mandate_reviewer_enforced` (story_e0833aea) is
-the only fixed shape: every story must include `plan` at the front
-and `story_close` at the end. The contracts in between are the
+The mandate principle `pr_mandate_reviewer_enforced` is the only
+fixed shape: every story plan must include `plan` at the front and
+`story_close` at the end. The contracts in between are the
 orchestrator's choice based on the story's shape. The
-`story_reviewer` agent rejects plans that omit the floor; the
-substrate does not enforce it (story_af79cf95 removed the slot
-algebra).
+`story_reviewer` agent rejects plans that omit the floor.
 
-### Plan-approval loop
+### Plan submission
 
 The flow when a user says `implement story_xxx`:
 
-1. Compose a plan: read story + ACs + principles + catalogs, produce
-   an ordered list of `(contract_name, agent_ref)` pairs that begins
-   with `plan` and ends with `story_close`.
-2. Write the `kind:plan` ledger row.
-3. Call `satellites_orchestrator_submit_plan(story_id, plan_markdown,
-   proposed_contracts, iteration=1)`.
-4. On `verdict=accepted`: proceed to `workflow_claim`. The verb has
-   already written the `kind:plan-approved` row.
-5. On `verdict=needs_more`: read `review_questions[]`, revise the
-   plan, increment `iteration`, resubmit. Repeat.
-6. On `error=plan_review_iteration_cap_exceeded`: stop and surface
-   the failure to the user; the iteration cap is KV-configurable
-   (`plan_review_max_iterations`, default 5).
+1. `task_walk(story_id=…)` — confirm the story has no tasks yet.
+2. Compose the plan: read story + ACs + principles + catalogs,
+   produce an ordered list of `(kind, action, agent_id?)` entries
+   that begins with `contract:plan` (kind=work) followed by its
+   `contract:plan` (kind=review) sibling, the body contracts each
+   paired with their own kind=review sibling, and ends with
+   `contract:story_close` paired with its review.
+3. Call `story_task_submit(kind=plan, story_id, plan_markdown,
+   tasks=[…])`. Validators that may fire:
+   - `plan_first_task_must_be_plan` — tasks[0].action ≠ contract:plan.
+   - `missing_review_for:<action>` — work task has no immediate
+     review sibling.
+   - `review_action_mismatch` / `invalid_action_format` — malformed.
+   - `agent_cannot_deliver` / `agent_cannot_review` — agent_id
+     supplied but its `delivers:` / `reviews:` doesn't cover the
+     action.
+4. The substrate writes the `kind:plan` ledger row + persists tasks.
+   Work tasks at `status=published` (claimable now); review tasks at
+   `status=planned` (gated until the work closes).
+5. Subsequent `task_claim` calls pick the highest-priority published
+   task; the agent allocated to it executes; close via
+   `story_task_submit(kind=close)` publishes the sibling review;
+   the reviewer service runs autonomously.
 
-### Reviewer mapping (per-contract close)
+### Reviewer routing (autonomous)
 
-When a contract close fires (`satellites_story_contract_close`), the
-substrate dispatches the reviewer based on contract name
-(story_b4d1107c, `runReviewer` in `internal/mcpserver/close_handlers.go`):
+Reviewer agents declare capability via `reviews:` lists on their
+agent doc structured settings. The autonomous reviewer service
+(`internal/reviewer/service`) listens for `kind:review` task emits,
+resolves the rubric by capability match (first agent whose
+`reviews:` contains `contract:<name>`), runs the reviewer against
+the rubric + evidence (sourced from `task_id:<parent_work>` ledger
+rows), writes a `kind:verdict` ledger row tagged to the review
+task, closes the review task with success/failure, and on rejection
+spawns a successor `kind=work` + paired planned-`kind=review` task
+pair carrying `prior_task_id` on the work.
 
-- `develop` → `development_reviewer.Body` is the rubric.
-- everything else (`plan`, `push`, `merge_to_main`,
-  `story_close`, and any project-scope contract) → `story_reviewer.Body`.
+The orchestrator never invokes any reviewer verb — there isn't one.
 
-The reviewer (`reviewer.Reviewer`, Gemini-backed in production —
-story_b4d1107c) reads the rubric + evidence and returns
-`accepted` / `rejected` / `needs_more`. On `needs_more` the
-orchestrator reads the review questions, addresses them via
-`satellites_story_contract_respond`, and re-closes.
-
-### Agent picking (proposed contracts)
+### Agent picking (per task)
 
 The default rule still matches a system agent whose name equals
-`<contract_name>_agent` or whose role-shaped agent body covers the
-contract; callers may override per-slot via the `agent_overrides`
-argument on `orchestrator_compose_plan`. Reviewer agents
-(`story_reviewer`, `development_reviewer`) are not assigned to
-proposed slots — the substrate dispatches them directly at close
-time.
+`<contract_name>_agent`. Capability is the source of truth: the
+substrate verifies the supplied `agent_id` carries the canonical
+`contract:<name>` action in its `delivers:` (for kind=work) or
+`reviews:` (for kind=review) list. When `agent_id` is omitted, the
+plan submission still validates structure but defers agent
+allocation to claim time.
 
 ## How
 
-The agent is a system-scope document referenced by the session
-registry. It is not "executed" the way lifecycle agents are — its
-purpose is to anchor the role-grant the session inherits and to
-codify the plan-composition contract above.
+The agent is a system-scope document referenced by every
+orchestrator session. Its body is what you are reading right now;
+agents read it via the MCP server-instructions handshake (see
+`config/seed/artifacts/default_agent_process.md`).
 
 ## Limitations
 
-- One agent per session. The SessionStart path mints exactly one
-  orchestrator grant per registered chat UUID.
+- One agent per session. The SessionStart path registers exactly one
+  orchestrator session per registered chat UUID.
 - Configuration changes (e.g. tightening `tool_ceiling`) require a
-  re-seed; existing sessions keep the grant they minted at start.
+  re-seed; existing sessions keep the role they registered with at
+  start.

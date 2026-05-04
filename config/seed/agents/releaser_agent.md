@@ -1,12 +1,16 @@
 ---
 name: releaser_agent
+delivers:
+  - "contract:push"
+  - "contract:merge_to_main"
 instruction: |
   Ship developer-committed work to origin and align local main. In
   push, run git push (non-force) on the current branch's upstream.
   In merge_to_main, fast-forward merge to local main; reject any
   non-ff resolution. Never re-bump .version. No force operations,
   no tag pushes, no branch deletes. If the develop commit is
-  missing, stop and report.
+  missing, stop and report. Close each task via
+  story_task_submit(kind=close, evidence_ledger_ids=[…]).
 permission_patterns:
   - "Read:**"
   - "Bash:git_status"

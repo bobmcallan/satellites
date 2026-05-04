@@ -16,20 +16,38 @@ two routing rules you must apply before any project-scoped work.
   See `docs/architecture-configuration-over-code-mandate.md`.
 - **story is the unit of work** (`pr_a9ccecfb`). Every change you
   make ties to a story id. There is no work outside a story.
-- **workflow is a list of contract names per story**
-  (architecture.md §5). There is no separate workflow table —
-  the ordered list of `contract_instance` rows on a story IS the
-  workflow.
-- **process order and evidence are first-class.** The
-  `contract_claim` MCP handler is a server-side gate, not a
-  convention. Predecessor CIs must be `passed` or `skipped` before
-  a successor can claim. Evidence on the ledger is the trust
-  leverage (`pr_0c11b762`).
-- **session = one agent.** Sessions don't drift between hats. Reviewer
-  is a separate runtime claiming review tasks, not a mode the
-  orchestrator switches into.
-- **five primitives per project** — projects, stories, contracts
-  (instances + documents), documents, ledger.
+- **story = task chain.** A story's tasks (rows where
+  `story_id=<id>`, ordered by created_at) are the conversation log
+  AND the workflow. There is no separate workflow / contract_instance
+  table — the ordered task list IS the workflow.
+- **plan as agent-authored task list.** The orchestrator submits
+  the full plan via `story_task_submit(kind=plan, tasks=[…])`.
+  Substrate validates structural invariants (plan first, every work
+  task has a paired review sibling, actions well-formed, agents have
+  the right capability) and rejects on violation — it does not
+  silently mutate.
+- **tasks are thin; ledger rows are the artifacts.** A task carries
+  only what's needed to dispatch + order the work (id, story_id,
+  kind, action, agent_id, parent_task_id, prior_task_id, status,
+  description). Plan markdown, evidence, and verdicts live as
+  ledger rows linked to the task by `task_id:<id>` tags.
+- **agent capability via frontmatter.** Agents declare what they
+  can do via `delivers:` / `reviews:` lists in their document
+  structured settings. The substrate matches at task-creation time
+  (`story_task_submit` rejects `agent_cannot_deliver` /
+  `agent_cannot_review` mismatches).
+- **session = one agent.** Sessions don't drift between hats.
+  The reviewer service is a separate in-process runtime that
+  subscribes to `kind:review` task emits, runs the rubric, writes
+  the verdict ledger row, closes the task, and on rejection spawns
+  a successor `kind=work` + paired planned-`kind=review` pair with
+  `prior_task_id` set on the work task.
+- **process order is enforced server-side.** `task_claim` is a
+  gate: agents claim what's published; review tasks stay at
+  `status=planned` until their sibling work task closes.
+- **five primitives per project** — projects, stories, tasks,
+  documents (contracts/agents/principles/skills/workflows),
+  ledger.
 
 ## routing rules
 
@@ -47,4 +65,18 @@ These rules are mandatory. Apply them in order.
    (or `run <story_id>`), your first MCP call is
    `satellites_story_get(id=<story_id>)`. The result names the
    project, status, category, tags, and template-required fields —
-   everything you need to choose the next call.
+   everything you need to choose the next call. Then call
+   `satellites_task_walk(story_id=<id>)` to see the current task
+   chain (with `current_task_id` pointing at the first non-terminal
+   task) and pick the next move:
+
+   - if no tasks exist, you are the orchestrator — compose the plan
+     and submit via `story_task_submit(kind=plan, tasks=[…])`.
+   - if a claimable task exists for your capability, claim it via
+     `task_claim` and execute. When done, write any
+     evidence/artifact ledger rows (tagged `task_id:<your_task>`)
+     and call `story_task_submit(kind=close, task_id=<id>,
+     outcome=success|failure, evidence_ledger_ids=[…])`.
+   - the close path automatically publishes the paired review task;
+     the reviewer service picks it up. You do not call any
+     reviewer verb — there isn't one.

@@ -1,10 +1,10 @@
 ---
 name: develop
 category: develop
-required_categories: [develop]
-validation_mode: llm
+delivers_by: developer_agent
+reviewed_by: development_reviewer
 evidence_required: |
-  Inline in close markdown:
+  Ledger rows tagged task_id:<develop_task>, kind:evidence:
   1. Files changed list with one-line why per file.
   2. Build / test / vet / fmt / lint outputs.
   3. AC-by-AC mapping with file:line or command-output citations.

@@ -1,11 +1,14 @@
 ---
 name: development_reviewer
+reviews:
+  - "contract:develop"
 instruction: |
-  Review develop CIs only. Verdict is one of: accepted | rejected |
-  needs_more. Cite principles in the rationale; on needs_more, return
-  concrete review_questions. Reject changes that introduce unrequested
-  compat layers (cite pr_no_unrequested_compat), workarounds that mask
-  root causes (cite pr_root_cause), or evidence claims unsupported by
+  Review develop kind:review tasks only. Verdict is one of:
+  accepted | rejected | needs_more. Cite principles in the
+  rationale; on needs_more, return concrete review_questions.
+  Reject changes that introduce unrequested compat layers
+  (cite pr_no_unrequested_compat), workarounds that mask root
+  causes (cite pr_root_cause), or evidence claims unsupported by
   command output. Require build/vet/fmt/test discipline + AC-by-AC
   evidence mapping + conventional-commit messages with no AI
   attribution.
@@ -16,18 +19,20 @@ tags: [v4, agents-roles, reviewer, role-shaped, develop]
 ---
 # Development Reviewer
 
-Reviewer agent (story_6d259b99 of `epic:configuration-over-code-mandate`)
-for `develop` contract closes. Read by the Gemini-backed
-`reviewer.Reviewer` dispatcher (story_b4d1107c) when `runReviewer`
-resolves a contract whose name equals `develop`.
+Reviewer agent for `develop` task reviews. The autonomous reviewer
+service (`internal/reviewer/service`) reads this body as the rubric
+when it claims a `kind=review` task whose `Action` is
+`contract:develop`. Capability is declared via the `reviews:`
+frontmatter list.
 
 ## What it reviews
 
-Every `develop` contract close. The evidence packet typically contains:
+Every `kind=review` task with `Action=contract:develop`. The
+evidence packet typically contains:
 
 - A `kind:plan` ledger row that scoped the change.
-- A `kind:evidence` ledger row with files-changed, gate output, and
-  AC-by-AC mapping.
+- A `kind:evidence` ledger row tagged `task_id:<parent_work>` with
+  files-changed, gate output, and AC-by-AC mapping.
 - The committed code on `main` (or a feature branch) referenced by SHA.
 
 ## Rubric
@@ -93,19 +98,19 @@ citation form.
 
 ### 8. Substrate evolution and rubric updates
 
-Cite **pr_mandate_configuration_over_code**. When the develop CI's
-diff touches a substrate primitive — `internal/task/`,
-`internal/contract/`, MCP verb signatures
+Cite **pr_mandate_configuration_over_code**. When the develop
+task's diff touches a substrate primitive — `internal/task/`,
+`internal/reviewer/`, MCP verb signatures
 (`internal/mcpserver/*_handler*.go`), agent doc bodies under
 `config/seed/agents/`, or contract doc bodies under
 `config/seed/contracts/` — the upstream plan-md MUST contain a
 "rubric updates" checklist enumerating which rubric files are
-updated in the SAME commit as the substrate change. The
-develop close evidence MUST cite the plan-md ledger row id
-where that checklist appears.
+updated in the SAME commit as the substrate change. The develop
+close evidence MUST cite the plan-md ledger row id where that
+checklist appears.
 
 Without that checklist, return `needs_more` with the question:
-*"Develop CI's diff touches substrate primitive X but the plan-md
+*"Develop task's diff touches substrate primitive X but the plan-md
 contains no rubric-updates list. Which rubric files
 (`config/seed/agents/story_reviewer.md`,
 `config/seed/agents/development_reviewer.md`, or
@@ -122,16 +127,16 @@ reviewer from enforcing concepts the substrate has retired.
 Same as `story_reviewer`:
 
 - `accepted` — rationale cites ACs + principles honoured.
-- `rejected` — rationale cites failing principle + the gap. Use
-  sparingly; prefer `needs_more` for fixable issues.
-- `needs_more` — rationale describes the gap; `review_questions[]`
-  carries one specific question per gap.
+- `rejected` — rationale cites failing principle + the gap. The
+  reviewer service spawns a successor work + paired planned-review
+  pair carrying `prior_task_id`. needs_more is coerced to rejected
+  on the task path; the questions are appended to the rationale and
+  posted as `kind:review-question` ledger rows tagged to the parent
+  work task so the next iteration can address them.
 
 ## Limitations
 
 - Read-only. No code edits, no mutating MCP verbs.
-- Reviews `develop` CIs only; everything else routes to
-  `story_reviewer`.
-- Does not bypass the per-CI close loop iteration semantics — the
-  loop is unbounded today (planned cap is a follow-up if it surfaces
-  as a problem).
+- Reviews `kind=review` tasks with `Action=contract:develop` only;
+  everything else routes to `story_reviewer` via the capability
+  match in `reviews:`.
