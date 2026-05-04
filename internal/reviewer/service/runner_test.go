@@ -204,7 +204,7 @@ func newFixture(t *testing.T, verdict reviewer.Verdict, reviewerErr error) *fixt
 
 func (f *fixture) newService(t *testing.T) *service.Service {
 	t.Helper()
-	svc, err := service.New(service.Config{PollInterval: 5 * time.Millisecond}, service.Deps{
+	svc, err := service.New(service.Config{}, service.Deps{
 		Tasks:     f.tasks,
 		Contracts: f.contracts,
 		Docs:      f.docs,
@@ -221,7 +221,7 @@ func TestService_Tick_HappyPath_AcceptedCommit(t *testing.T) {
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictAccepted, Rationale: "ok"}, nil)
 	svc := f.newService(t)
 
-	require.True(t, svc.Tick(context.Background()), "expected the service to claim and process the review task")
+	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask), "expected the service to claim and process the review task")
 
 	assert.Equal(t, int32(1), f.reviewer.calls.Load(), "reviewer should be invoked exactly once")
 	call := f.commitRecord.lastCall(t)
@@ -250,7 +250,7 @@ func TestService_Tick_RejectedCommit(t *testing.T) {
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictRejected, Rationale: "missing evidence"}, nil)
 	svc := f.newService(t)
 
-	require.True(t, svc.Tick(context.Background()))
+	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
 	call := f.commitRecord.lastCall(t)
 	assert.Equal(t, reviewer.VerdictRejected, call.Verdict)
 	assert.Contains(t, call.Rationale, "missing evidence")
@@ -265,7 +265,7 @@ func TestService_Tick_NeedsMore_TreatedAsRejected(t *testing.T) {
 	}, nil)
 	svc := f.newService(t)
 
-	require.True(t, svc.Tick(context.Background()))
+	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
 	call := f.commitRecord.lastCall(t)
 	assert.Equal(t, reviewer.VerdictRejected, call.Verdict, "needs_more must be coerced to rejected for the task path (no contract_respond loop in the queue model)")
 	assert.Contains(t, call.Rationale, "q1")
@@ -288,14 +288,18 @@ func TestService_Tick_GeminiError_RejectsWithRationale(t *testing.T) {
 	f := newFixture(t, reviewer.Verdict{}, errors.New("gemini api timeout"))
 	svc := f.newService(t)
 
-	require.True(t, svc.Tick(context.Background()))
+	require.True(t, svc.HandleTaskEvent(context.Background(), f.reviewTask))
 	call := f.commitRecord.lastCall(t)
 	assert.Equal(t, reviewer.VerdictRejected, call.Verdict, "reviewer error must reject the CI so it doesn't sit pending_review")
 	assert.Contains(t, call.Rationale, "reviewer error")
 	assert.Contains(t, call.Rationale, "gemini api timeout")
 }
 
-func TestService_Tick_NoTaskAvailable_BackoffSignal(t *testing.T) {
+// TestService_HandleTaskEvent_NotFound covers HandleTaskEvent's
+// race-loss path: when the task referenced by an emit is gone (or
+// never existed) the service returns false without invoking the
+// reviewer.
+func TestService_HandleTaskEvent_NotFound(t *testing.T) {
 	t.Parallel()
 	docs := document.NewMemoryStore()
 	tasks := task.NewMemoryStore()
@@ -305,7 +309,7 @@ func TestService_Tick_NoTaskAvailable_BackoffSignal(t *testing.T) {
 	commit := &recordingCommit{}
 	rev := &stubReviewer{verdict: reviewer.Verdict{Outcome: reviewer.VerdictAccepted}}
 
-	svc, err := service.New(service.Config{PollInterval: 5 * time.Millisecond}, service.Deps{
+	svc, err := service.New(service.Config{}, service.Deps{
 		Tasks:     tasks,
 		Contracts: contracts,
 		Docs:      docs,
@@ -315,17 +319,22 @@ func TestService_Tick_NoTaskAvailable_BackoffSignal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.False(t, svc.Tick(context.Background()), "empty queue → tick reports no work done")
-	assert.Equal(t, int32(0), rev.calls.Load(), "reviewer should not be invoked on empty queue")
+	missing := task.Task{ID: "task_deadbeef", WorkspaceID: "wksp_a", Kind: task.KindReview}
+	assert.False(t, svc.HandleTaskEvent(context.Background(), missing), "missing task → service skips silently")
+	assert.Equal(t, int32(0), rev.calls.Load(), "reviewer must not be invoked when the task is missing")
 }
 
-func TestService_Tick_SkipsNonReviewerTasks(t *testing.T) {
+// TestService_OnEmit_KindFilter verifies the listener filter: emits
+// for non-review tasks (or review tasks at non-claimable status) are
+// silently ignored. Under sty_c6d76a5b the substrate fans every emit
+// out to every listener; the kind-filter is the listener's concern.
+func TestService_OnEmit_KindFilter(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, reviewer.Verdict{Outcome: reviewer.VerdictAccepted}, nil)
 	ctx := context.Background()
-	now := time.Now().UTC()
+
 	// Inject a separate task with kind=work; the service must not
-	// pick it up.
+	// pick it up via OnEmit.
 	other, err := f.tasks.Enqueue(ctx, task.Task{
 		WorkspaceID:        "wksp_a",
 		ProjectID:          "proj_a",
@@ -333,19 +342,26 @@ func TestService_Tick_SkipsNonReviewerTasks(t *testing.T) {
 		Kind:               task.KindWork,
 		Origin:             task.OriginStoryStage,
 		Priority:           task.PriorityCritical,
-	}, now)
+	}, time.Now().UTC())
 	require.NoError(t, err)
 
 	svc := f.newService(t)
-	require.True(t, svc.Tick(ctx))
 
-	// Reviewer task got claimed, developer task is still enqueued.
-	developerTask, err := f.tasks.GetByID(ctx, other.ID, nil)
+	// Direct OnEmit with the kind=work task — listener must skip it.
+	svc.OnEmit(ctx, other)
+	assert.Equal(t, int32(0), f.reviewer.calls.Load(), "reviewer must not be invoked on kind=work emits")
+
+	// Direct OnEmit with the seeded review task — listener processes it.
+	svc.OnEmit(ctx, f.reviewTask)
+	assert.Equal(t, int32(1), f.reviewer.calls.Load(), "reviewer should be invoked exactly once on kind=review emit")
+
+	// Reviewer task got claimed; non-review task remains enqueued.
+	otherAfter, err := f.tasks.GetByID(ctx, other.ID, nil)
 	require.NoError(t, err)
-	assert.Equal(t, task.StatusEnqueued, developerTask.Status)
-	reviewerTask, err := f.tasks.GetByID(ctx, f.reviewTask.ID, nil)
+	assert.Equal(t, task.StatusEnqueued, otherAfter.Status)
+	reviewAfter, err := f.tasks.GetByID(ctx, f.reviewTask.ID, nil)
 	require.NoError(t, err)
-	assert.Equal(t, task.StatusClaimed, reviewerTask.Status)
+	assert.Equal(t, task.StatusClaimed, reviewAfter.Status)
 }
 
 func TestService_Run_ContextCancellationStops(t *testing.T) {

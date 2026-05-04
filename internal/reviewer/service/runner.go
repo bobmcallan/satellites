@@ -33,10 +33,6 @@ type CommitFn func(
 
 // Config carries the reviewer service's wiring.
 type Config struct {
-	// PollInterval is the back-off between empty-queue scans. Defaults
-	// to 5 s. Set lower in tests for tight polling.
-	PollInterval time.Duration
-
 	// SessionID is the registry session id the reviewer service runs
 	// under. Defaults to ServiceSessionID.
 	SessionID string
@@ -76,9 +72,6 @@ type Deps struct {
 	Now       func() time.Time // injectable clock for tests
 }
 
-// DefaultPollInterval is the back-off between empty-queue scans.
-const DefaultPollInterval = 5 * time.Second
-
 // New constructs a Service and validates the deps. Returns an error
 // when a required dep is nil — failures here are fatal at boot, not
 // runtime, so the caller can short-circuit before starting the
@@ -101,9 +94,6 @@ func New(cfg Config, deps Deps) (*Service, error) {
 	}
 	if deps.Commit == nil {
 		return nil, errors.New("reviewer/service: commit fn is required")
-	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = DefaultPollInterval
 	}
 	if cfg.SessionID == "" {
 		cfg.SessionID = ServiceSessionID
@@ -131,77 +121,97 @@ func New(cfg Config, deps Deps) (*Service, error) {
 	}, nil
 }
 
-// Run drives the service loop until ctx is cancelled. Each iteration:
+// Run registers the service as a task-store listener and blocks until
+// ctx is cancelled. The store delivers status events to OnEmit; the
+// service filters Kind=review + claimable statuses and processes one
+// task at a time. No polling — sty_c6d76a5b replaces Tick with the
+// subscribe path.
 //
-//  1. Tick — list enqueued kind:review tasks and claim the head.
-//     Returns true when a task was processed; false on empty queue or
-//     race-loss.
-//  2. On true, loop again immediately to drain the queue.
-//  3. On false, sleep cfg.PollInterval before the next scan.
-//
-// Errors from individual ticks are logged and the loop continues —
-// the service's job is liveness, not perfection. Cancellation
-// returns ctx.Err().
+// On startup the service drains any kind:review tasks already in the
+// queue at claimable statuses — listener registrations only fire on
+// future emits, so without the drain a process restart would leave
+// pre-existing reviews unclaimed.
 func (s *Service) Run(ctx context.Context) error {
 	if s.logger != nil {
 		s.logger.Info().
 			Str("session_id", s.cfg.SessionID).
 			Str("worker_id", s.cfg.WorkerID).
-			Dur("poll_interval", s.cfg.PollInterval).
 			Msg("reviewer service starting")
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			if s.logger != nil {
-				s.logger.Info().Msg("reviewer service stopping (context cancelled)")
-			}
-			return ctx.Err()
-		default:
-		}
-		if processed := s.Tick(ctx); processed {
+	s.drainAtBoot(ctx)
+	if attacher, ok := s.tasks.(interface {
+		AddListener(task.Listener)
+	}); ok {
+		attacher.AddListener(s)
+	} else if s.logger != nil {
+		s.logger.Warn().Msg("reviewer service: task store does not expose AddListener; the service will idle until ctx is cancelled")
+	}
+	<-ctx.Done()
+	if s.logger != nil {
+		s.logger.Info().Msg("reviewer service stopping (context cancelled)")
+	}
+	return ctx.Err()
+}
+
+// drainAtBoot lists kind:review tasks already at a claimable status
+// (pre-c6d76a5b enqueued, post-c6d76a5b published) and processes
+// them. Bridges the gap between process restart and listener
+// registration — without this, tasks emitted while the service was
+// down would never be picked up.
+func (s *Service) drainAtBoot(ctx context.Context) {
+	statuses := []string{task.StatusPublished, task.StatusEnqueued}
+	for _, status := range statuses {
+		candidates, err := s.tasks.List(ctx, task.ListOptions{
+			Status: status,
+			Kind:   task.KindReview,
+			Limit:  64,
+		}, nil)
+		if err != nil {
+			s.logWarn("reviewer service drain list failed", err, map[string]string{"status": status})
 			continue
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(s.cfg.PollInterval):
+		for _, t := range candidates {
+			s.HandleTaskEvent(ctx, t)
 		}
 	}
 }
 
-// Tick performs one scan-claim-process cycle. Returns true when a
-// task was claimed and processed (whether the verdict was accepted or
-// rejected — both count as work done). Exposed so tests can drive
-// the service deterministically without spawning the loop.
-func (s *Service) Tick(ctx context.Context) bool {
-	candidates, err := s.tasks.List(ctx, task.ListOptions{
-		Status: task.StatusEnqueued,
-		Kind:   task.KindReview,
-		Limit:  16,
-	}, nil)
+// OnEmit implements task.Listener. Filters for Kind=review tasks at
+// claimable status, then claims-by-id and processes. Lost claim races
+// + non-review tasks are silently skipped — the substrate fans every
+// emit out to every listener; filtering is the listener's concern.
+func (s *Service) OnEmit(ctx context.Context, t task.Task) {
+	if t.Kind != task.KindReview {
+		return
+	}
+	if !task.IsSubscriberVisible(t.Status) {
+		return
+	}
+	// Only act on the publish/enqueue transition — not on claimed,
+	// in_flight, or our own subsequent emits. Otherwise we'd loop on
+	// our own claim event.
+	if t.Status != task.StatusPublished && t.Status != task.StatusEnqueued {
+		return
+	}
+	s.HandleTaskEvent(ctx, t)
+}
+
+// HandleTaskEvent claims the named task and processes it. Returns
+// true when the task was claimed and processed (whether the verdict
+// was accepted or rejected — both count as work done); false on
+// race-loss / not-found / non-claimable. Exposed so tests can drive
+// the service deterministically without registering a listener.
+func (s *Service) HandleTaskEvent(ctx context.Context, t task.Task) bool {
+	claimed, err := s.tasks.ClaimByID(ctx, t.ID, s.cfg.WorkerID, s.nowUTC(), nil)
+	if errors.Is(err, task.ErrNoTaskAvailable) || errors.Is(err, task.ErrNotFound) {
+		return false
+	}
 	if err != nil {
-		s.logWarn("reviewer service list failed", err, nil)
+		s.logWarn("reviewer service claim failed", err, map[string]string{"task_id": t.ID})
 		return false
 	}
-	if len(candidates) == 0 {
-		return false
-	}
-	for _, t := range candidates {
-		claimed, err := s.tasks.ClaimByID(ctx, t.ID, s.cfg.WorkerID, s.nowUTC(), nil)
-		if errors.Is(err, task.ErrNoTaskAvailable) || errors.Is(err, task.ErrNotFound) {
-			// Lost the race or the task disappeared. Try the next
-			// candidate; the queue may carry several reviews in flight.
-			continue
-		}
-		if err != nil {
-			s.logWarn("reviewer service claim failed", err, map[string]string{"task_id": t.ID})
-			continue
-		}
-		s.processClaimed(ctx, claimed)
-		return true
-	}
-	return false
+	s.processClaimed(ctx, claimed)
+	return true
 }
 
 // reviewTaskPayload is the JSON shape close_handlers.go's

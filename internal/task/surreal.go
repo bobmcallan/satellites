@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
@@ -18,10 +19,45 @@ import (
 type SurrealStore struct {
 	db        *surrealdb.DB
 	publisher hubemit.Publisher
+	listenMu  sync.Mutex
+	listeners []Listener
 }
 
 // SetPublisher installs the hub emit sink for subsequent mutations.
 func (s *SurrealStore) SetPublisher(p hubemit.Publisher) { s.publisher = p }
+
+// AddListener registers l on the bus-subscriber slice (sty_c6d76a5b).
+// Listeners fire on every status transition after the existing per-
+// workspace hub publish.
+func (s *SurrealStore) AddListener(l Listener) {
+	if l == nil {
+		return
+	}
+	s.listenMu.Lock()
+	defer s.listenMu.Unlock()
+	s.listeners = append(s.listeners, l)
+}
+
+// snapshotListeners returns a defensive copy of the listener slice
+// for fan-out under-lock-free invocation.
+func (s *SurrealStore) snapshotListeners() []Listener {
+	s.listenMu.Lock()
+	defer s.listenMu.Unlock()
+	if len(s.listeners) == 0 {
+		return nil
+	}
+	out := make([]Listener, len(s.listeners))
+	copy(out, s.listeners)
+	return out
+}
+
+// emit fires the per-workspace hub publish + the listener fan-out.
+// Used at every status-changing mutation site so the two emit paths
+// stay in lockstep.
+func (s *SurrealStore) emit(ctx context.Context, t Task) {
+	emitStatus(ctx, s.publisher, t)
+	fanoutListeners(ctx, s.snapshotListeners(), t)
+}
 
 // NewSurrealStore wraps db as a Store and defines the `tasks` table +
 // the three indexes the dispatcher + worker heartbeat queries rely on.
@@ -65,7 +101,7 @@ func (s *SurrealStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
-	emitStatus(ctx, s.publisher, t)
+	s.emit(ctx, t)
 	return t, nil
 }
 
@@ -214,7 +250,7 @@ func (s *SurrealStore) Claim(ctx context.Context, workerID string, workspaceIDs 
 		return Task{}, ErrNoTaskAvailable
 	}
 	claimed := (*updateRes)[0].Result[0]
-	emitStatus(ctx, s.publisher, claimed)
+	s.emit(ctx, claimed)
 	return claimed, nil
 }
 
@@ -253,7 +289,7 @@ func (s *SurrealStore) ClaimByID(ctx context.Context, id, workerID string, now t
 		return Task{}, ErrNoTaskAvailable
 	}
 	claimed := (*updateRes)[0].Result[0]
-	emitStatus(ctx, s.publisher, claimed)
+	s.emit(ctx, claimed)
 	return claimed, nil
 }
 
@@ -276,7 +312,7 @@ func (s *SurrealStore) Close(ctx context.Context, id, outcome string, now time.T
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
-	emitStatus(ctx, s.publisher, t)
+	s.emit(ctx, t)
 	return t, nil
 }
 
@@ -296,7 +332,7 @@ func (s *SurrealStore) Reclaim(ctx context.Context, id, reason string, now time.
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
-	emitStatus(ctx, s.publisher, t)
+	s.emit(ctx, t)
 	return t, nil
 }
 
@@ -316,7 +352,7 @@ func (s *SurrealStore) Archive(ctx context.Context, id string, now time.Time, me
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
-	emitStatus(ctx, s.publisher, t)
+	s.emit(ctx, t)
 	return t, nil
 }
 
@@ -371,7 +407,7 @@ func (s *SurrealStore) Publish(ctx context.Context, id string, now time.Time, me
 	if err := s.write(ctx, t); err != nil {
 		return Task{}, err
 	}
-	emitStatus(ctx, s.publisher, t)
+	s.emit(ctx, t)
 	return t, nil
 }
 

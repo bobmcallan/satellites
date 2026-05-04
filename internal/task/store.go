@@ -121,6 +121,7 @@ type MemoryStore struct {
 	mu        sync.Mutex
 	rows      map[string]Task
 	publisher hubemit.Publisher
+	listeners []Listener
 }
 
 // NewMemoryStore returns an empty MemoryStore.
@@ -130,6 +131,41 @@ func NewMemoryStore() *MemoryStore {
 
 // SetPublisher installs the hub emit sink for subsequent mutations.
 func (m *MemoryStore) SetPublisher(p hubemit.Publisher) { m.publisher = p }
+
+// AddListener registers l on the bus-subscriber slice (sty_c6d76a5b).
+// Listeners fire on every status transition after the existing per-
+// workspace hub publish. Mirrors the pattern in
+// internal/ledger/store.go.
+func (m *MemoryStore) AddListener(l Listener) {
+	if l == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listeners = append(m.listeners, l)
+}
+
+// snapshotListeners returns a defensive copy of the listener slice
+// for fan-out under-lock-free invocation.
+func (m *MemoryStore) snapshotListeners() []Listener {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.listeners) == 0 {
+		return nil
+	}
+	out := make([]Listener, len(m.listeners))
+	copy(out, m.listeners)
+	return out
+}
+
+// emit fires the per-workspace hub publish + the listener fan-out.
+// Used at every status-changing mutation site so the two emit paths
+// stay in lockstep. Caller has already released the store lock so
+// listener callbacks may re-enter the store safely.
+func (m *MemoryStore) emit(ctx context.Context, pub hubemit.Publisher, t Task) {
+	emitStatus(ctx, pub, t)
+	fanoutListeners(ctx, m.snapshotListeners(), t)
+}
 
 // Enqueue implements Store for MemoryStore.
 //
@@ -168,7 +204,7 @@ func (m *MemoryStore) Enqueue(ctx context.Context, t Task, now time.Time) (Task,
 	m.rows[t.ID] = t
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, t)
+	m.emit(ctx, pub, t)
 	return t, nil
 }
 
@@ -269,7 +305,7 @@ func (m *MemoryStore) Claim(ctx context.Context, workerID string, workspaceIDs [
 	m.rows[picked.ID] = picked
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, picked)
+	m.emit(ctx, pub, picked)
 	return picked, nil
 }
 
@@ -296,7 +332,7 @@ func (m *MemoryStore) ClaimByID(ctx context.Context, id, workerID string, now ti
 	m.rows[id] = t
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, t)
+	m.emit(ctx, pub, t)
 	return t, nil
 }
 
@@ -322,7 +358,7 @@ func (m *MemoryStore) Close(ctx context.Context, id, outcome string, now time.Ti
 	m.rows[id] = t
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, t)
+	m.emit(ctx, pub, t)
 	return t, nil
 }
 
@@ -345,7 +381,7 @@ func (m *MemoryStore) Reclaim(ctx context.Context, id, reason string, now time.T
 	m.rows[id] = t
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, t)
+	m.emit(ctx, pub, t)
 	return t, nil
 }
 
@@ -369,7 +405,7 @@ func (m *MemoryStore) Archive(ctx context.Context, id string, now time.Time, mem
 	m.rows[id] = t
 	pub := m.publisher
 	m.mu.Unlock()
-	emitStatus(ctx, pub, t)
+	m.emit(ctx, pub, t)
 	return t, nil
 }
 
@@ -411,7 +447,7 @@ func (m *MemoryStore) Publish(ctx context.Context, id string, now time.Time, mem
 	t.Status = StatusPublished
 	m.rows[id] = t
 	pub := m.publisher
-	go emitStatus(context.Background(), pub, t)
+	go m.emit(context.Background(), pub, t)
 	return t, nil
 }
 
