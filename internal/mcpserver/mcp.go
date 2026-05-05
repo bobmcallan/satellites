@@ -412,6 +412,16 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		)
 		s.mcp.AddTool(getStoryTool, s.handleStoryGet)
 
+		// sty_509a46fa: story_context is a single-roundtrip composer
+		// returning the story + project + recent evidence + resolved
+		// agent_process body + category template. Replaces the agent-
+		// side stitch of story_get + project_get + ledger_recall.
+		contextStoryTool := mcpgo.NewTool("story_context",
+			mcpgo.WithDescription("Return the orientation bundle for a story: row body/status/fields/tags, owning project, recent ledger evidence, the resolved agent_process instruction markdown, and the category template. Single-roundtrip alternative to stitching story_get + project_get + ledger_recall. Workspace-scoped."),
+			mcpgo.WithString("id", mcpgo.Required(), mcpgo.Description("Story id (sty_<8hex>).")),
+		)
+		s.mcp.AddTool(contextStoryTool, s.handleStoryContext)
+
 		listStoryTool := mcpgo.NewTool("story_list",
 			mcpgo.WithDescription("List stories in a project. Supports status, priority, and tag filters."),
 			mcpgo.WithString("project_id", mcpgo.Required(), mcpgo.Description("Project scope.")),
