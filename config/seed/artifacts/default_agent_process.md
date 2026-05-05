@@ -49,6 +49,32 @@ two routing rules you must apply before any project-scoped work.
   documents (contracts/agents/principles/skills/workflows),
   ledger.
 
+## pre-flight
+
+These rules apply to the orchestrator before every plan
+submission and every work-task close. Reviewer rejections cite
+violations against this section.
+
+- **Rule 1 — read contracts before composing evidence.** Before
+  `task_submit(kind=close)` on any work task with
+  `action=contract:<name>`, you MUST call
+  `document_get(name="contract:<name>")` and treat its
+  `evidence_required:` frontmatter as the literal close-evidence
+  checklist. The story AC is additive, not substitutive.
+- **Rule 2 — read contracts before composing the plan.** Before
+  `task_submit(kind=plan)`, read each contract document
+  referenced by the planned actions, so the plan reflects the
+  rubric the reviewer will enforce.
+- **Rule 3 — reviewer rejection is operator authority.** When
+  the reviewer service rejects (close returns
+  `published_review_id` and the substrate spawns a successor
+  work + planned-review pair carrying `prior_task_id`), your
+  response is to read the verdict ledger row, address each
+  cited gap in a fresh evidence row tagged for the iter-2 work
+  task, and submit the retry close. Do NOT bypass the chain by
+  transitioning the story to `done` while open work tasks
+  remain. Citing `pr_reviewer_voice_authoritative`.
+
 ## routing rules
 
 These rules are mandatory. Apply them in order.

@@ -12,6 +12,27 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
+// TestSystemDefaultSeedFile_CarriesPreflightRules is the regression
+// test that sty_7fef4a3a (orchestrator pre-flight, order:01) demands.
+// The seeded artifact body MUST carry the three Rule anchors so future
+// Claude sessions reading the body via `story_context.agent_process`
+// pick up the orchestrator's pre-flight discipline.
+func TestSystemDefaultSeedFile_CarriesPreflightRules(t *testing.T) {
+	t.Parallel()
+	body := readSeedBody(t)
+	mustContain := []string{
+		"Rule 1 — read contracts before composing evidence",
+		"Rule 2 — read contracts before composing the plan",
+		"Rule 3 — reviewer rejection is operator authority",
+		"pr_reviewer_voice_authoritative",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("seed body missing pre-flight anchor %q — sty_7fef4a3a requires the rule wording in the seed so future sessions pick it up", want)
+		}
+	}
+}
+
 // TestSystemDefaultSeedFile_PinsContractTokens is the regression test
 // that AC6 of sty_e1ab884d demands. The seeded body MUST keep its
 // fundamentals + routing tokens; a future edit that drops any of them

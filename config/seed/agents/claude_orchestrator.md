@@ -47,6 +47,32 @@ plans and dispatch the lifecycle.
 | Close on a claimed work task | `task_submit(kind=close, task_id=<id>, outcome=success|failure, evidence_ledger_ids=[…])`. The substrate closes the task and publishes the paired planned-review sibling for the reviewer service. |
 | Per-task evidence | `ledger_append` rows tagged `task_id:<id>` + `kind:evidence`. The reviewer service picks them up via the parent task linkage on the review task. |
 
+### Pre-flight
+
+Three rules apply before every plan submission and every
+work-task close. Reviewer rejections cite violations here.
+
+- **Rule 1 — read contracts before composing evidence.** Before
+  `task_submit(kind=close)` on any work task with
+  `action=contract:<name>`, the orchestrator MUST call
+  `document_get(name="contract:<name>")` and treat its
+  `evidence_required:` frontmatter as the literal close-evidence
+  checklist. The story AC is additive, not substitutive.
+- **Rule 2 — read contracts before composing the plan.** Before
+  `task_submit(kind=plan)`, the orchestrator reads each contract
+  document referenced by the planned actions, so the plan
+  reflects the rubric the reviewer will enforce.
+- **Rule 3 — reviewer rejection is operator authority.** When
+  the reviewer service rejects (close returns
+  `published_review_id`, the substrate spawns a successor work
+  + planned-review pair carrying `prior_task_id`), the
+  orchestrator's response is to read the verdict ledger row,
+  address each cited gap in a fresh evidence row tagged for the
+  iter-2 work task, and submit the retry close. The
+  orchestrator does NOT bypass the chain by transitioning the
+  story to `done` while open work tasks remain. Citing
+  `pr_reviewer_voice_authoritative`.
+
 ### Constraints
 
 The mandate principle `pr_mandate_reviewer_enforced` is the only
@@ -54,6 +80,10 @@ fixed shape: every story plan must include `plan` at the front and
 `story_close` at the end. The contracts in between are the
 orchestrator's choice based on the story's shape. The
 `story_reviewer` agent rejects plans that omit the floor.
+
+A reviewer rejection is the operator's voice; treat it as
+feedback to address, not friction to bypass. Citing
+`pr_reviewer_voice_authoritative`.
 
 ### Plan submission
 
