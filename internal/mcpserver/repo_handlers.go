@@ -12,22 +12,12 @@ import (
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/repo"
-	"github.com/bobmcallan/satellites/internal/task"
 )
 
-// reindexPayload is the JSON envelope written to task.Payload when a
-// repo_add or repo_scan enqueues a reindex. The slice 12.3 worker keys
-// off `handler == "reindex_repo"` and the repo_id.
-type reindexPayload struct {
-	Handler   string `json:"handler"`
-	RepoID    string `json:"repo_id"`
-	GitRemote string `json:"git_remote"`
-	Trigger   string `json:"trigger"`
-}
-
 // handleRepoAdd implements `repo_add`. Resolves the caller's project,
-// dedups against (workspace, git_remote), creates the row, enqueues a
-// reindex task, and writes a kind:repo-added audit row.
+// dedups against (workspace, git_remote), creates the row, and writes
+// a kind:repo-added audit row. sty_509a46fa removed the post-create
+// reindex enqueue when the reindex worker pipeline was retired.
 func (s *Server) handleRepoAdd(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	if s.repos == nil {
 		return mcpgo.NewToolResultError("repo_add unavailable: repo store not configured"), nil
@@ -68,7 +58,6 @@ func (s *Server) handleRepoAdd(ctx context.Context, req mcpgo.CallToolRequest) (
 		return mcpgo.NewToolResultError(fmt.Sprintf("repo_add: %s", err)), nil
 	}
 
-	taskID := s.enqueueReindex(ctx, created, "repo_add", caller.UserID, now)
 	s.appendRepoAuditRow(ctx, created, "kind:repo-added", caller.UserID, map[string]any{
 		"git_remote":     created.GitRemote,
 		"default_branch": created.DefaultBranch,
@@ -76,7 +65,6 @@ func (s *Server) handleRepoAdd(ctx context.Context, req mcpgo.CallToolRequest) (
 
 	return jsonResult(map[string]any{
 		"repo_id":        created.ID,
-		"task_id":        taskID,
 		"deduplicated":   false,
 		"git_remote":     created.GitRemote,
 		"default_branch": created.DefaultBranch,
@@ -132,51 +120,6 @@ func (s *Server) handleRepoList(ctx context.Context, req mcpgo.CallToolRequest) 
 		"project_id": projectID,
 		"status":     statusFilter,
 		"repos":      rows,
-	})
-}
-
-// handleRepoScan implements `repo_scan`. Idempotent: if a reindex task
-// for the repo is already enqueued/claimed/in_flight the existing
-// task_id is returned with deduplicated=true.
-func (s *Server) handleRepoScan(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-	if s.repos == nil {
-		return mcpgo.NewToolResultError("repo_scan unavailable"), nil
-	}
-	if s.tasks == nil {
-		return mcpgo.NewToolResultError("repo_scan unavailable: task store not configured"), nil
-	}
-	caller, _ := UserFrom(ctx)
-	repoID, err := req.RequireString("repo_id")
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	memberships := s.resolveCallerMemberships(ctx, caller)
-	r, err := s.repos.GetByID(ctx, repoID, memberships)
-	if err != nil {
-		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-
-	if existingID := s.findInFlightReindex(ctx, r, memberships); existingID != "" {
-		return jsonResult(map[string]any{
-			"task_id":      existingID,
-			"deduplicated": true,
-			"repo_id":      r.ID,
-		})
-	}
-
-	now := time.Now().UTC()
-	taskID := s.enqueueReindex(ctx, r, "repo_scan", caller.UserID, now)
-	if taskID == "" {
-		return mcpgo.NewToolResultError("repo_scan: task enqueue failed"), nil
-	}
-	s.appendRepoAuditRow(ctx, r, "kind:repo-scan-enqueued", caller.UserID, map[string]any{
-		"task_id": taskID,
-		"trigger": "manual",
-	}, now)
-	return jsonResult(map[string]any{
-		"task_id":      taskID,
-		"repo_id":      r.ID,
-		"deduplicated": false,
 	})
 }
 
@@ -337,86 +280,6 @@ func (s *Server) resolveRepoForProxy(ctx context.Context, req mcpgo.CallToolRequ
 // repo_scan. Returns the new task id, or empty string when the task
 // store rejected the enqueue (logged but non-fatal — the repo row is
 // still created so a follow-up repo_scan can retry).
-func (s *Server) enqueueReindex(ctx context.Context, r repo.Repo, trigger, actor string, now time.Time) string {
-	if s.tasks == nil {
-		return ""
-	}
-	payload := reindexPayload{
-		Handler:   "reindex_repo",
-		RepoID:    r.ID,
-		GitRemote: r.GitRemote,
-		Trigger:   trigger,
-	}
-	body, _ := json.Marshal(payload)
-	t, err := s.tasks.Enqueue(ctx, task.Task{
-		WorkspaceID:      r.WorkspaceID,
-		ProjectID:        r.ProjectID,
-		Origin:           task.OriginEvent,
-		Payload:          body,
-		Priority:         task.PriorityMedium,
-		ExpectedDuration: 5 * time.Minute,
-	}, now)
-	if err != nil {
-		s.logger.Warn().Str("repo_id", r.ID).Err(err).Msg("repo: reindex enqueue failed")
-		return ""
-	}
-	if s.ledger != nil {
-		_, _ = s.ledger.Append(ctx, ledger.LedgerEntry{
-			WorkspaceID: t.WorkspaceID,
-			ProjectID:   t.ProjectID,
-			Type:        ledger.TypeDecision,
-			Tags: []string{
-				"kind:task-enqueued",
-				"task_id:" + t.ID,
-				"origin:" + t.Origin,
-				"handler:reindex_repo",
-				"repo_id:" + r.ID,
-			},
-			Content:    fmt.Sprintf("reindex task enqueued for repo %s (trigger=%s)", r.ID, trigger),
-			Structured: body,
-			CreatedBy:  actor,
-		}, now)
-	}
-	return t.ID
-}
-
-// findInFlightReindex returns the id of a reindex task already in
-// flight for r, or empty when none. Workspace-scoped via memberships.
-func (s *Server) findInFlightReindex(ctx context.Context, r repo.Repo, memberships []string) string {
-	if s.tasks == nil {
-		return ""
-	}
-	for _, status := range []string{task.StatusEnqueued, task.StatusClaimed, task.StatusInFlight} {
-		rows, err := s.tasks.List(ctx, task.ListOptions{
-			Origin: task.OriginEvent,
-			Status: status,
-		}, memberships)
-		if err != nil {
-			continue
-		}
-		for _, t := range rows {
-			if matchesReindex(t, r.ID) {
-				return t.ID
-			}
-		}
-	}
-	return ""
-}
-
-// matchesReindex decodes a task's payload and reports whether it
-// targets the given repo_id. Tasks with non-JSON or missing handler
-// fall through silently — they're not reindex tasks.
-func matchesReindex(t task.Task, repoID string) bool {
-	if len(t.Payload) == 0 {
-		return false
-	}
-	var p reindexPayload
-	if err := json.Unmarshal(t.Payload, &p); err != nil {
-		return false
-	}
-	return p.Handler == "reindex_repo" && p.RepoID == repoID
-}
-
 // appendRepoAuditRow writes a repo audit ledger row. Extra tags are
 // appended after the canonical {kind, repo_id} pair so callers can
 // add action sub-tags without recomputing the base set.

@@ -634,7 +634,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("prior_task_id", mcpgo.Description("Links a fresh implement task to the prior implement task it succeeds in the rejection-append loop. Distinct from parent_task_id (the conversation anchor): prior_task_id is the same-slot retry pointer.")),
 			mcpgo.WithString("priority", mcpgo.Description("critical | high | medium (default) | low")),
 			mcpgo.WithString("trigger", mcpgo.Description("Free-form JSON trigger payload.")),
-			mcpgo.WithString("payload", mcpgo.Description("Free-form JSON task payload.")),
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
 		}
 
@@ -712,12 +711,6 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("status", mcpgo.Description("active (default) | archived | all")),
 		)
 		s.mcp.AddTool(listRepoTool, s.handleRepoList)
-
-		scanRepoTool := mcpgo.NewTool("repo_scan",
-			mcpgo.WithDescription("Enqueue a reindex task. Idempotent — returns the in-flight task_id when one already exists for the repo."),
-			mcpgo.WithString("repo_id", mcpgo.Required(), mcpgo.Description("Repo id.")),
-		)
-		s.mcp.AddTool(scanRepoTool, s.handleRepoScan)
 
 		searchTool := mcpgo.NewTool("repo_search",
 			mcpgo.WithDescription("Symbol search via the satellites code indexer. Writes a kind:repo-query audit row. Returns the indexer payload as JSON. Indexer outage → structured `code_index_unavailable` error."),
@@ -1201,13 +1194,6 @@ func (s *Server) handleDocumentCreate(ctx context.Context, req mcpgo.CallToolReq
 	created, err := s.docs.Create(ctx, doc, now)
 	if err != nil {
 		return mcpgo.NewToolResultError(err.Error()), nil
-	}
-	// Story_8b06a100: enqueue an embed-document task so the production
-	// embed worker (when SATELLITES_EMBEDDINGS_PROVIDER is set) chunks + embeds the
-	// new row. Returns nil + nil when bodies are too short or the
-	// taskStore isn't wired (dev/no-DB), so the success path is unaffected.
-	if _, err := document.EnqueueIngest(ctx, s.tasks, created, now); err != nil {
-		s.logger.Warn().Str("doc_id", created.ID).Str("error", err.Error()).Msg("embed enqueue failed")
 	}
 	body, _ := json.Marshal(created)
 	s.logger.Info().

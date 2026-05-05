@@ -52,7 +52,6 @@ func newSeededTask(id string) Task {
 		ProjectID:   "proj_1",
 		Origin:      OriginScheduled,
 		Priority:    PriorityMedium,
-		Payload:     []byte(`{}`),
 	}
 }
 

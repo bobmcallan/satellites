@@ -52,7 +52,6 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 	parentTaskID := getString(args, "parent_task_id")
 	priorTaskID := getString(args, "prior_task_id")
 	triggerRaw := []byte(getString(args, "trigger"))
-	payloadRaw := []byte(getString(args, "payload"))
 	expectedStr := getString(args, "expected_duration")
 	var expected time.Duration
 	if expectedStr != "" {
@@ -85,7 +84,6 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 		Status:           status,
 		Origin:           origin,
 		Trigger:          triggerRaw,
-		Payload:          payloadRaw,
 		Priority:         priority,
 		ExpectedDuration: expected,
 	}
@@ -112,7 +110,6 @@ func (s *Server) createTask(ctx context.Context, req mcpgo.CallToolRequest, stat
 				"priority:" + t.Priority,
 			},
 			Content:    fmt.Sprintf("task created: id=%s status=%s origin=%s priority=%s", t.ID, t.Status, t.Origin, t.Priority),
-			Structured: t.Payload,
 			Durability: ledger.DurabilityDurable,
 			SourceType: ledger.SourceAgent,
 			Status:     ledger.StatusActive,

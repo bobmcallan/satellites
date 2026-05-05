@@ -68,14 +68,15 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS tasks_dispatch ON TABLE tasks FIELDS workspace_id, status, priority, created_at", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS tasks_worker ON TABLE tasks FIELDS workspace_id, claimed_by", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS tasks_archival ON TABLE tasks FIELDS workspace_id, completed_at", nil)
-	// sty_509a46fa: contract_instance_id became dead concept post-
-	// sty_c6d76a5b. UNSET clears any lingering values on legacy rows;
-	// idempotent on already-cleared rows.
+	// sty_509a46fa: contract_instance_id and payload are dead post-
+	// sty_c6d76a5b's "tasks are thin" mandate. UNSET clears any lingering
+	// values on legacy rows; idempotent on already-cleared rows.
 	_, _ = surrealdb.Query[any](ctx, db, "UPDATE tasks UNSET contract_instance_id", nil)
+	_, _ = surrealdb.Query[any](ctx, db, "UPDATE tasks UNSET payload", nil)
 	return s
 }
 
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, kind, iteration, agent_id, prior_task_id, parent_task_id, action, description, origin, trigger, payload, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, kind, iteration, agent_id, prior_task_id, parent_task_id, action, description, origin, trigger, status, priority, claimed_by, claimed_at, completed_at, outcome, ledger_root_id, expected_duration, reclaim_count, created_at"
 
 // Enqueue implements Store for SurrealStore.
 //

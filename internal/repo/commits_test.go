@@ -169,36 +169,3 @@ func TestMemoryStore_Diff_DiffSourceUnavailable(t *testing.T) {
 	}
 }
 
-func TestPersistCommits_ExtractsStoryIDs(t *testing.T) {
-	t.Parallel()
-	store, r := newCommitsFixture(t)
-	now := time.Now().UTC()
-	persistCommits(context.Background(), store, r, []pushCommit{
-		{ID: "abc123", Message: "feat: thing (story_abcd1234)"},
-		{ID: "def456", Message: "chore: routine"},
-	}, now)
-	rows, _ := store.ListCommits(context.Background(), r.ID, "", 0, nil)
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
-	}
-	var withRef, noRef *Commit
-	for i := range rows {
-		if rows[i].SHA == "abc123" {
-			withRef = &rows[i]
-		}
-		if rows[i].SHA == "def456" {
-			noRef = &rows[i]
-		}
-	}
-	if withRef == nil || len(withRef.StoryIDs) != 1 || withRef.StoryIDs[0] != "story_abcd1234" {
-		t.Errorf("with-ref commit StoryIDs = %v", withRef.StoryIDs)
-	}
-	if noRef == nil || len(noRef.StoryIDs) != 0 {
-		t.Errorf("no-ref commit StoryIDs = %v, want empty", noRef.StoryIDs)
-	}
-}
-
-func TestPersistCommits_NilStoreNoOp(t *testing.T) {
-	t.Parallel()
-	persistCommits(context.Background(), nil, Repo{}, []pushCommit{{ID: "x", Message: "m"}}, time.Now())
-}

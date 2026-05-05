@@ -5,7 +5,6 @@ package portal
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"time"
 
@@ -28,25 +27,24 @@ type tasksComposite struct {
 
 // taskCard is one row in any of the three columns.
 type taskCard struct {
-	ID           string `json:"id"`
-	Origin       string `json:"origin"`
-	Status       string `json:"status"`
-	Priority     string `json:"priority"`
-	StoryID      string `json:"story_id,omitempty"`
-	ClaimedBy    string `json:"claimed_by,omitempty"`
-	ClaimedAt    string `json:"claimed_at,omitempty"`
-	CompletedAt  string `json:"completed_at,omitempty"`
-	Outcome      string `json:"outcome,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	PayloadShort string `json:"payload_short,omitempty"`
+	ID          string `json:"id"`
+	Origin      string `json:"origin"`
+	Status      string `json:"status"`
+	Priority    string `json:"priority"`
+	StoryID     string `json:"story_id,omitempty"`
+	ClaimedBy   string `json:"claimed_by,omitempty"`
+	ClaimedAt   string `json:"claimed_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // taskDrawer is the per-task detail composite returned by
-// `/api/tasks/{id}`. Carries the full task payload + a bounded ledger
-// trail rooted at the task.LedgerRootID (when present).
+// `/api/tasks/{id}`. Carries the trigger blob + a bounded ledger trail
+// rooted at the task.LedgerRootID (when present). sty_509a46fa
+// retired Task.Payload; artifact content lives on linked ledger rows.
 type taskDrawer struct {
 	Task     taskCard        `json:"task"`
-	Payload  string          `json:"payload,omitempty"`
 	Trigger  string          `json:"trigger,omitempty"`
 	Excerpts []ledgerExcerpt `json:"ledger_excerpts"`
 }
@@ -76,9 +74,7 @@ func buildTasksComposite(ctx context.Context, tasks task.Store, memberships []st
 	return c
 }
 
-// taskCardsFor projects task.Task rows into the view-model. Extracts
-// payload.story_id when the payload is JSON-encoded; tolerates non-JSON
-// payloads silently.
+// taskCardsFor projects task.Task rows into the view-model.
 func taskCardsFor(rows []task.Task) []taskCard {
 	out := make([]taskCard, 0, len(rows))
 	for _, t := range rows {
@@ -87,6 +83,7 @@ func taskCardsFor(rows []task.Task) []taskCard {
 			Origin:    t.Origin,
 			Status:    t.Status,
 			Priority:  t.Priority,
+			StoryID:   t.StoryID,
 			ClaimedBy: t.ClaimedBy,
 			Outcome:   t.Outcome,
 			CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
@@ -97,29 +94,9 @@ func taskCardsFor(rows []task.Task) []taskCard {
 		if t.CompletedAt != nil {
 			card.CompletedAt = t.CompletedAt.UTC().Format(time.RFC3339)
 		}
-		card.StoryID = storyIDFromPayload(t.Payload)
-		card.PayloadShort = truncate(string(t.Payload), 120)
 		out = append(out, card)
 	}
 	return out
-}
-
-// storyIDFromPayload extracts the canonical `story_id` field from a
-// JSON-encoded payload. Returns "" when the payload is empty, not
-// JSON, or has no story_id key. Used to render the story-link badge
-// on cards whose origin carries a story scope (story_stage,
-// story_producing).
-func storyIDFromPayload(payload []byte) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var p struct {
-		StoryID string `json:"story_id"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return ""
-	}
-	return p.StoryID
 }
 
 // buildTaskDrawer assembles the per-task drawer payload. Reads the
@@ -136,7 +113,6 @@ func buildTaskDrawer(ctx context.Context, tasks task.Store, ledgerStore ledger.S
 	}
 	d := taskDrawer{
 		Task:    cards[0],
-		Payload: string(t.Payload),
 		Trigger: string(t.Trigger),
 	}
 	if ledgerStore != nil && t.LedgerRootID != "" {

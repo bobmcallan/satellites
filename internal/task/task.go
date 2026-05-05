@@ -131,8 +131,10 @@ func PriorityRank(p string) int {
 }
 
 // Task is one orchestration row. Fields match docs/architecture.md §4
-// verbatim. Trigger + Payload are JSON-encoded raw bytes so the store
+// verbatim. Trigger is a JSON-encoded raw byte slice so the store
 // layer doesn't require compile-time knowledge of every origin's shape.
+// sty_509a46fa retired the Payload blob; tasks are thin and any
+// artifact content lives on linked ledger rows.
 //
 // Iteration is the lap number for tasks of the same Action on the same
 // story (rejection-append loop). First work-task on (story_id, action)
@@ -191,7 +193,6 @@ type Task struct {
 	Description      string        `json:"description,omitempty"`
 	Origin           string        `json:"origin"`
 	Trigger          []byte        `json:"trigger,omitempty"`
-	Payload          []byte        `json:"payload,omitempty"`
 	Status           string        `json:"status"`
 	Priority         string        `json:"priority"`
 	ClaimedBy        string        `json:"claimed_by,omitempty"`

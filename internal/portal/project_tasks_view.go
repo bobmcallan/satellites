@@ -268,9 +268,6 @@ func buildProjectTasksComposite(
 			CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339),
 		}
 		row.StoryID = t.StoryID
-		if row.StoryID == "" {
-			row.StoryID = storyIDFromPayload(t.Payload)
-		}
 		row.StoryTitle = storyTitles[row.StoryID]
 		if row.StoryID != "" {
 			row.StoryHref = fmt.Sprintf("/projects/%s/stories/%s", projectID, row.StoryID)

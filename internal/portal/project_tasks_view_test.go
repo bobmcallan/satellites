@@ -2,7 +2,6 @@ package portal
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +59,6 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 	taskStore := p.tasks.(*task.MemoryStore)
 
 	// One enqueued, one claimed, one closed.
-	enqPayload, _ := json.Marshal(map[string]string{"story_id": st.ID})
 	enq, err := taskStore.Enqueue(ctx, task.Task{
 		WorkspaceID: proj.WorkspaceID,
 		ProjectID:   proj.ID,
@@ -70,7 +68,6 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		Iteration:   2,
 		Origin:      task.OriginStoryStage,
 		Priority:    task.PriorityHigh,
-		Payload:     enqPayload,
 	}, now.Add(-30*time.Minute))
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -84,7 +81,6 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		Iteration:   1,
 		Origin:      task.OriginStoryStage,
 		Priority:    task.PriorityMedium,
-		Payload:     enqPayload,
 	}, now.Add(-2*time.Hour))
 	clm, _ := taskStore.ClaimByID(ctx, clmSeed.ID, "worker_a", now.Add(-90*time.Minute), nil)
 	closeSeed, _ := taskStore.Enqueue(ctx, task.Task{
@@ -96,7 +92,6 @@ func TestProjectTasks_RendersThreePanesWithRoleAndIteration(t *testing.T) {
 		Iteration:   1,
 		Origin:      task.OriginStoryStage,
 		Priority:    task.PriorityLow,
-		Payload:     enqPayload,
 	}, now.Add(-3*time.Hour))
 	if _, err := taskStore.ClaimByID(ctx, closeSeed.ID, "worker_a", now.Add(-150*time.Minute), nil); err != nil {
 		t.Fatalf("claim close-seed: %v", err)
@@ -143,18 +138,15 @@ func TestProjectTasks_FilterByRole(t *testing.T) {
 	proj, _ := projects.Create(ctx, user.ID, "wksp_a", "alpha", now)
 	st, _ := stories.Create(ctx, story.Story{ProjectID: proj.ID, Title: "story", Status: "in_progress", CreatedBy: user.ID}, now)
 	taskStore := p.tasks.(*task.MemoryStore)
-	payload, _ := json.Marshal(map[string]string{"story_id": st.ID})
 	if _, err := taskStore.Enqueue(ctx, task.Task{
-		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID,
+		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID, StoryID: st.ID,
 		Kind: task.KindWork, Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
-		Payload: payload,
 	}, now); err != nil {
 		t.Fatalf("enq dev: %v", err)
 	}
 	if _, err := taskStore.Enqueue(ctx, task.Task{
-		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID,
+		WorkspaceID: proj.WorkspaceID, ProjectID: proj.ID, StoryID: st.ID,
 		Kind: task.KindReview, Origin: task.OriginStoryStage, Priority: task.PriorityMedium,
-		Payload: payload,
 	}, now); err != nil {
 		t.Fatalf("enq rev: %v", err)
 	}

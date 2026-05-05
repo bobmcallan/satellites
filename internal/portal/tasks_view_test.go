@@ -91,10 +91,10 @@ func TestTasksView_PopulatedColumns(t *testing.T) {
 	// Seed: one enqueued, one in_flight (claimed), one closed.
 	enq, err := tasks.Enqueue(ctx, task.Task{
 		WorkspaceID: "ws_test",
+		StoryID:     "sty_demo01",
 		Origin:      task.OriginStoryStage,
 		Priority:    task.PriorityHigh,
 		Status:      task.StatusEnqueued,
-		Payload:     []byte(`{"story_id":"sty_demo01"}`),
 	}, now)
 	if err != nil {
 		t.Fatalf("seed enqueued: %v", err)
@@ -134,7 +134,7 @@ func TestTasksView_PopulatedColumns(t *testing.T) {
 	// Three different origins should all appear in the rendered SSR.
 	for _, want := range []string{
 		"story_stage", "scheduled", "story_producing",
-		"sty_demo01", // story_id badge from payload
+		"sty_demo01", // story_id badge from t.StoryID
 		"worker_a",   // claimed_by on in_flight card
 		"outcome-success",
 	} {
@@ -154,8 +154,8 @@ func TestTasksView_PopulatedColumns(t *testing.T) {
 	if drawer.Task.ID != enq.ID {
 		t.Errorf("drawer task id = %q, want %q", drawer.Task.ID, enq.ID)
 	}
-	if !strings.Contains(drawer.Payload, "sty_demo01") {
-		t.Errorf("drawer payload missing story_id; got %q", drawer.Payload)
+	if drawer.Task.StoryID != "sty_demo01" {
+		t.Errorf("drawer story id = %q, want sty_demo01", drawer.Task.StoryID)
 	}
 }
 
@@ -172,22 +172,3 @@ func TestTasksView_DrawerNotFound(t *testing.T) {
 	}
 }
 
-func TestStoryIDFromPayload_Variants(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		payload []byte
-		want    string
-	}{
-		{nil, ""},
-		{[]byte(""), ""},
-		{[]byte("not json"), ""},
-		{[]byte(`{"other":"x"}`), ""},
-		{[]byte(`{"story_id":"sty_abc12345"}`), "sty_abc12345"},
-	}
-	for _, c := range cases {
-		got := storyIDFromPayload(c.payload)
-		if got != c.want {
-			t.Errorf("storyIDFromPayload(%q) = %q, want %q", string(c.payload), got, c.want)
-		}
-	}
-}

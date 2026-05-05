@@ -28,8 +28,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/dispatcher"
 	"github.com/bobmcallan/satellites/internal/document"
-	"github.com/bobmcallan/satellites/internal/embeddings"
-	"github.com/bobmcallan/satellites/internal/embedworker"
 	"github.com/bobmcallan/satellites/internal/httpserver"
 	"github.com/bobmcallan/satellites/internal/hub"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -128,11 +126,6 @@ func main() {
 		// `kv_set` at scope=system; the next boot picks it up.
 		reviewerServiceMode = reviewerservice.ModeEmbedded
 
-		surrealDocChunks    document.ChunkStore
-		surrealLedgerChunks ledger.ChunkStore
-		surrealDocsTyped    *document.SurrealStore
-		surrealLedgerTyped  *ledger.SurrealStore
-
 		oauthServer *auth.OAuthServer
 	)
 	if cfg.DBDSN != "" {
@@ -186,13 +179,8 @@ func main() {
 
 		surrealDocs := document.NewSurrealStore(conn)
 		docStore = surrealDocs
-		surrealDocsTyped = surrealDocs
 		projStore = project.NewSurrealStore(conn)
-		surrealLed := ledger.NewSurrealStore(conn)
-		ledgerStore = surrealLed
-		surrealLedgerTyped = surrealLed
-		surrealDocChunks = document.NewSurrealChunkStore(conn)
-		surrealLedgerChunks = ledger.NewSurrealChunkStore(conn)
+		ledgerStore = ledger.NewSurrealStore(conn)
 		storyStore = story.NewSurrealStore(conn, ledgerStore)
 		wsStore = workspace.NewSurrealStore(conn)
 		sessionStore = session.NewSurrealStore(conn)
@@ -492,21 +480,6 @@ func main() {
 		}
 	}
 
-	// In-process repo reindex worker (story_c99995c8). Drains
-	// reindex_repo tasks the MCP repo_add / repo_scan handlers enqueue,
-	// runs HandleReindex inline, and closes the task. Lives in the
-	// satellites binary so the repo collection pipeline is self-contained
-	// — operators don't need a separate worker process for the repo
-	// reference primitive to populate SurrealDB.
-	if taskStore != nil && repoStore != nil && repoIndexer != nil {
-		repoWorker := repo.NewWorker(repoStore, taskStore, ledgerStore, repoIndexer, nil, logger, repo.WorkerOptions{})
-		if err := repoWorker.Start(ctx); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("repo reindex worker start failed")
-		} else {
-			defer repoWorker.Stop()
-		}
-	}
-
 	// epic:v4-lifecycle-refactor sty_6077711d: standalone reviewer
 	// service. Runs as an in-process goroutine consuming kind:review
 	// tasks from the queue, invoking the gemini reviewer against the
@@ -546,47 +519,11 @@ func main() {
 		}
 	}
 
-	// Embedding ingestion worker (story_5abfe61c). Boots only when an
-	// embeddings provider is configured AND SATELLITES_DB_DSN is set so the Surreal
-	// chunk stores are available. SATELLITES_EMBEDDINGS_PROVIDER=none / unset → the
-	// worker is not started; document_search and ledger_search fall
-	// back to filter-only Search via the verb-layer ErrSemanticUnavailable
-	// path.
-	embedCfg := embeddings.FromConfig(cfg)
-	if taskStore != nil && surrealDocChunks != nil && surrealLedgerChunks != nil {
-		embedder, err := embeddings.New(embedCfg)
-		if err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("embeddings provider construction failed; semantic search disabled")
-		} else if embedder != nil {
-			// Wire the chunk stores into the typed Surreal stores so
-			// SearchSemantic delegates instead of returning
-			// ErrSemanticUnavailable.
-			if surrealDocsTyped != nil {
-				surrealDocsTyped.WithEmbeddings(embedder, surrealDocChunks)
-			}
-			if surrealLedgerTyped != nil {
-				surrealLedgerTyped.WithEmbeddings(embedder, surrealLedgerChunks)
-			}
-
-			worker := embedworker.New(embedworker.Deps{
-				Tasks:        taskStore,
-				Embedder:     embedder,
-				Docs:         docStore,
-				DocChunks:    surrealDocChunks,
-				Ledger:       ledgerStore,
-				LedgerChunks: surrealLedgerChunks,
-				Logger:       logger,
-			})
-			if worker != nil {
-				if err := worker.Start(ctx); err != nil {
-					logger.Warn().Str("error", err.Error()).Msg("embedworker start failed")
-				} else {
-					defer worker.Stop()
-					logger.Info().Str("provider", embedCfg.Provider).Str("model", embedder.Model()).Msg("embedding worker started")
-				}
-			}
-		}
-	}
+	// sty_509a46fa: embedding ingestion worker + repo reindex worker
+	// removed. Both depended on Task.Payload as a job envelope, which is
+	// itself gone. Semantic search and repo reindex are no longer
+	// background-job features; reintroduce as substrate-native verbs if
+	// needed.
 
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error().Str("error", err.Error()).Msg("server terminated with error")

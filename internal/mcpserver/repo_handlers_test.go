@@ -98,9 +98,6 @@ func TestRepoAdd_CreatesEnqueuesAndAudits(t *testing.T) {
 	if body["repo_id"] == "" {
 		t.Fatalf("repo_id empty: %+v", body)
 	}
-	if body["task_id"] == "" {
-		t.Fatalf("task_id empty: %+v", body)
-	}
 	if body["deduplicated"] != false {
 		t.Fatalf("deduplicated = %v, want false", body["deduplicated"])
 	}
@@ -111,16 +108,6 @@ func TestRepoAdd_CreatesEnqueuesAndAudits(t *testing.T) {
 	}
 	if !hasTag(rows, "kind:repo-added") {
 		t.Errorf("missing kind:repo-added ledger row; tags=%v", flattenTags(rows))
-	}
-	if !hasTag(rows, "kind:task-enqueued") {
-		t.Errorf("missing kind:task-enqueued ledger row; tags=%v", flattenTags(rows))
-	}
-	tasks, _ := f.tasks.List(f.ctx, task.ListOptions{}, nil)
-	if len(tasks) != 1 {
-		t.Errorf("expected 1 task enqueued, got %d", len(tasks))
-	}
-	if len(tasks) > 0 && tasks[0].Origin != task.OriginEvent {
-		t.Errorf("task origin = %q, want %q", tasks[0].Origin, task.OriginEvent)
 	}
 }
 
@@ -218,33 +205,6 @@ func TestRepoList_FiltersByStatus(t *testing.T) {
 	rows, _ = archivedBody["repos"].([]any)
 	if len(rows) != 1 {
 		t.Errorf("archived list returned %d rows, want 1", len(rows))
-	}
-}
-
-func TestRepoScan_IdempotentInFlight(t *testing.T) {
-	t.Parallel()
-	f := newRepoFixture(t)
-	add, _ := f.server.handleRepoAdd(f.callerCtx(), newCallToolReq("repo_add", map[string]any{
-		"git_remote": "git@github.com:example/scan.git",
-	}))
-	if add.IsError {
-		t.Fatalf("add: %s", firstText(add))
-	}
-	repoID := decodeMap(t, add)["repo_id"].(string)
-	taskIDFromAdd := decodeMap(t, add)["task_id"].(string)
-
-	scan, _ := f.server.handleRepoScan(f.callerCtx(), newCallToolReq("repo_scan", map[string]any{
-		"repo_id": repoID,
-	}))
-	if scan.IsError {
-		t.Fatalf("scan: %s", firstText(scan))
-	}
-	scanBody := decodeMap(t, scan)
-	if scanBody["deduplicated"] != true {
-		t.Fatalf("scan: deduplicated = %v, want true (add task is in-flight)", scanBody["deduplicated"])
-	}
-	if scanBody["task_id"] != taskIDFromAdd {
-		t.Fatalf("scan: task_id = %q, want %q", scanBody["task_id"], taskIDFromAdd)
 	}
 }
 
