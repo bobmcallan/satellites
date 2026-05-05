@@ -26,7 +26,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/portalreplicate"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/repo"
-	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -49,7 +48,6 @@ type Server struct {
 	stories          story.Store
 	workspaces       workspace.Store
 	sessions         session.Store
-	reviewer         reviewer.Reviewer
 	tasks            task.Store
 	repos            repo.Store
 	changelog        changelog.Store
@@ -93,7 +91,6 @@ type Deps struct {
 	StoryStore       story.Store
 	WorkspaceStore   workspace.Store
 	SessionStore     session.Store
-	Reviewer         reviewer.Reviewer
 	// TaskStore is optional; nil disables the task_* MCP verbs.
 	// Story_a8fee0cc.
 	TaskStore task.Store
@@ -134,15 +131,11 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		stories:          deps.StoryStore,
 		workspaces:       deps.WorkspaceStore,
 		sessions:         deps.SessionStore,
-		reviewer:         deps.Reviewer,
 		tasks:            deps.TaskStore,
 		repos:            deps.RepoStore,
 		changelog:        deps.ChangelogStore,
 		indexer:          deps.Indexer,
 		nowFunc:          deps.NowFunc,
-	}
-	if s.reviewer == nil {
-		s.reviewer = reviewer.AcceptAll{}
 	}
 	if s.indexer == nil {
 		s.indexer = codeindex.NewStub()

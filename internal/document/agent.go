@@ -38,10 +38,11 @@ type AgentSettings struct {
 	Delivers []string `json:"delivers,omitempty"`
 
 	// Reviews (sty_c6d76a5b): the contract action strings this agent is
-	// authorised to review. Replaces the hardcoded `if contractName ==
-	// "develop"` reviewer routing in close_handlers.go and
-	// internal/reviewer/service/runner.go. Empty list means
-	// "this agent doesn't do reviews."
+	// authorised to review. The orchestrator's dispatch loop matches a
+	// kind:review task's Action against this list when picking an agent
+	// to dispatch (sty_51571015 retired the in-process listener that
+	// previously consumed this field; routing is now orchestrator-side).
+	// Empty list means "this agent doesn't do reviews."
 	Reviews []string `json:"reviews,omitempty"`
 }
 

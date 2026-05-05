@@ -37,7 +37,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/ratelimit"
 	"github.com/bobmcallan/satellites/internal/repo"
-	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -421,8 +420,6 @@ func main() {
 	}
 	srv.SetLLMPinger(newGeminiPinger(cfg.GeminiAPIKey))
 
-	rev := buildReviewer(logger, cfg)
-
 	mcp := mcpserver.New(cfg, logger, startedAt, mcpserver.Deps{
 		DocStore:         docStore,
 		DocsDir:          cfg.DocsDir,
@@ -436,7 +433,6 @@ func main() {
 		RepoStore:        repoStore,
 		ChangelogStore:   changelogStore,
 		Indexer:          repoIndexer,
-		Reviewer:         rev,
 	})
 	// Sty_088f6d5c: install the portal_replicate action vocabulary
 	// from the seeded replicate_vocabulary document. configseed has
@@ -483,31 +479,6 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info().Msg("server stopped cleanly")
-}
-
-// buildReviewer wires the production Reviewer for the MCP server.
-// When cfg.GeminiAPIKey is set, returns a Gemini-backed reviewer using
-// cfg.GeminiReviewModel (default gemini-2.5-flash). When unset, returns
-// AcceptAll with a warning log so test/dev boots stay green but the
-// operator knows the review path is a stub.
-//
-// Story_b218cb81 migrated the credentials from os.Getenv reads to the
-// shared *config.Config so production resolution stays env→TOML→default
-// and tests can carry the values via mounted TOML.
-func buildReviewer(logger arbor.ILogger, cfg *config.Config) reviewer.Reviewer {
-	if cfg.GeminiAPIKey == "" {
-		logger.Warn().Msg("SATELLITES_GEMINI_API_KEY not set — reviewer falls back to AcceptAll (validation_mode=llm closes auto-accepted)")
-		return reviewer.AcceptAll{}
-	}
-	model := cfg.GeminiReviewModel
-	if model == "" {
-		model = reviewer.DefaultGeminiReviewModel
-	}
-	logger.Info().Str("model", model).Msg("gemini reviewer wired")
-	return reviewer.NewGeminiReviewer(reviewer.GeminiConfig{
-		APIKey: cfg.GeminiAPIKey,
-		Model:  model,
-	})
 }
 
 // geminiPinger is the httpserver.LLMPinger adapter for the Google
