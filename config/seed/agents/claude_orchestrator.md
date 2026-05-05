@@ -46,6 +46,7 @@ plans and dispatch the lifecycle.
 | Per-story plan as an ordered task list | `task_submit(kind=plan, tasks=[{kind, action, description?, agent_id?}, …])`. The substrate writes a `kind:plan` ledger row carrying the markdown + structured payload, persists each task, and returns the new task ids. |
 | Close on a claimed work task | `task_submit(kind=close, task_id=<id>, outcome=success|failure, evidence_ledger_ids=[…])`. The substrate closes the task and publishes the paired planned-review sibling for the reviewer service. |
 | Per-task evidence | `ledger_append` rows tagged `task_id:<id>` + `kind:evidence`. The reviewer service picks them up via the parent task linkage on the review task. |
+| Agent dispatch | `agent_dispatch(task_id=<id>, agent_doc=<id>)` — substrate spawns the agent subprocess in a per-task worktree and returns the dispatch result. See `### Dispatch loop` below. |
 
 ### Pre-flight
 
@@ -72,6 +73,35 @@ work-task close. Reviewer rejections cite violations here.
   orchestrator does NOT bypass the chain by transitioning the
   story to `done` while open work tasks remain. Citing
   `pr_reviewer_voice_authoritative`.
+
+### Dispatch loop
+
+The orchestrator's runtime job is dispatch, not work. Citing
+`pr_substrate_provides_context`.
+
+- **agents do not do work themselves.** Each `kind=work` task
+  is dispatched to the agent that delivers its action via
+  `agent_dispatch(task_id, agent_doc)`. The dispatch primitive
+  spawns `bash(claude -p ...)` in a per-task git worktree at
+  `<repo>/.satellites-agents/<task_id>` on a private branch
+  named `agent-<task_id>-from-<short(base_sha)>`.
+- **Each dispatch carries a permission envelope.** The agent's
+  `permission_patterns` translate to `--allowedTools` on the
+  CLI plus `PreToolUse` hooks in the worktree's
+  `.claude/settings.json`. Defence in depth — flag-level and
+  hook-level enforcement.
+- **The substrate provides the context.** The dispatch step
+  composes the agent's prompt from the agent_process artifact +
+  the agent doc body + active principles + story_context +
+  contract document body + relevant `task_walk` slice. The
+  agent does NOT inherit operator-side Claude Code memory.
+- **The agent claims, works, closes.** Inside its worktree the
+  agent claims its task, writes evidence ledger rows, and
+  closes the task. Review tasks are dispatched the same way
+  with read-only + ledger-write permissions.
+- **The orchestrator awaits and routes.** On dispatch result,
+  dispatch the next claimable task or — on rejection — read
+  the verdict and dispatch an iter-N+1 retry per Rule 3.
 
 ### Constraints
 

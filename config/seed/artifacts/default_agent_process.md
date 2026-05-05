@@ -75,6 +75,42 @@ violations against this section.
   transitioning the story to `done` while open work tasks
   remain. Citing `pr_reviewer_voice_authoritative`.
 
+## dispatch loop
+
+The orchestrator's runtime job is dispatch, not work. The
+substrate provides the dispatch primitive; the orchestrator
+drives the loop. Citing `pr_substrate_provides_context`.
+
+- **agents do not do work themselves.** Each `kind=work` task
+  is dispatched to the agent that delivers its action via
+  `agent_dispatch(task_id, agent_doc)`. The dispatch primitive
+  spawns `bash(claude -p ...)` in a per-task git worktree at
+  `<repo>/.satellites-agents/<task_id>` on a private branch
+  named `agent-<task_id>-from-<short(base_sha)>`.
+- **Each dispatch carries a permission envelope.** The agent's
+  `permission_patterns` translate to `--allowedTools` on the
+  CLI plus `PreToolUse` hooks in the worktree's
+  `.claude/settings.json`. Defence in depth — flag-level and
+  hook-level enforcement.
+- **The substrate provides the context.** The dispatch step
+  composes the agent's prompt from the agent_process artifact +
+  the agent doc body + active principles + story_context +
+  contract document body + relevant `task_walk` slice. The
+  agent does NOT inherit operator-side Claude Code memory —
+  that lives at `~/.claude/projects/.../memory/` and is
+  orchestrator-only.
+- **The agent claims, works, closes.** Inside its worktree the
+  agent claims its task, writes evidence ledger rows tagged
+  `task_id:<id>`, closes the task via `task_submit(kind=close)`.
+  The substrate's reviewer-dispatch path is the same: review
+  tasks are dispatched as reviewer agents in their own
+  worktrees with read-only + ledger-write permission envelopes.
+- **The orchestrator awaits and routes.** On dispatch result,
+  the orchestrator either dispatches the next claimable task
+  or — on rejection (per pre-flight Rule 3) — reads the
+  verdict and dispatches an iter-N+1 retry that addresses the
+  cited gaps.
+
 ## routing rules
 
 These rules are mandatory. Apply them in order.

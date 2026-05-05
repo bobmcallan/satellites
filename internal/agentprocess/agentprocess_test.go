@@ -33,6 +33,30 @@ func TestSystemDefaultSeedFile_CarriesPreflightRules(t *testing.T) {
 	}
 }
 
+// TestSystemDefaultSeedFile_CarriesDispatchLoop is the regression
+// test that sty_9d7992c3 (orchestrator dispatch loop, order:02)
+// demands. The seeded artifact body MUST carry the five dispatch-
+// loop anchor strings + the section heading so future Claude
+// sessions reading the body via `story_context.agent_process`
+// pick up the dispatch discipline.
+func TestSystemDefaultSeedFile_CarriesDispatchLoop(t *testing.T) {
+	t.Parallel()
+	body := readSeedBody(t)
+	mustContain := []string{
+		"## dispatch loop",
+		"agents do not do work themselves",
+		"bash(claude -p",
+		".satellites-agents/<task_id>",
+		"pr_substrate_provides_context",
+		"--allowedTools",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("seed body missing dispatch-loop anchor %q — sty_9d7992c3 requires the wording in the seed so future sessions pick up the dispatch discipline", want)
+		}
+	}
+}
+
 // TestSystemDefaultSeedFile_PinsContractTokens is the regression test
 // that AC6 of sty_e1ab884d demands. The seeded body MUST keep its
 // fundamentals + routing tokens; a future edit that drops any of them
