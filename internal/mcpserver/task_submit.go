@@ -1,4 +1,4 @@
-// Package mcpserver — story_task_submit MCP verb (sty_c6d76a5b).
+// Package mcpserver — task_submit MCP verb (sty_c6d76a5b).
 //
 // The agent-authored, substrate-validated alternative to
 // orchestrator_compose_plan. The orchestrator submits the full task
@@ -37,7 +37,7 @@ const (
 )
 
 // taskInput is the JSON shape of one entry in the `tasks[]` arg of
-// story_task_submit. The agent supplies kind, action, description,
+// task_submit. The agent supplies kind, action, description,
 // and (optionally) agent_id; the substrate fills in the rest.
 type taskInput struct {
 	Kind        string `json:"kind"`
@@ -47,10 +47,10 @@ type taskInput struct {
 	Priority    string `json:"priority,omitempty"`
 }
 
-// handleStoryTaskSubmit implements `story_task_submit`. The first
+// handleTaskSubmit implements `task_submit`. The first
 // supported mode is `kind=plan`: the orchestrator submits an
 // agent-authored task list; the substrate validates and persists.
-func (s *Server) handleStoryTaskSubmit(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func (s *Server) handleTaskSubmit(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	start := time.Now()
 	caller, _ := UserFrom(ctx)
 
@@ -64,7 +64,7 @@ func (s *Server) handleStoryTaskSubmit(ctx context.Context, req mcpgo.CallToolRe
 	}
 
 	if s.stories == nil || s.tasks == nil || s.ledger == nil {
-		return mcpgo.NewToolResultError("story_task_submit unavailable: required stores not configured"), nil
+		return mcpgo.NewToolResultError("task_submit unavailable: required stores not configured"), nil
 	}
 
 	memberships := s.resolveCallerMemberships(ctx, caller)
@@ -79,7 +79,7 @@ func (s *Server) handleStoryTaskSubmit(ctx context.Context, req mcpgo.CallToolRe
 	case SubmitKindClose:
 		return s.submitClose(ctx, req, st, caller, memberships, start)
 	default:
-		return mcpgo.NewToolResultError(fmt.Sprintf("story_task_submit: unsupported kind %q", kind)), nil
+		return mcpgo.NewToolResultError(fmt.Sprintf("task_submit: unsupported kind %q", kind)), nil
 	}
 }
 
@@ -89,18 +89,18 @@ func (s *Server) handleStoryTaskSubmit(ctx context.Context, req mcpgo.CallToolRe
 func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st story.Story, caller CallerIdentity, memberships []string, start time.Time) (*mcpgo.CallToolResult, error) {
 	rawTasks := req.GetString("tasks", "")
 	if strings.TrimSpace(rawTasks) == "" {
-		return mcpgo.NewToolResultError("story_task_submit(kind=plan): tasks[] required"), nil
+		return mcpgo.NewToolResultError("task_submit(kind=plan): tasks[] required"), nil
 	}
 	var inputs []taskInput
 	if err := json.Unmarshal([]byte(rawTasks), &inputs); err != nil {
-		return mcpgo.NewToolResultError(fmt.Sprintf("story_task_submit: tasks[] parse error: %v", err)), nil
+		return mcpgo.NewToolResultError(fmt.Sprintf("task_submit: tasks[] parse error: %v", err)), nil
 	}
 	if len(inputs) == 0 {
-		return mcpgo.NewToolResultError("story_task_submit(kind=plan): tasks[] empty"), nil
+		return mcpgo.NewToolResultError("task_submit(kind=plan): tasks[] empty"), nil
 	}
 
 	// Idempotence: when the story already has tasks submitted via
-	// story_task_submit, return the existing task ids without writing
+	// task_submit, return the existing task ids without writing
 	// fresh rows. Mirrors orchestrator_compose_plan's convention.
 	existing, _ := s.tasks.List(ctx, task.ListOptions{StoryID: st.ID}, memberships)
 	if len(existing) > 0 {
@@ -129,7 +129,7 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 
 	// Persist tasks. Work tasks land at StatusPublished (claimable
 	// now); review tasks land at StatusPlanned (subscriber-invisible
-	// until the matching work task closes via story_task_submit
+	// until the matching work task closes via task_submit
 	// (kind=close), which publishes them). This gates the reviewer
 	// service so it can't claim a review before the work is done.
 	//
@@ -189,7 +189,7 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 		ProjectID:   st.ProjectID,
 		StoryID:     ledger.StringPtr(st.ID),
 		Type:        ledger.TypePlan,
-		Tags:        []string{"kind:plan", "phase:orchestrator", "story:" + st.ID, "source:story_task_submit"},
+		Tags:        []string{"kind:plan", "phase:orchestrator", "story:" + st.ID, "source:task_submit"},
 		Content:     planContent,
 		Structured:  planPayload,
 		CreatedBy:   caller.UserID,
@@ -206,7 +206,7 @@ func (s *Server) submitPlan(ctx context.Context, req mcpgo.CallToolRequest, st s
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_task_submit").
+		Str("tool", "task_submit").
 		Str("kind", SubmitKindPlan).
 		Str("story_id", st.ID).
 		Int("task_count", len(taskIDs)).
@@ -255,7 +255,7 @@ func (s *Server) submitClose(ctx context.Context, req mcpgo.CallToolRequest, st 
 
 	// Publish the matching sibling review task — kind=review with the
 	// same action that comes immediately after this work task in the
-	// story chain (story_task_submit(kind=plan) emits it at status=
+	// story chain (task_submit(kind=plan) emits it at status=
 	// planned for exactly this gating). When no sibling exists (close
 	// of a review task itself, or a story chain without an explicit
 	// review for this action), no publish is performed.
@@ -271,7 +271,7 @@ func (s *Server) submitClose(ctx context.Context, req mcpgo.CallToolRequest, st 
 					Str("task_id", taskID).
 					Str("sibling_id", sibling).
 					Err(perr).
-					Msg("story_task_submit close: sibling review publish failed")
+					Msg("task_submit close: sibling review publish failed")
 			}
 		}
 	}
@@ -291,7 +291,7 @@ func (s *Server) submitClose(ctx context.Context, req mcpgo.CallToolRequest, st 
 	})
 	s.logger.Info().
 		Str("method", "tools/call").
-		Str("tool", "story_task_submit").
+		Str("tool", "task_submit").
 		Str("kind", SubmitKindClose).
 		Str("story_id", st.ID).
 		Str("task_id", taskID).
@@ -304,7 +304,7 @@ func (s *Server) submitClose(ctx context.Context, req mcpgo.CallToolRequest, st 
 }
 
 // findPlannedReviewSibling returns the task id of the planned review
-// task whose ParentTaskID is `parent.ID`. story_task_submit(kind=plan)
+// task whose ParentTaskID is `parent.ID`. task_submit(kind=plan)
 // stamps that linkage at compose time. Empty when no matching planned
 // review exists (legacy chain, already-published, etc.).
 func (s *Server) findPlannedReviewSibling(ctx context.Context, parent task.Task, memberships []string) string {
@@ -382,7 +382,7 @@ func (s *Server) validatePlanCapabilities(ctx context.Context, inputs []taskInpu
 }
 
 // validatePlanTasks runs the structural checks required by
-// `story_task_submit(kind=plan)` per sty_c6d76a5b's AC list. Returns
+// `task_submit(kind=plan)` per sty_c6d76a5b's AC list. Returns
 // the first violation as a structured error string; nil when clean.
 //
 // Structural rules in this slice:

@@ -32,16 +32,16 @@ func tasksJSON(t *testing.T, inputs []taskInput) string {
 	return string(b)
 }
 
-// TestStoryTaskSubmit_HappyPath_PlanKind covers the happy path:
+// TestTaskSubmit_HappyPath_PlanKind covers the happy path:
 // agent-authored task list passes structural validation, tasks are
 // persisted with story_id linkage and the right kind/action fields,
 // kind:plan ledger row is written, response carries task_ids.
-func TestStoryTaskSubmit_HappyPath_PlanKind(t *testing.T) {
+func TestTaskSubmit_HappyPath_PlanKind(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	inputs := minimalPlanTasks()
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, inputs),
@@ -104,10 +104,10 @@ func TestStoryTaskSubmit_HappyPath_PlanKind(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_Idempotent verifies a second submission against
+// TestTaskSubmit_Idempotent verifies a second submission against
 // a story that already has tasks returns the existing ids without
 // duplicating rows.
-func TestStoryTaskSubmit_Idempotent(t *testing.T) {
+func TestTaskSubmit_Idempotent(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	args := map[string]any{
@@ -116,11 +116,11 @@ func TestStoryTaskSubmit_Idempotent(t *testing.T) {
 		"tasks":    tasksJSON(t, minimalPlanTasks()),
 	}
 
-	first, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", args))
+	first, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", args))
 	if err != nil || first.IsError {
 		t.Fatalf("first submit: err=%v body=%s", err, firstText(first))
 	}
-	second, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", args))
+	second, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", args))
 	if err != nil || second.IsError {
 		t.Fatalf("second submit: err=%v body=%s", err, firstText(second))
 	}
@@ -138,9 +138,9 @@ func TestStoryTaskSubmit_Idempotent(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsFirstNotPlan covers the
+// TestTaskSubmit_RejectsFirstNotPlan covers the
 // `plan_first_task_must_be_plan` rejection class.
-func TestStoryTaskSubmit_RejectsFirstNotPlan(t *testing.T) {
+func TestTaskSubmit_RejectsFirstNotPlan(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	bad := []taskInput{
@@ -148,7 +148,7 @@ func TestStoryTaskSubmit_RejectsFirstNotPlan(t *testing.T) {
 		{Kind: task.KindReview, Action: task.ContractAction("develop")},
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -164,10 +164,10 @@ func TestStoryTaskSubmit_RejectsFirstNotPlan(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsMissingReview covers the
+// TestTaskSubmit_RejectsMissingReview covers the
 // `missing_review_for:` rejection class — the substrate refuses to
 // silently insert a review task; the agent owns the list.
-func TestStoryTaskSubmit_RejectsMissingReview(t *testing.T) {
+func TestTaskSubmit_RejectsMissingReview(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	bad := []taskInput{
@@ -180,7 +180,7 @@ func TestStoryTaskSubmit_RejectsMissingReview(t *testing.T) {
 		{Kind: task.KindReview, Action: task.ContractAction("story_close")},
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -196,11 +196,11 @@ func TestStoryTaskSubmit_RejectsMissingReview(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsReviewActionMismatch covers the
+// TestTaskSubmit_RejectsReviewActionMismatch covers the
 // `review_action_mismatch` rejection class — a review task whose
 // action doesn't match the immediately preceding work task is
 // rejected.
-func TestStoryTaskSubmit_RejectsReviewActionMismatch(t *testing.T) {
+func TestTaskSubmit_RejectsReviewActionMismatch(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	bad := []taskInput{
@@ -209,7 +209,7 @@ func TestStoryTaskSubmit_RejectsReviewActionMismatch(t *testing.T) {
 		{Kind: task.KindReview, Action: task.ContractAction("develop")},
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -225,10 +225,10 @@ func TestStoryTaskSubmit_RejectsReviewActionMismatch(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsBadActionFormat covers
+// TestTaskSubmit_RejectsBadActionFormat covers
 // `invalid_action_format` — actions must use the `contract:<name>`
 // canonical form.
-func TestStoryTaskSubmit_RejectsBadActionFormat(t *testing.T) {
+func TestTaskSubmit_RejectsBadActionFormat(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	bad := []taskInput{
@@ -236,7 +236,7 @@ func TestStoryTaskSubmit_RejectsBadActionFormat(t *testing.T) {
 		{Kind: task.KindReview, Action: "plan"},
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -257,12 +257,12 @@ func TestStoryTaskSubmit_RejectsBadActionFormat(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsEmptyTasks covers the empty-list case.
-func TestStoryTaskSubmit_RejectsEmptyTasks(t *testing.T) {
+// TestTaskSubmit_RejectsEmptyTasks covers the empty-list case.
+func TestTaskSubmit_RejectsEmptyTasks(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    "[]",
@@ -278,13 +278,13 @@ func TestStoryTaskSubmit_RejectsEmptyTasks(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_UnsupportedKind verifies the verb rejects
+// TestTaskSubmit_UnsupportedKind verifies the verb rejects
 // kinds beyond the implemented set.
-func TestStoryTaskSubmit_UnsupportedKind(t *testing.T) {
+func TestTaskSubmit_UnsupportedKind(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     "spawn",
 	}))
@@ -299,11 +299,11 @@ func TestStoryTaskSubmit_UnsupportedKind(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsAgentCannotDeliver covers the
+// TestTaskSubmit_RejectsAgentCannotDeliver covers the
 // `agent_cannot_deliver` rejection class — when a work task names an
 // agent whose AgentSettings.Delivers list doesn't include the
 // task's action.
-func TestStoryTaskSubmit_RejectsAgentCannotDeliver(t *testing.T) {
+func TestTaskSubmit_RejectsAgentCannotDeliver(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	// Find releaser_agent (only delivers push/merge_to_main, NOT plan).
@@ -329,7 +329,7 @@ func TestStoryTaskSubmit_RejectsAgentCannotDeliver(t *testing.T) {
 		{Kind: task.KindWork, Action: task.ContractAction("plan"), AgentID: releaser.ID},
 		{Kind: task.KindReview, Action: task.ContractAction("plan")},
 	}
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -345,10 +345,10 @@ func TestStoryTaskSubmit_RejectsAgentCannotDeliver(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_RejectsAgentCannotReview covers the
+// TestTaskSubmit_RejectsAgentCannotReview covers the
 // `agent_cannot_review` rejection class — when a review task names an
 // agent whose AgentSettings.Reviews list doesn't include the action.
-func TestStoryTaskSubmit_RejectsAgentCannotReview(t *testing.T) {
+func TestTaskSubmit_RejectsAgentCannotReview(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	agents, err := f.server.docs.List(f.ctx, document.ListOptions{
@@ -374,7 +374,7 @@ func TestStoryTaskSubmit_RejectsAgentCannotReview(t *testing.T) {
 		{Kind: task.KindWork, Action: task.ContractAction("plan")},
 		{Kind: task.KindReview, Action: task.ContractAction("plan"), AgentID: dev.ID},
 	}
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, bad),
@@ -396,7 +396,7 @@ func TestStoryTaskSubmit_RejectsAgentCannotReview(t *testing.T) {
 // a known task chain.
 func submitMinimalPlan(t *testing.T, f *orchestratorFixture) []string {
 	t.Helper()
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindPlan,
 		"tasks":    tasksJSON(t, minimalPlanTasks()),
@@ -413,11 +413,11 @@ func submitMinimalPlan(t *testing.T, f *orchestratorFixture) []string {
 	return body.TaskIDs
 }
 
-// TestStoryTaskSubmit_CloseKind_PublishesSiblingReview verifies the
+// TestTaskSubmit_CloseKind_PublishesSiblingReview verifies the
 // happy path for kind=close: closing a kind=work task publishes the
 // kind=review sibling that was sitting at status=planned, so the
 // reviewer service's subscribe path can claim it.
-func TestStoryTaskSubmit_CloseKind_PublishesSiblingReview(t *testing.T) {
+func TestTaskSubmit_CloseKind_PublishesSiblingReview(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	ids := submitMinimalPlan(t, f)
@@ -433,7 +433,7 @@ func TestStoryTaskSubmit_CloseKind_PublishesSiblingReview(t *testing.T) {
 		t.Fatalf("review pre-check status: got %q want %q", rv.Status, task.StatusPlanned)
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  planWorkID,
@@ -474,10 +474,10 @@ func TestStoryTaskSubmit_CloseKind_PublishesSiblingReview(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_CloseKind_OnReviewTask doesn't publish anything
+// TestTaskSubmit_CloseKind_OnReviewTask doesn't publish anything
 // — review tasks have no review sibling. Confirms the close path
 // doesn't error when no sibling exists.
-func TestStoryTaskSubmit_CloseKind_OnReviewTask(t *testing.T) {
+func TestTaskSubmit_CloseKind_OnReviewTask(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	ids := submitMinimalPlan(t, f)
@@ -491,7 +491,7 @@ func TestStoryTaskSubmit_CloseKind_OnReviewTask(t *testing.T) {
 		t.Fatalf("setup publish review: %v", err)
 	}
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  planReviewID,
@@ -513,16 +513,16 @@ func TestStoryTaskSubmit_CloseKind_OnReviewTask(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_CloseKind_RejectsWrongStory verifies a task
+// TestTaskSubmit_CloseKind_RejectsWrongStory verifies a task
 // belonging to a different story is rejected.
-func TestStoryTaskSubmit_CloseKind_RejectsWrongStory(t *testing.T) {
+func TestTaskSubmit_CloseKind_RejectsWrongStory(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	ids := submitMinimalPlan(t, f)
 
 	// Make a second story; close the first story's task against it.
 	otherStoryID := f.storyID + "_other"
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": otherStoryID,
 		"kind":     SubmitKindClose,
 		"task_id":  ids[0],
@@ -542,16 +542,16 @@ func TestStoryTaskSubmit_CloseKind_RejectsWrongStory(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_CloseKind_RejectsTerminal verifies closing an
+// TestTaskSubmit_CloseKind_RejectsTerminal verifies closing an
 // already-closed task is rejected, not silently accepted.
-func TestStoryTaskSubmit_CloseKind_RejectsTerminal(t *testing.T) {
+func TestTaskSubmit_CloseKind_RejectsTerminal(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	ids := submitMinimalPlan(t, f)
 	planWorkID := ids[0]
 
 	// First close — succeeds.
-	first, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	first, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  planWorkID,
@@ -561,7 +561,7 @@ func TestStoryTaskSubmit_CloseKind_RejectsTerminal(t *testing.T) {
 	}
 
 	// Second close — rejected.
-	second, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	second, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  planWorkID,
@@ -577,14 +577,14 @@ func TestStoryTaskSubmit_CloseKind_RejectsTerminal(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_CloseKind_RejectsBadOutcome verifies invalid
+// TestTaskSubmit_CloseKind_RejectsBadOutcome verifies invalid
 // outcome strings are rejected up-front.
-func TestStoryTaskSubmit_CloseKind_RejectsBadOutcome(t *testing.T) {
+func TestTaskSubmit_CloseKind_RejectsBadOutcome(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 	ids := submitMinimalPlan(t, f)
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  ids[0],
@@ -601,13 +601,13 @@ func TestStoryTaskSubmit_CloseKind_RejectsBadOutcome(t *testing.T) {
 	}
 }
 
-// TestStoryTaskSubmit_CloseKind_TaskNotFound verifies a missing
+// TestTaskSubmit_CloseKind_TaskNotFound verifies a missing
 // task id is rejected cleanly.
-func TestStoryTaskSubmit_CloseKind_TaskNotFound(t *testing.T) {
+func TestTaskSubmit_CloseKind_TaskNotFound(t *testing.T) {
 	t.Parallel()
 	f := newOrchestratorFixture(t)
 
-	res, err := f.server.handleStoryTaskSubmit(f.callerCtx(), newCallToolReq("story_task_submit", map[string]any{
+	res, err := f.server.handleTaskSubmit(f.callerCtx(), newCallToolReq("task_submit", map[string]any{
 		"story_id": f.storyID,
 		"kind":     SubmitKindClose,
 		"task_id":  "task_deadbeef",

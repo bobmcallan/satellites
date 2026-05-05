@@ -10,7 +10,7 @@ instruction: |
   non-ff resolution. Never re-bump .version. No force operations,
   no tag pushes, no branch deletes. If the develop commit is
   missing, stop and report. Close each task via
-  story_task_submit(kind=close, evidence_ledger_ids=[…]).
+  task_submit(kind=close, evidence_ledger_ids=[…]).
 permission_patterns:
   - "Read:**"
   - "Bash:git_status"

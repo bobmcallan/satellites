@@ -149,7 +149,7 @@ type Task struct {
 	// StoryID links the task to its story directly. sty_c6d76a5b's
 	// model treats `tasks where story_id=X` as the conversation log
 	// — the story IS the task chain. Set explicitly by
-	// story_task_submit; legacy tasks created via the CI path can
+	// task_submit; legacy tasks created via the CI path can
 	// project StoryID from their CI.
 	StoryID string `json:"story_id,omitempty"`
 	// Kind classifies the task by its purpose so subscribers can filter
@@ -183,7 +183,7 @@ type Task struct {
 	ParentTaskID string `json:"parent_task_id,omitempty"`
 	// Action names what the task delivers, in canonical form
 	// `contract:<name>` (e.g. `contract:plan`, `contract:develop`). Set
-	// by the orchestrator at story_task_submit time and validated by
+	// by the orchestrator at task_submit time and validated by
 	// the substrate against the project's contract markdown set
 	// (sty_c6d76a5b). For Kind=KindReview, the action is the contract
 	// being reviewed (the review task is the sibling of a Kind=KindWork

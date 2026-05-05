@@ -21,7 +21,7 @@ two routing rules you must apply before any project-scoped work.
   AND the workflow. There is no separate workflow / contract_instance
   table — the ordered task list IS the workflow.
 - **plan as agent-authored task list.** The orchestrator submits
-  the full plan via `story_task_submit(kind=plan, tasks=[…])`.
+  the full plan via `task_submit(kind=plan, tasks=[…])`.
   Substrate validates structural invariants (plan first, every work
   task has a paired review sibling, actions well-formed, agents have
   the right capability) and rejects on violation — it does not
@@ -34,7 +34,7 @@ two routing rules you must apply before any project-scoped work.
 - **agent capability via frontmatter.** Agents declare what they
   can do via `delivers:` / `reviews:` lists in their document
   structured settings. The substrate matches at task-creation time
-  (`story_task_submit` rejects `agent_cannot_deliver` /
+  (`task_submit` rejects `agent_cannot_deliver` /
   `agent_cannot_review` mismatches).
 - **session = one agent.** Sessions don't drift between hats.
   The reviewer service is a separate in-process runtime that
@@ -71,11 +71,11 @@ These rules are mandatory. Apply them in order.
    task) and pick the next move:
 
    - if no tasks exist, you are the orchestrator — compose the plan
-     and submit via `story_task_submit(kind=plan, tasks=[…])`.
+     and submit via `task_submit(kind=plan, tasks=[…])`.
    - if a claimable task exists for your capability, claim it via
      `task_claim` and execute. When done, write any
      evidence/artifact ledger rows (tagged `task_id:<your_task>`)
-     and call `story_task_submit(kind=close, task_id=<id>,
+     and call `task_submit(kind=close, task_id=<id>,
      outcome=success|failure, evidence_ledger_ids=[…])`.
    - the close path automatically publishes the paired review task;
      the reviewer service picks it up. You do not call any

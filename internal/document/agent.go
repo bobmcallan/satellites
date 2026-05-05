@@ -31,7 +31,7 @@ type AgentSettings struct {
 
 	// Delivers (sty_c6d76a5b): the contract action strings (canonical
 	// `contract:<name>` form) this agent is authorised to deliver. The
-	// substrate's story_task_submit validator checks each Kind=KindWork
+	// substrate's task_submit validator checks each Kind=KindWork
 	// task's agent_id has this contract action listed. Empty list means
 	// "no work-task delivery" — the agent is reviewer-only or a legacy
 	// agent that pre-dates capability frontmatter.

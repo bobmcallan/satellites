@@ -465,7 +465,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		// substrate no longer enforces a per-project workflow shape; the
 		// orchestrator composes per-story plans and the reviewer
 		// (story_reviewer, Gemini-backed) approves them via the
-		// plan-approval loop (now agent-authored via story_task_submit).
+		// plan-approval loop (now agent-authored via task_submit).
 
 		// Unified KV verbs (story_3d392258). Single family taking a
 		// `scope` arg covering the four tiers from epic:kv-scopes.
@@ -540,7 +540,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 		s.mcp.AddTool(agentSummaryTool, s.handleAgentEphemeralSummary)
 
 		if s.sessions != nil {
-			storyTaskSubmitTool := mcpgo.NewTool("story_task_submit",
+			taskSubmitTool := mcpgo.NewTool("task_submit",
 				mcpgo.WithDescription("Submit an agent-authored task list to a story (sty_c6d76a5b). The orchestrator agent composes the full plan; the substrate validates structural invariants and rejects on violations — it does not silently mutate the list. Modes via `kind`: `plan` (initial plan submission with tasks[]); `close` (close a task; publishes the sibling review task when the closed task is kind=work). Tasks are thin — rich content (plan markdown, evidence, verdicts) lives on linked ledger rows, not task fields. Validators reject `plan_first_task_must_be_plan`, `missing_review_for:<action>`, `invalid_action_format`, `review_action_mismatch`, `task_not_found`, `task_story_mismatch`, `task_already_terminal`, `invalid_outcome`."),
 				mcpgo.WithString("story_id", mcpgo.Required(), mcpgo.Description("Story to submit against.")),
 				mcpgo.WithString("kind", mcpgo.Required(), mcpgo.Description("Submission mode: `plan` | `close`.")),
@@ -550,7 +550,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 				mcpgo.WithString("outcome", mcpgo.Description("`success` (default) | `failure`. Used when kind=close.")),
 				mcpgo.WithString("evidence_ledger_ids", mcpgo.Description("JSON array of ledger row ids referenced as evidence by the close. The agent writes those ledger rows separately (ledger_append) and references them here.")),
 			)
-			s.mcp.AddTool(storyTaskSubmitTool, s.handleStoryTaskSubmit)
+			s.mcp.AddTool(taskSubmitTool, s.handleTaskSubmit)
 
 			whoamiTool := mcpgo.NewTool("session_whoami",
 				mcpgo.WithDescription("Return the caller's session registry row. session_id resolves from the Mcp-Session-Id header by default (story_31975268); pass session_id as a body arg to override. Returns a structured session_not_registered error when the resolved session is not in the registry."),
@@ -628,7 +628,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	if s.tasks != nil {
 		// task_plan is the only remaining bare task-creation MCP verb
 		// (sty_c6d76a5b checkpoint 12 retired task_enqueue + task_publish).
-		// The story-scoped plan path lives in story_task_submit
+		// The story-scoped plan path lives in task_submit
 		// (kind=plan); task_plan covers the rare draft case outside a
 		// story chain.
 		taskCommonOpts := []mcpgo.ToolOption{
@@ -644,7 +644,7 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 			mcpgo.WithString("expected_duration", mcpgo.Description("Optional Go duration string (e.g. \"30s\") used by claim-expiry watchdog.")),
 		}
 
-		planOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Write a task at status=planned (the agent-local drafting state). Subscribers do not see planned rows. The story-scoped plan path lives in story_task_submit (kind=plan); task_plan covers bare drafts outside a story chain. sty_c1200f75.")}, taskCommonOpts...)
+		planOpts := append([]mcpgo.ToolOption{mcpgo.WithDescription("Write a task at status=planned (the agent-local drafting state). Subscribers do not see planned rows. The story-scoped plan path lives in task_submit (kind=plan); task_plan covers bare drafts outside a story chain. sty_c1200f75.")}, taskCommonOpts...)
 		s.mcp.AddTool(mcpgo.NewTool("task_plan", planOpts...), s.handleTaskPlan)
 
 		getTaskTool := mcpgo.NewTool("task_get",

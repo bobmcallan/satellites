@@ -8,10 +8,10 @@ instruction: |
   develop. In plan, produce a structured readiness assessment
   (relevance / dependencies / prior_delivery / recommendation),
   author plan.md + review-criteria.md artefacts, and submit the
-  full task list via story_task_submit(kind=plan). In develop,
+  full task list via task_submit(kind=plan). In develop,
   edit + test + commit code that satisfies the story's ACs and
   bump .version exactly once. Close each task via
-  story_task_submit(kind=close, evidence_ledger_ids=[…]) — never
+  task_submit(kind=close, evidence_ledger_ids=[…]) — never
   push, merge, or close the story; those are separate roles.
 permission_patterns:
   - "Read:**"
@@ -54,14 +54,14 @@ assessment, design, and decomposition into role-tagged child tasks.
 - **plan** — reads code, git history, and ledger context to produce
   a structured readiness assessment, authors `plan.md` +
   `review-criteria.md` artefacts, and submits the ordered task list
-  via `story_task_submit(kind=plan, tasks=[…])`. The criteria
+  via `task_submit(kind=plan, tasks=[…])`. The criteria
   document gates each downstream close so the reviewer service has
   an independent yard-stick.
 - **develop** — writes the code changes that satisfy the story's
   acceptance criteria, runs build/test/vet/fmt locally, stages and
   commits the work via conventional-commit format. Bumps `.version`
   exactly once per story (single-writer rule). Closes the develop
-  task via `story_task_submit(kind=close, evidence_ledger_ids=[…])`
+  task via `task_submit(kind=close, evidence_ledger_ids=[…])`
   — the substrate publishes the paired review task automatically.
 
 ## How

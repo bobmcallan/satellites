@@ -9,7 +9,7 @@ evidence_required: |
   - plan.md  (scope, files-to-change, approach, test-strategy, AC mapping)
   - review-criteria.md  (per-AC verify / evidence / pass-fail boundary)
 
-  Plus a submitted task list via story_task_submit(kind=plan,
+  Plus a submitted task list via task_submit(kind=plan,
   tasks=[…]) covering the downstream actions (develop / push /
   merge_to_main / story_close) each paired with its kind=review
   sibling. The plan task itself is tasks[0] (kind=work,
@@ -36,7 +36,7 @@ readiness assessment.
   before the implementing agent begins so the criteria are
   independent of the implementing agent's choices. Same tagging.
 - **Task list** — the plan agent submits the full ordered task
-  list via `story_task_submit(kind=plan, tasks=[…])`. Each
+  list via `task_submit(kind=plan, tasks=[…])`. Each
   downstream work task is paired with its kind=review sibling; the
   substrate validates structure (plan first, every work has a
   review, agents match capability) and rejects on violation.
@@ -44,14 +44,14 @@ readiness assessment.
 ## How
 
 Read-only investigation plus ledger writes plus the
-`story_task_submit(kind=plan)` call. The plan agent inspects the
+`task_submit(kind=plan)` call. The plan agent inspects the
 codebase and reasons about the change shape; it never edits a file
 or runs a build.
 
 ## Limitations
 
 - Plan binds develop. Mid-flight scope changes require submitting a
-  fresh plan via `story_task_submit(kind=plan)` against the same
+  fresh plan via `task_submit(kind=plan)` against the same
   story (the substrate is idempotent on first submission and
   rejects subsequent submissions when tasks already exist — agents
   amend through the orchestrator's task-spawn flow, not by

@@ -7,7 +7,7 @@ tags: [v4, system]
 The default lifecycle every story passes through. The workflow is
 **prose-only context** for the orchestrator and reviewer agents —
 the substrate enforces the structure of the submitted task list
-(`story_task_submit(kind=plan)` validators) but not the specific
+(`task_submit(kind=plan)` validators) but not the specific
 shape of the workflow itself.
 
 ## Shape
@@ -17,7 +17,7 @@ shape of the workflow itself.
 - `plan` — implementation strategy + review criteria. The plan
   agent also assesses readiness (relevance, dependencies, prior
   delivery) and submits the full ordered task list via
-  `story_task_submit(kind=plan, tasks=[…])`.
+  `task_submit(kind=plan, tasks=[…])`.
 - `develop` — code edits + tests + commit. Multiple develop tasks
   are permitted when a story splits naturally (e.g. backend then
   frontend), but each is its own task pair (work + review) with
@@ -29,7 +29,7 @@ shape of the workflow itself.
 ## How it's used
 
 The orchestrator agent reads this prose when composing a per-story
-plan and submits the plan via `story_task_submit(kind=plan, tasks=
+plan and submits the plan via `task_submit(kind=plan, tasks=
 […])`. The substrate validates structural invariants (plan first,
 every work task has a paired review sibling, agents have the right
 capability) and rejects on violation.

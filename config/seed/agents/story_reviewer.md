@@ -55,7 +55,7 @@ path.
 
 **Verify the task chain by calling `task_walk({story_id})`** and
 inspecting the returned `tasks[]` and `action_summary[]`. The
-substrate composes the chain at `story_task_submit(kind=plan)`
+substrate composes the chain at `task_submit(kind=plan)`
 time and exposes it ordered by created_at. Do NOT require the
 agent to recite the chain in plan-md prose — the recital is
 duplicated state and the reviewer should read the structural
@@ -80,7 +80,7 @@ and it passed") triggers `needs_more`.
 
 **`evidence_ledger_ids` are first-class evidence.** When a close
 references prior ledger rows by id (`evidence_ledger_ids: [ldg_…]`
-on the `story_task_submit(kind=close)` call, or `see ldg_…`
+on the `task_submit(kind=close)` call, or `see ldg_…`
 citations in evidence markdown), dereference each id via
 `ledger_get` and read the row's content as part of the evidence
 packet. Do NOT reject for missing inline duplication when the

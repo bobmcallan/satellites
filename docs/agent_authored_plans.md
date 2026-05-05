@@ -2,7 +2,7 @@
 
 Discussion doc capturing the architectural redirect from
 `orchestrator_compose_plan` (substrate hardcodes the plan) to
-`story_task_submit(kind:plan, plan_markdown, tasks[])` (agent authors the
+`task_submit(kind:plan, plan_markdown, tasks[])` (agent authors the
 plan; substrate validates structure and auto-inserts review tasks).
 
 This is a significant tightening of `sty_c6d76a5b` ("tasks are the
@@ -27,11 +27,11 @@ but not the destination.
 
 4. **Orchestrator agent → `story_context(story_id)`.** Returns the
    story body, status, recent ledger ids, and the instruction to
-   submit a plan via `story_task_submit(kind:plan, …)`. The agent
+   submit a plan via `task_submit(kind:plan, …)`. The agent
    may pull more context (ledger rows, code) before it composes the
    plan.
 
-5. **Orchestrator → `story_task_submit(kind=plan, plan_markdown,
+5. **Orchestrator → `task_submit(kind=plan, plan_markdown,
    tasks[])`.** Single submit verb — replaces compose_plan,
    workflow_claim, contract_claim, task_enqueue. Substrate
    mechanically:
@@ -56,7 +56,7 @@ but not the destination.
    instruction: read `kind:plan` ledger row, write a pass/fail ledger
    row with detail. The reviewer may pull more context.
 
-7. **Reviewer → `story_task_submit(kind=plan_accept | plan_reject,
+7. **Reviewer → `task_submit(kind=plan_accept | plan_reject,
    verdict_markdown, evidence_ledger_ids[])`.** This both closes the
    reviewer's claimed plan_review task and emits a successor task
    that the orchestrator can act on. The accept/reject task IS the
@@ -68,7 +68,7 @@ but not the destination.
    submits a fresh `kind:plan` (next iteration).
 
 9. **Per-step iteration.** Each implement task closes via
-   `story_task_submit(kind=<step>_close, …)`. Substrate flips that
+   `task_submit(kind=<step>_close, …)`. Substrate flips that
    to closed and (if not already present) auto-spawns the
    `kind:<step>_review` task. Reviewer claims, judges, submits
    `kind:<step>_accept` or `kind:<step>_reject`. On reject, the
@@ -93,7 +93,7 @@ but not the destination.
 ## What this replaces
 
 Verbs that go away:
-- `orchestrator_compose_plan` — agent submits via `story_task_submit`.
+- `orchestrator_compose_plan` — agent submits via `task_submit`.
 - `orchestrator_submit_plan` — same.
 - `workflow_claim` — substrate creates contract instances (or skips
   the CI concept entirely; see open question) when the plan task list
@@ -102,14 +102,14 @@ Verbs that go away:
   per the existing sty_c6d76a5b spec, deleted.
 - `contract_review_close` / `CommitReviewVerdict` — replaced by
   the reviewer submitting `kind:*_accept` / `kind:*_reject` via
-  `story_task_submit`.
+  `task_submit`.
 - `task_enqueue` / `task_publish` / `task_close` — collapsed into
-  `story_task_submit`.
+  `task_submit`.
 
 Verbs that stay or get added:
 - `story_context(story_id)` — context bundle for an agent about to
   work the story.
-- `story_task_submit(kind, markdown, tasks[]?, evidence_ledger_ids[]?)`.
+- `task_submit(kind, markdown, tasks[]?, evidence_ledger_ids[]?)`.
 - `story_task_claim(task_id)` — subscriber-side directed claim.
 - `story_task_walk(story_id)` — read the conversation log.
 - `ledger_*` (unchanged).
@@ -193,7 +193,7 @@ These need direction before this can become a story:
 7. **Strategy proposals (split / cycles).** Per the existing story
    body, reviewer pushback can spawn `kind:split-proposal` or
    `kind:cycles-proposal` tasks. Do these go through the same
-   `story_task_submit` verb? (Yes, presumably — they're just
+   `task_submit` verb? (Yes, presumably — they're just
    another kind.) And what does the orchestrator do with them?
    Read the markdown body and emit a fresh kind:plan that
    incorporates the split? That keeps it agent-driven.
@@ -209,7 +209,7 @@ NOTE: Possible to have a number of ledger items marked against the task. Hence a
   compose time. Useful primitive — auto-pairing is what the
   proposed flow asks for at every step. But the trigger is wrong
   (operator-driven `compose_plan` instead of agent-driven
-  `story_task_submit(kind=plan)`), and the list is hardcoded
+  `task_submit(kind=plan)`), and the list is hardcoded
   instead of agent-authored.
 
 - **`sty_c6d76a5b` AC re-statement.** The current story body says
@@ -221,12 +221,12 @@ NOTE: Possible to have a number of ledger items marked against the task. Hence a
   next implementation slice.
 
 - **Remaining-9 list.** The order shifts:
-  1. Add `story_context` + `story_task_submit` + validation rules
+  1. Add `story_context` + `task_submit` + validation rules
      (kind:plan first, default minimum, auto-insert reviews).
   2. Reviewer service: subscribe via hubemit (item #2 from the old
      list — still next, unchanged).
   3. Reviewer's verdict path: emit `kind:*_accept` / `kind:*_reject`
-     tasks via `story_task_submit` instead of calling
+     tasks via `task_submit` instead of calling
      `contract_review_close`.
   4. Markdown: reviewer routing on contract frontmatter (open
      question 4).

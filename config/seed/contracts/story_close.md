@@ -22,7 +22,7 @@ closed with `outcome=success`.
 - Reads `task_walk(story_id=…)` to confirm every prior work task
   closed successfully.
 - Writes a closing-evidence ledger row capturing the resolution.
-- Closes its own task via `story_task_submit(kind=close,
+- Closes its own task via `task_submit(kind=close,
   outcome=success, evidence_ledger_ids=[…])`. The substrate
   publishes the paired review task; the autonomous reviewer service
   grades the close against `story_reviewer`'s rubric. On accepted
@@ -31,7 +31,7 @@ closed with `outcome=success`.
 ## How
 
 Read-only across the codebase, MCP read + write to the ledger and
-`story_task_submit` verbs.
+`task_submit` verbs.
 
 ## Limitations
 

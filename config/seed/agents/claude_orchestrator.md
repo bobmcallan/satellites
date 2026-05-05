@@ -13,7 +13,7 @@ plans and dispatch the lifecycle.
 ## What it does
 
 - Composes the per-story plan as an ordered list of tasks and
-  submits it via `story_task_submit(kind=plan, tasks=[…])`. The
+  submits it via `task_submit(kind=plan, tasks=[…])`. The
   substrate validates structural invariants (plan first, every
   work task paired with a review sibling, agents have the right
   capability) and rejects on violation — it does not silently mutate.
@@ -43,8 +43,8 @@ plans and dispatch the lifecycle.
 
 | Output | Substrate target |
 |---|---|
-| Per-story plan as an ordered task list | `story_task_submit(kind=plan, tasks=[{kind, action, description?, agent_id?}, …])`. The substrate writes a `kind:plan` ledger row carrying the markdown + structured payload, persists each task, and returns the new task ids. |
-| Close on a claimed work task | `story_task_submit(kind=close, task_id=<id>, outcome=success|failure, evidence_ledger_ids=[…])`. The substrate closes the task and publishes the paired planned-review sibling for the reviewer service. |
+| Per-story plan as an ordered task list | `task_submit(kind=plan, tasks=[{kind, action, description?, agent_id?}, …])`. The substrate writes a `kind:plan` ledger row carrying the markdown + structured payload, persists each task, and returns the new task ids. |
+| Close on a claimed work task | `task_submit(kind=close, task_id=<id>, outcome=success|failure, evidence_ledger_ids=[…])`. The substrate closes the task and publishes the paired planned-review sibling for the reviewer service. |
 | Per-task evidence | `ledger_append` rows tagged `task_id:<id>` + `kind:evidence`. The reviewer service picks them up via the parent task linkage on the review task. |
 
 ### Constraints
@@ -66,7 +66,7 @@ The flow when a user says `implement story_xxx`:
    `contract:plan` (kind=review) sibling, the body contracts each
    paired with their own kind=review sibling, and ends with
    `contract:story_close` paired with its review.
-3. Call `story_task_submit(kind=plan, story_id, plan_markdown,
+3. Call `task_submit(kind=plan, story_id, plan_markdown,
    tasks=[…])`. Validators that may fire:
    - `plan_first_task_must_be_plan` — tasks[0].action ≠ contract:plan.
    - `missing_review_for:<action>` — work task has no immediate
@@ -80,7 +80,7 @@ The flow when a user says `implement story_xxx`:
    `status=planned` (gated until the work closes).
 5. Subsequent `task_claim` calls pick the highest-priority published
    task; the agent allocated to it executes; close via
-   `story_task_submit(kind=close)` publishes the sibling review;
+   `task_submit(kind=close)` publishes the sibling review;
    the reviewer service runs autonomously.
 
 ### Reviewer routing (autonomous)

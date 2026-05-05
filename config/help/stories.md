@@ -15,7 +15,7 @@ exist (per principle pr_a9ccecfb).
 
 A story IS its task chain — the rows where `story_id=<id>`,
 ordered by `created_at`. The orchestrator submits the full task
-list up front via `story_task_submit(kind=plan, tasks=[…])`.
+list up front via `task_submit(kind=plan, tasks=[…])`.
 Each contract surfaces as a paired (kind=work, kind=review) task.
 
 At each work task:
@@ -26,7 +26,7 @@ At each work task:
    `permission_patterns`.
 3. It writes evidence as ledger rows tagged `task_id:<id>`,
    `kind:evidence`.
-4. It **closes** via `story_task_submit(kind=close, task_id=<id>,
+4. It **closes** via `task_submit(kind=close, task_id=<id>,
    outcome=success|failure, evidence_ledger_ids=[…])`. The
    substrate publishes the paired review task automatically.
 

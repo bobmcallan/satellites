@@ -40,7 +40,7 @@ structured payload (`delivers_by`, `reviewed_by`,
 ## Lifecycle
 
 Contracts surface at runtime as **task actions**. The orchestrator
-submits a plan via `story_task_submit(kind=plan, tasks=[…])` where
+submits a plan via `task_submit(kind=plan, tasks=[…])` where
 each entry's `action` is the canonical `contract:<name>` form.
 Each contract becomes a paired (kind=work, kind=review) task in
 the chain. The work task is delivered by the agent whose
@@ -55,7 +55,7 @@ list covers the same action.
   `contract:story_close` at the end; the reviewer rejects plans
   that skip the floor.
 - The full task list is submitted up front via
-  `story_task_submit(kind=plan)`; the substrate validates structure
+  `task_submit(kind=plan)`; the substrate validates structure
   and rejects malformed plans (missing review siblings, agent
   capability mismatches, etc.). Mid-flight scope changes happen by
   spawning successor task pairs, not by amending the original plan.

@@ -10,7 +10,7 @@ A **workflow** is a default shape the orchestrator references when
 composing per-story plans. The shape is recorded as a
 `type=workflow` document; the substrate does not enforce it
 directly. The orchestrator submits a per-story task list via
-`story_task_submit(kind=plan)` and the reviewer judges whether the
+`task_submit(kind=plan)` and the reviewer judges whether the
 shape is appropriate.
 
 ## Default system workflow
@@ -35,6 +35,6 @@ via MCP and visible on the project's Configuration page.
   (`contract:story_close`) are rejected, which spawns a successor
   task pair so the orchestrator can resubmit.
 - Reordering tasks is not supported mid-flight. The plan submitted
-  via `story_task_submit(kind=plan)` is committed; the orchestrator
+  via `task_submit(kind=plan)` is committed; the orchestrator
   iterates by spawning successor task pairs (substrate-driven on
   rejection) rather than rewriting the chain.

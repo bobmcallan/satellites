@@ -19,7 +19,7 @@ import (
 // stores + one workspace + one project + the five default contract
 // docs + one parent story. Survives sty_c6d76a5b checkpoint 13 (which
 // retired the legacy CI lifecycle handlers) so agent_compose,
-// story_task_submit, and other tests that need a populated server can
+// task_submit, and other tests that need a populated server can
 // keep using it.
 type contractFixture struct {
 	t         *testing.T
@@ -102,7 +102,7 @@ func (f *contractFixture) callerCtx() context.Context {
 }
 
 // orchestratorFixture extends the contract fixture with a task store
-// and the system workflow + agent docs the story_task_submit / agent
+// and the system workflow + agent docs the task_submit / agent
 // capability tests rely on.
 type orchestratorFixture struct {
 	*contractFixture

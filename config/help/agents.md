@@ -17,7 +17,7 @@ lifecycle:
 
 - `developer_agent` — delivers `contract:plan` and
   `contract:develop`. Reads code + git history; writes code +
-  commits; submits the plan task list via `story_task_submit`.
+  commits; submits the plan task list via `task_submit`.
 - `releaser_agent` — delivers `contract:push` and
   `contract:merge_to_main`.
 - `story_close_agent` — delivers `contract:story_close`.
@@ -51,7 +51,7 @@ the reviewer service evaluates closes against.
 
 The substrate matches at task-creation time:
 
-- `story_task_submit(kind=plan)` validates that any supplied
+- `task_submit(kind=plan)` validates that any supplied
   `agent_id` carries `contract:<action>` in its `delivers:` (for
   kind=work) or `reviews:` (for kind=review). Mismatches reject
   with `agent_cannot_deliver` / `agent_cannot_review`.
@@ -62,7 +62,7 @@ The substrate matches at task-creation time:
 ## Limitations
 
 - Agents do not choose their next task. Orchestration lives in the
-  Claude session (interactive) via `task_walk` + `story_task_submit`.
+  Claude session (interactive) via `task_walk` + `task_submit`.
 - Re-seeding (`/admin/system-config`) updates the document body and
   structured payload but does not interrupt running tasks; in-flight
   tasks keep the agent stamp they were created with.

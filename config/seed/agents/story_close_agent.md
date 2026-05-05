@@ -9,7 +9,7 @@ instruction: |
   outcome=success; write a closing-evidence ledger row tagged
   task_id:<this_close_task> summarising the resolution
   (delivered / plan_only / not_required / duplicate / superseded /
-  failed:*); then call story_task_submit(kind=close,
+  failed:*); then call task_submit(kind=close,
   outcome=success, evidence_ledger_ids=[…]). The reviewer service
   picks up the paired review automatically; on accepted verdict
   the story status reconciler walks the story to done.
@@ -33,7 +33,7 @@ reviewer service grades the close against `story_reviewer`'s rubric.
   `kind:evidence`) carrying the resolution (`delivered`,
   `plan_only`, `not_required`, `duplicate`, `superseded`,
   `failed:complexity`, `failed:scope_invalid`, `failed:blocked`).
-- Calls `story_task_submit(kind=close, task_id=<id>,
+- Calls `task_submit(kind=close, task_id=<id>,
   outcome=success, evidence_ledger_ids=[…])`. The substrate
   publishes the paired review task automatically; the reviewer
   service runs `story_reviewer` against it.
@@ -41,7 +41,7 @@ reviewer service grades the close against `story_reviewer`'s rubric.
 ## How
 
 Read-only across the codebase, MCP read + write to the ledger and
-story_task_submit verbs. No file edits, no git operations.
+task_submit verbs. No file edits, no git operations.
 
 ## Limitations
 
