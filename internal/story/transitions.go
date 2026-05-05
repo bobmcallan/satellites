@@ -25,29 +25,28 @@ const (
 // story into an unreachable target state.
 var ErrInvalidTransition = errors.New("story: invalid status transition")
 
-// ValidTransition reports whether a story may move from → to. Self-
-// transitions are rejected (no-op writes are a caller bug) and every
-// terminal state refuses further transitions.
+// ValidTransition reports whether a story may move from → to. V3
+// parity (sty_01f75142): operators may change a non-terminal story's
+// status to any other non-self status. Self-transitions are rejected
+// (no-op writes are a caller bug) and terminal states (done,
+// cancelled) refuse further transitions.
 //
 // Matrix:
 //
 //	from \ to   backlog ready in_progress blocked done cancelled
-//	backlog       -      ✓       -         -       -       ✓
-//	ready         -      -       ✓         -       -       ✓
-//	in_progress   -      -       -         ✓       ✓       ✓
-//	blocked       -      -       ✓         -       -       ✓
+//	backlog       -      ✓       ✓         ✓       ✓       ✓
+//	ready         ✓      -       ✓         ✓       ✓       ✓
+//	in_progress   ✓      ✓       -         ✓       ✓       ✓
+//	blocked       ✓      ✓       ✓         -       ✓       ✓
 //	done          -      -       -         -       -       -
 //	cancelled     -      -       -         -       -       -
 func ValidTransition(from, to string) bool {
+	if from == to {
+		return false
+	}
 	switch from {
-	case StatusBacklog:
-		return to == StatusReady || to == StatusCancelled
-	case StatusReady:
-		return to == StatusInProgress || to == StatusCancelled
-	case StatusInProgress:
-		return to == StatusBlocked || to == StatusDone || to == StatusCancelled
-	case StatusBlocked:
-		return to == StatusInProgress || to == StatusCancelled
+	case StatusBacklog, StatusReady, StatusInProgress, StatusBlocked:
+		return IsKnownStatus(to)
 	case StatusDone, StatusCancelled:
 		return false
 	default:

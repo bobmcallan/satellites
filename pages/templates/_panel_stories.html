@@ -49,10 +49,6 @@
           <option value="backlog">backlog</option>
         </select>
       </label>
-      <input type="text"
-             x-model="bulkReason"
-             placeholder="reason (required for non-derivable jumps)"
-             data-testid="story-bulk-reason" />
       <button type="button"
               data-testid="story-bulk-apply"
               :disabled="bulkBusy"
@@ -112,11 +108,12 @@
             data-testid="story-detail-{{.ID}}">
           <td colspan="6">
             <div class="story-detail-flat">
-              <!-- sty_1d6751e9: per-row status override. Current status's
-                   button is disabled; click on any other button POSTs to
-                   /api/stories/{id}/status. The reason field is required
-                   for non-derivable jumps; the realtime bridge patches
-                   the status pill in place on the next WS event. -->
+              <!-- sty_01f75142: per-row status override. V3 parity —
+                   one-click flips, no reason input, no save indirection.
+                   Current status's button is disabled; click on any
+                   other button POSTs to /api/stories/{id}/status with
+                   {status} only. The realtime bridge patches the
+                   status pill in place on the next WS event. -->
               <section class="story-detail-block story-status-controls" data-testid="story-status-buttons-{{.ID}}">
                 <h4>status</h4>
                 <div class="status-button-group">
@@ -124,34 +121,28 @@
                           class="status-button"
                           data-testid="story-status-button-{{.ID}}-backlog"
                           {{if eq .Status "backlog"}}disabled aria-pressed="true"{{end}}
-                          @click.stop="applyRowStatus('{{.ID}}', 'backlog', $refs.reason{{.ID}}.value)">backlog</button>
+                          @click.stop="applyRowStatus('{{.ID}}', 'backlog')">backlog</button>
                   <button type="button"
                           class="status-button"
                           data-testid="story-status-button-{{.ID}}-ready"
                           {{if eq .Status "ready"}}disabled aria-pressed="true"{{end}}
-                          @click.stop="applyRowStatus('{{.ID}}', 'ready', $refs.reason{{.ID}}.value)">ready</button>
+                          @click.stop="applyRowStatus('{{.ID}}', 'ready')">ready</button>
                   <button type="button"
                           class="status-button"
                           data-testid="story-status-button-{{.ID}}-in_progress"
                           {{if eq .Status "in_progress"}}disabled aria-pressed="true"{{end}}
-                          @click.stop="applyRowStatus('{{.ID}}', 'in_progress', $refs.reason{{.ID}}.value)">in_progress</button>
+                          @click.stop="applyRowStatus('{{.ID}}', 'in_progress')">in_progress</button>
                   <button type="button"
                           class="status-button"
                           data-testid="story-status-button-{{.ID}}-done"
                           {{if eq .Status "done"}}disabled aria-pressed="true"{{end}}
-                          @click.stop="applyRowStatus('{{.ID}}', 'done', $refs.reason{{.ID}}.value)">done</button>
+                          @click.stop="applyRowStatus('{{.ID}}', 'done')">done</button>
                   <button type="button"
                           class="status-button"
                           data-testid="story-status-button-{{.ID}}-cancelled"
                           {{if eq .Status "cancelled"}}disabled aria-pressed="true"{{end}}
-                          @click.stop="applyRowStatus('{{.ID}}', 'cancelled', $refs.reason{{.ID}}.value)">cancelled</button>
+                          @click.stop="applyRowStatus('{{.ID}}', 'cancelled')">cancelled</button>
                 </div>
-                <input type="text"
-                       x-ref="reason{{.ID}}"
-                       class="status-reason-input"
-                       placeholder="reason (required for non-derivable jumps)"
-                       data-testid="story-status-reason-{{.ID}}"
-                       @click.stop />
               </section>
               <section class="story-detail-block">
                 <h4>description</h4>

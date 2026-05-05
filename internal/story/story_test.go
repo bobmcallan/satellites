@@ -95,18 +95,19 @@ func TestNewID_Format(t *testing.T) {
 
 func TestValidTransition_Matrix(t *testing.T) {
 	t.Parallel()
-	allowed := map[[2]string]bool{
-		{StatusBacklog, StatusReady}:        true,
-		{StatusBacklog, StatusCancelled}:    true,
-		{StatusReady, StatusInProgress}:     true,
-		{StatusReady, StatusCancelled}:      true,
-		{StatusInProgress, StatusDone}:      true,
-		{StatusInProgress, StatusCancelled}: true,
+	// V3 parity (sty_01f75142): non-terminal sources transition to any
+	// non-self target; terminal sources (done, cancelled) refuse all
+	// transitions.
+	nonTerminal := map[string]bool{
+		StatusBacklog:    true,
+		StatusReady:      true,
+		StatusInProgress: true,
+		StatusBlocked:    true,
 	}
-	all := []string{StatusBacklog, StatusReady, StatusInProgress, StatusDone, StatusCancelled}
+	all := []string{StatusBacklog, StatusReady, StatusInProgress, StatusBlocked, StatusDone, StatusCancelled}
 	for _, from := range all {
 		for _, to := range all {
-			want := allowed[[2]string{from, to}]
+			want := nonTerminal[from] && from != to
 			got := ValidTransition(from, to)
 			if got != want {
 				t.Errorf("ValidTransition(%q, %q) = %v, want %v", from, to, got, want)
@@ -270,14 +271,21 @@ func TestMemoryStore_UpdateStatus_RejectsInvalid(t *testing.T) {
 	now := time.Now().UTC()
 
 	s, _ := store.Create(ctx, Story{ProjectID: "proj_a", Title: "x"}, now)
+	// Walk to done so the next attempt is the only category V3-parity
+	// (sty_01f75142) still rejects: terminal-rollback.
+	if _, err := store.UpdateStatus(ctx, s.ID, StatusDone, "u_alice", now.Add(time.Second), nil); err != nil {
+		t.Fatalf("walk to done: %v", err)
+	}
+	baseline, _ := led.List(ctx, "proj_a", ledger.ListOptions{}, nil)
+	baselineLen := len(baseline)
 
-	// backlog → done is invalid (must pass through ready + in_progress).
-	if _, err := store.UpdateStatus(ctx, s.ID, StatusDone, "u_alice", now, nil); !errors.Is(err, ErrInvalidTransition) {
+	// done → backlog is invalid (terminal source).
+	if _, err := store.UpdateStatus(ctx, s.ID, StatusBacklog, "u_alice", now.Add(2*time.Second), nil); !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("want ErrInvalidTransition, got %v", err)
 	}
 	entries, _ := led.List(ctx, "proj_a", ledger.ListOptions{}, nil)
-	if len(entries) != 0 {
-		t.Errorf("ledger must not be written on invalid transition; got %d entries", len(entries))
+	if len(entries) != baselineLen {
+		t.Errorf("ledger must not be written on invalid transition; got %d entries (baseline %d)", len(entries), baselineLen)
 	}
 }
 

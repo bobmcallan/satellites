@@ -152,7 +152,7 @@ func TestStoryStatusUpdate_E2E_SadPath_IllegalTransition(t *testing.T) {
 	baselineEvents := len(rec.snapshot())
 	baselineRows, _ := ledgerStore.List(ctx, proj.ID, ledger.ListOptions{StoryID: st.ID, Tags: []string{"kind:story.status_change"}}, nil)
 
-	httpRec := postStoryStatus(t, p, st.ID, sess.ID, map[string]any{"status": "backlog", "reason": "back to drawing board"})
+	httpRec := postStoryStatus(t, p, st.ID, sess.ID, map[string]any{"status": "backlog"})
 	if httpRec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("(a) HTTP status = %d, want 422; body=%s", httpRec.Code, httpRec.Body.String())
 	}
@@ -164,13 +164,6 @@ func TestStoryStatusUpdate_E2E_SadPath_IllegalTransition(t *testing.T) {
 	}
 	if got := len(postRows) - len(baselineRows); got != 0 {
 		t.Errorf("(b) kind:story.status_change row delta = %d, want 0", got)
-	}
-
-	// (b') zero new kind:operator-override rows either — the reason
-	// audit row only writes when the substrate-side mutation succeeds.
-	overrideRows, _ := ledgerStore.List(ctx, proj.ID, ledger.ListOptions{StoryID: st.ID, Tags: []string{"kind:operator-override"}}, nil)
-	if len(overrideRows) != 0 {
-		t.Errorf("(b') kind:operator-override row count = %d, want 0 — handler must not write the audit row when the mutation is rejected", len(overrideRows))
 	}
 
 	// (c) zero new WS events.

@@ -145,14 +145,13 @@ function storyPanel() {
         // Reactive bump counter for realtime row patches. Read from
         // matchesRow so x-show re-runs when bumped.
         _filterTick: 0,
-        // sty_1d6751e9 — bulk-select state for the operator-status-
-        // override surface. selectedIDs is a Set keyed by story id;
-        // bulkTarget / bulkReason hold the action-bar form state;
-        // bulkBusy disables apply during an in-flight Promise.all;
+        // sty_1d6751e9 + sty_01f75142 — bulk-select state for the
+        // operator-status-override surface. selectedIDs is a Set keyed
+        // by story id; bulkTarget holds the target enum; bulkBusy
+        // disables apply during an in-flight Promise.all;
         // bulkResultText carries the "applied N / failed M" strip.
         selectedIDs: new Set(),
         bulkTarget: 'ready',
-        bulkReason: '',
         bulkBusy: false,
         bulkResultText: '',
         get tokens() { return parseStoryQuery(this.query); },
@@ -383,8 +382,8 @@ function storyPanel() {
             this.selectedIDs = new Set();
             this.bulkResultText = '';
         },
-        async applyRowStatus(id, target, reason) {
-            const res = await this._postStatus(id, target, reason);
+        async applyRowStatus(id, target) {
+            const res = await this._postStatus(id, target);
             if (!res.ok) {
                 console.warn('storyPanel: row status failed', id, res.status, res.body);
             }
@@ -396,8 +395,7 @@ function storyPanel() {
             this.bulkResultText = '';
             const ids = Array.from(this.selectedIDs);
             const target = this.bulkTarget;
-            const reason = this.bulkReason;
-            const results = await Promise.all(ids.map(id => this._postStatus(id, target, reason)));
+            const results = await Promise.all(ids.map(id => this._postStatus(id, target)));
             let applied = 0, failed = 0;
             for (const r of results) {
                 if (r.ok) { applied++; } else { failed++; }
@@ -405,13 +403,13 @@ function storyPanel() {
             this.bulkResultText = 'applied ' + applied + ' / failed ' + failed;
             this.bulkBusy = false;
         },
-        async _postStatus(id, target, reason) {
+        async _postStatus(id, target) {
             try {
                 const resp = await fetch('/api/stories/' + encodeURIComponent(id) + '/status', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ status: target, reason: reason || '' }),
+                    body: JSON.stringify({ status: target }),
                 });
                 const text = await resp.text();
                 return { ok: resp.ok, status: resp.status, body: text };

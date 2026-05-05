@@ -136,12 +136,14 @@ func TestStory_InvalidTransition_NoPublish(t *testing.T) {
 		WorkspaceID: "wksp_A", ProjectID: "proj_1", Title: "t",
 	}, now)
 	require.NoError(t, err)
-	// Create emits one event (sty_1ff1065a). Capture the count so we
-	// can assert no further publish on the failed UpdateStatus below.
+	// Walk to done so the next transition is a terminal-rollback —
+	// the only category the V3-parity matrix (sty_01f75142) rejects.
+	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now.Add(time.Second), nil)
+	require.NoError(t, err)
 	priorCount := rec.count()
 
-	// backlog → done is invalid.
-	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now, nil)
+	// done → backlog is invalid (terminal source).
+	_, err = store.UpdateStatus(ctx, s.ID, StatusBacklog, "alice", now.Add(2*time.Second), nil)
 	assert.Error(t, err)
 	assert.Equal(t, priorCount, rec.count(), "no publish on failed transition")
 }
@@ -163,14 +165,20 @@ func TestStory_UpdateStatusDerived_BypassesTransitionGuard(t *testing.T) {
 	}, now)
 	require.NoError(t, err)
 
-	// Manual path rejects backlog → done (forward-only walk).
-	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now, nil)
-	require.Error(t, err, "manual path must still reject illegal jumps")
-
-	// Derived path accepts the same transition.
-	updated, err := store.UpdateStatusDerived(ctx, s.ID, StatusDone, now.Add(time.Second), nil)
+	// Walk to done so we have a terminal source for the bypass test.
+	// V3 parity (sty_01f75142) means terminal-rollback is the only
+	// transition the manual path still rejects.
+	_, err = store.UpdateStatus(ctx, s.ID, StatusDone, "alice", now.Add(time.Second), nil)
 	require.NoError(t, err)
-	assert.Equal(t, StatusDone, updated.Status)
+
+	// Manual path rejects done → backlog (terminal-rollback).
+	_, err = store.UpdateStatus(ctx, s.ID, StatusBacklog, "alice", now.Add(2*time.Second), nil)
+	require.Error(t, err, "manual path must still reject terminal-rollback")
+
+	// Derived path accepts the same transition (bypasses the guard).
+	updated, err := store.UpdateStatusDerived(ctx, s.ID, StatusBacklog, now.Add(3*time.Second), nil)
+	require.NoError(t, err)
+	assert.Equal(t, StatusBacklog, updated.Status)
 
 	// Ledger row carries reason:derived and the system:reconciler actor.
 	rows, err := led.List(ctx, "proj_1", ledger.ListOptions{
@@ -192,7 +200,7 @@ func TestStory_UpdateStatusDerived_BypassesTransitionGuard(t *testing.T) {
 	// WS event still publishes — the panel sees the flip.
 	require.GreaterOrEqual(t, rec.count(), 2) // at least Create-emit + Derived-emit
 	last2 := rec.events[rec.count()-1]
-	assert.Equal(t, "story.done", last2.kind)
+	assert.Equal(t, "story.backlog", last2.kind)
 }
 
 // TestStory_UpdateStatusDerived_NoOpWhenStatusMatches asserts a
