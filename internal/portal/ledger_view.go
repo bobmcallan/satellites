@@ -29,7 +29,6 @@ type ledgerRowView struct {
 	Type       string   `json:"type"`
 	Tags       []string `json:"tags,omitempty"`
 	StoryID    string   `json:"story_id,omitempty"`
-	ContractID string   `json:"contract_id,omitempty"`
 	Durability string   `json:"durability"`
 	SourceType string   `json:"source_type"`
 	Status     string   `json:"status"`
@@ -46,15 +45,14 @@ type ledgerFilters struct {
 	Type       string   `json:"type,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 	StoryID    string   `json:"story_id,omitempty"`
-	ContractID string   `json:"contract_id,omitempty"`
 	Durability string   `json:"durability,omitempty"`
 	SourceType string   `json:"source_type,omitempty"`
 	Status     string   `json:"status,omitempty"`
 }
 
 // parseLedgerFilters reads `?q=`, `?type=`, `?tag=`, `?story_id=`,
-// `?contract_id=`, `?durability=`, `?source_type=`, `?status=` from
-// the request. `tag` may be repeated or comma-separated.
+// `?durability=`, `?source_type=`, `?status=` from the request.
+// `tag` may be repeated or comma-separated.
 func parseLedgerFilters(r *http.Request) ledgerFilters {
 	q := r.URL.Query()
 	tags := make([]string, 0)
@@ -71,7 +69,6 @@ func parseLedgerFilters(r *http.Request) ledgerFilters {
 		Type:       strings.TrimSpace(q.Get("type")),
 		Tags:       tags,
 		StoryID:    strings.TrimSpace(q.Get("story_id")),
-		ContractID: strings.TrimSpace(q.Get("contract_id")),
 		Durability: strings.TrimSpace(q.Get("durability")),
 		SourceType: strings.TrimSpace(q.Get("source_type")),
 		Status:     strings.TrimSpace(q.Get("status")),
@@ -88,7 +85,6 @@ func buildLedgerComposite(ctx context.Context, store ledger.Store, projectID str
 	listOpts := ledger.ListOptions{
 		Type:       f.Type,
 		StoryID:    f.StoryID,
-		ContractID: f.ContractID,
 		Tags:       f.Tags,
 		Durability: f.Durability,
 		SourceType: f.SourceType,
@@ -131,9 +127,6 @@ func ledgerRowViewFor(r ledger.LedgerEntry) ledgerRowView {
 	}
 	if r.StoryID != nil {
 		v.StoryID = *r.StoryID
-	}
-	if r.ContractID != nil {
-		v.ContractID = *r.ContractID
 	}
 	if len(r.Structured) > 0 {
 		v.Structured = string(r.Structured)

@@ -72,9 +72,6 @@ func emitAppended(ctx context.Context, p hubemit.Publisher, entry LedgerEntry) {
 	if entry.StoryID != nil {
 		payload["story_id"] = *entry.StoryID
 	}
-	if entry.ContractID != nil {
-		payload["contract_id"] = *entry.ContractID
-	}
 	p.Publish(ctx, topicPrefix+entry.WorkspaceID, EventKindAppended, entry.WorkspaceID, payload)
 
 	// Activity panel fan-out (sty_e55f335e). Re-emit the same payload
@@ -103,9 +100,6 @@ func emitAppended(ctx context.Context, p hubemit.Publisher, entry LedgerEntry) {
 		"kind":         matchedKind,
 		"story_id":     *entry.StoryID,
 		"created_at":   entry.CreatedAt.UTC().Format(time.RFC3339),
-	}
-	if entry.ContractID != nil {
-		activityPayload["contract_id"] = *entry.ContractID
 	}
 	p.Publish(ctx, topicPrefix+entry.WorkspaceID, EventKindStoryActivity, entry.WorkspaceID, activityPayload)
 }

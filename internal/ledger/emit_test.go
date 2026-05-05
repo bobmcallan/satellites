@@ -147,14 +147,12 @@ func TestLedger_Append_StoryActivityEmit(t *testing.T) {
 	rec := &recorder{}
 	store.SetPublisher(rec)
 	storyRef := "sty_test_e55f"
-	contractRef := "ci_test"
 	createdAt := time.Date(2026, 5, 2, 6, 0, 0, 0, time.UTC)
 
 	entry, err := store.Append(context.Background(), LedgerEntry{
 		WorkspaceID: "wksp_A",
 		ProjectID:   "proj_1",
 		StoryID:     &storyRef,
-		ContractID:  &contractRef,
 		Type:        TypePlan,
 		Tags:        []string{"kind:plan", "phase:orchestrator"},
 		Content:     "orchestrator plan composed",
@@ -180,7 +178,6 @@ func TestLedger_Append_StoryActivityEmit(t *testing.T) {
 	payload := activity.data.(map[string]any)
 	assert.Equal(t, entry.ID, payload["ledger_id"])
 	assert.Equal(t, storyRef, payload["story_id"])
-	assert.Equal(t, contractRef, payload["contract_id"])
 	assert.Equal(t, "kind:plan", payload["kind"])
 	assert.Equal(t, "orchestrator plan composed", payload["content"])
 	assert.Equal(t, createdAt.Format(time.RFC3339), payload["created_at"])

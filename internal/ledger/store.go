@@ -26,7 +26,6 @@ const MaxListLimit = 500
 type ListOptions struct {
 	Type          string
 	StoryID       string
-	ContractID    string
 	Tags          []string
 	Durability    string
 	SourceType    string
@@ -174,11 +173,6 @@ func matches(e LedgerEntry, opts ListOptions) bool {
 	}
 	if opts.StoryID != "" {
 		if e.StoryID == nil || *e.StoryID != opts.StoryID {
-			return false
-		}
-	}
-	if opts.ContractID != "" {
-		if e.ContractID == nil || *e.ContractID != opts.ContractID {
 			return false
 		}
 	}
@@ -412,7 +406,6 @@ func (m *MemoryStore) Dereference(ctx context.Context, id, reason, actor string,
 		WorkspaceID: target.WorkspaceID,
 		ProjectID:   target.ProjectID,
 		StoryID:     target.StoryID,
-		ContractID:  target.ContractID,
 		Type:        TypeDecision,
 		Tags:        []string{"kind:dereference", "target:" + id},
 		Content:     reason,

@@ -252,22 +252,18 @@ func TestMemoryStore_GetByID(t *testing.T) {
 	}
 }
 
-func TestMemoryStore_FilterByStoryAndContractAndTags(t *testing.T) {
+func TestMemoryStore_FilterByStoryAndTags(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := NewMemoryStore()
 	now := time.Now().UTC()
 	storyA := "story_a"
-	contractZ := "ci_z"
 	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeDecision, StoryID: &storyA, Tags: []string{"phase:plan"}}, now)
-	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeDecision, ContractID: &contractZ, Tags: []string{"phase:develop"}}, now.Add(time.Second))
+	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeDecision, Tags: []string{"phase:develop"}}, now.Add(time.Second))
 	_, _ = store.Append(ctx, LedgerEntry{ProjectID: "proj_a", Type: TypeDecision, Tags: []string{"phase:plan", "phase:develop"}}, now.Add(2*time.Second))
 
 	if got, _ := store.List(ctx, "proj_a", ListOptions{StoryID: storyA}, nil); len(got) != 1 {
 		t.Errorf("StoryID filter = %d, want 1", len(got))
-	}
-	if got, _ := store.List(ctx, "proj_a", ListOptions{ContractID: contractZ}, nil); len(got) != 1 {
-		t.Errorf("ContractID filter = %d, want 1", len(got))
 	}
 	if got, _ := store.List(ctx, "proj_a", ListOptions{Tags: []string{"phase:plan"}}, nil); len(got) != 2 {
 		t.Errorf("Tags filter = %d, want 2", len(got))

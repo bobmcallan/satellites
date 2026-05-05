@@ -82,7 +82,6 @@ type LedgerEntry struct {
 	WorkspaceID string     `json:"workspace_id"`
 	ProjectID   string     `json:"project_id"`
 	StoryID     *string    `json:"story_id,omitempty"`
-	ContractID  *string    `json:"contract_id,omitempty"`
 	Type        string     `json:"type"`
 	Tags        []string   `json:"tags,omitempty"`
 	Content     string     `json:"content"`
@@ -110,9 +109,9 @@ type LedgerEntry struct {
 }
 
 // Validate returns the first invariant violation on e, or nil if e is
-// well-formed. Validate covers shape only; FK existence (StoryID,
-// ContractID) is not enforced — the ledger is append-only and tolerates
-// references to rows that may have been dereferenced.
+// well-formed. Validate covers shape only; FK existence (StoryID) is
+// not enforced — the ledger is append-only and tolerates references
+// to rows that may have been dereferenced.
 func (e LedgerEntry) Validate() error {
 	if _, ok := validTypes[e.Type]; !ok {
 		return fmt.Errorf("ledger: invalid type %q", e.Type)
@@ -145,8 +144,8 @@ func NewID() string {
 }
 
 // StringPtr returns nil for the empty string, otherwise a pointer to a
-// fresh copy of s. Used by callers populating optional StoryID /
-// ContractID without sprinkling pointer construction across call sites.
+// fresh copy of s. Used by callers populating optional pointer fields
+// like StoryID without sprinkling pointer construction across call sites.
 func StringPtr(s string) *string {
 	if s == "" {
 		return nil

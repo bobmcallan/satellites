@@ -65,15 +65,13 @@ const activityContentTrim = 240
 // underlying ledger entry id (`ldg_<8hex>`). Kind is the matched
 // activity-kind tag (e.g. `kind:plan`). Phase is the contract slot
 // derived from a `phase:<contract_name>` tag, empty when none.
-// ContractID is the FK to the contract instance, when the row carries
-// one. Summary is a one-line human snippet derived from the row's
+// Summary is a one-line human snippet derived from the row's
 // content. CreatedAt is RFC3339 UTC.
 type storyActivityRow struct {
 	ID           string   `json:"id"`
 	Kind         string   `json:"kind"`
 	KindClass    string   `json:"kind_class,omitempty"`
 	Phase        string   `json:"contract_slot,omitempty"`
-	ContractID   string   `json:"contract_id,omitempty"`
 	Type         string   `json:"type"`
 	Tags         []string `json:"tags"`
 	Summary      string   `json:"summary"`
@@ -133,9 +131,6 @@ func buildStoryActivity(
 			Tags:      append([]string(nil), r.Tags...),
 			Summary:   truncate(r.Content, activityContentTrim),
 			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
-		}
-		if r.ContractID != nil {
-			row.ContractID = *r.ContractID
 		}
 		out = append(out, row)
 	}

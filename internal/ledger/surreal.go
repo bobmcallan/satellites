@@ -57,9 +57,13 @@ func NewSurrealStore(db *surrealdb.DB) *SurrealStore {
 	ctx := context.Background()
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE TABLE IF NOT EXISTS ledger SCHEMALESS", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_story_created ON ledger FIELDS workspace_id, story_id, created_at", nil)
-	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_contract ON ledger FIELDS workspace_id, contract_id", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE INDEX IF NOT EXISTS ledger_ws_tags ON ledger FIELDS workspace_id, tags", nil)
 	_, _ = surrealdb.Query[any](ctx, db, "DEFINE TABLE IF NOT EXISTS ledger_chunks SCHEMALESS", nil)
+	// sty_509a46fa: contract_id was the FK to the deleted contract_instance
+	// row type. Drop the legacy index and clear lingering values from old
+	// rows; new ledger writes carry task_id / phase tags instead.
+	_, _ = surrealdb.Query[any](ctx, db, "REMOVE INDEX IF EXISTS ledger_ws_contract ON TABLE ledger", nil)
+	_, _ = surrealdb.Query[any](ctx, db, "UPDATE ledger UNSET contract_id", nil)
 	return s
 }
 
@@ -163,7 +167,7 @@ func (c *SurrealChunkStore) SearchByEmbedding(ctx context.Context, opts ChunkSea
 }
 
 // selectCols preserves the string form of id (see internal/project/surreal.go).
-const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, contract_id, type, tags, content, structured, durability, expires_at, source_type, sensitive, status, created_at, created_by, impersonating_as_workspace"
+const selectCols = "meta::id(id) AS id, workspace_id, project_id, story_id, type, tags, content, structured, durability, expires_at, source_type, sensitive, status, created_at, created_by, impersonating_as_workspace"
 
 // Append implements Store for SurrealStore.
 func (s *SurrealStore) Append(ctx context.Context, entry LedgerEntry, now time.Time) (LedgerEntry, error) {
@@ -232,10 +236,6 @@ func (s *SurrealStore) buildListWhere(projectID string, opts ListOptions, member
 	if opts.StoryID != "" {
 		conds = append(conds, "story_id = $story")
 		vars["story"] = opts.StoryID
-	}
-	if opts.ContractID != "" {
-		conds = append(conds, "contract_id = $contract")
-		vars["contract"] = opts.ContractID
 	}
 	if len(opts.Tags) > 0 {
 		conds = append(conds, "tags ANYINSIDE $tags")
@@ -433,7 +433,6 @@ func (s *SurrealStore) Dereference(ctx context.Context, id, reason, actor string
 		WorkspaceID: target.WorkspaceID,
 		ProjectID:   target.ProjectID,
 		StoryID:     target.StoryID,
-		ContractID:  target.ContractID,
 		Type:        TypeDecision,
 		Tags:        []string{"kind:dereference", "target:" + id},
 		Content:     reason,

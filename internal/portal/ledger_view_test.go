@@ -46,7 +46,7 @@ func TestParseLedgerFilters_QueryString(t *testing.T) {
 			ledgerFilters{Type: "verdict", Durability: "durable", SourceType: "agent", Status: "active", Tags: []string{}}},
 		{"tag=kind:plan&tag=phase:plan", ledgerFilters{Tags: []string{"kind:plan", "phase:plan"}}},
 		{"tag=a,b,c", ledgerFilters{Tags: []string{"a", "b", "c"}}},
-		{"story_id=sty_x&contract_id=ci_y", ledgerFilters{StoryID: "sty_x", ContractID: "ci_y", Tags: []string{}}},
+		{"story_id=sty_x", ledgerFilters{StoryID: "sty_x", Tags: []string{}}},
 	}
 	for _, c := range cases {
 		u, _ := url.Parse("/x?" + c.raw)
@@ -61,7 +61,7 @@ func TestParseLedgerFilters_QueryString(t *testing.T) {
 		}
 		if got.Query != c.want.Query || got.Type != c.want.Type || got.Durability != c.want.Durability ||
 			got.SourceType != c.want.SourceType || got.Status != c.want.Status ||
-			got.StoryID != c.want.StoryID || got.ContractID != c.want.ContractID ||
+			got.StoryID != c.want.StoryID ||
 			!sameStringSlice(got.Tags, c.want.Tags) {
 			t.Errorf("parseLedgerFilters(%q) = %+v, want %+v", c.raw, got, c.want)
 		}
