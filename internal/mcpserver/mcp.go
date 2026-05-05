@@ -625,6 +625,24 @@ func New(cfg *config.Config, logger arbor.ILogger, startedAt time.Time, deps Dep
 	)
 	s.mcp.AddTool(systemSeedTool, s.handleSystemSeedRun)
 
+	// sty_51571015: agent_dispatch verb. Orchestrator (operator's
+	// Claude Code session) calls this to spawn a dispatched agent in
+	// an isolated git worktree under <repo_path>/.satellites-agents/
+	// <task_id>. The substrate composes the full context bundle (per
+	// pr_substrate_provides_context), enforces the agent's
+	// permission_patterns via --allowedTools, and writes a
+	// kind:dispatch-result ledger row tagged task_id:<id> for audit.
+	// Replaces the in-process reviewer service — every review now
+	// flows through the same dispatch primitive every work task does.
+	agentDispatchTool := mcpgo.NewTool("agent_dispatch",
+		mcpgo.WithDescription("Spawn a dispatched agent for a task in an isolated git worktree. Loads the agent doc + task, verifies capability (delivers/reviews against task action), creates worktree at <repo_path>/.satellites-agents/<task_id> on branch agent-<task_id>-from-<short(HEAD)>, writes .claude/settings.json (permission_patterns + hooks) + .claude/mcp.json (X-Satellites-Agent header), composes the six-source context bundle (agent_process + agent doc + active principles + story_context + contract + task_walk), and runs `claude -p` under a fresh HOME with --allowedTools / --mcp-config / --strict-mcp-config / --output-format json. Writes a kind:dispatch-result ledger row tagged task_id:<id>. Returns {success, branch, head_sha, evidence_ledger_id, worktree_dir, error?}. KV switches: agent.dispatch.mode (default bash), agent.dispatch.bash.claude_path (default claude), agent.dispatch.bash.timeout_seconds (default 600), agent.dispatch.bash.preserve_worktree_on_failure (default true). sty_51571015."),
+		mcpgo.WithString("task_id", mcpgo.Required(), mcpgo.Description("Task id (task_<8hex>) the dispatched agent works on. The task's Action determines the contract; the agent's delivers/reviews list must include it.")),
+		mcpgo.WithString("agent_doc_id", mcpgo.Required(), mcpgo.Description("Agent document id (doc_<8hex>) — the role to dispatch. Must be type=agent and capable of the task's action.")),
+		mcpgo.WithString("repo_path", mcpgo.Required(), mcpgo.Description("Absolute path of the operator's git repo. The worktree lands under <repo_path>/.satellites-agents/<task_id>. The substrate must have filesystem access to this path — typically the operator runs satellites-server locally for dispatch.")),
+		mcpgo.WithString("mcp_url", mcpgo.Description("Override the dispatched session's MCP server URL written into .claude/mcp.json. Defaults to <PublicURL>/mcp.")),
+	)
+	s.mcp.AddTool(agentDispatchTool, s.handleAgentDispatch)
+
 	if s.tasks != nil {
 		// task_plan is the only remaining bare task-creation MCP verb
 		// (sty_c6d76a5b checkpoint 12 retired task_enqueue + task_publish).

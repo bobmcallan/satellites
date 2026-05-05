@@ -38,7 +38,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/ratelimit"
 	"github.com/bobmcallan/satellites/internal/repo"
 	"github.com/bobmcallan/satellites/internal/reviewer"
-	reviewerservice "github.com/bobmcallan/satellites/internal/reviewer/service"
 	"github.com/bobmcallan/satellites/internal/session"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/task"
@@ -118,13 +117,6 @@ func main() {
 		repoIndexer      codeindex.Indexer
 		defaultProjectID string
 		dbPing           httpserver.HealthCheck
-		// reviewerServiceMode is the resolved value of the system-tier KV
-		// row `reviewer.service.mode` — the substrate-managed source of
-		// truth for whether the embedded reviewer goroutine starts.
-		// Defaults to "embedded" when no row resolves so out-of-the-box
-		// boots have a working close path. Operators flip the row via
-		// `kv_set` at scope=system; the next boot picks it up.
-		reviewerServiceMode = reviewerservice.ModeEmbedded
 
 		oauthServer *auth.OAuthServer
 	)
@@ -331,17 +323,12 @@ func main() {
 		// every close now goes through the review-task gate
 		// unconditionally; mode resolution is gone.
 
-		// Reviewer service mode lives on the system-tier KV row
-		// `reviewer.service.mode` (default "embedded"). Application
-		// behaviour belongs in the substrate's KV layer, not in
-		// infrastructure secrets. Operators flip the value via `kv_set`
-		// at scope=system; the next boot picks it up.
-		if err := seedSystemReviewerServiceMode(ctx, ledgerStore, time.Now().UTC()); err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("reviewer_service KV seed failed")
-		}
-		reviewerServiceMode = resolveReviewerServiceMode(ctx, ledgerStore)
-		logger.Info().Str("mode", reviewerServiceMode).Msg("reviewer service mode resolved")
-
+		// sty_51571015 retired the in-process reviewer service. Reviews
+		// are now dispatched via `agent_dispatch` (the orchestrator
+		// claims kind:review tasks and spawns the appropriate reviewer
+		// agent in an isolated worktree). The substrate keeps emitting
+		// kind:review task events; only the listener that auto-claimed
+		// + auto-verdicted is gone.
 	}
 
 	portalHandlers, err := portal.New(cfg, logger, sessions, users, projStore, ledgerStore, storyStore, taskStore, docStore, repoStore, repoIndexer, wsStore, startedAt)
@@ -480,44 +467,10 @@ func main() {
 		}
 	}
 
-	// epic:v4-lifecycle-refactor sty_6077711d: standalone reviewer
-	// service. Runs as an in-process goroutine consuming kind:review
-	// tasks from the queue, invoking the gemini reviewer against the
-	// rubric + evidence, and committing the verdict directly as a
-	// kind:verdict ledger row + paired task close + on-rejection
-	// successor spawn (sty_c6d76a5b slice A — reviewer no longer routes
-	// through CommitReviewVerdict). Mode is resolved from the
-	// system-tier KV row `reviewer.service.mode` (default "embedded")
-	// earlier at boot.
-	if reviewerServiceMode == reviewerservice.ModeEmbedded && taskStore != nil && rev != nil {
-		revSvc, err := reviewerservice.New(reviewerservice.Config{}, reviewerservice.Deps{
-			Tasks:    taskStore,
-			Docs:     docStore,
-			Ledger:   ledgerStore,
-			Reviewer: rev,
-			Logger:   logger,
-		})
-		if err != nil {
-			logger.Warn().Str("error", err.Error()).Msg("reviewer service construction failed")
-		} else {
-			revCtx, revStop := context.WithCancel(ctx)
-			revDone := make(chan struct{})
-			go func() {
-				defer close(revDone)
-				if err := revSvc.Run(revCtx); err != nil && !errors.Is(err, context.Canceled) {
-					logger.Warn().Str("error", err.Error()).Msg("reviewer service exited")
-				}
-			}()
-			defer func() {
-				revStop()
-				select {
-				case <-revDone:
-				case <-time.After(5 * time.Second):
-					logger.Warn().Msg("reviewer service shutdown timeout exceeded")
-				}
-			}()
-		}
-	}
+	// sty_51571015 retired the in-process reviewer service goroutine.
+	// kind:review tasks now flow to the orchestrator session, which
+	// dispatches the appropriate reviewer agent via `agent_dispatch`
+	// (internal/agentdispatch) — same path as every other dispatch.
 
 	// sty_509a46fa: embedding ingestion worker + repo reindex worker
 	// removed. Both depended on Task.Payload as a job envelope, which is
@@ -530,59 +483,6 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info().Msg("server stopped cleanly")
-}
-
-// reviewerServiceModeKVKey is the system-tier KV key the boot loop
-// resolves to decide whether the embedded reviewer goroutine starts.
-// Application config belongs in the substrate's KV layer, not in
-// process env vars or infrastructure secrets.
-const reviewerServiceModeKVKey = "reviewer.service.mode"
-
-// seedSystemReviewerServiceMode writes the default "embedded" value
-// onto the system-tier KV row `reviewer.service.mode` when no system-
-// scope value exists yet. Idempotent — operator-set rows or an
-// existing system seed are left untouched. Operators flip the value
-// via `kv_set` at scope=system; the next boot picks it up.
-func seedSystemReviewerServiceMode(ctx context.Context, ledgerStore ledger.Store, now time.Time) error {
-	if ledgerStore == nil {
-		return nil
-	}
-	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, reviewerServiceModeKVKey, ledger.KVResolveOptions{}, []string{""})
-	if err != nil {
-		return fmt.Errorf("resolve existing reviewer_service mode: %w", err)
-	}
-	if found && row.Scope == ledger.KVScopeSystem {
-		return nil
-	}
-	if _, err := ledgerStore.Append(ctx, ledger.LedgerEntry{
-		WorkspaceID: "",
-		Type:        ledger.TypeKV,
-		Tags:        []string{"scope:system", "key:" + reviewerServiceModeKVKey},
-		Content:     reviewerservice.ModeEmbedded,
-		CreatedBy:   "system",
-	}, now); err != nil {
-		return fmt.Errorf("seed reviewer_service KV: %w", err)
-	}
-	return nil
-}
-
-// resolveReviewerServiceMode reads the resolved value of the system-
-// tier KV row `reviewer.service.mode`. Falls back to "embedded" when
-// the ledger store is unwired or no row resolves so out-of-the-box
-// boots have a working close path.
-func resolveReviewerServiceMode(ctx context.Context, ledgerStore ledger.Store) string {
-	if ledgerStore == nil {
-		return reviewerservice.ModeEmbedded
-	}
-	row, found, err := ledger.KVResolveScoped(ctx, ledgerStore, reviewerServiceModeKVKey, ledger.KVResolveOptions{}, []string{""})
-	if err != nil || !found {
-		return reviewerservice.ModeEmbedded
-	}
-	v := strings.TrimSpace(strings.ToLower(row.Value))
-	if v == "" {
-		return reviewerservice.ModeEmbedded
-	}
-	return v
 }
 
 // buildReviewer wires the production Reviewer for the MCP server.
@@ -734,4 +634,3 @@ func taskRetentionDays() int {
 func strconvAtoiSafe(s string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(s))
 }
-

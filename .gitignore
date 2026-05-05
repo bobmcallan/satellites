@@ -20,6 +20,11 @@ scripts/satellites.toml
 *.out
 *.prof
 
+# sty_51571015: agent_dispatch creates a per-task worktree under
+# .satellites-agents/<task_id>. Operators clean these via
+# `git worktree remove` once the dispatched branch lands.
+.satellites-agents/
+
 # Dependencies
 /vendor/
 
