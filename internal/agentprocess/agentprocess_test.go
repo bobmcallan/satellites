@@ -57,6 +57,51 @@ func TestSystemDefaultSeedFile_CarriesDispatchLoop(t *testing.T) {
 	}
 }
 
+// TestDocsCarryDispatchArchitecture is the regression test that
+// sty_2de0905b (docs update, order:03) demands. The architecture
+// and agent-process docs MUST carry the dispatch architecture so
+// readers (operator, future Claude sessions, dispatched agents
+// reading docs as context) treat the new model as authoritative.
+func TestDocsCarryDispatchArchitecture(t *testing.T) {
+	t.Parallel()
+	architecture := readDocBody(t, "architecture.md")
+	agentProcess := readDocBody(t, "agent_process_v3.md")
+
+	architectureAnchors := []string{
+		"## Agent Dispatch",
+		"bash(claude -p",
+		".satellites-agents/<task_id>",
+	}
+	for _, want := range architectureAnchors {
+		if !strings.Contains(architecture, want) {
+			t.Errorf("docs/architecture.md missing dispatch anchor %q", want)
+		}
+	}
+
+	agentProcessAnchors := []string{
+		"bash(claude -p",
+		"pr_substrate_provides_context",
+		"Substrate provides context",
+	}
+	for _, want := range agentProcessAnchors {
+		if !strings.Contains(agentProcess, want) {
+			t.Errorf("docs/agent_process_v3.md missing dispatch anchor %q", want)
+		}
+	}
+}
+
+// readDocBody returns the on-disk body of a doc file under
+// docs/ at the repo root.
+func readDocBody(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "docs", name)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read doc file %s: %v", path, err)
+	}
+	return string(content)
+}
+
 // TestSystemDefaultSeedFile_PinsContractTokens is the regression test
 // that AC6 of sty_e1ab884d demands. The seeded body MUST keep its
 // fundamentals + routing tokens; a future edit that drops any of them

@@ -367,6 +367,56 @@ Bypass is not a feature. The reviewer-review contract's rubric can flag weak evi
 
 ---
 
+## Agent Dispatch
+
+The substrate's execution model. Agents are dispatched as `bash(claude -p ...)` subprocesses in per-task git worktrees. The substrate provides the dispatch primitive (`agent_dispatch`); the orchestrator drives the loop. Citing `pr_substrate_provides_context`.
+
+This section describes the architecture introduced by sty_9d7992c3 (seed instructions, commit `3d80346`) and implemented by sty_51571015 (Go primitive, slated for order:04 of `epic:operator-visibility`). It supersedes the in-process reviewer service described in §3 — `internal/reviewer/service` is retired when sty_51571015 ships.
+
+### Dispatch primitive
+
+`agent_dispatch(task_id, agent_doc_id)` performs:
+
+1. Loads the agent doc and the task; verifies the task's action matches one of the agent's `delivers:` or `reviews:` capabilities.
+2. Creates a git worktree at `<repo>/.satellites-agents/<task_id>` on a private branch named `agent-<task_id>-from-<short(base_sha)>`.
+3. Writes per-task config files inside the worktree's `.claude/` directory:
+   - `settings.json` — `PreToolUse` hooks enforcing `permission_patterns` (defence-in-depth alongside the `--allowedTools` flag); `Stop` hook capturing the subprocess's exit reason.
+   - `mcp.json` — substrate MCP server config including an `X-Satellites-Agent: <role>:<task_id>` HTTP header for audit-feed attribution.
+4. Composes the agent's prompt: agent_process artifact body + agent doc body + active principles + `story_context` for the owning story + contract document body for the task's action + relevant `task_walk` slice. The substrate is authoritative on context; the agent does not inherit operator-side Claude Code memory.
+5. Spawns the subprocess: `HOME=<scratch> cd <worktree> && claude -p "<prompt>" --allowedTools "<patterns>" --mcp-config <worktree>/.claude/mcp.json --strict-mcp-config --output-format json`.
+6. Captures the JSON result, parses it, writes a `kind:dispatch-result` ledger row tagged `task_id:<id>` capturing exit code, duration, cost, agent role, branch name, head commit (if the agent committed), and a diff stat.
+7. Tears down the worktree (`git worktree remove`); the branch persists for forensics or merge.
+
+The dispatched agent is responsible for claiming its own task, doing the work, writing evidence ledger rows, and closing the task via `task_submit(kind=close)`. The orchestrator awaits the result and either dispatches the next claimable task or addresses a rejection by reading the verdict and dispatching an iter-N+1 retry.
+
+### Permission envelope
+
+Two layers of enforcement:
+
+- **CLI flag** — `--allowedTools` is set per-dispatch from the agent doc's `permission_patterns`. The CLI rejects unpermitted tool calls before they reach the LLM's tool surface.
+- **`PreToolUse` hook** — the worktree's `.claude/settings.json` declares hooks that return `permissionDecision: "deny"` for any tool call outside the agent's envelope. Defence in depth.
+
+### Identity / attribution
+
+Each subprocess shares the operator's Anthropic auth (no per-invocation auth override exists in `claude -p`), but its MCP traffic includes an `X-Satellites-Agent: <role>:<task_id>` header. The substrate's MCP server stamps that header on every audit-feed row, so dispatched-agent calls are distinguishable from the orchestrator's calls in the timeline view.
+
+### Decision footnote — why bash + worktree
+
+Two alternatives were considered and rejected:
+
+- **Subagents** (Claude Code's `Agent` tool with custom subagent types) inherit context construction from the parent. The parent's framing rides into the subagent's first turn. That is structurally the same defect as the in-process reviewer service: curated context produces hallucinations on what wasn't curated. Building external dispatch on subagents would re-create the same class of bug.
+- **Claude teams** are independent agents with their own context. They were closer to the right shape, but they couple the substrate to operator-local Claude Code as the runtime. Server-side dispatch (scheduled stories, webhook reactions, post-deploy probes) would require a separate path. Two source-of-truth surfaces: substrate's `config/seed/agents/` and Claude Code's team registry.
+
+`bash(claude -p)` is closest to "agent as service". One source of truth (the agent doc), and it generalises to any future server-side dispatch model. The CLI surface (`--allowedTools`, `--mcp-config`, `--strict-mcp-config`, `--output-format json`) is sufficient to enforce the permission envelope and parse the result. Per-subprocess `HOME` override gives each dispatch its own settings + auth state, so per-agent hooks fall out naturally.
+
+### Cleanup + forensics
+
+Worktrees are removed after dispatch. The branch persists in `.git/refs/heads/agent-<task_id>-*` so the operator can inspect what each dispatch did, cherry-pick a useful commit into the operator's working branch, or discard the branch when its work is rolled into the main flow. `.satellites-agents/` is ignored by `.gitignore` so the worktree paths don't pollute the operator's git status while a dispatch is in flight.
+
+**Principles:** Evidence is the primary trust leverage, Process order and evidence are first-class, pr_substrate_provides_context.
+
+---
+
 ## 6. Ledger
 
 ### Shape

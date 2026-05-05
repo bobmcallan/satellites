@@ -98,7 +98,78 @@ Subsequent project-scoped verbs default to the bound project.
 
 ---
 
+## Orchestrator dispatch loop
+
+This is the current authoritative description of how the
+orchestrator runs a story. It supersedes section 5 below;
+section 5's per-task cycle described the in-process reviewer
+service execution model retired by `sty_51571015` (order:04 of
+`epic:operator-visibility`).
+
+The orchestrator does not do work itself. The orchestrator
+dispatches agents via `bash(claude -p ...)` in per-task git
+worktrees. The substrate provides the dispatch primitive
+`agent_dispatch(task_id, agent_doc)`. See `docs/architecture.md`
+§ "Agent Dispatch" for the dispatch architecture.
+
+### Flow
+
+1. **Operator says `implement <story_id>`.** The orchestrator's
+   conversation begins.
+2. **Orient.** Read `story_get`, `story_context`, `task_walk`.
+   The `agent_process` body returned by `story_context` carries
+   the orchestrator's pre-flight rules and dispatch loop.
+3. **If no tasks exist on the chain — compose plan.** Per
+   pre-flight Rule 2, read each contract document the planned
+   actions reference. Compose plan-md and review-criteria.md.
+   Submit via `task_submit(kind=plan, tasks=[…])`.
+4. **Dispatch loop.** While the chain has open work tasks:
+   - Find the next claimable task via `task_walk`.
+   - Resolve the agent doc by matching the task's action to an
+     agent's `delivers:` or `reviews:` capability list.
+   - Call `agent_dispatch(task_id, agent_doc)`. The substrate
+     creates the worktree, writes per-task `.claude/` config,
+     spawns `bash(claude -p)`, captures the JSON result.
+   - The dispatched agent claims its task, does its work,
+     writes evidence ledger rows, and closes the task itself.
+   - On rejection (per pre-flight Rule 3): read the verdict
+     ledger row, address each cited gap in a fresh evidence
+     row tagged for the iter-N+1 work task, dispatch the
+     retry. Do NOT bypass the chain by transitioning the
+     story.
+5. **Story close.** When `story_close` is the only remaining
+   work AND its review accepted, the orchestrator may
+   transition the story to done — subject to the substrate
+   done-gate from order:05 (`sty_0233fabd`) which rejects
+   `done`/`cancelled` while any task is at status `published`
+   or `planned`.
+
+## Substrate provides context
+
+The substrate is the authoritative source of context for
+dispatched agents. Memories at
+`~/.claude/projects/.../memory/` are orchestrator-only —
+dispatched subprocess agents have HOME-overridden auth and do
+not see the operator's local memory directory. Anything
+load-bearing for dispatched-agent behaviour must live in seed
+documents (principles, agent docs, artifacts, contracts) or in
+the per-dispatch context bundle the substrate composes.
+
+Citing `pr_substrate_provides_context`. The dispatch primitive
+itself enforces this: every dispatch composes the agent's
+prompt from agent_process artifact + agent doc body + active
+principles + story_context + contract body + relevant
+`task_walk` slice. The agent does not inherit, it is supplied.
+
+---
+
 ## 5. Per-task cycle
+
+> **Superseded** — see "Orchestrator dispatch loop" above.
+> This section describes the in-process reviewer service
+> execution model retired by `sty_51571015` (order:04). Kept
+> for historical reference; new orchestrator behaviour follows
+> the dispatch loop.
 
 For each implement task returned by `task_walk` (in
 `current_task_id` order). Review tasks are not in the
