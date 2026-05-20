@@ -30,3 +30,10 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Build output
+/bin/
+/dist/
+
+# Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md)
+.satellites/
