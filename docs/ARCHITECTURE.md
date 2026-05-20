@@ -52,7 +52,7 @@ Reviewers run in parallel when they have no shared mutable state. The session ag
 
 ## Substrate posture
 
-- **Postgres-backed** (replacing V4's SurrealDB). Mature tooling, predictable read paths.
+- **Postgres-backed** (replacing V4's SurrealDB). Mature tooling, predictable read paths. Schema lives at `internal/db/migrations/`; migrations managed by [`golang-migrate`](https://github.com/golang-migrate/migrate) and embedded into the server binary via `go:embed` — single-binary deploy, no separate migration assets to ship. `evidence` is enforced append-only at the DB layer (triggers reject UPDATE/DELETE).
 - **Thin MCP + CLI gateway.** Single execution path (CLI verbs) for all primaries. MCP becomes the Claude-native attachment that handles session bootstrap + auth + verb discovery, dispatching to the same underlying verb implementations. Gemini/Codex/Warp call the same verbs via Bash → CLI. No second-class primaries.
 - **No opinionated substrate content.** Starter packs ship as documentation — labelled examples, optional, not loaded by default. The substrate runs fine with zero authored content.
 
@@ -79,7 +79,7 @@ The reviewer ↔ session agent conversation, captured in the ledger, is the audi
 
 ## Implementation choices
 
-- **Language**: Go.
+- **Language**: Go (1.24+, driven by `golang-migrate` v4.19's minimum).
 - **Binary names**: `satellites-server` (server), `satellites` (CLI).
 - **Server boundary**: separate `satellites-server` service. CLI calls into the server (not directly into Postgres) — the server owns substrate invariants; the CLI is a typed client.
 - **Auth**: OAuth on the server (one provider minimum). Dev mode boots the server with pre-created `admin` + `user` for local development (disabled in production builds; V4 pattern). CLI authenticates with an api-key by default (`Authorization: Bearer`), and supports an interactive OAuth flow that mints an api-key locally.

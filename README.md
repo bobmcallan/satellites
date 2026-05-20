@@ -26,9 +26,22 @@ docs/                    # architecture + design records
 ## Building
 
 ```sh
-go build ./cmd/...
+make build           # or: go build ./cmd/...
 ```
+
+## Database & migrations
+
+Schema lives under `internal/db/migrations/` (golang-migrate, embedded into the binary). The migrator runs against any Postgres reachable via `DATABASE_URL`:
+
+```sh
+export DATABASE_URL=postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable
+make migrate-up       # apply all migrations
+make migrate-status   # current version
+make migrate-down     # roll back all migrations (dev only)
+```
+
+`make migrate-*` shells out to `go run github.com/golang-migrate/migrate/v4/cmd/migrate` — no external tool needed. The same migrations are embedded into `satellites-server` for boot-time application and into the integration test harness.
 
 ## Local development
 
-`scripts/` will host docker-compose for a local stack once `sty_829b05b4` lands. For now, the binaries are stubs that compile and print a placeholder.
+`scripts/` will host docker-compose for a local stack once `sty_829b05b4` lands. For now, the binaries are stubs that compile and print a placeholder; the Postgres schema is ready to apply against any reachable Postgres instance.
