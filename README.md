@@ -44,4 +44,19 @@ make migrate-down     # roll back all migrations (dev only)
 
 ## Local development
 
-`scripts/` will host docker-compose for a local stack once `sty_829b05b4` lands. For now, the binaries are stubs that compile and print a placeholder; the Postgres schema is ready to apply against any reachable Postgres instance.
+The local-dev stack lives under `scripts/`. Until `satellites-server` gains a listening HTTP surface (`sty_3a7121e6`) and dev-mode users (`sty_9b3e355c`), the stack brings up Postgres only — the server binary runs on the host against the compose-managed Postgres.
+
+```sh
+./scripts/dev-up.sh        # docker compose up postgres + make migrate-up
+./scripts/dev-logs.sh      # tail container logs
+./scripts/dev-reset.sh     # drop + recreate satellites DB, re-apply migrations
+./scripts/dev-down.sh      # tear down (removes data volume — destructive)
+```
+
+Then in another shell:
+
+```sh
+export DATABASE_URL=postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable
+go run ./cmd/satellites-server     # stub for now (listening surface arrives with sty_3a7121e6)
+go run ./cmd/satellites version
+```

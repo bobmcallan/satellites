@@ -1,0 +1,32 @@
+# scripts/docker-compose.dev.yml
+#
+# Local satellites-server stack for development.
+#
+# Until satellites-server gains a listening HTTP transport (sty_3a7121e6) and
+# dev-mode user accounts (sty_9b3e355c), this stack brings up Postgres only.
+# The server binary runs on the host (go run ./cmd/satellites-server) against
+# this Postgres instance.
+
+name: satellites-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: satellites-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: satellites
+      POSTGRES_PASSWORD: satellites
+      POSTGRES_DB: satellites
+    ports:
+      - "5432:5432"
+    volumes:
+      - satellites-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U satellites -d satellites"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  satellites-postgres-data:
