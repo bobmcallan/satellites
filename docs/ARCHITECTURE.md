@@ -79,7 +79,7 @@ The reviewer ↔ session agent conversation, captured in the ledger, is the audi
 
 ## Implementation choices
 
-- **Language**: Go (1.24+, driven by `golang-migrate` v4.19's minimum).
+- **Language**: Go (1.25+, driven by `mark3labs/mcp-go` v0.54's minimum).
 - **Binary names**: `satellites-server` (server), `satellites` (CLI).
 - **Server boundary**: separate `satellites-server` service. CLI calls into the server (not directly into Postgres) — the server owns substrate invariants; the CLI is a typed client.
 - **Auth**: OAuth on the server (one provider minimum). Dev mode boots the server with pre-created `admin` + `user` for local development (disabled in production builds; V4 pattern). CLI authenticates with an api-key by default (`Authorization: Bearer`), and supports an interactive OAuth flow that mints an api-key locally.
