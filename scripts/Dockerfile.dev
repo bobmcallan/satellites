@@ -1,0 +1,16 @@
+# scripts/Dockerfile.dev — satellites-server image for the local dev stack.
+# Multi-stage: build with the toolchain, ship a minimal alpine runtime.
+# Used by scripts/docker-compose.dev.yml.
+
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/satellites-server ./cmd/satellites-server
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /out/satellites-server /usr/local/bin/satellites-server
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/satellites-server"]

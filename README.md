@@ -44,19 +44,22 @@ make migrate-down     # roll back all migrations (dev only)
 
 ## Local development
 
-The local-dev stack lives under `scripts/`. Until `satellites-server` gains a listening HTTP surface (`sty_3a7121e6`) and dev-mode users (`sty_9b3e355c`), the stack brings up Postgres only — the server binary runs on the host against the compose-managed Postgres.
+The local-dev stack lives under `scripts/`. One command brings up Postgres + `satellites-server` (in `--dev` mode with pre-seeded `admin` / `user` accounts):
 
 ```sh
-./scripts/dev-up.sh        # docker compose up postgres + make migrate-up
+./scripts/dev-up.sh        # docker compose up; satellites-server builds first time
 ./scripts/dev-logs.sh      # tail container logs
-./scripts/dev-reset.sh     # drop + recreate satellites DB, re-apply migrations
+./scripts/dev-reset.sh     # drop + recreate satellites DB, restart server
 ./scripts/dev-down.sh      # tear down (removes data volume — destructive)
 ```
 
-Then in another shell:
+Once up:
+
+- Postgres: `localhost:5432` (db=satellites user=satellites)
+- Server:   `http://localhost:8080`, MCP at `/mcp`
+- Dev keys: `sk_dev_admin` (RoleAdmin), `sk_dev_user` (RoleUser)
 
 ```sh
-export DATABASE_URL=postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable
-go run ./cmd/satellites-server     # stub for now (listening surface arrives with sty_3a7121e6)
-go run ./cmd/satellites version
+curl -X POST http://localhost:8080/mcp \
+     -H 'Authorization: Bearer sk_dev_admin' -d '{}'
 ```

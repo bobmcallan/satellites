@@ -2,10 +2,12 @@
 #
 # Local satellites-server stack for development.
 #
-# Until satellites-server gains a listening HTTP transport (sty_3a7121e6) and
-# dev-mode user accounts (sty_9b3e355c), this stack brings up Postgres only.
-# The server binary runs on the host (go run ./cmd/satellites-server) against
-# this Postgres instance.
+# - postgres:        Postgres 16-alpine on :5432
+# - satellites-server: built from scripts/Dockerfile.dev, runs in --dev
+#                    mode (seeds admin + user with predictable api-keys
+#                    sk_dev_admin and sk_dev_user), listens on :8080
+#
+# Bring up with scripts/dev-up.sh; tear down with scripts/dev-down.sh.
 
 name: satellites-dev
 
@@ -27,6 +29,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  satellites-server:
+    build:
+      context: ..
+      dockerfile: scripts/Dockerfile.dev
+    container_name: satellites-server-dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://satellites:satellites@postgres:5432/satellites?sslmode=disable
+      SATELLITES_LISTEN_ADDR: ":8080"
+    command: ["--dev"]
+    ports:
+      - "8080:8080"
 
 volumes:
   satellites-postgres-data:

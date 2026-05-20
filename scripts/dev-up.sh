@@ -1,38 +1,41 @@
 #!/usr/bin/env bash
 #
-# scripts/dev-up.sh — bring up local Postgres and apply migrations.
-#
-# satellites-server is run locally on the host against this Postgres; see
-# sty_3a7121e6 + sty_9b3e355c for when the server gains a listening surface
-# and dev-mode admin/user accounts.
+# scripts/dev-up.sh — bring up the local satellites stack (Postgres + server).
+# satellites-server boots in --dev mode and seeds the admin/user accounts
+# with predictable api-keys (sk_dev_admin / sk_dev_user). It applies
+# migrations on startup, so no separate migrate step is needed.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-DATABASE_URL="${DATABASE_URL:-postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable}"
-export DATABASE_URL
+docker compose -f scripts/docker-compose.dev.yml up -d --build
 
-docker compose -f scripts/docker-compose.dev.yml up -d postgres
-
-echo "Waiting for Postgres..."
-for _ in $(seq 1 30); do
-    if docker compose -f scripts/docker-compose.dev.yml exec -T postgres \
-        pg_isready -U satellites -d satellites >/dev/null 2>&1; then
+echo "Waiting for satellites-server..."
+for _ in $(seq 1 60); do
+    if curl -fsS -o /dev/null http://localhost:8080/mcp \
+        -H "Authorization: Bearer sk_dev_admin" \
+        -X POST \
+        -d '{}' 2>/dev/null; then
+        break
+    fi
+    if curl -fsS -o /dev/null -w '%{http_code}' http://localhost:8080/mcp 2>/dev/null | grep -q '^4'; then
+        # 401 / 400 — server is up and responding, just rejecting our probe
         break
     fi
     sleep 1
 done
 
-echo "Applying migrations..."
-make migrate-up
-
 cat <<EOF
 
-Postgres ready at localhost:5432 (db=satellites user=satellites).
-DATABASE_URL=$DATABASE_URL
+Satellites dev stack ready:
+  Postgres : localhost:5432 (db=satellites user=satellites)
+  Server   : http://localhost:8080
+  MCP path : http://localhost:8080/mcp
+  Dev keys : sk_dev_admin (RoleAdmin) | sk_dev_user (RoleUser)
 
-Next:
-  go run ./cmd/satellites-server     # listening surface lands with sty_3a7121e6
-  go run ./cmd/satellites version
+Smoke test:
+  curl -X POST http://localhost:8080/mcp \\
+       -H 'Authorization: Bearer sk_dev_admin' \\
+       -d '{}'  # MCP rejects sessionless requests by spec; 4xx means up
 EOF
