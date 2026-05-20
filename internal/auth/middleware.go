@@ -17,6 +17,14 @@ func FromContext(ctx context.Context) *User {
 	return u
 }
 
+// WithUser attaches a user to ctx the same way Middleware does.
+// Exported for tests and for in-process callers that have already
+// authenticated through a non-HTTP channel (e.g. CLI dispatching
+// server-side verbs in-process during dev).
+func WithUser(ctx context.Context, u *User) context.Context {
+	return context.WithValue(ctx, ctxKey{}, u)
+}
+
 // Middleware authenticates incoming HTTP requests against the api-keys
 // table. On success, attaches the user to the request context. On
 // failure, returns 401.
@@ -48,7 +56,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, u))
+		r = r.WithContext(WithUser(r.Context(), u))
 		next.ServeHTTP(w, r)
 	})
 }

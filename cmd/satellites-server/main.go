@@ -12,6 +12,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
+	"github.com/bobmcallan/satellites/internal/verb"
 	_ "github.com/lib/pq"
 )
 
@@ -39,6 +40,7 @@ func main() {
 	defer sqlDB.Close()
 
 	store := auth.New(sqlDB)
+	verb.SetAuthStore(store) // satellites_init verb mints api-keys via this store
 
 	if *devMode {
 		if err := store.DevSeed(context.Background()); err != nil {
