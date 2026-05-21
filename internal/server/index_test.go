@@ -55,12 +55,15 @@ func TestIndex_AuthedRendersPortal_NoDev(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"SATELLITES", "PROJECTS", `data-field="version"`, `data-section="endpoints"`,
-		`data-field="footer-name"`, `data-field="footer-email"`, `data-field="footer-version"`,
+		`data-field="footer-name"`, `data-field="footer-email"`,
 		"/static/alpine.min.js",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+	if strings.Contains(body, `data-field="footer-version"`) {
+		t.Error("footer-version rendered (was removed per V4 footer pattern)")
 	}
 	if strings.Contains(body, "dev mode users") {
 		t.Error("dev-users section rendered when DevMode=false")

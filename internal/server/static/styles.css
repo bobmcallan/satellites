@@ -125,12 +125,17 @@ main {
 }
 
 .site-footer {
-  padding: 2rem;
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid #222;
   color: #555;
   font-size: 0.85rem;
 }
-.site-footer a { color: #888; }
+.site-footer a { color: #888; text-decoration: none; }
+.site-footer a:hover { color: #d0d0d0; }
+.footer-name { letter-spacing: 0.1em; }
 
 /* Login page */
 .login-body { display: flex; flex-direction: column; min-height: 100vh; }

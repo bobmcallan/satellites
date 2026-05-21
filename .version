@@ -5,8 +5,8 @@
 # cadence (independent per-binary tags) is a future enhancement; today
 # both binaries normally rev together.
 
-satellites.version: 0.0.3
-satellites.build: 2026-05-21-01-08-06
+satellites.version: 0.0.4
+satellites.build: 2026-05-21-01-14-43
 
-satellites-server.version: 0.0.3
-satellites-server.build: 2026-05-21-01-08-06
+satellites-server.version: 0.0.4
+satellites-server.build: 2026-05-21-01-14-43
