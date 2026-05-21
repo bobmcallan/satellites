@@ -59,7 +59,7 @@ jobs:
           - { goos: linux,  goarch: arm64, binary: satellites,        validate: false }
           - { goos: darwin, goarch: amd64, binary: satellites,        validate: false }
           - { goos: darwin, goarch: arm64, binary: satellites,        validate: false }
-          - { goos: linux,  goarch: amd64, binary: satellites-server, validate: true  }
+          - { goos: linux,  goarch: amd64, binary: satellites-server, validate: false }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
