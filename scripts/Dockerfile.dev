@@ -1,5 +1,10 @@
 # scripts/Dockerfile.dev — satellites-server image for the local dev stack.
+#
 # Multi-stage: build with the toolchain, ship a minimal alpine runtime.
+# Version info is BAKED INTO the binary via -ldflags at build time from
+# .version. The final image contains only the binary — .version is NOT
+# present at runtime. Single-binary deployment.
+#
 # Used by scripts/docker-compose.dev.yml.
 
 FROM golang:1.25-alpine AS builder
@@ -7,7 +12,19 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/satellites-server ./cmd/satellites-server
+
+# Read per-binary version from .version (builder stage only — never
+# copied into the final image). awk is in busybox on alpine.
+RUN set -eux; \
+    VER=$(awk '$1=="satellites-server.version:" {print $2}' .version); \
+    BLD=$(awk '$1=="satellites-server.build:"   {print $2}' .version); \
+    test -n "$VER" -a -n "$BLD"; \
+    CGO_ENABLED=0 go build \
+      -trimpath \
+      -ldflags="-s -w \
+        -X github.com/bobmcallan/satellites/internal/verb.Version=v${VER} \
+        -X github.com/bobmcallan/satellites/internal/verb.BuildTime=${BLD}" \
+      -o /out/satellites-server ./cmd/satellites-server
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
