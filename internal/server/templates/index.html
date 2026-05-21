@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand">SATELLITES</h1>
+  <nav class="primary-nav">
+    <a href="#" class="nav-item disabled">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/mcp" class="nav-item">MCP</a>
+    <a href="#" class="nav-item disabled">CONFIG</a>
+    <a href="#" class="nav-item disabled">HELP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-section="server">
+    <h2>server</h2>
+    <dl class="metadata">
+      <dt>VERSION</dt><dd data-field="version">{{.Version}}</dd>
+      <dt>COMMIT</dt><dd data-field="commit">{{.Commit}}</dd>
+      <dt>BUILT</dt><dd data-field="build">{{.BuildTime}}</dd>
+      <dt>DEV MODE</dt><dd data-field="dev-mode">{{.DevMode}}</dd>
+    </dl>
+  </section>
+
+  {{if .DevMode}}
+  <section class="panel" data-section="dev-users">
+    <h2>dev mode users</h2>
+    <p class="warning">Predictable api-keys for local development only &mdash; NEVER use in production.</p>
+    <dl class="metadata">
+      <dt>ADMIN</dt><dd data-field="dev-admin-key">{{.DevAdminKey}}</dd>
+      <dt>USER</dt><dd data-field="dev-user-key">{{.DevUserKey}}</dd>
+    </dl>
+  </section>
+  {{end}}
+
+  <section class="panel" data-section="endpoints">
+    <h2>endpoints</h2>
+    <table class="endpoints">
+      <thead><tr><th>METHOD</th><th>PATH</th><th>NOTES</th></tr></thead>
+      <tbody>
+        {{range .Endpoints}}<tr data-field="endpoint"><td>{{.Method}}</td><td>{{.Path}}</td><td>{{.Desc}}</td></tr>{{end}}
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<footer>
+  <p>satellites v5 substrate &middot; <a href="https://github.com/bobmcallan/satellites">github.com/bobmcallan/satellites</a></p>
+</footer>
+
+</body>
+</html>

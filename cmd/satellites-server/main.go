@@ -11,7 +11,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/db"
-	"github.com/bobmcallan/satellites/internal/mcpserver"
+	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/verb"
 	_ "github.com/lib/pq"
 )
@@ -40,7 +40,7 @@ func main() {
 	defer sqlDB.Close()
 
 	store := auth.New(sqlDB)
-	verb.SetAuthStore(store) // satellites_init verb mints api-keys via this store
+	verb.SetAuthStore(store) // satellites_init mints api-keys via this store
 
 	if *devMode {
 		if err := store.DevSeed(context.Background()); err != nil {
@@ -51,21 +51,17 @@ func main() {
 			auth.DevAdminEmail, auth.DevUserEmail, auth.DevAdminKey, auth.DevUserKey)
 	}
 
-	oauthCfg := auth.OAuthConfig{
-		GitHubClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
-		GitHubClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
-	}
-
-	s := mcpserver.New()
-	mcpHandler := mcpserver.HTTPHandler(s)
-
-	mux := http.NewServeMux()
-	auth.RegisterRoutes(mux, oauthCfg)
-	mux.Handle("/mcp", store.Middleware(mcpHandler))
-	mux.Handle("/mcp/", store.Middleware(mcpHandler))
+	handler := server.Build(server.Config{
+		Store:   store,
+		DevMode: *devMode,
+		OAuth: auth.OAuthConfig{
+			GitHubClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
+			GitHubClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
+		},
+	})
 
 	log.Printf("satellites-server listening on %s (dev=%v)", *addr, *devMode)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(*addr, handler); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -3,15 +3,24 @@
 // Package testbootstrap is the shared setup/teardown helper for V5's
 // integration tests. One bootstrap function across all sections; each
 // test calls Reset to enforce clean data injection between scenarios.
+//
+// Two flavours:
+//   - SetUp(t)           — Postgres only (used by DB-shape and store tests)
+//   - SetUpWithServer(t) — Postgres + auth.Store + DevSeed + satellites-server
+//                          via httptest. This is the canonical bootstrap
+//                          for browser-driven (chromedp) integration tests.
 package testbootstrap
 
 import (
 	"context"
 	"database/sql"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/server"
 	_ "github.com/lib/pq"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -24,6 +33,14 @@ import (
 type Env struct {
 	DSN string
 	DB  *sql.DB
+}
+
+// ServerEnv extends Env with a live satellites-server (httptest) bound
+// to the test Postgres + a seeded dev-mode auth store.
+type ServerEnv struct {
+	*Env
+	Store     *auth.Store
+	ServerURL string
 }
 
 // SetUp boots a Postgres container, applies migrations, opens a
@@ -81,5 +98,35 @@ func Reset(t *testing.T, env *Env) {
 	t.Helper()
 	if _, err := env.DB.Exec(`TRUNCATE stories, tools, reviews, evidence RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("reset tables: %v", err)
+	}
+}
+
+// SetUpWithServer is the canonical browser-driven integration bootstrap:
+// Postgres + migrations + auth.Store + DevSeed + the full
+// satellites-server handler stack behind httptest.NewServer.
+//
+// chromedp tests Navigate to env.ServerURL/...; the dev-mode admin/user
+// accounts are seeded so auth-gated paths work with sk_dev_admin /
+// sk_dev_user.
+func SetUpWithServer(t *testing.T) *ServerEnv {
+	t.Helper()
+	base := SetUp(t)
+
+	store := auth.New(base.DB)
+	if err := store.DevSeed(context.Background()); err != nil {
+		t.Fatalf("dev seed: %v", err)
+	}
+
+	handler := server.Build(server.Config{
+		Store:   store,
+		DevMode: true,
+	})
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	return &ServerEnv{
+		Env:       base,
+		Store:     store,
+		ServerURL: srv.URL,
 	}
 }
