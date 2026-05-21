@@ -73,10 +73,14 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
 	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
 
-	// MCP routes — auth-gated via Bearer api-key middleware (agents).
+	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
 	mcp := mcpserver.HTTPHandler(mcpserver.New())
 	mux.Handle("/mcp", cfg.Store.Middleware(mcp))
 	mux.Handle("/mcp/", cfg.Store.Middleware(mcp))
+
+	// CLI ↔ server transport. Same auth pipeline as /mcp; same verbs.
+	// POST /api/v1/exec/<verb_name> with the verb's JSON request body.
+	mux.Handle("/api/v1/exec/", cfg.Store.Middleware(execHandler()))
 
 	return mux
 }

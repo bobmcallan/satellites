@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
@@ -38,16 +40,18 @@ func resolveCallerUserID(flagValue string) string {
 
 func init() {
 	var (
-		jsonArg string
-		userArg string
+		jsonArg   string
+		userArg   string
+		configArg string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "exec <verb>",
 		Short: "Dispatch a verb with JSON args (single-execution-path entry)",
-		Long: `exec is the verb-name entry point. The MCP transport dispatches
-identically — same code path, same response shape. Both CLI and MCP
-callers ultimately hit verb.Dispatch.`,
+		Long: `exec dispatches a verb. When a satellites-server is configured
+(.satellites/satellites.toml with server_url + auth.token), the verb is
+posted to POST /api/v1/exec/<name> on that server. When no config is
+found, the verb is dispatched in-process against the local registry.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -69,6 +73,21 @@ callers ultimately hit verb.Dispatch.`,
 				}
 			}
 
+			// Remote dispatch when the config is present + complete.
+			cfg, _, err := cliconfig.Load(configArg)
+			switch {
+			case err == nil && cfg.IsConfigured():
+				resp, err := httpDispatch(cfg, name, req)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(resp))
+				return nil
+			case err != nil && !errors.Is(err, cliconfig.ErrNotFound):
+				return err
+			}
+
+			// In-process fallback (no config or incomplete config).
 			ctx := stampCallerUser(context.Background(), resolveCallerUserID(userArg))
 			resp, err := verb.Dispatch(ctx, name, req)
 			if err != nil {
@@ -79,6 +98,7 @@ callers ultimately hit verb.Dispatch.`,
 		},
 	}
 	cmd.Flags().StringVar(&jsonArg, "json", "", "JSON request body (alternative to stdin)")
-	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs that record owner_user_id.")
+	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs that record owner_user_id when dispatching in-process.")
+	cmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	register(cmd)
 }
