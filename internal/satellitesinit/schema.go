@@ -30,11 +30,20 @@ type InstallSchema struct {
 
 // DefaultConfig mirrors the canonical satellites.toml defaults.
 type DefaultConfig struct {
-	ServerURL      string `yaml:"server_url"      json:"server_url,omitempty"`
-	RepoPath       string `yaml:"repo_path"       json:"repo_path"`
-	WorktreeRoot   string `yaml:"worktree_root"   json:"worktree_root"`
-	LogPath        string `yaml:"log_path"        json:"log_path"`
-	BranchTemplate string `yaml:"branch_template" json:"branch_template"`
+	ServerURL      string    `yaml:"server_url"      json:"server_url,omitempty"`
+	RepoPath       string    `yaml:"repo_path"       json:"repo_path"`
+	WorktreeRoot   string    `yaml:"worktree_root"   json:"worktree_root"`
+	LogPath        string    `yaml:"log_path"        json:"log_path"`
+	BranchTemplate string    `yaml:"branch_template" json:"branch_template"`
+	Auth           AuthBlock `yaml:"auth"            json:"auth"`
+}
+
+// AuthBlock mirrors the satellites.toml `[auth]` section. The token
+// field is the api-key the CLI presents on every server call. The
+// schema ships it empty; Claude fills it from auth_bootstrap.api_key
+// after satellites_init mints one.
+type AuthBlock struct {
+	Token string `yaml:"token" json:"token"`
 }
 
 // AuthBootstrapBlock describes the auth bootstrap step the operator

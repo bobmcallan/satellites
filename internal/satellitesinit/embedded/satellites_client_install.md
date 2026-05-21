@@ -9,6 +9,8 @@ default_config:
   worktree_root: ./.satellites/worktree
   log_path: ./.satellites/logs
   branch_template: client-{task_id}-from-{base_sha}
+  auth:
+    token: ""
 auth_bootstrap:
   kind: auth_login
   command: satellites auth login
@@ -39,6 +41,7 @@ DB-stored artifact row — same shape on the wire either way.)
 | `default_config.worktree_root`        | TOML `[worktree].root` — where the daemon materialises per-task worktrees.                                                      |
 | `default_config.log_path`             | TOML `[logging].path` — CLI + per-task log destination.                                                                         |
 | `default_config.branch_template`      | TOML `[worktree].branch_template` — git branch name template the daemon uses when minting worktree branches.                    |
+| `default_config.auth.token`           | TOML `[auth].token` — the api-key the CLI presents on every server call. Empty in the schema; Claude fills it from `auth_bootstrap.api_key` after `satellites_init` mints one. |
 | `auth_bootstrap.kind`                 | Auth bootstrap flow kind the operator runs after the binary lands. `auth_login` for first-time human bootstrap.                 |
 | `auth_bootstrap.command`              | The shell command the operator runs for `kind=auth_login`.                                                                      |
 | `auth_bootstrap.env_hint`             | Env-var name carrying the bearer after `auth login` mints it.                                                                   |

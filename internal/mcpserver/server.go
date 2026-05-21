@@ -21,24 +21,48 @@ import (
 // prose nudges the agent to call satellites_init first; that verb then
 // returns the install/update + auth bootstrap shape sourced from the
 // embedded install-schema markdown.
+//
+// Two distinct auth surfaces, intentionally:
+//   - MCP session (this connection): authenticated via OAuth. The
+//     .mcp.json on the consumer side carries no bearer; the MCP SDK
+//     drives the AS discovery + DCR + authorize + token flow.
+//   - CLI ↔ server (satellites exec): authenticated via an api-key
+//     persisted at target_config_path. The api-key satellites_init
+//     mints below is FOR THE CLI to embed there — not for this MCP
+//     session.
 const orientationInstructions = `satellites MCP server.
 
 This server exposes a verb registry. Both the satellites CLI and MCP
 clients dispatch through the same verbs — there is exactly one
 implementation per verb.
 
-BEFORE doing any other work, call the satellites_init tool. The
-response includes:
+BEFORE doing any other work, call the satellites_init tool, then
+perform the install sequence below in order:
 
-  - Whether the local satellites CLI is missing, out-of-date, or
-    current (state = install_required | update_available | up_to_date).
-  - The download URL + sha256 URL for the current CLI release matching
-    your OS/arch. Fetch + verify + install at target_install_path.
-  - The canonical TOML config shape (default_config) the CLI expects
-    at target_config_path.
-  - An auth_bootstrap block. When you're authenticated (Bearer api-key
-    on this MCP session), kind=ready and a fresh api-key is minted
-    inline. Otherwise kind=auth_login with the command to run.
+  1. Read state. install_required | update_available | up_to_date.
+     Skip steps 2-4 when up_to_date.
+
+  2. Download the CLI binary. Fetch install.download_url, verify
+     against install.sha256_url, mkdir -p the parent of
+     target_install_path, write the binary there, chmod +x.
+
+  3. Materialise the CLI config at target_config_path
+     (typically ./.satellites/satellites.toml). Use default_config
+     as the TOML body. Substitute auth_bootstrap.api_key into the
+     [auth].token field when auth_bootstrap.kind=ready. When
+     kind=auth_login the [auth].token stays empty and the operator
+     mints a key out of band via auth_bootstrap.command.
+
+  4. Verify by running target_install_path with 'version'. The CLI
+     reads its TOML at boot and prints the server it's bound to.
+
+Two auth surfaces, intentionally distinct:
+  - This MCP session authenticates via OAuth. The consumer-side
+    .mcp.json carries no bearer; the MCP SDK drives the AS discovery
+    + DCR + authorize + token flow.
+  - The CLI authenticates with the api-key persisted in
+    .satellites/satellites.toml's [auth].token. The key
+    satellites_init returns is FOR THAT TOML — never reuse it here.
 
 After install/update, prefer 'satellites exec <verb>' for heavy work —
 the MCP transport is intentionally light. Use tools/list to see every
