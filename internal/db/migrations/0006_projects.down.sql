@@ -1,0 +1,2 @@
+ALTER TABLE stories DROP CONSTRAINT IF EXISTS stories_project_fk;
+DROP TABLE IF EXISTS projects;

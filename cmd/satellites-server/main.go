@@ -11,6 +11,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -67,6 +68,8 @@ func main() {
 	}
 	arbor.Info("workspace default ready", "id", defaultWs.ID, "name", defaultWs.Name)
 	verb.SetWorkspaceStore(wsStore)
+
+	verb.SetProjectStore(project.New(sqlDB))
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
