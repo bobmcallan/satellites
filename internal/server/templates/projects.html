@@ -28,51 +28,64 @@
   </nav>
 </header>
 
-<main>
-  <section class="panel" data-section="projects-create">
-    <h2>create project</h2>
-    <p>A project scopes stories, tools, and evidence to a single engagement within the default workspace.</p>
-    {{if .FlashError}}<p class="error" data-field="projects-error">{{.FlashError}}</p>{{end}}
-    <form method="POST" action="/projects" class="projects-create-form" data-form="projects-create">
-      <input type="hidden" name="action" value="create">
-      <label>
-        <span>NAME</span>
-        <input type="text" name="name" autocomplete="off" required>
-      </label>
-      <label>
-        <span>DESCRIPTION (optional)</span>
-        <input type="text" name="description" autocomplete="off">
-      </label>
-      <label>
-        <span>GIT URL (optional)</span>
-        <input type="text" name="git_url" placeholder="git@github.com:owner/repo.git" autocomplete="off">
-      </label>
-      <button type="submit" class="btn primary" data-action="projects-create">CREATE PROJECT</button>
-    </form>
-  </section>
-
+<main x-data="{ createOpen: {{if .FlashError}}true{{else}}false{{end}} }">
   <section class="panel" data-section="projects-list">
-    <h2>projects</h2>
+    <div class="panel-header">
+      <h2>projects</h2>
+      <button type="button" class="btn primary" @click="createOpen = true" data-action="projects-add-open">ADD PROJECT</button>
+    </div>
+
     {{if .Projects}}
-    <table class="projects">
-      <thead><tr><th>ID</th><th>NAME</th><th>DESCRIPTION</th><th>GIT URL</th><th>STATUS</th><th>CREATED</th></tr></thead>
-      <tbody>
-        {{range .Projects}}
-        <tr data-field="project-row">
-          <td><code>{{.ID}}</code></td>
-          <td>{{.Name}}</td>
-          <td>{{.Description}}</td>
-          <td>{{if .GitURL}}<code>{{.GitURL}}</code>{{end}}</td>
-          <td>{{.Status}}</td>
-          <td>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="project-grid">
+      {{range .Projects}}
+      <article class="project-card" data-field="project-row">
+        <header class="project-card-header">
+          <h3 class="project-card-title">{{.Name}}</h3>
+          <span class="project-card-status">{{.Status}}</span>
+        </header>
+        {{if .Description}}<p class="project-card-desc">{{.Description}}</p>{{end}}
+        <dl class="project-card-meta">
+          <dt>ID</dt><dd>{{.ID}}</dd>
+          {{if .GitURL}}<dt>GIT</dt><dd>{{.GitURL}}</dd>{{end}}
+          <dt>CREATED</dt><dd>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
+        </dl>
+      </article>
+      {{end}}
+    </div>
     {{else}}
-    <p class="empty" data-field="projects-empty">No projects yet. Create one above.</p>
+    <p class="empty" data-field="projects-empty">No projects yet. Use ADD PROJECT to create one.</p>
     {{end}}
   </section>
+
+  <div class="modal-backdrop" x-show="createOpen" x-cloak @keydown.escape.window="createOpen = false" @click.self="createOpen = false" data-section="projects-create">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="projects-create-title">
+      <header class="modal-header">
+        <h3 id="projects-create-title">create project</h3>
+        <button type="button" class="modal-close" @click="createOpen = false" aria-label="close">&times;</button>
+      </header>
+      <p class="modal-desc">A project scopes stories, tools, and evidence to a single engagement within the default workspace.</p>
+      {{if .FlashError}}<p class="error" data-field="projects-error">{{.FlashError}}</p>{{end}}
+      <form method="POST" action="/projects" class="form-stack" data-form="projects-create">
+        <input type="hidden" name="action" value="create">
+        <label>
+          <span>NAME</span>
+          <input type="text" name="name" autocomplete="off" required>
+        </label>
+        <label>
+          <span>DESCRIPTION (optional)</span>
+          <input type="text" name="description" autocomplete="off">
+        </label>
+        <label>
+          <span>GIT URL (optional)</span>
+          <input type="text" name="git_url" placeholder="git@github.com:owner/repo.git" autocomplete="off">
+        </label>
+        <div class="form-actions">
+          <button type="button" class="btn secondary" @click="createOpen = false" data-action="projects-create-cancel">CANCEL</button>
+          <button type="submit" class="btn primary" data-action="projects-create">CREATE PROJECT</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </main>
 
 <footer class="site-footer">
