@@ -107,7 +107,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
-      group: fly-deploy-${{ env.FLY_APP }}
+      # Hardcoded literal — env vars in concurrency.group expressions
+      # are evaluated before job env is in scope and have historically
+      # caused GitHub Actions to reject the workflow at parse time.
+      group: fly-deploy-satellites-pprod
       cancel-in-progress: false
 
     steps:
