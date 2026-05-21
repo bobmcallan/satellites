@@ -51,10 +51,21 @@ func main() {
 			auth.DevAdminEmail, auth.DevUserEmail, auth.DevAdminKey, auth.DevUserKey)
 	}
 
-	sessionSecret, err := auth.SecretFromHex(os.Getenv("SATELLITES_SESSION_SECRET"))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "SATELLITES_SESSION_SECRET: must be hex-encoded:", err)
-		os.Exit(1)
+	// Session secret: env var wins (fly.io secrets, vault) → otherwise
+	// load-or-create from server_settings so sessions survive restarts.
+	var sessionSecret []byte
+	if env := os.Getenv("SATELLITES_SESSION_SECRET"); env != "" {
+		sessionSecret, err = auth.SecretFromHex(env)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "SATELLITES_SESSION_SECRET: must be hex-encoded:", err)
+			os.Exit(1)
+		}
+	} else {
+		sessionSecret, err = auth.LoadOrCreateSessionSecret(context.Background(), sqlDB)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "load session secret:", err)
+			os.Exit(1)
+		}
 	}
 	sessions := auth.NewSessions(sessionSecret)
 

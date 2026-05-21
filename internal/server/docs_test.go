@@ -33,14 +33,11 @@ func TestDocsMCP_AuthedRenders(t *testing.T) {
 		"SATELLITES", `data-page="docs-mcp"`, `data-field="mcp-endpoint"`,
 		"POST /mcp", `data-section="dev-keys"`, `data-section="example"`,
 		`data-field="dev-admin-key"`, "sk_dev_admin", "/static/alpine.min.js",
-		`data-field="footer-name"`, `data-field="footer-email"`,
+		`data-field="footer-name"`, `data-field="footer-email"`, `data-field="footer-version"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
-	}
-	if strings.Contains(body, `data-field="footer-version"`) {
-		t.Error("footer-version rendered (was removed per V4 footer pattern)")
 	}
 }
 

@@ -45,9 +45,10 @@ func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
 	ctx := newBrowserCtx(t)
 
 	var (
-		loginBrand  string
-		footerName  string
-		footerEmail string
+		loginBrand   string
+		footerName   string
+		footerEmail  string
+		footerVer    string
 
 		portalBrand string
 		userEmail   string
@@ -63,6 +64,7 @@ func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
 		chromedp.Text(`.brand`, &loginBrand, chromedp.ByQuery),
 		chromedp.Text(`[data-field="footer-name"]`, &footerName, chromedp.ByQuery),
 		chromedp.Text(`[data-field="footer-email"]`, &footerEmail, chromedp.ByQuery),
+		chromedp.Text(`[data-field="footer-version"]`, &footerVer, chromedp.ByQuery),
 	)
 	if err != nil {
 		t.Fatalf("phase1 (load login): %v", err)
@@ -75,6 +77,9 @@ func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
 	}
 	if !strings.Contains(footerEmail, "@") {
 		t.Errorf("footer-email looks malformed: %q", footerEmail)
+	}
+	if footerVer == "" {
+		t.Error("footer-version empty")
 	}
 
 	// Phase 2: click the dev-admin quick-login button.
@@ -269,17 +274,13 @@ func TestFooter_PresentOnEveryPage(t *testing.T) {
 
 	for _, p := range pages {
 		t.Run("footer on "+p.path, func(t *testing.T) {
-			var name, email string
-			var versionPresent bool
+			var name, email, version string
 			if err := chromedp.Run(ctx,
 				chromedp.Navigate(env.ServerURL+p.path),
 				chromedp.WaitVisible(p.ready, chromedp.ByQuery),
 				chromedp.Text(`[data-field="footer-name"]`, &name, chromedp.ByQuery),
 				chromedp.Text(`[data-field="footer-email"]`, &email, chromedp.ByQuery),
-				chromedp.Evaluate(
-					`!!document.querySelector('[data-field="footer-version"]')`,
-					&versionPresent,
-				),
+				chromedp.Text(`[data-field="footer-version"]`, &version, chromedp.ByQuery),
 			); err != nil {
 				t.Fatalf("nav %s: %v", p.path, err)
 			}
@@ -289,8 +290,8 @@ func TestFooter_PresentOnEveryPage(t *testing.T) {
 			if !strings.Contains(email, "@") {
 				t.Errorf("%s: footer-email malformed: %q", p.path, email)
 			}
-			if versionPresent {
-				t.Errorf("%s: footer-version selector found a node (version was removed)", p.path)
+			if version == "" {
+				t.Errorf("%s: footer-version empty", p.path)
 			}
 		})
 	}

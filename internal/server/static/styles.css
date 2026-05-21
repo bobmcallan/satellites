@@ -136,6 +136,7 @@ main {
 .site-footer a { color: #888; text-decoration: none; }
 .site-footer a:hover { color: #d0d0d0; }
 .footer-name { letter-spacing: 0.1em; }
+.footer-version { font-variant-numeric: tabular-nums; }
 
 /* Login page */
 .login-body { display: flex; flex-direction: column; min-height: 100vh; }
