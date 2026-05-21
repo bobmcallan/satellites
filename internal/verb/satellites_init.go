@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/satellitesinit"
 )
 
 // authStore is set by the server at boot via SetAuthStore. Verbs that
@@ -31,12 +32,12 @@ type SatellitesInitRequest struct {
 
 // SatellitesInitResponse is the install payload returned by the verb.
 type SatellitesInitResponse struct {
-	State             string         `json:"state"`
-	Install           *InstallInfo   `json:"install,omitempty"`
-	TargetInstallPath string         `json:"target_install_path"`
-	TargetConfigPath  string         `json:"target_config_path"`
-	DefaultConfig     map[string]any `json:"default_config"`
-	AuthBootstrap     *AuthBootstrap `json:"auth_bootstrap,omitempty"`
+	State             string                       `json:"state"`
+	Install           *InstallInfo                 `json:"install,omitempty"`
+	TargetInstallPath string                       `json:"target_install_path"`
+	TargetConfigPath  string                       `json:"target_config_path"`
+	DefaultConfig     satellitesinit.DefaultConfig `json:"default_config"`
+	AuthBootstrap     *AuthBootstrap               `json:"auth_bootstrap,omitempty"`
 }
 
 // InstallInfo carries download + integrity info for the platform binary.
@@ -47,21 +48,20 @@ type InstallInfo struct {
 
 // AuthBootstrap is the agent-API-key handoff block. Kind="ready" means
 // the api-key is present in this response; Kind="auth_login" means the
-// caller must authenticate first.
+// caller must authenticate first via the schema-defined command.
 type AuthBootstrap struct {
 	Kind     string `json:"kind"`
+	Command  string `json:"command,omitempty"`
+	EnvHint  string `json:"env_hint,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
 	APIKeyID string `json:"api_key_id,omitempty"`
 }
 
-// Install destination + release URL constants. The release base URL
-// points at GitHub's "latest release" alias so this verb keeps working
-// across sty_d3270775 tag pushes without code changes.
-const (
-	releaseBaseURL    = "https://github.com/bobmcallan/satellites/releases/latest/download"
-	targetInstallPath = "./.satellites/satellites"
-	targetConfigPath  = "./.satellites/config.json"
-)
+// releaseBaseURL points at GitHub's "latest release" alias so this
+// verb keeps working across tag pushes without code changes. The
+// install/config paths now come from the embedded install-schema
+// markdown via satellitesinit.Embedded().
+const releaseBaseURL = "https://github.com/bobmcallan/satellites/releases/latest/download"
 
 func init() {
 	Register(&Verb{
@@ -85,6 +85,11 @@ func invokeSatellitesInit(ctx context.Context, raw json.RawMessage) (json.RawMes
 		req.Arch = runtime.GOARCH
 	}
 
+	schema, err := satellitesinit.Embedded()
+	if err != nil {
+		return nil, fmt.Errorf("satellites_init: install schema: %w", err)
+	}
+
 	state := computeState(req.CurrentVersion, Version)
 
 	binaryName := fmt.Sprintf("satellites-%s-%s-%s", Version, req.OS, req.Arch)
@@ -94,12 +99,10 @@ func invokeSatellitesInit(ctx context.Context, raw json.RawMessage) (json.RawMes
 			DownloadURL: fmt.Sprintf("%s/%s", releaseBaseURL, binaryName),
 			SHA256URL:   fmt.Sprintf("%s/%s.sha256", releaseBaseURL, binaryName),
 		},
-		TargetInstallPath: targetInstallPath,
-		TargetConfigPath:  targetConfigPath,
-		DefaultConfig: map[string]any{
-			"server_url": "https://<satellites-server-host>",
-		},
-		AuthBootstrap: buildAuthBootstrap(ctx, req),
+		TargetInstallPath: schema.TargetInstallPath,
+		TargetConfigPath:  schema.TargetConfigPath,
+		DefaultConfig:     schema.DefaultConfig,
+		AuthBootstrap:     buildAuthBootstrap(ctx, req, schema.AuthBootstrap),
 	}
 	return json.Marshal(resp)
 }
@@ -115,13 +118,23 @@ func computeState(currentVersion, serverVersion string) string {
 	}
 }
 
-func buildAuthBootstrap(ctx context.Context, req SatellitesInitRequest) *AuthBootstrap {
+func buildAuthBootstrap(ctx context.Context, req SatellitesInitRequest, schemaAuth satellitesinit.AuthBootstrapBlock) *AuthBootstrap {
+	// loginFallback is the prose-driven shape from the embedded
+	// install schema. Returned when the caller is unauthenticated
+	// (CLI-local or anonymous MCP session) or when api-key minting
+	// fails — the operator still has a recoverable path via the
+	// command the schema names.
+	loginFallback := &AuthBootstrap{
+		Kind:    schemaAuth.Kind,
+		Command: schemaAuth.Command,
+		EnvHint: schemaAuth.EnvHint,
+	}
 	if authStore == nil {
-		return &AuthBootstrap{Kind: "auth_login"}
+		return loginFallback
 	}
 	u := auth.FromContext(ctx)
 	if u == nil {
-		return &AuthBootstrap{Kind: "auth_login"}
+		return loginFallback
 	}
 
 	agentName := req.AgentName
@@ -132,9 +145,7 @@ func buildAuthBootstrap(ctx context.Context, req SatellitesInitRequest) *AuthBoo
 	keyID := fmt.Sprintf("apk_init_%s", randomSuffix())
 	rawKey, k, err := authStore.IssueAPIKey(ctx, keyID, u.ID, req.ProjectID, agentName)
 	if err != nil {
-		// API key minting failed — return auth_login and let the
-		// caller fall back to manual auth. Don't fail the whole verb.
-		return &AuthBootstrap{Kind: "auth_login"}
+		return loginFallback
 	}
 	return &AuthBootstrap{
 		Kind:     "ready",
