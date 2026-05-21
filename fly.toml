@@ -1,0 +1,40 @@
+# fly.toml — satellites-pprod app config.
+#
+# This file is what `flyctl deploy` reads to create + roll machines.
+# All operator-supplied secrets (DATABASE_URL, etc.) live in fly secrets,
+# NOT here:
+#
+#   fly secrets set DATABASE_URL=postgres://... -a satellites-pprod
+#
+# Non-secret env values (log shape, dev mode flag) live in [env] below.
+
+app            = "satellites-pprod"
+primary_region = "syd"
+
+[build]
+
+[env]
+  SATELLITES_LISTEN_ADDR = ":8080"
+  SATELLITES_LOG_LEVEL   = "info"
+  SATELLITES_LOG_JSON    = "true"
+
+[http_service]
+  internal_port        = 8080
+  force_https          = true
+  auto_stop_machines   = false
+  auto_start_machines  = true
+  min_machines_running = 1
+  processes            = ["app"]
+
+[[http_service.checks]]
+  interval     = "30s"
+  timeout      = "5s"
+  grace_period = "10s"
+  method       = "GET"
+  path         = "/login"
+  # Probes /login (no auth required) — every deploy verifies the HTTP
+  # surface comes up before Fly marks the machine healthy.
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
