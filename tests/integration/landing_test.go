@@ -13,18 +13,11 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestLandingPage_RendersServerMetadata is the canonical browser-driven
-// integration test: chromedp navigates to the live satellites-server
-// landing page and verifies the DOM matches the server's runtime state.
-//
-// This is V5's default integration shape — tests assert behaviour
-// through the same surface (a real browser hitting a real handler)
-// operators see in production. Pure-Go assertions still exist for
-// schema invariants and store-level behaviour, but anything user-facing
-// goes through chromedp.
-func TestLandingPage_RendersServerMetadata(t *testing.T) {
-	env := testbootstrap.SetUpWithServer(t)
-
+// newBrowserCtx returns a fresh chromedp context backed by a headless
+// Google Chrome subprocess. Timeouts + cleanup wired so tests fail fast
+// rather than hang on a stuck browser.
+func newBrowserCtx(t *testing.T) context.Context {
+	t.Helper()
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
 		append(chromedp.DefaultExecAllocatorOptions[:],
 			chromedp.Flag("headless", true),
@@ -40,37 +33,73 @@ func TestLandingPage_RendersServerMetadata(t *testing.T) {
 	runCtx, cancelRun := context.WithTimeout(browserCtx, 30*time.Second)
 	t.Cleanup(cancelRun)
 
+	return runCtx
+}
+
+// TestLogin_DevButtons_LandsOnPortal exercises the full login flow:
+// unauthenticated → redirected to /login → dev-quick admin submit →
+// portal visible with footer + nav + dev keys. This is V5's canonical
+// browser-driven integration test.
+func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
 	var (
-		brand        string
-		version      string
-		devMode      string
-		devAdminKey  string
-		devUserKey   string
-		endpointRows []string
+		loginBrand string
+		footerName string
+		footerEmail string
+		footerVer  string
+
+		portalBrand string
+		userEmail   string
+		devAdminKey string
+		devUserKey  string
+		devMode     string
 	)
 
-	err := chromedp.Run(runCtx,
+	// Phase 1: unauthenticated navigation → login page.
+	err := chromedp.Run(ctx,
 		chromedp.Navigate(env.ServerURL+"/"),
-		chromedp.WaitVisible(`.brand`, chromedp.ByQuery),
-		chromedp.Text(`.brand`, &brand, chromedp.ByQuery),
-		chromedp.Text(`[data-field="version"]`, &version, chromedp.ByQuery),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Text(`.brand`, &loginBrand, chromedp.ByQuery),
+		chromedp.Text(`[data-field="footer-name"]`, &footerName, chromedp.ByQuery),
+		chromedp.Text(`[data-field="footer-email"]`, &footerEmail, chromedp.ByQuery),
+		chromedp.Text(`[data-field="footer-version"]`, &footerVer, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("phase1 (load login): %v", err)
+	}
+	if loginBrand != "SATELLITES" {
+		t.Errorf("login .brand: got %q want SATELLITES", loginBrand)
+	}
+	if footerName == "" {
+		t.Error("footer-name empty")
+	}
+	if !strings.Contains(footerEmail, "@") {
+		t.Errorf("footer-email looks malformed: %q", footerEmail)
+	}
+	if footerVer == "" {
+		t.Error("footer-version empty")
+	}
+
+	// Phase 2: click the dev-admin quick-login button.
+	err = chromedp.Run(ctx,
+		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+		chromedp.Text(`.brand`, &portalBrand, chromedp.ByQuery),
+		chromedp.Text(`[data-field="user-email"]`, &userEmail, chromedp.ByQuery),
 		chromedp.Text(`[data-field="dev-mode"]`, &devMode, chromedp.ByQuery),
 		chromedp.Text(`[data-field="dev-admin-key"]`, &devAdminKey, chromedp.ByQuery),
 		chromedp.Text(`[data-field="dev-user-key"]`, &devUserKey, chromedp.ByQuery),
-		chromedp.Evaluate(
-			`Array.from(document.querySelectorAll('[data-field="endpoint"]')).map(r => r.innerText.replace(/\s+/g,' ').trim())`,
-			&endpointRows,
-		),
 	)
 	if err != nil {
-		t.Fatalf("chromedp: %v", err)
+		t.Fatalf("phase2 (dev login): %v", err)
 	}
-
-	if brand != "SATELLITES" {
-		t.Errorf(".brand: got %q want SATELLITES", brand)
+	if portalBrand != "SATELLITES" {
+		t.Errorf("portal .brand: got %q want SATELLITES", portalBrand)
 	}
-	if version == "" {
-		t.Error("version field empty")
+	if userEmail != auth.DevAdminEmail {
+		t.Errorf("user-email after admin login: got %q want %q", userEmail, auth.DevAdminEmail)
 	}
 	if devMode != "true" {
 		t.Errorf("dev-mode: got %q want true", devMode)
@@ -82,40 +111,49 @@ func TestLandingPage_RendersServerMetadata(t *testing.T) {
 		t.Errorf("dev user key: got %q want %q", devUserKey, auth.DevUserKey)
 	}
 
-	if len(endpointRows) == 0 {
-		t.Fatal("endpoint table empty")
-	}
-	wantContains := []string{"POST /mcp", "GET /oauth/github/login", "GET /oauth/github/callback"}
-	joined := strings.Join(endpointRows, "\n")
-	for _, w := range wantContains {
-		if !strings.Contains(joined, w) {
-			t.Errorf("endpoint row missing %q in:\n%s", w, joined)
-		}
+	// Phase 3: logout → back to login form.
+	err = chromedp.Run(ctx,
+		chromedp.Click(`button[data-action="logout"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("phase3 (logout): %v", err)
 	}
 }
 
-// TestLandingPage_UnknownPath404s confirms unknown URLs still 404 —
-// the root handler doesn't accidentally swallow every path.
+// TestLogin_BadCredentials_StaysOnLoginWithError submits invalid
+// credentials and asserts the page re-renders with the error banner
+// (no redirect to portal).
+func TestLogin_BadCredentials_StaysOnLoginWithError(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
+	var errMsg string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.SendKeys(`input[name="email"]`, "nobody@nowhere.test", chromedp.ByQuery),
+		chromedp.SendKeys(`input[name="password"]`, "wrong", chromedp.ByQuery),
+		chromedp.Submit(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="login-error"]`, chromedp.ByQuery),
+		chromedp.Text(`[data-field="login-error"]`, &errMsg, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(errMsg), "invalid") {
+		t.Errorf("error message: got %q want something containing 'invalid'", errMsg)
+	}
+}
+
+// TestLandingPage_UnknownPath404s confirms unknown URLs still 404 after
+// the login surface was added.
 func TestLandingPage_UnknownPath404s(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
-
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
-		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.Flag("headless", true),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-		)...,
-	)
-	t.Cleanup(cancelAlloc)
-
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	t.Cleanup(cancelBrowser)
-
-	runCtx, cancelRun := context.WithTimeout(browserCtx, 30*time.Second)
-	t.Cleanup(cancelRun)
+	ctx := newBrowserCtx(t)
 
 	var body string
-	err := chromedp.Run(runCtx,
+	err := chromedp.Run(ctx,
 		chromedp.Navigate(env.ServerURL+"/no-such-path"),
 		chromedp.Text(`body`, &body, chromedp.ByQuery),
 	)

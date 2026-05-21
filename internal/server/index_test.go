@@ -10,27 +10,53 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 )
 
-// TestIndex_NotInDevMode renders the landing page without dev-mode
-// blocks; asserts the SATELLITES title + version + endpoints section
-// without relying on a live DB.
-func TestIndex_NotInDevMode(t *testing.T) {
-	cfg := Config{
-		Store:   auth.New((*sql.DB)(nil)), // store unused on / path
-		DevMode: false,
+func newTestConfig(devMode bool) Config {
+	return Config{
+		Store:    auth.New((*sql.DB)(nil)),
+		Sessions: auth.NewSessions([]byte("test-secret-fixed-for-determinism")),
+		DevMode:  devMode,
 	}
+}
+
+// withSession returns a request carrying a valid session cookie for the
+// given user id (no DB lookup required — indexHandler tolerates a
+// nil-DB store and just leaves UserEmail empty).
+func withSession(cfg Config, method, target, userID string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	indexHandler(cfg)(rec, req)
+	cfg.Sessions.Issue(rec, userID)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	return req
+}
+
+func TestIndex_UnauthedRedirectsToLogin(t *testing.T) {
+	cfg := newTestConfig(false)
+	rec := httptest.NewRecorder()
+	indexHandler(cfg)(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status: got %d want 303", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/login" {
+		t.Errorf("location: got %q want /login", got)
+	}
+}
+
+func TestIndex_AuthedRendersPortal_NoDev(t *testing.T) {
+	cfg := newTestConfig(false)
+	rec := httptest.NewRecorder()
+	indexHandler(cfg)(rec, withSession(cfg, http.MethodGet, "/", "usr_test"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200", rec.Code)
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Errorf("content-type: got %q", ct)
-	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"SATELLITES", "PROJECTS", "MCP", `data-field="version"`, `data-section="endpoints"`,
+		"SATELLITES", "PROJECTS", `data-field="version"`, `data-section="endpoints"`,
+		`data-field="footer-name"`, `data-field="footer-email"`, `data-field="footer-version"`,
+		"/static/alpine.min.js",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
@@ -41,35 +67,27 @@ func TestIndex_NotInDevMode(t *testing.T) {
 	}
 }
 
-func TestIndex_DevMode(t *testing.T) {
-	cfg := Config{
-		Store:   auth.New((*sql.DB)(nil)),
-		DevMode: true,
-	}
+func TestIndex_AuthedRendersPortal_DevMode(t *testing.T) {
+	cfg := newTestConfig(true)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	indexHandler(cfg)(rec, req)
+	indexHandler(cfg)(rec, withSession(cfg, http.MethodGet, "/", "usr_test"))
 
 	body := rec.Body.String()
 	if !strings.Contains(body, "dev mode users") {
 		t.Error("dev-users section missing when DevMode=true")
 	}
-	if !strings.Contains(body, auth.DevAdminKey) {
-		t.Errorf("dev admin key not rendered (looking for %q)", auth.DevAdminKey)
-	}
-	if !strings.Contains(body, auth.DevUserKey) {
-		t.Error("dev user key not rendered")
+	if !strings.Contains(body, auth.DevAdminKey) || !strings.Contains(body, auth.DevUserKey) {
+		t.Error("dev keys not rendered")
 	}
 }
 
 func TestIndex_NotFoundOnUnknownPath(t *testing.T) {
-	cfg := Config{Store: auth.New((*sql.DB)(nil)), DevMode: false}
+	cfg := newTestConfig(false)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/some/random/path", nil)
-	indexHandler(cfg)(rec, req)
+	indexHandler(cfg)(rec, httptest.NewRequest(http.MethodGet, "/some/random/path", nil))
 
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status: got %d want 404 for unknown path", rec.Code)
+		t.Fatalf("status: got %d want 404", rec.Code)
 	}
 }
 

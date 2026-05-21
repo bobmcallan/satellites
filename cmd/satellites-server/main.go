@@ -51,9 +51,17 @@ func main() {
 			auth.DevAdminEmail, auth.DevUserEmail, auth.DevAdminKey, auth.DevUserKey)
 	}
 
+	sessionSecret, err := auth.SecretFromHex(os.Getenv("SATELLITES_SESSION_SECRET"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "SATELLITES_SESSION_SECRET: must be hex-encoded:", err)
+		os.Exit(1)
+	}
+	sessions := auth.NewSessions(sessionSecret)
+
 	handler := server.Build(server.Config{
-		Store:   store,
-		DevMode: *devMode,
+		Store:    store,
+		Sessions: sessions,
+		DevMode:  *devMode,
 		OAuth: auth.OAuthConfig{
 			GitHubClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
 			GitHubClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),

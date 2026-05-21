@@ -104,6 +104,19 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error)
 	return &u, nil
 }
 
+// GetUserByID returns the user with the given id or sql.ErrNoRows. Used
+// by the session middleware to resolve the cookie's user_id to a row.
+func (s *Store) GetUserByID(ctx context.Context, id string) (*User, error) {
+	var u User
+	if err := s.DB.QueryRowContext(ctx, `
+        SELECT id, email, display_name, role, created_at
+          FROM users WHERE id = $1
+    `, id).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 // IssueAPIKey mints a fresh random api-key for (user, project, agent).
 // Returns the raw key (only visible at issue time) and the row.
 func (s *Store) IssueAPIKey(ctx context.Context, id, userID, projectID, agentName string) (string, *APIKey, error) {

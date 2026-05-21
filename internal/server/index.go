@@ -24,6 +24,24 @@ type indexData struct {
 	DevAdminKey string
 	DevUserKey  string
 	Endpoints   []endpoint
+	UserEmail   string
+	FooterName  string
+	FooterEmail string
+}
+
+// Footer constants (V3/V4 pattern: name, contact, version on every page).
+// Operators wanting different contact info should rebuild with these
+// overridden via ldflags (-X), same pattern as verb.Version.
+var (
+	footerName  = "satellites"
+	footerEmail = "bobmcallan@gmail.com"
+)
+
+func versionString() string {
+	if verb.Version == "" {
+		return "dev"
+	}
+	return verb.Version
 }
 
 type endpoint struct {
@@ -41,12 +59,33 @@ func indexHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
+		// Auth gate: redirect to /login when no valid session cookie.
+		// Dev mode still requires login; it just makes the credentials
+		// predictable. (V4 behaviour.)
+		userID, err := cfg.Sessions.UserID(r)
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		// Resolve the authenticated user for display. Best-effort —
+		// rendering still works without it (UserEmail stays empty).
+		var userEmail string
+		if cfg.Store != nil && cfg.Store.DB != nil {
+			if u, err := cfg.Store.GetUserByID(r.Context(), userID); err == nil && u != nil {
+				userEmail = u.Email
+			}
+		}
+
 		data := indexData{
-			Title:     "satellites",
-			Version:   verb.Version,
-			Commit:    verb.Commit,
-			BuildTime: verb.BuildTime,
-			DevMode:   cfg.DevMode,
+			Title:       "satellites",
+			Version:     verb.Version,
+			Commit:      verb.Commit,
+			BuildTime:   verb.BuildTime,
+			DevMode:     cfg.DevMode,
+			UserEmail:   userEmail,
+			FooterName:  footerName,
+			FooterEmail: footerEmail,
 			Endpoints: []endpoint{
 				{"POST", "/mcp", "MCP JSON-RPC (Authorization: Bearer required)"},
 				{"GET", "/oauth/github/login", "OAuth login redirect (when configured)"},

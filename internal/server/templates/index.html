@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{.Title}}</title>
 <link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
 </head>
 <body>
 
@@ -17,6 +18,12 @@
     <a href="#" class="nav-item disabled">CONFIG</a>
     <a href="#" class="nav-item disabled">HELP</a>
     {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{if .UserEmail}}
+    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
+    <form method="POST" action="/logout" class="logout-form">
+      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
+    </form>
+    {{end}}
   </nav>
 </header>
 
@@ -53,8 +60,12 @@
   </section>
 </main>
 
-<footer>
-  <p>satellites v5 substrate &middot; <a href="https://github.com/bobmcallan/satellites">github.com/bobmcallan/satellites</a></p>
+<footer class="site-footer">
+  <span data-field="footer-name">{{.FooterName}}</span>
+  &middot;
+  <a href="mailto:{{.FooterEmail}}" data-field="footer-email">{{.FooterEmail}}</a>
+  &middot;
+  <span data-field="footer-version">{{.Version}}</span>
 </footer>
 
 </body>

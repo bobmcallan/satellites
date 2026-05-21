@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body class="login-body">
+
+<header class="topbar">
+  <h1 class="brand">SATELLITES</h1>
+  <nav class="primary-nav">
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+  </nav>
+</header>
+
+<main class="login-main">
+  <section class="panel login-panel">
+    <h2>login</h2>
+    {{if .Error}}<p class="error" data-field="login-error">{{.Error}}</p>{{end}}
+    <form method="POST" action="/login" class="login-form" data-form="login"
+          x-data="{ loading: false }" x-on:submit="loading = true">
+      <label>
+        <span>EMAIL</span>
+        <input type="email" name="email" required autofocus autocomplete="username">
+      </label>
+      <label>
+        <span>PASSWORD</span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn primary"
+              x-bind:disabled="loading"
+              x-text="loading ? 'SIGNING IN…' : 'SIGN IN'">SIGN IN</button>
+    </form>
+
+    {{if .DevMode}}
+    <div class="dev-login" data-section="dev-login">
+      <p class="warning">DEV MODE &mdash; one-click login as seeded users.</p>
+      <form method="POST" action="/login" class="dev-quick">
+        <input type="hidden" name="email" value="{{.DevAdmin.Email}}">
+        <input type="hidden" name="password" value="{{.DevAdmin.Password}}">
+        <button type="submit" class="btn dev" data-action="dev-login-admin">DEV LOGIN: ADMIN</button>
+      </form>
+      <form method="POST" action="/login" class="dev-quick">
+        <input type="hidden" name="email" value="{{.DevUser.Email}}">
+        <input type="hidden" name="password" value="{{.DevUser.Password}}">
+        <button type="submit" class="btn dev" data-action="dev-login-user">DEV LOGIN: USER</button>
+      </form>
+    </div>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span data-field="footer-name">{{.FooterName}}</span>
+  &middot;
+  <a href="mailto:{{.FooterEmail}}" data-field="footer-email">{{.FooterEmail}}</a>
+  &middot;
+  <span data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
