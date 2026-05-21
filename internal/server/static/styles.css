@@ -58,18 +58,21 @@ th { font-weight: 700; text-align: left; }
   font-size: 0.6rem;
 }
 
-/* Responsive page gutters: applied to every page. Normal viewports
-   get 10% side padding (wide content); wide viewports (>=1600px) get
-   30% to keep long lines readable on big monitors. */
+/* Page container: capped content width, centered, with fluid inline
+   padding that grows with the viewport but is bounded by clamp().
+   Step the cap up on very wide displays so 4K/5K monitors aren't
+   mostly empty gutter. */
 main {
-  padding: 2rem 10%;
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-block: 2rem;
+  padding-inline: clamp(1rem, 5vw, 4rem);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
-@media (min-width: 1600px) {
-  main { padding: 2rem 30%; }
-}
+@media (min-width: 1920px) { main { max-width: 1600px; } }
+@media (min-width: 2560px) { main { max-width: 1920px; } }
 
 .panel {
   background: #111;
