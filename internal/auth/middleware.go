@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -41,6 +42,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		h := r.Header.Get("Authorization")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(h, prefix) {
+			setWWWAuthenticate(w, r)
 			http.Error(w, "missing bearer credential", http.StatusUnauthorized)
 			return
 		}
@@ -49,6 +51,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		u, err := s.ValidateKey(r.Context(), key)
 		if err != nil {
 			if errors.Is(err, ErrInvalidKey) {
+				setWWWAuthenticate(w, r)
 				http.Error(w, "invalid credential", http.StatusUnauthorized)
 				return
 			}
@@ -60,4 +63,14 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		r = r.WithContext(WithUser(r.Context(), u))
 		next.ServeHTTP(w, r)
 	})
+}
+
+// setWWWAuthenticate points unauthenticated /mcp callers at the
+// protected-resource metadata so MCP-SDK clients can discover the
+// authorization server (RFC 9728).
+func setWWWAuthenticate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(
+		`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`,
+		SchemeAndHost(r),
+	))
 }

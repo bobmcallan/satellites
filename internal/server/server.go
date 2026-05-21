@@ -53,6 +53,12 @@ func Build(cfg Config) http.Handler {
 	// directly on success.
 	registerOAuthRoutes(mux, cfg)
 
+	// MCP OAuth discovery — public per RFC 8414 / RFC 9728. The /oauth/*
+	// endpoints announced in this metadata land in follow-up PRs; for now
+	// the discovery handshake is what unblocks MCP-SDK clients hitting /mcp.
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthorizationServer)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResource)
+
 	// Session-gated UI surfaces.
 	mux.HandleFunc("/", indexHandler(cfg))
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
