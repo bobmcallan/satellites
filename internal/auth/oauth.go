@@ -39,19 +39,20 @@ type ProviderSet struct {
 	Google *Provider
 }
 
-// Enabled returns the list of active providers in stable order
-// (alphabetical by name). Order matters: the login template renders
-// buttons in this order.
+// Enabled returns the list of active providers in stable render order
+// (Google first, GitHub second). Order matters: the login template
+// renders buttons in this order — Google is the preferred sign-in
+// path for operators.
 func (p *ProviderSet) Enabled() []*Provider {
 	if p == nil {
 		return nil
 	}
 	out := make([]*Provider, 0, 2)
-	if p.GitHub != nil {
-		out = append(out, p.GitHub)
-	}
 	if p.Google != nil {
 		out = append(out, p.Google)
+	}
+	if p.GitHub != nil {
+		out = append(out, p.GitHub)
 	}
 	return out
 }

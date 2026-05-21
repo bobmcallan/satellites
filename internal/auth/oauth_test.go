@@ -93,7 +93,7 @@ func TestBuildProviderSet_BothEnabled(t *testing.T) {
 	for _, p := range set.Enabled() {
 		names = append(names, p.Name)
 	}
-	if len(names) != 2 || names[0] != "github" || names[1] != "google" {
+	if len(names) != 2 || names[0] != "google" || names[1] != "github" {
 		t.Errorf("enabled order: %v", names)
 	}
 }
