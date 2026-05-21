@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"flag"
 	"net/http"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
@@ -12,6 +13,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/verb"
+	"github.com/bobmcallan/satellites/internal/workspace"
 	_ "github.com/lib/pq"
 )
 
@@ -54,6 +56,17 @@ func main() {
 
 	store := auth.New(sqlDB)
 	verb.SetAuthStore(store)
+
+	// Workspace store + boot-time default-workspace seed. The first
+	// boot mints a NULL-owner workspace named "default"; subsequent
+	// boots are no-ops.
+	wsStore := workspace.New(sqlDB)
+	defaultWs, err := workspace.SeedDefault(context.Background(), wsStore, time.Now().UTC())
+	if err != nil {
+		arbor.Fatal("workspace: seed default", "err", err)
+	}
+	arbor.Info("workspace default ready", "id", defaultWs.ID, "name", defaultWs.Name)
+	verb.SetWorkspaceStore(wsStore)
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
