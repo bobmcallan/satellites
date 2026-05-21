@@ -146,6 +146,157 @@ func TestLogin_BadCredentials_StaysOnLoginWithError(t *testing.T) {
 	}
 }
 
+// TestNav_MCPLink_GoesToDocs follows the MCP nav link from the portal
+// and asserts the docs page renders (not the raw API 401). Regression
+// guard: the MCP nav previously pointed at the API endpoint and
+// browsers saw "missing bearer credential" plaintext.
+func TestNav_MCPLink_GoesToDocs(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
+	var (
+		endpoint string
+		example  string
+		footer   string
+	)
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+
+		chromedp.Click(`a[data-nav="mcp"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`main[data-page="docs-mcp"]`, chromedp.ByQuery),
+		chromedp.Text(`[data-field="mcp-endpoint"]`, &endpoint, chromedp.ByQuery),
+		chromedp.Text(`[data-section="example"]`, &example, chromedp.ByQuery),
+		chromedp.Text(`[data-field="footer-name"]`, &footer, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !strings.Contains(endpoint, "POST /mcp") {
+		t.Errorf("endpoint field: got %q want contains 'POST /mcp'", endpoint)
+	}
+	if !strings.Contains(example, "Authorization: Bearer") {
+		t.Errorf("example missing auth header: %q", example)
+	}
+	if footer == "" {
+		t.Error("footer-name empty on docs page")
+	}
+}
+
+// TestNav_DisabledLinks_DoNotNavigate confirms the placeholder nav items
+// (PROJECTS, LEDGER, CONFIG, HELP) carry href="#" so they don't actually
+// navigate. If we ever wire one up, this test fails loudly and reminds
+// us to add real coverage.
+func TestNav_DisabledLinks_DoNotNavigate(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
+	var hrefs []string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+		chromedp.Evaluate(
+			`Array.from(document.querySelectorAll('a.nav-item.disabled')).map(a => a.getAttribute('href'))`,
+			&hrefs,
+		),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if len(hrefs) == 0 {
+		t.Fatal("no disabled nav items found")
+	}
+	for _, h := range hrefs {
+		if h != "#" {
+			t.Errorf("disabled nav item links to real path %q — add a real test if so", h)
+		}
+	}
+}
+
+// TestSession_PersistsAcrossRefresh logs in, refreshes the portal page,
+// and asserts the user remains authenticated (no redirect to /login).
+func TestSession_PersistsAcrossRefresh(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
+	var emailAfterRefresh string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-action="dev-login-user"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+
+		chromedp.Reload(),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+		chromedp.Text(`[data-field="user-email"]`, &emailAfterRefresh, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if emailAfterRefresh != auth.DevUserEmail {
+		t.Errorf("user-email after refresh: got %q want %q", emailAfterRefresh, auth.DevUserEmail)
+	}
+}
+
+// TestFooter_PresentOnEveryPage walks the visible UI surfaces and
+// asserts the V3/V4 footer (name, email, version) is consistent. Single
+// guard for any future page that forgets the footer.
+func TestFooter_PresentOnEveryPage(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+	ctx := newBrowserCtx(t)
+
+	type page struct {
+		path   string
+		ready  string
+		needs  []string
+		login  bool
+	}
+	pages := []page{
+		{"/login", `form[data-form="login"]`, nil, false},
+		{"/", `[data-section="server"]`, nil, true},
+		{"/docs/mcp", `main[data-page="docs-mcp"]`, nil, true},
+	}
+
+	// Pre-login once; the session cookie carries through the rest.
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	for _, p := range pages {
+		t.Run("footer on "+p.path, func(t *testing.T) {
+			var name, email, version string
+			if err := chromedp.Run(ctx,
+				chromedp.Navigate(env.ServerURL+p.path),
+				chromedp.WaitVisible(p.ready, chromedp.ByQuery),
+				chromedp.Text(`[data-field="footer-name"]`, &name, chromedp.ByQuery),
+				chromedp.Text(`[data-field="footer-email"]`, &email, chromedp.ByQuery),
+				chromedp.Text(`[data-field="footer-version"]`, &version, chromedp.ByQuery),
+			); err != nil {
+				t.Fatalf("nav %s: %v", p.path, err)
+			}
+			if name == "" {
+				t.Errorf("%s: footer-name empty", p.path)
+			}
+			if !strings.Contains(email, "@") {
+				t.Errorf("%s: footer-email malformed: %q", p.path, email)
+			}
+			if version == "" {
+				t.Errorf("%s: footer-version empty", p.path)
+			}
+		})
+	}
+}
+
 // TestLandingPage_UnknownPath404s confirms unknown URLs still 404 after
 // the login surface was added.
 func TestLandingPage_UnknownPath404s(t *testing.T) {

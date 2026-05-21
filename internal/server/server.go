@@ -40,6 +40,9 @@ func Build(cfg Config) http.Handler {
 	// and redirects to /login when absent.
 	mux.HandleFunc("/", indexHandler(cfg))
 
+	// Docs pages — session-gated UI surfaces, each handler enforces.
+	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
+
 	// OAuth routes — own their auth flow (handlers bypass middleware).
 	auth.RegisterRoutes(mux, cfg.OAuth)
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{.Title}}</title>
+<title>mcp · satellites</title>
 <link rel="stylesheet" href="/static/styles.css">
 <script defer src="/static/alpine.min.js"></script>
 </head>
@@ -14,7 +14,7 @@
   <nav class="primary-nav">
     <a href="#" class="nav-item disabled">PROJECTS</a>
     <a href="#" class="nav-item disabled">LEDGER</a>
-    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/docs/mcp" class="nav-item active" data-nav="mcp">MCP</a>
     <a href="#" class="nav-item disabled">CONFIG</a>
     <a href="#" class="nav-item disabled">HELP</a>
     {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
@@ -27,20 +27,22 @@
   </nav>
 </header>
 
-<main>
-  <section class="panel" data-section="server">
-    <h2>server</h2>
+<main data-page="docs-mcp">
+
+  <section class="panel">
+    <h2>mcp</h2>
+    <p>Satellites exposes the substrate verbs over <a href="https://modelcontextprotocol.io">MCP</a> (Model Context Protocol) JSON-RPC. Agents attach via the endpoint below; the CLI calls the same verbs locally and shares its implementation with the MCP transport.</p>
     <dl class="metadata">
-      <dt>VERSION</dt><dd data-field="version">{{.Version}}</dd>
-      <dt>COMMIT</dt><dd data-field="commit">{{.Commit}}</dd>
-      <dt>BUILT</dt><dd data-field="build">{{.BuildTime}}</dd>
-      <dt>DEV MODE</dt><dd data-field="dev-mode">{{.DevMode}}</dd>
+      <dt>ENDPOINT</dt><dd data-field="mcp-endpoint"><code>POST /mcp</code></dd>
+      <dt>TRANSPORT</dt><dd>Streamable HTTP (per MCP spec)</dd>
+      <dt>AUTH</dt><dd><code>Authorization: Bearer &lt;api-key&gt;</code></dd>
+      <dt>CONTENT</dt><dd><code>application/json</code> JSON-RPC 2.0</dd>
     </dl>
   </section>
 
   {{if .DevMode}}
-  <section class="panel" data-section="dev-users">
-    <h2>dev mode users</h2>
+  <section class="panel" data-section="dev-keys">
+    <h2>dev mode api keys</h2>
     <p class="warning">Predictable api-keys for local development only &mdash; NEVER use in production.</p>
     <dl class="metadata">
       <dt>ADMIN</dt><dd data-field="dev-admin-key">{{.DevAdminKey}}</dd>
@@ -49,14 +51,14 @@
   </section>
   {{end}}
 
-  <section class="panel" data-section="endpoints">
-    <h2>endpoints</h2>
-    <table class="endpoints">
-      <thead><tr><th>METHOD</th><th>PATH</th><th>NOTES</th></tr></thead>
-      <tbody>
-        {{range .Endpoints}}<tr data-field="endpoint"><td>{{.Method}}</td><td>{{.Path}}</td><td>{{.Desc}}</td></tr>{{end}}
-      </tbody>
-    </table>
+  <section class="panel" data-section="example">
+    <h2>example</h2>
+    <pre class="code"><code>curl -X POST {{.ExampleURL}}/mcp \
+  -H 'Authorization: Bearer {{.ExampleKey}}' \
+  -H 'Content-Type: application/json' \
+  -H 'Mcp-Session-Id: &lt;session-id&gt;' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</code></pre>
+    <p>The streamable HTTP transport requires an <code>Mcp-Session-Id</code> header after the initial handshake. Use an MCP client (Claude Code, Warp, Gemini CLI, Codex) for the full session lifecycle.</p>
   </section>
 </main>
 
