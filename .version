@@ -1,2 +1,11 @@
-version: 0.0.2
-build: 2026-05-21-00-47-21
+# Canonical version definitions for V5 binaries.
+# Per-binary so satellites (CLI) and satellites-server can rev
+# independently. The release workflow tags v<satellites.version> as the
+# operator-facing canonical version; asset filenames include each
+# binary's own version, so divergent versions ship side by side cleanly.
+
+satellites.version: 0.0.2
+satellites.build: 2026-05-21-00-47-21
+
+satellites-server.version: 0.0.2
+satellites-server.build: 2026-05-21-00-47-21

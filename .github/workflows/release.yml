@@ -1,10 +1,11 @@
 name: release
 
-# .version is canonical: every push to main reads it, and if the resulting
-# tag v<version> does not already exist on the remote, this workflow
-# creates it + builds + publishes the release. /commit-push bumps .version
-# on every commit, so the operator's flow is: edit code, run /commit-push,
-# done — the release falls out automatically.
+# .version is canonical: every push to main reads it. The release tag
+# v<satellites.version> is the operator-facing canonical version (CLI is
+# the surface operators interact with). Each binary is built with its
+# own ldflag-injected version + build timestamp so satellites and
+# satellites-server can rev independently — their asset filenames
+# include their per-binary versions.
 on:
   push:
     branches: [main]
@@ -14,11 +15,14 @@ permissions:
 
 jobs:
   derive-tag:
-    name: derive tag from .version
+    name: derive release tag from .version
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.read.outputs.tag }}
-      version: ${{ steps.read.outputs.version }}
+      cli_version: ${{ steps.read.outputs.cli_version }}
+      cli_build: ${{ steps.read.outputs.cli_build }}
+      server_version: ${{ steps.read.outputs.server_version }}
+      server_build: ${{ steps.read.outputs.server_build }}
       needs_release: ${{ steps.check.outputs.needs_release }}
     steps:
       - uses: actions/checkout@v4
@@ -27,13 +31,21 @@ jobs:
       - id: read
         run: |
           set -euo pipefail
-          V="$(awk '/^version:/ {print $2}' .version)"
-          if [ -z "$V" ]; then
-            echo ".version missing or malformed" >&2
-            exit 1
-          fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "tag=v$V"    >> "$GITHUB_OUTPUT"
+          CLI_V=$(awk '$1=="satellites.version:" {print $2}' .version)
+          CLI_B=$(awk '$1=="satellites.build:"   {print $2}' .version)
+          SRV_V=$(awk '$1=="satellites-server.version:" {print $2}' .version)
+          SRV_B=$(awk '$1=="satellites-server.build:"   {print $2}' .version)
+          for v in "$CLI_V" "$CLI_B" "$SRV_V" "$SRV_B"; do
+            if [ -z "$v" ]; then
+              echo ".version missing or malformed (one of the per-binary fields is empty)" >&2
+              exit 1
+            fi
+          done
+          echo "cli_version=$CLI_V"    >> "$GITHUB_OUTPUT"
+          echo "cli_build=$CLI_B"      >> "$GITHUB_OUTPUT"
+          echo "server_version=$SRV_V" >> "$GITHUB_OUTPUT"
+          echo "server_build=$SRV_B"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$CLI_V"           >> "$GITHUB_OUTPUT"
       - id: check
         run: |
           set -euo pipefail
@@ -69,30 +81,38 @@ jobs:
 
       - name: build
         env:
-          GOOS:        ${{ matrix.goos }}
-          GOARCH:      ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
-          TAG:         ${{ needs.derive-tag.outputs.tag }}
+          GOOS:           ${{ matrix.goos }}
+          GOARCH:         ${{ matrix.goarch }}
+          CGO_ENABLED:    '0'
+          BINARY:         ${{ matrix.binary }}
+          CLI_VERSION:    ${{ needs.derive-tag.outputs.cli_version }}
+          CLI_BUILD:      ${{ needs.derive-tag.outputs.cli_build }}
+          SERVER_VERSION: ${{ needs.derive-tag.outputs.server_version }}
+          SERVER_BUILD:   ${{ needs.derive-tag.outputs.server_build }}
         run: |
           set -euo pipefail
-          SHA="${GITHUB_SHA}"
-          BUILD="$(awk '/^build:/ {print $2}' .version)"
-          OUT="${{ matrix.binary }}-${TAG}-${GOOS}-${GOARCH}"
+          if [ "$BINARY" = "satellites" ]; then
+            BIN_VER="$CLI_VERSION"
+            BIN_BUILD="$CLI_BUILD"
+          else
+            BIN_VER="$SERVER_VERSION"
+            BIN_BUILD="$SERVER_BUILD"
+          fi
+          OUT="${BINARY}-v${BIN_VER}-${GOOS}-${GOARCH}"
           go build \
             -trimpath \
             -ldflags="-s -w \
-              -X github.com/bobmcallan/satellites/internal/verb.Version=${TAG} \
-              -X github.com/bobmcallan/satellites/internal/verb.Commit=${SHA} \
-              -X github.com/bobmcallan/satellites/internal/verb.BuildTime=${BUILD}" \
-            -o "${OUT}" ./cmd/${{ matrix.binary }}
+              -X github.com/bobmcallan/satellites/internal/verb.Version=v${BIN_VER} \
+              -X github.com/bobmcallan/satellites/internal/verb.Commit=${GITHUB_SHA} \
+              -X github.com/bobmcallan/satellites/internal/verb.BuildTime=${BIN_BUILD}" \
+            -o "${OUT}" ./cmd/${BINARY}
           sha256sum "${OUT}" > "${OUT}.sha256"
           echo "OUT=${OUT}" >> "$GITHUB_ENV"
 
-      - name: validate (linux/amd64 only)
+      - name: validate (linux/amd64 satellites only)
         if: matrix.validate
         run: |
           ./"${OUT}" version
-          ./"${OUT}" --help >/dev/null || true   # satellites-server has no --help
 
       - uses: actions/upload-artifact@v4
         with:
@@ -139,11 +159,15 @@ jobs:
 
       - name: gh release create
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG:      ${{ needs.derive-tag.outputs.tag }}
+          GH_TOKEN:       ${{ secrets.GITHUB_TOKEN }}
+          TAG:            ${{ needs.derive-tag.outputs.tag }}
+          CLI_VERSION:    ${{ needs.derive-tag.outputs.cli_version }}
+          SERVER_VERSION: ${{ needs.derive-tag.outputs.server_version }}
         run: |
           set -euo pipefail
           gh release create "$TAG" \
             --title "$TAG" \
-            --generate-notes \
+            --notes "satellites v${CLI_VERSION} · satellites-server v${SERVER_VERSION}
+
+          See per-binary versions in asset filenames." \
             artifacts/*

@@ -26,11 +26,22 @@ docs/                    # architecture + design records
 ## Building
 
 ```sh
-make build           # ldflags-injects version/commit/buildTime from .version
-make version         # report current version/commit/build
+make build           # builds bin/satellites + bin/satellites-server with
+                     # per-binary ldflag injection from .version
+make version         # report current per-binary version/commit/build
 ```
 
-`.version` (repo root) is the canonical version source. `/commit-push` bumps it on every commit; the release workflow reads it to derive the release tag.
+`.version` (repo root) is the canonical version source. It carries **per-binary** entries so `satellites` (CLI) and `satellites-server` can rev independently:
+
+```
+satellites.version: 0.0.2
+satellites.build: 2026-05-21-00-47-21
+
+satellites-server.version: 0.0.2
+satellites-server.build: 2026-05-21-00-47-21
+```
+
+`/commit-push` bumps the per-binary entries on every commit; the release workflow reads them, builds each binary with its own ldflags, and tags the release `v<satellites.version>` (CLI is the operator-facing canonical surface). Asset filenames include each binary's own version.
 
 ## Database & migrations
 

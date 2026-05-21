@@ -1,25 +1,37 @@
 DATABASE_URL ?= postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable
 
-# Version + build info sourced from .version (canonical) — auto-bumped on
-# every commit by the /commit-push skill. Local builds inject these via
-# ldflags so 'satellites version' reports them; the release pipeline reads
-# the same file to derive the git tag.
-VERSION := $(shell awk '/^version:/ {print $$2}' .version)
-BUILD   := $(shell awk '/^build:/ {print $$2}' .version)
-COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Version + build info sourced from .version (canonical) — per binary.
+# Each binary is built with its own ldflags so 'satellites version' and
+# 'satellites-server' (MCP version verb) report independent values. The
+# release workflow uses the same per-binary extraction.
+CLI_VERSION    := $(shell awk '$$1=="satellites.version:"        {print $$2}' .version)
+CLI_BUILD      := $(shell awk '$$1=="satellites.build:"          {print $$2}' .version)
+SERVER_VERSION := $(shell awk '$$1=="satellites-server.version:" {print $$2}' .version)
+SERVER_BUILD   := $(shell awk '$$1=="satellites-server.build:"   {print $$2}' .version)
+COMMIT         := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-LDFLAGS := -s -w \
-  -X github.com/bobmcallan/satellites/internal/verb.Version=v$(VERSION) \
-  -X github.com/bobmcallan/satellites/internal/verb.Commit=$(COMMIT) \
-  -X github.com/bobmcallan/satellites/internal/verb.BuildTime=$(BUILD)
+VERB_PKG := github.com/bobmcallan/satellites/internal/verb
+
+CLI_LDFLAGS    := -s -w \
+  -X $(VERB_PKG).Version=v$(CLI_VERSION) \
+  -X $(VERB_PKG).Commit=$(COMMIT) \
+  -X $(VERB_PKG).BuildTime=$(CLI_BUILD)
+
+SERVER_LDFLAGS := -s -w \
+  -X $(VERB_PKG).Version=v$(SERVER_VERSION) \
+  -X $(VERB_PKG).Commit=$(COMMIT) \
+  -X $(VERB_PKG).BuildTime=$(SERVER_BUILD)
 
 .PHONY: build vet test test-integration migrate-up migrate-down migrate-status version
 
 build:
-	go build -trimpath -ldflags="$(LDFLAGS)" ./cmd/...
+	go build -trimpath -ldflags="$(CLI_LDFLAGS)"    -o bin/satellites        ./cmd/satellites
+	go build -trimpath -ldflags="$(SERVER_LDFLAGS)" -o bin/satellites-server ./cmd/satellites-server
 
 version:
-	@echo "version=$(VERSION) commit=$(COMMIT) build=$(BUILD)"
+	@echo "satellites        version=$(CLI_VERSION)    build=$(CLI_BUILD)"
+	@echo "satellites-server version=$(SERVER_VERSION) build=$(SERVER_BUILD)"
+	@echo "commit            $(COMMIT)"
 
 vet:
 	go vet ./...
