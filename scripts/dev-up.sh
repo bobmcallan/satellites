@@ -9,7 +9,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-docker compose -f scripts/docker-compose.dev.yml up -d --build
+# Bootstrap scripts/satellites-server.toml from the checked-in example
+# if missing. The container bind-mounts only this file (read-only,
+# gitignored) — no broader access to the repo. Fill in [oauth] there
+# to surface provider buttons on /login.
+if [ ! -f scripts/satellites-server.toml ]; then
+    echo "scripts/satellites-server.toml not found — copying from example."
+    cp scripts/satellites-server.toml.example scripts/satellites-server.toml
+    echo "Edit scripts/satellites-server.toml [oauth] section, then re-run scripts/dev-up.sh"
+    echo "to enable GitHub / Google sign-in buttons (file is gitignored)."
+fi
+
+# --force-recreate ensures Docker re-stages the single-file bind mount
+# after host-side edits to scripts/satellites-server.toml. Without it,
+# Docker Desktop on WSL2 holds onto the old inode and host edits don't
+# appear inside the container until the next compose down/up.
+docker compose -f scripts/docker-compose.dev.yml up -d --build --force-recreate
 
 echo "Waiting for satellites-server..."
 for _ in $(seq 1 60); do

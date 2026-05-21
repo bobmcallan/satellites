@@ -15,17 +15,29 @@ import (
 )
 
 // Config carries the operator-supplied runtime configuration.
+//
+// OAuth carries credentials + bootstrap policy (admin emails). Providers
+// is the constructed ProviderSet derived from OAuth at boot; it's
+// passed in so tests can substitute fakes without rebuilding from real
+// credentials. OAuthStates is the CSRF state registry shared across
+// provider start/callback handlers — long-lived, safe for concurrent
+// use.
 type Config struct {
-	Store    *auth.Store
-	Sessions *auth.Sessions
-	DevMode  bool
-	OAuth    auth.OAuthConfig
+	Store       *auth.Store
+	Sessions    *auth.Sessions
+	DevMode     bool
+	OAuth       auth.OAuthConfig
+	Providers   *auth.ProviderSet
+	OAuthStates *auth.StateStore
 }
 
 // Build returns the configured root handler.
 func Build(cfg Config) http.Handler {
 	if cfg.Sessions == nil {
 		cfg.Sessions = auth.NewSessions(nil)
+	}
+	if cfg.OAuthStates == nil {
+		cfg.OAuthStates = auth.NewStateStore(0)
 	}
 	mux := http.NewServeMux()
 
@@ -36,15 +48,15 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/login", loginHandler(cfg))
 	mux.HandleFunc("/logout", logoutHandler(cfg))
 
-	// Auth-gated UI root. indexHandler itself checks the session cookie
-	// and redirects to /login when absent.
+	// OAuth start + callback routes per enabled provider. Each provider
+	// owns its own auth flow; the callback issues the session cookie
+	// directly on success.
+	registerOAuthRoutes(mux, cfg)
+
+	// Session-gated UI surfaces.
 	mux.HandleFunc("/", indexHandler(cfg))
-
-	// Docs pages — session-gated UI surfaces, each handler enforces.
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
-
-	// OAuth routes — own their auth flow (handlers bypass middleware).
-	auth.RegisterRoutes(mux, cfg.OAuth)
+	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
 
 	// MCP routes — auth-gated via Bearer api-key middleware (agents).
 	mcp := mcpserver.HTTPHandler(mcpserver.New())

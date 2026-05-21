@@ -7,8 +7,8 @@
 // Two flavours:
 //   - SetUp(t)           — Postgres only (used by DB-shape and store tests)
 //   - SetUpWithServer(t) — Postgres + auth.Store + DevSeed + satellites-server
-//                          via httptest. This is the canonical bootstrap
-//                          for browser-driven (chromedp) integration tests.
+//     via httptest. This is the canonical bootstrap
+//     for browser-driven (chromedp) integration tests.
 package testbootstrap
 
 import (

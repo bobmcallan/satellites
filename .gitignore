@@ -37,3 +37,8 @@ go.work.sum
 
 # Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md)
 .satellites/
+
+# Operator-supplied config — may contain OAuth client secrets. The
+# `*.example` templates stay in git; the live files do not.
+/scripts/satellites-server.toml
+/satellites.toml

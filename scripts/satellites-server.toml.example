@@ -1,0 +1,44 @@
+# Example satellites-server.toml — drop alongside the binary (or pass
+# --config /path/to/file). All keys are optional; defaults are in code.
+# Env vars override the file:
+#
+#   SATELLITES_LISTEN_ADDR              → addr
+#   DATABASE_URL                        → dsn
+#   SATELLITES_DEV                      → dev (true|false|1|0)
+#   SATELLITES_SESSION_SECRET           → session_secret (hex)
+#   GITHUB_OAUTH_CLIENT_ID              → oauth.github_client_id
+#   GITHUB_OAUTH_CLIENT_SECRET          → oauth.github_client_secret
+#   GOOGLE_OAUTH_CLIENT_ID              → oauth.google_client_id
+#   GOOGLE_OAUTH_CLIENT_SECRET          → oauth.google_client_secret
+#   SATELLITES_OAUTH_REDIRECT_BASE_URL  → oauth.redirect_base_url
+#   SATELLITES_ADMIN_EMAILS             → oauth.admin_emails
+#   SATELLITES_LOG_LEVEL                → log.level
+#   SATELLITES_LOG_JSON                 → log.json
+
+addr           = ":8080"
+dsn            = "postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable"
+dev            = false
+session_secret = ""
+
+# OAuth — sign-in providers for the web UI.
+#
+# redirect_base_url is the public origin satellites-server is reachable
+# at (e.g. https://satellites.fly.dev or http://localhost:8080). Each
+# enabled provider's callback registers at <base>/auth/<provider>/callback;
+# that URL must be configured in the provider's OAuth app settings.
+#
+# admin_emails is a comma-separated list of operator emails promoted to
+# RoleAdmin on first OAuth sign-in — the prod bootstrap mechanism. Leave
+# empty in dev (dev seeds an admin@dev account through the normal bcrypt
+# path).
+[oauth]
+github_client_id     = ""
+github_client_secret = ""
+google_client_id     = ""
+google_client_secret = ""
+redirect_base_url    = ""
+admin_emails         = ""
+
+[log]
+level = "info"   # debug | info | warn | error
+json  = false    # true in prod (Fly), false in dev (human-readable)

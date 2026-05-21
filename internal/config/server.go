@@ -26,11 +26,23 @@ type Server struct {
 	Log   LogConfig   `toml:"log"`
 }
 
-// ServerOAuth holds OAuth provider credentials. GitHub-only today;
-// additional providers slot in here without changing the env wiring.
+// ServerOAuth holds OAuth provider credentials + bootstrap policy.
+//
+// RedirectBaseURL is the public origin (scheme + host[:port]) the
+// provider should redirect back to — e.g. https://satellites.fly.dev
+// in prod, http://localhost:8080 in dev. Required for OAuth to work;
+// missing/empty disables OAuth start/callback routes.
+//
+// AdminEmails is a comma-separated list of emails that are promoted
+// to RoleAdmin on first OAuth sign-in. Solves the prod-bootstrap
+// problem without manual SQL.
 type ServerOAuth struct {
 	GitHubClientID     string `toml:"github_client_id"`
 	GitHubClientSecret string `toml:"github_client_secret"`
+	GoogleClientID     string `toml:"google_client_id"`
+	GoogleClientSecret string `toml:"google_client_secret"`
+	RedirectBaseURL    string `toml:"redirect_base_url"`
+	AdminEmails        string `toml:"admin_emails"`
 }
 
 // LogConfig drives the arbor logger setup. Shared by both binaries.
@@ -101,6 +113,18 @@ func (s *Server) applyServerEnv() {
 	}
 	if v := os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"); v != "" {
 		s.OAuth.GitHubClientSecret = v
+	}
+	if v := os.Getenv("GOOGLE_OAUTH_CLIENT_ID"); v != "" {
+		s.OAuth.GoogleClientID = v
+	}
+	if v := os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"); v != "" {
+		s.OAuth.GoogleClientSecret = v
+	}
+	if v := os.Getenv("SATELLITES_OAUTH_REDIRECT_BASE_URL"); v != "" {
+		s.OAuth.RedirectBaseURL = v
+	}
+	if v := os.Getenv("SATELLITES_ADMIN_EMAILS"); v != "" {
+		s.OAuth.AdminEmails = v
 	}
 	if v := os.Getenv("SATELLITES_LOG_LEVEL"); v != "" {
 		s.Log.Level = v

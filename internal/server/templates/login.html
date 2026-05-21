@@ -20,17 +20,27 @@
   <section class="panel login-panel">
     <h2>login</h2>
     {{if .Error}}<p class="error" data-field="login-error">{{.Error}}</p>{{end}}
-    <form method="POST" action="/login" class="login-form" data-form="login"
+
+    {{if .Providers}}
+    <div class="oauth-providers primary-auth" data-section="oauth-providers">
+      {{range .Providers}}
+      <a href="/oauth/{{.Name}}/login" class="btn primary oauth" data-action="oauth-{{.Name}}">SIGN IN WITH {{.Label}}</a>
+      {{end}}
+    </div>
+    <p class="oauth-divider"><span>OR USE EMAIL</span></p>
+    {{end}}
+
+    <form method="POST" action="/login" class="login-form secondary-auth" data-form="login"
           x-data="{ loading: false }" x-on:submit="loading = true">
       <label>
         <span>EMAIL</span>
-        <input type="email" name="email" required autofocus autocomplete="username">
+        <input type="email" name="email" required autocomplete="username">
       </label>
       <label>
         <span>PASSWORD</span>
         <input type="password" name="password" required autocomplete="current-password">
       </label>
-      <button type="submit" class="btn primary"
+      <button type="submit" class="btn secondary"
               x-bind:disabled="loading"
               x-text="loading ? 'SIGNING IN…' : 'SIGN IN'">SIGN IN</button>
     </form>

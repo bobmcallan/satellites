@@ -1,0 +1,101 @@
+package server
+
+import (
+	"net/http"
+	"strings"
+
+	"golang.org/x/oauth2"
+
+	"github.com/bobmcallan/satellites/internal/arbor"
+	"github.com/bobmcallan/satellites/internal/auth"
+)
+
+// registerOAuthRoutes wires /oauth/<provider>/login + /callback for
+// every enabled provider in cfg.Providers. The callback path matches
+// what's registered in satellites-infra (the GitHub OAuth App points
+// at https://satellites-<env>.fly.dev/oauth/github/callback). Disabled
+// providers (nil entries) register nothing; callers see 404 from the
+// mux itself.
+func registerOAuthRoutes(mux *http.ServeMux, cfg Config) {
+	if cfg.Providers == nil {
+		return
+	}
+	for _, p := range cfg.Providers.Enabled() {
+		provider := p // capture
+		mux.HandleFunc("/oauth/"+provider.Name+"/login", oauthStartHandler(cfg, provider))
+		mux.HandleFunc("/oauth/"+provider.Name+"/callback", oauthCallbackHandler(cfg, provider))
+	}
+}
+
+func oauthStartHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		state, err := cfg.OAuthStates.Mint()
+		if err != nil {
+			arbor.ErrorCtx(r.Context(), "oauth: state mint", "provider", p.Name, "err", err)
+			http.Error(w, "state mint failed", http.StatusInternalServerError)
+			return
+		}
+		url := p.OAuth2.AuthCodeURL(state, oauth2.AccessTypeOnline)
+		arbor.InfoCtx(r.Context(), "oauth: start", "provider", p.Name)
+		http.Redirect(w, r, url, http.StatusSeeOther)
+	}
+}
+
+func oauthCallbackHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		q := r.URL.Query()
+		if errCode := q.Get("error"); errCode != "" {
+			arbor.WarnCtx(r.Context(), "oauth: provider returned error", "provider", p.Name, "error", errCode)
+			http.Error(w, "oauth provider error: "+errCode, http.StatusBadRequest)
+			return
+		}
+		state := q.Get("state")
+		if err := cfg.OAuthStates.Consume(state); err != nil {
+			arbor.WarnCtx(r.Context(), "oauth: invalid state", "provider", p.Name, "err", err)
+			http.Error(w, "invalid state", http.StatusBadRequest)
+			return
+		}
+		code := q.Get("code")
+		if code == "" {
+			http.Error(w, "missing code", http.StatusBadRequest)
+			return
+		}
+
+		token, err := p.OAuth2.Exchange(r.Context(), code)
+		if err != nil {
+			arbor.WarnCtx(r.Context(), "oauth: exchange failed", "provider", p.Name, "err", err)
+			http.Error(w, "token exchange failed", http.StatusBadGateway)
+			return
+		}
+		info, err := p.FetchInfo(r.Context(), token)
+		if err != nil {
+			arbor.WarnCtx(r.Context(), "oauth: userinfo failed", "provider", p.Name, "err", err)
+			http.Error(w, "userinfo fetch failed", http.StatusBadGateway)
+			return
+		}
+		if strings.TrimSpace(info.Email) == "" || strings.TrimSpace(info.Sub) == "" {
+			arbor.WarnCtx(r.Context(), "oauth: incomplete userinfo", "provider", p.Name)
+			http.Error(w, "incomplete userinfo", http.StatusBadRequest)
+			return
+		}
+
+		u, err := cfg.Store.UpsertOAuthUser(r.Context(), p.Name, info.Sub, info.Email, info.DisplayName, cfg.OAuth.AdminEmails)
+		if err != nil {
+			arbor.ErrorCtx(r.Context(), "oauth: upsert user", "provider", p.Name, "err", err)
+			http.Error(w, "could not link account", http.StatusInternalServerError)
+			return
+		}
+
+		cfg.Sessions.Issue(w, u.ID)
+		arbor.InfoCtx(r.Context(), "oauth: login", "provider", p.Name, "user_id", u.ID, "role", string(u.Role))
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}

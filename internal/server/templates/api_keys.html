@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="#" class="nav-item disabled">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/settings/api-keys" class="nav-item active" data-nav="api-keys">API KEYS</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{if .UserEmail}}
+    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
+    <form method="POST" action="/logout" class="logout-form">
+      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
+    </form>
+    {{end}}
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-section="api-keys-issue">
+    <h2>issue api-key</h2>
+    <p>Bearer credential for MCP clients. The raw value is shown <strong>once</strong> at issue time; record it before leaving this page.</p>
+    {{if .FlashError}}<p class="error" data-field="apikeys-error">{{.FlashError}}</p>{{end}}
+    <form method="POST" action="/settings/api-keys" class="apikeys-issue-form" data-form="apikeys-issue">
+      <input type="hidden" name="action" value="issue">
+      <label>
+        <span>AGENT NAME (optional)</span>
+        <input type="text" name="agent_name" placeholder="cli_default" autocomplete="off">
+      </label>
+      <button type="submit" class="btn primary" data-action="apikeys-issue">ISSUE NEW KEY</button>
+    </form>
+  </section>
+
+  {{if .JustIssued}}
+  <section class="panel highlight" data-section="apikeys-just-issued">
+    <h2>new key issued</h2>
+    <p class="warning">{{.JustIssued.Notice}}</p>
+    <dl class="metadata">
+      <dt>ID</dt><dd data-field="issued-id">{{.JustIssued.ID}}</dd>
+      <dt>AGENT</dt><dd data-field="issued-agent">{{.JustIssued.Agent}}</dd>
+      <dt>RAW</dt><dd data-field="issued-raw"><code>{{.JustIssued.Raw}}</code></dd>
+    </dl>
+  </section>
+  {{end}}
+
+  <section class="panel" data-section="api-keys-list">
+    <h2>active keys</h2>
+    {{if .Keys}}
+    <table class="apikeys">
+      <thead><tr><th>ID</th><th>AGENT</th><th>CREATED</th><th>ACTION</th></tr></thead>
+      <tbody>
+        {{range .Keys}}
+        <tr data-field="apikey-row">
+          <td><code>{{.ID}}</code></td>
+          <td>{{.AgentName}}</td>
+          <td>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
+          <td>
+            <form method="POST" action="/settings/api-keys" class="apikeys-revoke-form">
+              <input type="hidden" name="action" value="revoke">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" class="btn danger" data-action="apikeys-revoke">REVOKE</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="apikeys-empty">No active keys. Issue one above.</p>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

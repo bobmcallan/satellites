@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -102,6 +103,109 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error)
 		return nil, err
 	}
 	return &u, nil
+}
+
+// UpsertOAuthUser is idempotent on (provider, sub). On first sight it
+// inserts a new user row (id = `usr_oauth_<sub>` prefixed by provider
+// short code). On a re-callback it refreshes email + display_name and
+// returns the existing row.
+//
+// If the user's email is contained in adminEmails (case-insensitive),
+// the role is promoted to RoleAdmin — solving the prod bootstrap
+// without manual SQL. Demotion is NOT automatic: a row already at
+// RoleAdmin stays admin even if the email is removed from the env list.
+// That's the V4 lesson — silent demotions are worse than stale admins.
+func (s *Store) UpsertOAuthUser(ctx context.Context, provider, sub, email, displayName string, adminEmails []string) (*User, error) {
+	if provider == "" || sub == "" {
+		return nil, fmt.Errorf("auth: oauth upsert needs provider+sub")
+	}
+	if email == "" {
+		return nil, fmt.Errorf("auth: oauth upsert needs email")
+	}
+
+	wantAdmin := false
+	emailLC := strings.ToLower(strings.TrimSpace(email))
+	for _, a := range adminEmails {
+		if strings.ToLower(strings.TrimSpace(a)) == emailLC {
+			wantAdmin = true
+			break
+		}
+	}
+
+	// Try update by (provider, sub). On hit, we're done.
+	row := s.DB.QueryRowContext(ctx, `
+        UPDATE users
+           SET email        = $1,
+               display_name = COALESCE(NULLIF($2, ''), display_name),
+               role         = CASE WHEN $3 THEN 'admin' ELSE role END
+         WHERE oauth_provider = $4 AND oauth_sub = $5
+        RETURNING id, email, display_name, role, created_at
+    `, email, displayName, wantAdmin, provider, sub)
+	var u User
+	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt)
+	if err == nil {
+		return &u, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("auth: oauth update: %w", err)
+	}
+
+	// No row for (provider, sub) yet. Insert. The unique index on email
+	// means a pre-existing email-only user (e.g. dev-seeded admin@dev)
+	// blocks insert — we surface that as a clean error rather than
+	// silently linking, which would be a confusing identity merge.
+	role := RoleUser
+	if wantAdmin {
+		role = RoleAdmin
+	}
+	id := fmt.Sprintf("usr_oauth_%s_%s", provider, sub)
+	if _, err := s.DB.ExecContext(ctx, `
+        INSERT INTO users (id, email, display_name, role, oauth_provider, oauth_sub)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `, id, email, displayName, string(role), provider, sub); err != nil {
+		return nil, fmt.Errorf("auth: oauth insert: %w", err)
+	}
+	return s.GetUserByID(ctx, id)
+}
+
+// ListAPIKeysForUser returns the non-revoked api-keys owned by userID,
+// ordered newest-first. Used by the /settings/api-keys UI.
+func (s *Store) ListAPIKeysForUser(ctx context.Context, userID string) ([]APIKey, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+        SELECT id, user_id, COALESCE(project_id,''), agent_name, key_hash, created_at, revoked_at
+          FROM api_keys
+         WHERE user_id = $1 AND revoked_at IS NULL
+         ORDER BY created_at DESC
+    `, userID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list keys: %w", err)
+	}
+	defer rows.Close()
+	var out []APIKey
+	for rows.Next() {
+		var k APIKey
+		if err := rows.Scan(&k.ID, &k.UserID, &k.ProjectID, &k.AgentName, &k.KeyHash, &k.CreatedAt, &k.RevokedAt); err != nil {
+			return nil, fmt.Errorf("auth: scan key: %w", err)
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+// RevokeKeyForUser revokes id only when it belongs to userID — prevents
+// one user revoking another's key by guessing the id.
+func (s *Store) RevokeKeyForUser(ctx context.Context, userID, id string) error {
+	res, err := s.DB.ExecContext(ctx, `
+        UPDATE api_keys SET revoked_at = now()
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+    `, id, userID)
+	if err != nil {
+		return fmt.Errorf("auth: revoke: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("auth: apikey %s not found or not yours", id)
+	}
+	return nil
 }
 
 // GetUserByID returns the user with the given id or sql.ErrNoRows. Used

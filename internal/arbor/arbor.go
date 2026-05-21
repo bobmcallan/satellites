@@ -108,16 +108,16 @@ func SetDefault(l *Logger) { defaultLogger.Store(l) }
 func Default() *Logger { return defaultLogger.Load() }
 
 // Package-level convenience helpers route through Default().
-func Debug(msg string, args ...any)                                  { Default().Debug(msg, args...) }
-func Info(msg string, args ...any)                                   { Default().Info(msg, args...) }
-func Warn(msg string, args ...any)                                   { Default().Warn(msg, args...) }
-func Error(msg string, args ...any)                                  { Default().Error(msg, args...) }
-func Fatal(msg string, args ...any)                                  { Default().Fatal(msg, args...) }
-func DebugCtx(ctx context.Context, msg string, args ...any)          { Default().DebugCtx(ctx, msg, args...) }
-func InfoCtx(ctx context.Context, msg string, args ...any)           { Default().InfoCtx(ctx, msg, args...) }
-func WarnCtx(ctx context.Context, msg string, args ...any)           { Default().WarnCtx(ctx, msg, args...) }
-func ErrorCtx(ctx context.Context, msg string, args ...any)          { Default().ErrorCtx(ctx, msg, args...) }
-func With(args ...any) *Logger                                       { return Default().With(args...) }
+func Debug(msg string, args ...any)                         { Default().Debug(msg, args...) }
+func Info(msg string, args ...any)                          { Default().Info(msg, args...) }
+func Warn(msg string, args ...any)                          { Default().Warn(msg, args...) }
+func Error(msg string, args ...any)                         { Default().Error(msg, args...) }
+func Fatal(msg string, args ...any)                         { Default().Fatal(msg, args...) }
+func DebugCtx(ctx context.Context, msg string, args ...any) { Default().DebugCtx(ctx, msg, args...) }
+func InfoCtx(ctx context.Context, msg string, args ...any)  { Default().InfoCtx(ctx, msg, args...) }
+func WarnCtx(ctx context.Context, msg string, args ...any)  { Default().WarnCtx(ctx, msg, args...) }
+func ErrorCtx(ctx context.Context, msg string, args ...any) { Default().ErrorCtx(ctx, msg, args...) }
+func With(args ...any) *Logger                              { return Default().With(args...) }
 
 // Errf is a tiny convenience for callers building a single-line error
 // message before logging. Equivalent to Error(fmt.Sprintf(...)) but

@@ -16,6 +16,7 @@ type loginData struct {
 	DevMode     bool
 	DevAdmin    devCred
 	DevUser     devCred
+	Providers   []providerButton
 	FooterName  string
 	FooterEmail string
 	Version     string
@@ -24,6 +25,11 @@ type loginData struct {
 type devCred struct {
 	Email    string
 	Password string
+}
+
+type providerButton struct {
+	Name  string // "github", "google" — used in data-action + start URL
+	Label string // "GitHub", "Google" — display text
 }
 
 func loginHandler(cfg Config) http.HandlerFunc {
@@ -44,6 +50,7 @@ func renderLogin(w http.ResponseWriter, cfg Config, errMsg string) {
 		Title:       "login · satellites",
 		Error:       errMsg,
 		DevMode:     cfg.DevMode,
+		Providers:   enabledProviderButtons(cfg),
 		FooterName:  footerName,
 		FooterEmail: footerEmail,
 		Version:     versionString(),
@@ -59,6 +66,28 @@ func renderLogin(w http.ResponseWriter, cfg Config, errMsg string) {
 	if err := loginTmpl.Execute(w, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// enabledProviderButtons turns cfg.Providers into the display list the
+// template renders. Order tracks ProviderSet.Enabled.
+func enabledProviderButtons(cfg Config) []providerButton {
+	if cfg.Providers == nil {
+		return nil
+	}
+	labels := map[string]string{
+		"github": "GitHub",
+		"google": "Google",
+	}
+	enabled := cfg.Providers.Enabled()
+	out := make([]providerButton, 0, len(enabled))
+	for _, p := range enabled {
+		label, ok := labels[p.Name]
+		if !ok {
+			label = p.Name
+		}
+		out = append(out, providerButton{Name: p.Name, Label: label})
+	}
+	return out
 }
 
 func handleLoginPost(w http.ResponseWriter, r *http.Request, cfg Config) {

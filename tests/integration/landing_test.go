@@ -45,10 +45,10 @@ func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
 	ctx := newBrowserCtx(t)
 
 	var (
-		loginBrand   string
-		footerName   string
-		footerEmail  string
-		footerVer    string
+		loginBrand  string
+		footerName  string
+		footerEmail string
+		footerVer   string
 
 		portalBrand string
 		userEmail   string
@@ -250,10 +250,10 @@ func TestFooter_PresentOnEveryPage(t *testing.T) {
 	ctx := newBrowserCtx(t)
 
 	type page struct {
-		path   string
-		ready  string
-		needs  []string
-		login  bool
+		path  string
+		ready string
+		needs []string
+		login bool
 	}
 	pages := []page{
 		{"/login", `form[data-form="login"]`, nil, false},

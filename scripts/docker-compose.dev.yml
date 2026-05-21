@@ -39,6 +39,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Only the operator-supplied TOML beside this compose file is mounted
+    # into the container — no broader access to the repo. dev-up.sh
+    # bootstraps satellites-server.toml from the checked-in example and
+    # force-recreates the container after each up so the bind-mount
+    # picks up host-side edits (Docker Desktop on WSL2 doesn't honour
+    # in-place edits to single-file bind mounts on `docker restart`).
+    # All OAuth credentials (session_secret + [oauth] section) live in
+    # this TOML — single source of truth for local dev. The compose
+    # file carries only non-secret operational env.
+    command: ["--config", "/etc/satellites/satellites-server.toml"]
+    volumes:
+      - ./satellites-server.toml:/etc/satellites/satellites-server.toml:ro
     environment:
       DATABASE_URL: postgres://satellites:satellites@postgres:5432/satellites?sslmode=disable
       SATELLITES_LISTEN_ADDR: ":8080"

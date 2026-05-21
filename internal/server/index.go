@@ -88,8 +88,11 @@ func indexHandler(cfg Config) http.HandlerFunc {
 			FooterEmail: footerEmail,
 			Endpoints: []endpoint{
 				{"POST", "/mcp", "MCP JSON-RPC (Authorization: Bearer required)"},
-				{"GET", "/oauth/github/login", "OAuth login redirect (when configured)"},
-				{"GET", "/oauth/github/callback", "OAuth callback"},
+				{"GET", "/oauth/github/login", "GitHub sign-in (when configured)"},
+				{"GET", "/oauth/github/callback", "GitHub OAuth callback"},
+				{"GET", "/oauth/google/login", "Google sign-in (when configured)"},
+				{"GET", "/oauth/google/callback", "Google OAuth callback"},
+				{"GET", "/settings/api-keys", "Issue + revoke MCP api-keys (session-gated)"},
 			},
 		}
 		if cfg.DevMode {

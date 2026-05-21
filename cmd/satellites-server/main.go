@@ -85,14 +85,43 @@ func main() {
 	}
 	sessions := auth.NewSessions(sessionSecret)
 
+	oauthCfg := auth.OAuthConfig{
+		GitHubClientID:     cfg.OAuth.GitHubClientID,
+		GitHubClientSecret: cfg.OAuth.GitHubClientSecret,
+		GoogleClientID:     cfg.OAuth.GoogleClientID,
+		GoogleClientSecret: cfg.OAuth.GoogleClientSecret,
+		RedirectBaseURL:    cfg.OAuth.RedirectBaseURL,
+		AdminEmails:        auth.ParseAdminEmails(cfg.OAuth.AdminEmails),
+	}
+	providers := auth.BuildProviderSet(oauthCfg)
+	for _, p := range providers.Enabled() {
+		arbor.Info("oauth provider enabled", "provider", p.Name, "redirect", p.OAuth2.RedirectURL)
+	}
+	// Surface partial-config silently-disabled providers — common
+	// footgun is setting *_CLIENT_ID / *_CLIENT_SECRET but forgetting
+	// SATELLITES_OAUTH_REDIRECT_BASE_URL, which leaves the provider
+	// off with no obvious clue why no button shows in the UI.
+	if oauthCfg.RedirectBaseURL == "" &&
+		(oauthCfg.GitHubClientID != "" || oauthCfg.GoogleClientID != "") {
+		arbor.Warn("oauth: client credentials present but SATELLITES_OAUTH_REDIRECT_BASE_URL is empty — providers disabled")
+	}
+	if oauthCfg.GitHubClientID != "" && oauthCfg.GitHubClientSecret == "" {
+		arbor.Warn("oauth: GITHUB_OAUTH_CLIENT_ID set without GITHUB_OAUTH_CLIENT_SECRET — github disabled")
+	}
+	if oauthCfg.GoogleClientID != "" && oauthCfg.GoogleClientSecret == "" {
+		arbor.Warn("oauth: GOOGLE_OAUTH_CLIENT_ID set without GOOGLE_OAUTH_CLIENT_SECRET — google disabled")
+	}
+	if len(oauthCfg.AdminEmails) > 0 {
+		arbor.Info("oauth admin emails configured", "count", len(oauthCfg.AdminEmails))
+	}
+
 	handler := server.Build(server.Config{
-		Store:    store,
-		Sessions: sessions,
-		DevMode:  cfg.Dev,
-		OAuth: auth.OAuthConfig{
-			GitHubClientID:     cfg.OAuth.GitHubClientID,
-			GitHubClientSecret: cfg.OAuth.GitHubClientSecret,
-		},
+		Store:       store,
+		Sessions:    sessions,
+		DevMode:     cfg.Dev,
+		OAuth:       oauthCfg,
+		Providers:   providers,
+		OAuthStates: auth.NewStateStore(0),
 	})
 
 	arbor.Info("satellites-server listening", "addr", cfg.Addr)
