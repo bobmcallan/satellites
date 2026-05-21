@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item active" data-nav="projects">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/settings/api-keys" class="nav-item" data-nav="api-keys">API KEYS</a>
+    <a href="#" class="nav-item disabled">CONFIG</a>
+    <a href="#" class="nav-item disabled">HELP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{if .UserEmail}}
+    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
+    <form method="POST" action="/logout" class="logout-form">
+      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
+    </form>
+    {{end}}
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-section="projects-create">
+    <h2>create project</h2>
+    <p>A project scopes stories, tools, and evidence to a single engagement within the default workspace.</p>
+    {{if .FlashError}}<p class="error" data-field="projects-error">{{.FlashError}}</p>{{end}}
+    <form method="POST" action="/projects" class="projects-create-form" data-form="projects-create">
+      <input type="hidden" name="action" value="create">
+      <label>
+        <span>NAME</span>
+        <input type="text" name="name" autocomplete="off" required>
+      </label>
+      <label>
+        <span>DESCRIPTION (optional)</span>
+        <input type="text" name="description" autocomplete="off">
+      </label>
+      <label>
+        <span>GIT URL (optional)</span>
+        <input type="text" name="git_url" placeholder="git@github.com:owner/repo.git" autocomplete="off">
+      </label>
+      <button type="submit" class="btn primary" data-action="projects-create">CREATE PROJECT</button>
+    </form>
+  </section>
+
+  <section class="panel" data-section="projects-list">
+    <h2>projects</h2>
+    {{if .Projects}}
+    <table class="projects">
+      <thead><tr><th>ID</th><th>NAME</th><th>DESCRIPTION</th><th>GIT URL</th><th>STATUS</th><th>CREATED</th></tr></thead>
+      <tbody>
+        {{range .Projects}}
+        <tr data-field="project-row">
+          <td><code>{{.ID}}</code></td>
+          <td>{{.Name}}</td>
+          <td>{{.Description}}</td>
+          <td>{{if .GitURL}}<code>{{.GitURL}}</code>{{end}}</td>
+          <td>{{.Status}}</td>
+          <td>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="projects-empty">No projects yet. Create one above.</p>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

@@ -72,6 +72,7 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/", indexHandler(cfg))
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
 	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
+	mux.HandleFunc("/projects", projectsHandler(cfg))
 
 	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
 	mcp := mcpserver.HTTPHandler(mcpserver.New())

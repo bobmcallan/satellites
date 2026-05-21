@@ -92,6 +92,7 @@ func indexHandler(cfg Config) http.HandlerFunc {
 				{"GET", "/oauth/github/callback", "GitHub OAuth callback"},
 				{"GET", "/oauth/google/login", "Google sign-in (when configured)"},
 				{"GET", "/oauth/google/callback", "Google OAuth callback"},
+				{"GET", "/projects", "List + create projects (session-gated)"},
 				{"GET", "/settings/api-keys", "Issue + revoke MCP api-keys (session-gated)"},
 			},
 		}
