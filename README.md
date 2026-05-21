@@ -26,8 +26,11 @@ docs/                    # architecture + design records
 ## Building
 
 ```sh
-make build           # or: go build ./cmd/...
+make build           # ldflags-injects version/commit/buildTime from .version
+make version         # report current version/commit/build
 ```
+
+`.version` (repo root) is the canonical version source. `/commit-push` bumps it on every commit; the release workflow reads it to derive the release tag.
 
 ## Database & migrations
 
