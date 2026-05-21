@@ -42,7 +42,9 @@ services:
     environment:
       DATABASE_URL: postgres://satellites:satellites@postgres:5432/satellites?sslmode=disable
       SATELLITES_LISTEN_ADDR: ":8080"
-    command: ["--dev"]
+      SATELLITES_DEV: "true"
+      SATELLITES_LOG_LEVEL: "info"
+      SATELLITES_LOG_JSON: "false"
     ports:
       - "8080:8080"
 

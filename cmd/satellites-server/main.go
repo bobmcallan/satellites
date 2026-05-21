@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"flag"
-	"fmt"
-	"log"
 	"net/http"
-	"os"
 
+	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -17,78 +16,87 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr",
-		envOr("SATELLITES_LISTEN_ADDR", ":8080"),
-		"HTTP listen address")
-	dsn := flag.String("dsn",
-		envOr("DATABASE_URL", "postgres://satellites:satellites@localhost:5432/satellites?sslmode=disable"),
-		"Postgres DSN")
-	devMode := flag.Bool("dev", false,
-		"Dev mode: seed admin/user accounts with well-known api keys (NEVER in production)")
+	// Single flag — points at the TOML config file. Defaults in code,
+	// file overrides defaults, env overrides file. Anything operators
+	// want to tweak per-deploy goes through here.
+	configPath := flag.String("config", "satellites-server.toml",
+		"Path to satellites-server.toml (defaults applied when absent)")
 	flag.Parse()
 
-	if err := db.MigrateUp(*dsn); err != nil {
-		fmt.Fprintln(os.Stderr, "migrate:", err)
-		os.Exit(1)
+	cfg, err := config.LoadServer(*configPath)
+	if err != nil {
+		// Default logger is still the boot bootstrap — fine for this
+		// one-shot error.
+		arbor.Errf("load config: %v", err)
+		arbor.Fatal("aborting")
 	}
 
-	sqlDB, err := sql.Open("postgres", *dsn)
+	// Wire arbor as the process-global logger now that we know the
+	// caller's preference (level + json/text).
+	logger := arbor.New(arbor.ParseLevel(cfg.Log.Level), cfg.Log.JSON, nil)
+	arbor.SetDefault(logger)
+	arbor.Info("satellites-server starting",
+		"addr", cfg.Addr,
+		"dev", cfg.Dev,
+		"log_level", cfg.Log.Level,
+		"log_json", cfg.Log.JSON,
+	)
+
+	if err := db.MigrateUp(cfg.DSN); err != nil {
+		arbor.Fatal("migrate", "err", err)
+	}
+
+	sqlDB, err := sql.Open("postgres", cfg.DSN)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "db open:", err)
-		os.Exit(1)
+		arbor.Fatal("db open", "err", err)
 	}
 	defer sqlDB.Close()
 
 	store := auth.New(sqlDB)
-	verb.SetAuthStore(store) // satellites_init mints api-keys via this store
+	verb.SetAuthStore(store)
 
-	if *devMode {
+	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
-			fmt.Fprintln(os.Stderr, "dev seed:", err)
-			os.Exit(1)
+			arbor.Fatal("dev seed", "err", err)
 		}
-		log.Printf("dev mode: seeded admin (%s) and user (%s); api keys = %s / %s",
-			auth.DevAdminEmail, auth.DevUserEmail, auth.DevAdminKey, auth.DevUserKey)
+		arbor.Info("dev mode: seeded admin + user",
+			"admin_email", auth.DevAdminEmail,
+			"user_email", auth.DevUserEmail,
+			"admin_key", auth.DevAdminKey,
+			"user_key", auth.DevUserKey,
+		)
 	}
 
-	// Session secret: env var wins (fly.io secrets, vault) → otherwise
+	// Session secret: env wins (handled by LoadServer); otherwise
 	// load-or-create from server_settings so sessions survive restarts.
 	var sessionSecret []byte
-	if env := os.Getenv("SATELLITES_SESSION_SECRET"); env != "" {
-		sessionSecret, err = auth.SecretFromHex(env)
+	if cfg.SessionSecret != "" {
+		sessionSecret, err = auth.SecretFromHex(cfg.SessionSecret)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "SATELLITES_SESSION_SECRET: must be hex-encoded:", err)
-			os.Exit(1)
+			arbor.Fatal("session secret: must be hex-encoded", "err", err)
 		}
+		arbor.Info("session secret loaded from config/env")
 	} else {
 		sessionSecret, err = auth.LoadOrCreateSessionSecret(context.Background(), sqlDB)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "load session secret:", err)
-			os.Exit(1)
+			arbor.Fatal("load session secret from db", "err", err)
 		}
+		arbor.Info("session secret loaded from server_settings (db-backed)")
 	}
 	sessions := auth.NewSessions(sessionSecret)
 
 	handler := server.Build(server.Config{
 		Store:    store,
 		Sessions: sessions,
-		DevMode:  *devMode,
+		DevMode:  cfg.Dev,
 		OAuth: auth.OAuthConfig{
-			GitHubClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
-			GitHubClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
+			GitHubClientID:     cfg.OAuth.GitHubClientID,
+			GitHubClientSecret: cfg.OAuth.GitHubClientSecret,
 		},
 	})
 
-	log.Printf("satellites-server listening on %s (dev=%v)", *addr, *devMode)
-	if err := http.ListenAndServe(*addr, handler); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	arbor.Info("satellites-server listening", "addr", cfg.Addr)
+	if err := http.ListenAndServe(cfg.Addr, handler); err != nil {
+		arbor.Fatal("http listen", "err", err)
 	}
-}
-
-func envOr(key, defaultV string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultV
 }

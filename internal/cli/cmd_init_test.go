@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,16 +13,17 @@ func TestInit_WritesConfig(t *testing.T) {
 		t.Fatalf("WriteConfig: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(dir, StateDir, ConfigFile))
+	got, err := LoadConfig(dir)
 	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	var got Config
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("LoadConfig: %v", err)
 	}
 	if got.ServerURL != "https://example.com" || got.APIKey != "k1" {
 		t.Fatalf("config mismatch: %+v", got)
+	}
+
+	// Side-effect check: TOML file lives at .satellites/satellites.toml.
+	if _, err := os.Stat(filepath.Join(dir, StateDir, ConfigFile)); err != nil {
+		t.Fatalf("expected %s on disk: %v", filepath.Join(dir, StateDir, ConfigFile), err)
 	}
 }
 
@@ -60,10 +60,17 @@ func TestInit_Idempotent(t *testing.T) {
 	}
 }
 
-func TestInit_LoadMissingErrors(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := LoadConfig(dir); err == nil {
-		t.Fatal("expected error loading missing config, got nil")
+func TestInit_LoadMissingReturnsDefaults(t *testing.T) {
+	dir := t.TempDir() // no satellites.toml inside
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("missing file should be defaults, got err: %v", err)
+	}
+	if cfg.ServerURL == "" {
+		t.Error("defaults: ServerURL should be set")
+	}
+	if cfg.APIKey != "" {
+		t.Errorf("defaults: APIKey should be empty, got %q", cfg.APIKey)
 	}
 }
 

@@ -1,0 +1,14 @@
+# Example .satellites/satellites.toml — written by `satellites init`.
+# Env vars override the file:
+#
+#   SATELLITES_SERVER_URL  → server_url
+#   SATELLITES_API_KEY     → api_key
+#   SATELLITES_LOG_LEVEL   → log.level
+#   SATELLITES_LOG_JSON    → log.json
+
+server_url = "http://localhost:8080"
+api_key    = "sk_..."
+
+[log]
+level = "info"
+json  = false

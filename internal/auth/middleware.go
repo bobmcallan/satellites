@@ -3,9 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"strings"
+
+	"github.com/bobmcallan/satellites/internal/arbor"
 )
 
 type ctxKey struct{}
@@ -51,7 +52,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "invalid credential", http.StatusUnauthorized)
 				return
 			}
-			log.Printf("auth: validate key: %v", err)
+			arbor.ErrorCtx(r.Context(), "auth: validate key", "err", err)
 			http.Error(w, "auth error", http.StatusInternalServerError)
 			return
 		}

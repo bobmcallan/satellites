@@ -1,0 +1,165 @@
+name: deploy
+
+# On push to main: compile, push image to GHCR (durable history with sha
+# + version + latest tags), then deploy to Fly by re-pushing the same
+# image to registry.fly.io and triggering flyctl deploy.
+#
+# Mirrors the satellites-v4 release.yml shape. App config (env vars,
+# VM size, healthchecks) is owned by satellites-infra/fly/apps/satellites/fly.toml
+# and applied via `./fly/deploy.sh pprod` from that repo; CI deploys only
+# swap the running image.
+#
+# Required repo secret:
+#   FLY_API_TOKEN — `fly tokens create deploy -a satellites-pprod`
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  FLY_APP: satellites-pprod
+
+jobs:
+  # --- Sanity build + vet --------------------------------------------------
+  # Tests live in ci.yml (which also runs on every push); this job exists so
+  # an unbuildable commit never reaches the image-push stage.
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          go build ./cmd/satellites-server/
+          go build ./cmd/satellites/
+      - name: Vet
+        run: go vet ./...
+
+  # --- Build + push image to GHCR -----------------------------------------
+  # GHCR is the durable artifact registry (keeps every sha-tagged build).
+  # The deploy job re-pushes latest to the Fly registry.
+  push:
+    needs: compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        name: Read satellites-server version metadata from .version
+        run: |
+          set -euo pipefail
+          VERSION=$(awk '$1=="satellites-server.version:" {print $2}' .version)
+          BUILD=$(awk   '$1=="satellites-server.build:"   {print $2}' .version)
+          if [ -z "$VERSION" ] || [ -z "$BUILD" ]; then
+            echo ".version missing satellites-server.{version,build}" >&2
+            exit 1
+          fi
+          {
+            echo "version=v${VERSION}"
+            echo "build=${BUILD}"
+            echo "commit=${GITHUB_SHA::8}"
+          } >> "$GITHUB_OUTPUT"
+
+      - id: docker-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=${{ steps.meta.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.docker-meta.outputs.tags }}
+          labels: ${{ steps.docker-meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD=${{ steps.meta.outputs.build }}
+            COMMIT=${{ steps.meta.outputs.commit }}
+          provenance: false
+          sbom: false
+
+  # --- Deploy to Fly.io ---------------------------------------------------
+  # Pulls :latest from GHCR, re-tags + pushes to the Fly registry, and
+  # rolls out via `flyctl deploy --image`. App config (fly.toml) is owned
+  # by satellites-infra and is NOT touched here.
+  deploy:
+    needs: push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-${{ env.FLY_APP }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-push image to Fly registry
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          flyctl auth docker
+          docker pull ${{ env.REGISTRY }}/${{ github.repository }}:latest
+          docker tag  ${{ env.REGISTRY }}/${{ github.repository }}:latest \
+                      registry.fly.io/${{ env.FLY_APP }}:latest
+          docker push registry.fly.io/${{ env.FLY_APP }}:latest
+
+      - name: Pre-deploy machine check
+        # Force-destroy machines stuck in `replacing` / `destroying` before
+        # rolling out — same guard satellites-infra/fly/deploy.sh runs for
+        # manual deploys. Fly recreates them per min_machines_running.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          stuck=$(flyctl machines list --app ${{ env.FLY_APP }} --json \
+            | jq '[.[] | select(.state == "replacing" or .state == "destroying")] | length')
+          if [ "$stuck" -gt 0 ]; then
+            echo "::warning::Found $stuck stuck machine(s) — forcing cleanup"
+            flyctl machines list --app ${{ env.FLY_APP }} --json \
+              | jq -r '.[] | select(.state == "replacing" or .state == "destroying") | .id' \
+              | xargs -I{} flyctl machines destroy {} --app ${{ env.FLY_APP }} --force
+            sleep 5
+          fi
+
+      - name: Deploy to Fly.io
+        uses: nick-fields/retry@v3
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_wait_seconds: 30
+          command: |
+            flyctl deploy \
+              --app ${{ env.FLY_APP }} \
+              --image registry.fly.io/${{ env.FLY_APP }}:latest \
+              --strategy rolling \
+              --wait-timeout 300 \
+              --yes
