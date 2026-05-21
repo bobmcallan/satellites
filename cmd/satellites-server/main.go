@@ -13,6 +13,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
+	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	_ "github.com/lib/pq"
@@ -70,6 +71,7 @@ func main() {
 	verb.SetWorkspaceStore(wsStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
+	verb.SetStoryStore(story.New(sqlDB))
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
