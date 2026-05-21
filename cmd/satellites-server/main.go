@@ -133,6 +133,35 @@ func main() {
 		arbor.Info("oauth admin emails configured", "count", len(oauthCfg.AdminEmails))
 	}
 
+	// OAuth Authorization Server: signs access tokens for the MCP
+	// surface. JWT secret persists in server_settings so tokens
+	// survive restarts; api-keys remain a parallel valid credential
+	// (the CLI uses an api-key, the MCP SDK uses a JWT).
+	jwtSecret, err := auth.LoadOrCreateJWTSecret(context.Background(), sqlDB)
+	if err != nil {
+		arbor.Fatal("load jwt secret", "err", err)
+	}
+	store.SetJWTSecret(jwtSecret)
+	oauthServer := auth.NewOAuthServer(auth.OAuthServerConfig{
+		JWTSecret:       jwtSecret,
+		AccessTokenTTL:  1 * time.Hour,
+		RefreshTokenTTL: 7 * 24 * time.Hour,
+		CodeTTL:         10 * time.Minute,
+		Store:           auth.NewOAuthStore(sqlDB),
+		DevMode:         cfg.Dev,
+		ResolveSessionUser: func(r *http.Request) string {
+			id, err := sessions.UserID(r)
+			if err != nil {
+				return ""
+			}
+			return id
+		},
+		UserByID: func(ctx context.Context, userID string) (*auth.User, error) {
+			return store.GetUserByID(ctx, userID)
+		},
+	})
+	arbor.Info("oauth authorization server ready")
+
 	handler := server.Build(server.Config{
 		Store:       store,
 		Sessions:    sessions,
@@ -140,6 +169,7 @@ func main() {
 		OAuth:       oauthCfg,
 		Providers:   providers,
 		OAuthStates: auth.NewStateStore(0),
+		OAuthServer: oauthServer,
 	})
 
 	arbor.Info("satellites-server listening", "addr", cfg.Addr)

@@ -27,9 +27,20 @@ func WithUser(ctx context.Context, u *User) context.Context {
 	return context.WithValue(ctx, ctxKey{}, u)
 }
 
-// Middleware authenticates incoming HTTP requests against the api-keys
-// table. On success, attaches the user to the request context. On
-// failure, returns 401.
+// SetJWTSecret installs the OAuth access-token signing secret on the
+// Store. Once set, Middleware accepts JWT bearer tokens minted by the
+// OAuth Authorization Server in addition to api-keys.
+func (s *Store) SetJWTSecret(secret []byte) { s.jwtSecret = secret }
+
+// Middleware authenticates incoming HTTP requests. Accepts two
+// credential shapes on the Authorization: Bearer header:
+//
+//   - JWT — signed by the OAuth Authorization Server; sub claim
+//     resolves to a user row.
+//   - api-key — looked up in the api_keys table by SHA-256 hash.
+//
+// On success, attaches the user to the request context. On failure,
+// returns 401 with WWW-Authenticate pointing at the discovery endpoint.
 //
 // Paths under /oauth/ are skipped — they implement their own auth flow.
 func (s *Store) Middleware(next http.Handler) http.Handler {
@@ -46,9 +57,34 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "missing bearer credential", http.StatusUnauthorized)
 			return
 		}
-		key := strings.TrimPrefix(h, prefix)
+		token := strings.TrimPrefix(h, prefix)
 
-		u, err := s.ValidateKey(r.Context(), key)
+		// JWT path: minted by the OAuth AS. Identified by 3-segment dot
+		// shape and a configured signing secret.
+		if len(s.jwtSecret) > 0 && LooksLikeJWT(token) {
+			claims, err := ValidateJWT(token, s.jwtSecret)
+			if err != nil {
+				setWWWAuthenticate(w, r)
+				http.Error(w, "invalid credential", http.StatusUnauthorized)
+				return
+			}
+			u, err := s.GetUserByID(r.Context(), claims.Sub)
+			if err != nil {
+				// JWT sub doesn't map to a known user — minimal identity
+				// from the claims is still better than failing the
+				// request, since the JWT itself was signature-verified.
+				u = &User{
+					ID:    claims.Sub,
+					Email: claims.Email,
+				}
+			}
+			r = r.WithContext(WithUser(r.Context(), u))
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// api-key path.
+		u, err := s.ValidateKey(r.Context(), token)
 		if err != nil {
 			if errors.Is(err, ErrInvalidKey) {
 				setWWWAuthenticate(w, r)

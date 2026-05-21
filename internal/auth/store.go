@@ -53,7 +53,8 @@ var ErrInvalidKey = errors.New("auth: invalid api key")
 
 // Store wraps DB-backed auth operations.
 type Store struct {
-	DB *sql.DB
+	DB        *sql.DB
+	jwtSecret []byte
 }
 
 // New returns a Store bound to the given database/sql handle.

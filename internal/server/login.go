@@ -109,7 +109,39 @@ func handleLoginPost(w http.ResponseWriter, r *http.Request, cfg Config) {
 	}
 
 	cfg.Sessions.Issue(w, u.ID)
+	if dest := completeMCPSessionIfPresent(w, r, cfg, u.ID); dest != "" {
+		http.Redirect(w, r, dest, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// completeMCPSessionIfPresent checks for the mcp_session_id cookie
+// dropped by OAuthServer.setSessionCookieAndRedirect. When present,
+// completes the OAuth flow (mints a code, deletes the session) and
+// returns the client redirect URL with ?code=…&state=…. Returns "" when
+// no MCP session is bound or completion failed — caller falls back to
+// the regular post-login destination.
+func completeMCPSessionIfPresent(w http.ResponseWriter, r *http.Request, cfg Config, userID string) string {
+	c, err := r.Cookie("mcp_session_id")
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	if cfg.OAuthServer == nil {
+		return ""
+	}
+	redirectURL, err := cfg.OAuthServer.CompleteAuthorization(r.Context(), c.Value, userID)
+	if err != nil {
+		return ""
+	}
+	// Clear the bridge cookie.
+	http.SetCookie(w, &http.Cookie{
+		Name:   "mcp_session_id",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+	return redirectURL
 }
 
 func logoutHandler(cfg Config) http.HandlerFunc {

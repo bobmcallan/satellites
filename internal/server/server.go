@@ -29,6 +29,7 @@ type Config struct {
 	OAuth       auth.OAuthConfig
 	Providers   *auth.ProviderSet
 	OAuthStates *auth.StateStore
+	OAuthServer *auth.OAuthServer
 }
 
 // Build returns the configured root handler.
@@ -53,11 +54,19 @@ func Build(cfg Config) http.Handler {
 	// directly on success.
 	registerOAuthRoutes(mux, cfg)
 
-	// MCP OAuth discovery — public per RFC 8414 / RFC 9728. The /oauth/*
-	// endpoints announced in this metadata land in follow-up PRs; for now
-	// the discovery handshake is what unblocks MCP-SDK clients hitting /mcp.
+	// MCP OAuth discovery — public per RFC 8414 / RFC 9728.
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthorizationServer)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResource)
+
+	// OAuth Authorization Server endpoints (RFC 6749 + 7591 DCR + 7636
+	// PKCE). Public — DCR + authorize + token are unauthenticated by
+	// design; auth happens inside the flow (PKCE on the code exchange,
+	// session cookie on /authorize via the mcp_session_id bridge).
+	if cfg.OAuthServer != nil {
+		mux.HandleFunc("POST /oauth/register", cfg.OAuthServer.HandleRegister)
+		mux.HandleFunc("GET /oauth/authorize", cfg.OAuthServer.HandleAuthorize)
+		mux.HandleFunc("POST /oauth/token", cfg.OAuthServer.HandleToken)
+	}
 
 	// Session-gated UI surfaces.
 	mux.HandleFunc("/", indexHandler(cfg))
