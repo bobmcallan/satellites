@@ -21,8 +21,10 @@ type Store struct {
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
 // Create inserts a new workspace. ownerUserID may be empty for the
-// single-tenant CLI-local case; once membership lands it becomes the
-// authenticated user id.
+// single-tenant CLI-local case. When non-empty, the creator is
+// auto-promoted to admin via a workspace_members row in the same
+// transaction — the substrate guarantee is "every workspace has at
+// least its creator as admin".
 func (s *Store) Create(ctx context.Context, ownerUserID, name string, now time.Time) (Workspace, error) {
 	if name == "" {
 		return Workspace{}, fmt.Errorf("workspace: name required")
@@ -33,11 +35,30 @@ func (s *Store) Create(ctx context.Context, ownerUserID, name string, now time.T
 		owner = sql.NullString{String: ownerUserID, Valid: true}
 	}
 	now = now.UTC()
-	if _, err := s.DB.ExecContext(ctx, `
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
         INSERT INTO workspaces (id, name, owner_user_id, status, is_default, created_at, updated_at)
         VALUES ($1, $2, $3, $4, FALSE, $5, $5)
     `, id, name, owner, StatusActive, now); err != nil {
 		return Workspace{}, fmt.Errorf("workspace: insert: %w", err)
+	}
+	if ownerUserID != "" {
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO workspace_members (workspace_id, user_id, role, added_at, added_by)
+            VALUES ($1, $2, 'admin', $3, $2)
+            ON CONFLICT DO NOTHING
+        `, id, ownerUserID, now); err != nil {
+			return Workspace{}, fmt.Errorf("workspace: seed creator membership: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Workspace{}, fmt.Errorf("workspace: commit: %w", err)
 	}
 	return Workspace{
 		ID:          id,
