@@ -7,12 +7,40 @@ import (
 	"io"
 	"os"
 
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
+// stampCallerUser attaches a caller identity to ctx so verbs that
+// fall back to auth.FromContext (workspace_create, project_create, …)
+// stamp the right owner_user_id when invoked from the CLI.
+//
+// The CLI doesn't authenticate to a server — the operator declares
+// who they are via flag/env. Empty userID is fine; verbs then
+// produce NULL-owner rows as before. This is the bridge until the
+// CLI-talks-to-server path lands.
+func stampCallerUser(ctx context.Context, userID string) context.Context {
+	if userID == "" {
+		return ctx
+	}
+	return auth.WithUser(ctx, &auth.User{ID: userID})
+}
+
+// resolveCallerUserID returns the CLI's caller user id from the
+// --user flag with $SATELLITES_USER_ID as fallback.
+func resolveCallerUserID(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv("SATELLITES_USER_ID")
+}
+
 func init() {
-	var jsonArg string
+	var (
+		jsonArg string
+		userArg string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "exec <verb>",
@@ -41,7 +69,8 @@ callers ultimately hit verb.Dispatch.`,
 				}
 			}
 
-			resp, err := verb.Dispatch(context.Background(), name, req)
+			ctx := stampCallerUser(context.Background(), resolveCallerUserID(userArg))
+			resp, err := verb.Dispatch(ctx, name, req)
 			if err != nil {
 				return err
 			}
@@ -50,5 +79,6 @@ callers ultimately hit verb.Dispatch.`,
 		},
 	}
 	cmd.Flags().StringVar(&jsonArg, "json", "", "JSON request body (alternative to stdin)")
+	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs that record owner_user_id.")
 	register(cmd)
 }
