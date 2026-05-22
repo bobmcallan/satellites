@@ -29,6 +29,7 @@ import (
 // dedicated [auth] section for the api-key.
 type Config struct {
 	ServerURL      string    `toml:"server_url"`
+	ProjectID      string    `toml:"project_id"`
 	RepoPath       string    `toml:"repo_path"`
 	WorktreeRoot   string    `toml:"worktree_root"`
 	LogPath        string    `toml:"log_path"`

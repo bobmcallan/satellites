@@ -23,6 +23,7 @@ func init() {
 	var (
 		apiKey    string
 		serverURL string
+		projectID string
 		dir       string
 		useOAuth  bool
 	)
@@ -30,13 +31,17 @@ func init() {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Bootstrap a project's .satellites/ state directory",
-		Long: `init writes .satellites/satellites.toml with the server URL and
-(optionally) an API key. Idempotent: running twice with the same
-args writes identical bytes.
+		Long: `init writes .satellites/satellites.toml with the server URL,
+(optionally) an API key, and (optionally) a project_id. Idempotent:
+running twice with the same args writes identical bytes.
 
 Auth modes:
-  --api-key <key>   non-interactive; agents + scripts use this
-  --oauth           interactive browser flow (deferred)`,
+  --api-key <key>     non-interactive; agents + scripts use this
+  --oauth             interactive browser flow (deferred)
+
+Operational verbs (story, document, …) require project_id either in
+the TOML or via --project-id at the call site. Resolve a project
+from a git remote with: satellites project match --remote <url>.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if useOAuth {
 				return fmt.Errorf("--oauth client-side flow deferred; use --api-key for now")
@@ -44,11 +49,13 @@ Auth modes:
 			cfg := config.ClientDefaults()
 			cfg.ServerURL = serverURL
 			cfg.APIKey = apiKey
+			cfg.ProjectID = projectID
 			return config.SaveClient(dir, cfg)
 		},
 	}
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key for authenticating against satellites-server")
 	cmd.Flags().StringVar(&serverURL, "server-url", "http://localhost:8080", "satellites-server URL")
+	cmd.Flags().StringVar(&projectID, "project-id", "", "Default project_id for operational verbs (empty if unknown at init time)")
 	cmd.Flags().StringVar(&dir, "dir", ".", "Project root (state dir created as <dir>/.satellites/)")
 	cmd.Flags().BoolVar(&useOAuth, "oauth", false, "Use interactive OAuth flow (deferred)")
 

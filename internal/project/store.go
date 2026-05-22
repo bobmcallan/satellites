@@ -76,6 +76,22 @@ func (s *Store) GetByID(ctx context.Context, id string) (Project, error) {
 	return scanRow(row)
 }
 
+// GetByGitURL canonicalises the input and returns the project whose
+// stored git_url_canonical matches, or ErrNotFound. Empty input is
+// treated as "not found" so callers don't need to guard upstream.
+func (s *Store) GetByGitURL(ctx context.Context, gitURL string) (Project, error) {
+	canon, err := CanonicaliseGitRemote(gitURL)
+	if err != nil {
+		return Project{}, err
+	}
+	if canon == "" {
+		return Project{}, ErrNotFound
+	}
+	row := s.DB.QueryRowContext(ctx,
+		selectColumns+" FROM projects WHERE git_url_canonical = $1", canon)
+	return scanRow(row)
+}
+
 // ListByWorkspace returns every project bound to the given workspace
 // id, newest-first by created_at. Empty workspaceID lists every
 // project across the system (used by admin tooling — guard via

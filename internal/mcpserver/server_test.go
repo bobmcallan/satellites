@@ -30,23 +30,28 @@ func TestServerConstructs(t *testing.T) {
 	}
 }
 
-// TestMCPSurfaceIsMinimal pins the MCP tool surface to the single
-// bootstrap verb. All other verbs are reachable via the satellites CLI
-// once the agent has installed it using the orientation instructions.
-// If this test starts failing, the MCP server has regrown its surface
-// area — confirm intent before relaxing the assertion.
-func TestMCPSurfaceIsMinimal(t *testing.T) {
+// TestMCPSurfaceIsBootstrapOnly pins the MCP tool surface to the
+// bootstrap verbs. document_get returns the install schema; project_match
+// resolves a project_id from the consumer repo's git remote. Every
+// operational verb is reachable via the satellites CLI once the agent
+// has installed it using the orientation instructions. If this test
+// starts failing, the MCP server has regrown its surface area — confirm
+// intent before relaxing the assertion.
+func TestMCPSurfaceIsBootstrapOnly(t *testing.T) {
 	s := New()
 	tools := s.ListTools()
-	if len(tools) != 1 {
+	want := map[string]bool{"document_get": true, "project_match": true}
+	if len(tools) != len(want) {
 		names := make([]string, 0, len(tools))
 		for n := range tools {
 			names = append(names, n)
 		}
-		t.Fatalf("MCP surface should expose exactly 1 tool, got %d: %v", len(tools), names)
+		t.Fatalf("MCP surface should expose exactly %d tools, got %d: %v", len(want), len(tools), names)
 	}
-	if _, ok := tools["document_get"]; !ok {
-		t.Errorf("MCP surface missing document_get; tools = %v", tools)
+	for name := range want {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("MCP surface missing %q; tools = %v", name, tools)
+		}
 	}
 }
 

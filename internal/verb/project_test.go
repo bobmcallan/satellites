@@ -10,7 +10,7 @@ import (
 )
 
 func TestProjectVerbs_Registered(t *testing.T) {
-	want := []string{"project_create", "project_list", "project_get", "project_update"}
+	want := []string{"project_create", "project_list", "project_get", "project_update", "project_match"}
 	for _, name := range want {
 		if Get(name) == nil {
 			t.Errorf("verb %q not registered", name)
@@ -65,5 +65,31 @@ func TestProjectUpdate_RequiresID(t *testing.T) {
 		json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "id required") {
 		t.Fatalf("expected id-required error, got %v", err)
+	}
+}
+
+func TestProjectMatch_StoreNotConfigured(t *testing.T) {
+	prev := projectStore
+	projectStore = nil
+	defer func() { projectStore = prev }()
+
+	_, err := Get("project_match").Invoke(context.Background(),
+		json.RawMessage(`{"git_url":"git@github.com:owner/repo.git"}`))
+	if err == nil || !strings.Contains(err.Error(), "store not configured") {
+		t.Fatalf("expected store-not-configured error, got %v", err)
+	}
+}
+
+func TestProjectMatch_RequiresGitURL(t *testing.T) {
+	prev := projectStore
+	defer func() { projectStore = prev }()
+	projectStore = &project.Store{}
+
+	for _, body := range []string{`{}`, `{"git_url":""}`, `{"git_url":"   "}`} {
+		_, err := Get("project_match").Invoke(context.Background(),
+			json.RawMessage(body))
+		if err == nil || !strings.Contains(err.Error(), "git_url required") {
+			t.Fatalf("body=%s: expected git_url-required error, got %v", body, err)
+		}
 	}
 }

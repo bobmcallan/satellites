@@ -11,12 +11,31 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
+
+// resolveProjectID returns flagValue when set; otherwise the project_id
+// persisted at .satellites/satellites.toml; otherwise "" with a
+// caller-facing error matching the documented contract.
+func resolveProjectID(flagValue, configPath string) (string, error) {
+	if v := strings.TrimSpace(flagValue); v != "" {
+		return v, nil
+	}
+	cfg, _, err := cliconfig.Load(configPath)
+	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
+		return "", err
+	}
+	if v := strings.TrimSpace(cfg.ProjectID); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("error project_id not defined")
+}
 
 func init() {
 	var (
@@ -45,9 +64,11 @@ func newStoryCreateCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "create",
 		Short: "Create a story under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(req.ProjectID) == "" {
-				return fmt.Errorf("--project-id required")
+			pid, err := resolveProjectID(req.ProjectID, *configArg)
+			if err != nil {
+				return err
 			}
+			req.ProjectID = pid
 			if strings.TrimSpace(req.Title) == "" {
 				return fmt.Errorf("--title required")
 			}
@@ -58,7 +79,7 @@ func newStoryCreateCmd(configArg, userArg *string) *cobra.Command {
 			return runStoryVerb(cmd, "story_create", body, *configArg, *userArg)
 		},
 	}
-	cmd.Flags().StringVar(&req.ProjectID, "project-id", "", "Project id (required)")
+	cmd.Flags().StringVar(&req.ProjectID, "project-id", "", "Project id (falls back to project_id in satellites.toml)")
 	cmd.Flags().StringVar(&req.ParentID, "parent-id", "", "Parent story id (optional)")
 	cmd.Flags().StringVar(&req.Title, "title", "", "Story title (required)")
 	cmd.Flags().StringVar(&req.Body, "body", "", "Story body / description")
@@ -76,9 +97,11 @@ func newStoryListCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "list",
 		Short: "List stories under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(req.ProjectID) == "" {
-				return fmt.Errorf("--project-id required")
+			pid, err := resolveProjectID(req.ProjectID, *configArg)
+			if err != nil {
+				return err
 			}
+			req.ProjectID = pid
 			body, err := json.Marshal(req)
 			if err != nil {
 				return err
@@ -86,7 +109,8 @@ func newStoryListCmd(configArg, userArg *string) *cobra.Command {
 			return runStoryVerb(cmd, "story_list", body, *configArg, *userArg)
 		},
 	}
-	cmd.Flags().StringVar(&req.ProjectID, "project-id", "", "Project id (required)")
+	cmd.Flags().StringVar(&req.ProjectID, "project-id", "", "Project id (falls back to project_id in satellites.toml)")
+	cmd.Flags().StringSliceVar(&req.Tags, "tag", nil, "Filter to stories carrying ALL listed tags (repeatable)")
 	return cmd
 }
 

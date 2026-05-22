@@ -51,6 +51,17 @@ type ProjectUpdateRequest struct {
 	GitURL      *string `json:"git_url,omitempty"`
 }
 
+type ProjectMatchRequest struct {
+	GitURL string `json:"git_url"`
+}
+
+type ProjectMatchResponse struct {
+	ProjectID   string `json:"project_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	MatchedURL  string `json:"matched_url"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "project_create",
@@ -71,6 +82,11 @@ func init() {
 		Name:        "project_update",
 		Description: "Patch mutable fields on a project. workspace_id is immutable here.",
 		Invoke:      invokeProjectUpdate,
+	})
+	Register(&Verb{
+		Name:        "project_match",
+		Description: "Resolve a project_id from any-form git remote URL. Bootstrap surface.",
+		Invoke:      invokeProjectMatch,
 	})
 }
 
@@ -181,6 +197,37 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 		return nil, err
 	}
 	return json.Marshal(p)
+}
+
+func invokeProjectMatch(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if projectStore == nil {
+		return nil, fmt.Errorf("project_match: store not configured")
+	}
+	var req ProjectMatchRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_match: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.GitURL) == "" {
+		return nil, fmt.Errorf("project_match: git_url required")
+	}
+	p, err := projectStore.GetByGitURL(ctx, req.GitURL)
+	if err != nil {
+		if errors.Is(err, project.ErrInvalidGitRemote) {
+			return nil, fmt.Errorf("project_match: git_url_invalid: %w", err)
+		}
+		if errors.Is(err, project.ErrNotFound) {
+			return nil, fmt.Errorf("project_match: not_found")
+		}
+		return nil, err
+	}
+	return json.Marshal(ProjectMatchResponse{
+		ProjectID:   p.ID,
+		WorkspaceID: p.WorkspaceID,
+		Name:        p.Name,
+		MatchedURL:  p.GitURLCanonical,
+	})
 }
 
 // Compile-time reference to keep workspace import meaningful even if

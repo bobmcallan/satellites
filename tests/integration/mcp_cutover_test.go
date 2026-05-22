@@ -60,24 +60,29 @@ func TestMCPCutover(t *testing.T) {
 		},
 	)
 
-	t.Run("MCP surface exposes only document_get", func(t *testing.T) {
+	t.Run("MCP surface exposes the bootstrap verbs", func(t *testing.T) {
 		s := mcpserver.New()
 		tools := s.ListTools()
-		if len(tools) != 1 {
-			t.Fatalf("expected 1 tool, got %d: %v", len(tools), tools)
+		want := []string{"document_get", "project_match"}
+		if len(tools) != len(want) {
+			t.Fatalf("expected %d tools, got %d: %v", len(want), len(tools), tools)
 		}
-		if _, ok := tools["document_get"]; !ok {
-			t.Fatalf("missing document_get; tools=%v", tools)
+		for _, name := range want {
+			if _, ok := tools[name]; !ok {
+				t.Fatalf("missing %q; tools=%v", name, tools)
+			}
 		}
 		if _, ok := tools["satellites_init"]; ok {
 			t.Fatalf("satellites_init must not be exposed after cutover")
 		}
 	})
 
-	t.Run("orientation instructions reference document_get only", func(t *testing.T) {
+	t.Run("orientation instructions reference the bootstrap verbs", func(t *testing.T) {
 		body := string(seed.MCPLoadContextMarkdown())
-		if !strings.Contains(body, "document_get") {
-			t.Fatal("load context missing document_get")
+		for _, want := range []string{"document_get", "project_match"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("load context missing %q", want)
+			}
 		}
 		if strings.Contains(body, "satellites_init") {
 			t.Fatalf("load context still references satellites_init")

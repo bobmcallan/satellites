@@ -33,7 +33,8 @@ type StoryCreateRequest struct {
 }
 
 type StoryListRequest struct {
-	ProjectID string `json:"project_id"`
+	ProjectID string   `json:"project_id"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 type StoryListResponse struct {
@@ -125,7 +126,7 @@ func invokeStoryList(ctx context.Context, raw json.RawMessage) (json.RawMessage,
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return nil, fmt.Errorf("story_list: project_id required")
 	}
-	ss, err := storyStore.ListByProject(ctx, req.ProjectID)
+	ss, err := storyStore.ListByProject(ctx, req.ProjectID, req.Tags)
 	if err != nil {
 		return nil, err
 	}

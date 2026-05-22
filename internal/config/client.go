@@ -12,9 +12,16 @@ import (
 //
 // File: .satellites/satellites.toml (colocated under the consumer
 // project root). Env overrides applied last.
+//
+// ProjectID binds the CLI to a specific project_id on the server.
+// Operational verbs (story_*, document_*, …) read this when no
+// explicit --project-id flag is supplied. The agent populates it on
+// bootstrap by calling project_match against the consumer repo's git
+// remote.
 type Client struct {
 	ServerURL string    `toml:"server_url"`
 	APIKey    string    `toml:"api_key,omitempty"`
+	ProjectID string    `toml:"project_id,omitempty"`
 	Log       LogConfig `toml:"log"`
 }
 
@@ -70,6 +77,9 @@ func (c *Client) applyClientEnv() {
 	}
 	if v := os.Getenv("SATELLITES_API_KEY"); v != "" {
 		c.APIKey = v
+	}
+	if v := os.Getenv("SATELLITES_PROJECT_ID"); v != "" {
+		c.ProjectID = v
 	}
 	if v := os.Getenv("SATELLITES_LOG_LEVEL"); v != "" {
 		c.Log.Level = v

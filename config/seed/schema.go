@@ -22,10 +22,11 @@ type InstallSchema struct {
 	Install           InstallBlock       `yaml:"install"`
 }
 
-// InstallBlock carries the templated install URLs. Templates render
-// against the server's system-variables resolver before YAML decoding
-// ({{cli_version}}, {{os}}, {{arch}}).
+// InstallBlock carries the rendered install descriptor. The server
+// substitutes {{cli_version}}, {{os}}, {{arch}} before returning the
+// document; the values reaching the consumer are concrete strings.
 type InstallBlock struct {
+	CLIVersion  string `yaml:"cli_version"  json:"cli_version,omitempty"`
 	DownloadURL string `yaml:"download_url" json:"download_url,omitempty"`
 	SHA256URL   string `yaml:"sha256_url"   json:"sha256_url,omitempty"`
 }
@@ -33,6 +34,7 @@ type InstallBlock struct {
 // DefaultConfig mirrors the canonical satellites.toml defaults.
 type DefaultConfig struct {
 	ServerURL      string    `yaml:"server_url"      json:"server_url,omitempty"`
+	ProjectID      string    `yaml:"project_id"      json:"project_id,omitempty"`
 	RepoPath       string    `yaml:"repo_path"       json:"repo_path"`
 	WorktreeRoot   string    `yaml:"worktree_root"   json:"worktree_root"`
 	LogPath        string    `yaml:"log_path"        json:"log_path"`
@@ -41,8 +43,8 @@ type DefaultConfig struct {
 }
 
 // AuthBlock mirrors the satellites.toml `[auth]` section. The schema
-// ships token empty; the bootstrap flow fills it from
-// auth_bootstrap.api_key after the operator authenticates.
+// ships token empty; the auth_bootstrap flow fills it after the
+// operator authenticates.
 type AuthBlock struct {
 	Token string `yaml:"token" json:"token"`
 }

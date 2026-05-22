@@ -16,11 +16,13 @@ var ErrInvalidGitRemote = errors.New("project: invalid git remote URL")
 // trailing `.git`, no trailing slash.
 //
 // Supported inputs (round-trip to the same canonical):
-//   - SSH:    `git@github.com:owner/repo.git`
-//   - SSH:    `ssh://git@github.com/owner/repo.git`
-//   - HTTPS:  `https://github.com/owner/repo.git/`
-//   - HTTPS:  `HTTPS://GitHub.com/owner/repo`
-//   - Git:    `git://github.com/owner/repo.git`
+//   - SSH:        `git@github.com:owner/repo.git`
+//   - SSH:        `ssh://git@github.com/owner/repo.git`
+//   - HTTPS:      `https://github.com/owner/repo.git/`
+//   - HTTPS:      `HTTPS://GitHub.com/owner/repo`
+//   - Git:        `git://github.com/owner/repo.git`
+//   - Scoped:     `<scope>:github.com/owner/repo`   (e.g. `bobmcallan:github.com/owner/repo`)
+//   - Bare:       `github.com/owner/repo`
 //
 // Empty input returns ("", nil) — callers decide whether empty is
 // allowed (Create accepts it; project_update rejects it on explicit
@@ -52,7 +54,15 @@ func CanonicaliseGitRemote(input string) (string, error) {
 		case strings.HasPrefix(strings.ToLower(s), "http://"):
 			s = "https://" + s[len("http://"):]
 		default:
-			return "", ErrInvalidGitRemote
+			// Scoped (`<scope>:<host>/<owner>/<repo>`) and bare
+			// (`<host>/<owner>/<repo>`) inputs land here. The scope
+			// segment (if present) carries no semantic information —
+			// it's an upstream artifact (org prefix, user namespace,
+			// editor decoration) we strip to recover the host/path.
+			if colon := strings.Index(s, ":"); colon > 0 && !strings.Contains(s[:colon], "/") {
+				s = s[colon+1:]
+			}
+			s = "https://" + s
 		}
 	}
 

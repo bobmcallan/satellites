@@ -96,9 +96,16 @@ func (s *Store) GetByID(ctx context.Context, id string) (Story, error) {
 
 // ListByProject returns every story bound to the given project_id,
 // ordered status (in-progress first) then priority then most-recent.
-func (s *Store) ListByProject(ctx context.Context, projectID string) ([]Story, error) {
-	q := selectColumns + ` FROM stories
-        WHERE project_id = $1
+// When tags is non-empty the result is filtered to stories carrying
+// ALL listed tags (AND semantics via Postgres `@>`).
+func (s *Store) ListByProject(ctx context.Context, projectID string, tags []string) ([]Story, error) {
+	q := selectColumns + ` FROM stories WHERE project_id = $1`
+	args := []any{projectID}
+	if len(tags) > 0 {
+		q += ` AND tags @> $2`
+		args = append(args, pq.Array(tags))
+	}
+	q += `
         ORDER BY
             CASE status
                 WHEN 'in_progress' THEN 0
@@ -117,7 +124,7 @@ func (s *Store) ListByProject(ctx context.Context, projectID string) ([]Story, e
                 ELSE 4
             END,
             updated_at DESC, id`
-	rows, err := s.DB.QueryContext(ctx, q, projectID)
+	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("story: list: %w", err)
 	}

@@ -27,6 +27,16 @@ func TestCanonicaliseGitRemote(t *testing.T) {
 		{"HTTPS://GitHub.com/bobmcallan/satellites", "https://github.com/bobmcallan/satellites", false},
 		{"http://gitlab.example.com/group/repo.git", "https://gitlab.example.com/group/repo", false},
 
+		// Scoped (<scope>:<host>/<owner>/<repo>) — agents see these
+		// when an upstream tool prefixes the remote with a user or
+		// org namespace.
+		{"bobmcallan:github.com/bobmcallan/satellites", "https://github.com/bobmcallan/satellites", false},
+		{"bobmcallan:github.com/bobmcallan/satellites.git", "https://github.com/bobmcallan/satellites", false},
+
+		// Bare (<host>/<owner>/<repo>) — no scheme, no scope.
+		{"github.com/bobmcallan/satellites", "https://github.com/bobmcallan/satellites", false},
+		{"github.com/bobmcallan/satellites.git", "https://github.com/bobmcallan/satellites", false},
+
 		// Errors
 		{"not-a-url", "", true},
 		{"git@:owner/repo", "", true},
