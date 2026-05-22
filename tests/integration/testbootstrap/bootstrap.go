@@ -98,7 +98,7 @@ func Reset(t *testing.T, env *Env) {
 	t.Helper()
 	if _, err := env.DB.Exec(`
         TRUNCATE stories, tools, reviews, evidence,
-                 documents, document_versions
+                 documents, document_versions, variables
         RESTART IDENTITY CASCADE
     `); err != nil {
 		t.Fatalf("reset tables: %v", err)

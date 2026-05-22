@@ -16,6 +16,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/story"
+	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	_ "github.com/lib/pq"
@@ -92,6 +93,8 @@ func main() {
 		}
 	}
 	arbor.Info("system documents seeded")
+
+	verb.SetVariableStore(variable.New(sqlDB))
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
