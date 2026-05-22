@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
@@ -59,11 +60,58 @@ type DocumentGetResponse struct {
 	ResolvedScope string             `json:"resolved_scope"`
 }
 
+// DocumentUpsertRequest is the input shape for document_upsert. Every
+// call creates a new version row; the store layer never updates in
+// place. scope=system is rejected (system-scope writes go through the
+// internal seed path, not user-facing verbs).
+type DocumentUpsertRequest struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	Body        string `json:"body"`
+}
+
+// DocumentUpsertResponse mirrors document_get's shape so callers can
+// reuse parse paths: the new version row is returned alongside the
+// document pointer.
+type DocumentUpsertResponse struct {
+	Document document.Document `json:"document"`
+	Version  document.Version  `json:"version"`
+}
+
+// DocumentDeleteRequest is the input shape for document_delete. Same
+// addressing model as upsert; delete is soft (appends a tombstone
+// version) so version=all preserves the chain.
+type DocumentDeleteRequest struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+}
+
+// DocumentDeleteResponse returns the tombstone version that was
+// appended.
+type DocumentDeleteResponse struct {
+	Document document.Document `json:"document"`
+	Version  document.Version  `json:"version"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "document_get",
 		Description: "Fetch a document by (scope, name) with version selection + inherit cascade.",
 		Invoke:      invokeDocumentGet,
+	})
+	Register(&Verb{
+		Name:        "document_upsert",
+		Description: "Append a new version to a workspace/project-scoped document.",
+		Invoke:      invokeDocumentUpsert,
+	})
+	Register(&Verb{
+		Name:        "document_delete",
+		Description: "Soft-delete a workspace/project-scoped document by appending a tombstone version.",
+		Invoke:      invokeDocumentDelete,
 	})
 }
 
@@ -211,6 +259,112 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 		return err
 	}
 	return nil
+}
+
+func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if documentStore == nil {
+		return nil, fmt.Errorf("document_upsert: store not configured")
+	}
+	var req DocumentUpsertRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("document_upsert: %w: %v", ErrBadRequest, err)
+		}
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: name required", ErrBadRequest)
+	}
+	scope, err := parseScope(req.Scope)
+	if err != nil {
+		return nil, err
+	}
+	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if err := authorizeWrite(ctx, key); err != nil {
+		return nil, err
+	}
+	doc, v, err := documentStore.Upsert(ctx, document.UpsertInput{
+		Key:       key,
+		Body:      req.Body,
+		CreatedBy: callerUserID(ctx),
+	}, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
+	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
+}
+
+func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if documentStore == nil {
+		return nil, fmt.Errorf("document_delete: store not configured")
+	}
+	var req DocumentDeleteRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("document_delete: %w: %v", ErrBadRequest, err)
+		}
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, fmt.Errorf("document_delete: %w: name required", ErrBadRequest)
+	}
+	scope, err := parseScope(req.Scope)
+	if err != nil {
+		return nil, err
+	}
+	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if err := authorizeWrite(ctx, key); err != nil {
+		return nil, err
+	}
+	doc, v, err := documentStore.Delete(ctx, key, callerUserID(ctx), false, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_delete")
+	}
+	return json.Marshal(DocumentDeleteResponse{Document: doc, Version: v})
+}
+
+// authorizeWrite is the write-path twin of authorizeRead: system writes
+// from user-facing verbs are flatly rejected, workspace/project writes
+// require workspace membership. CLI-local in-process invocations
+// (authStore unwired) skip the membership check; the store-layer
+// ErrScopeReadonly still trips for scope=system regardless.
+func authorizeWrite(ctx context.Context, key document.Key) error {
+	if key.Scope == document.ScopeSystem {
+		return fmt.Errorf("document write: %w: system scope is read-only via verbs", ErrForbidden)
+	}
+	if authStore == nil {
+		return nil
+	}
+	u := auth.FromContext(ctx)
+	if u == nil {
+		return fmt.Errorf("document write: %w: bearer required for %s scope", ErrUnauthorized, key.Scope)
+	}
+	if workspaceStore == nil {
+		return nil
+	}
+	if key.WorkspaceID == "" {
+		return fmt.Errorf("document write: %w: %s scope requires workspace_id", ErrBadRequest, key.Scope)
+	}
+	if _, err := workspaceStore.GetRole(ctx, key.WorkspaceID, u.ID); err != nil {
+		if errors.Is(err, workspace.ErrMemberNotFound) {
+			return fmt.Errorf("document write: %w: user not a member of workspace %s", ErrForbidden, key.WorkspaceID)
+		}
+		return err
+	}
+	return nil
+}
+
+// mapStoreError translates store-layer sentinels into verb-layer ones
+// so the exec transport can map to canonical HTTP statuses.
+func mapStoreError(err error, prefix string) error {
+	switch {
+	case errors.Is(err, document.ErrScopeReadonly):
+		return fmt.Errorf("%s: %w: %v", prefix, ErrForbidden, err)
+	case errors.Is(err, document.ErrScopeMismatch):
+		return fmt.Errorf("%s: %w: %v", prefix, ErrBadRequest, err)
+	case errors.Is(err, document.ErrNotFound):
+		return fmt.Errorf("%s: %w: %v", prefix, ErrNotFound, err)
+	default:
+		return err
+	}
 }
 
 func marshalDocumentGet(res document.GetResult, resolvedScope document.Scope) (json.RawMessage, error) {

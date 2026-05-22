@@ -10,9 +10,11 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
-func TestDocumentGet_Registered(t *testing.T) {
-	if Get("document_get") == nil {
-		t.Fatal("document_get not registered")
+func TestDocumentVerbs_Registered(t *testing.T) {
+	for _, name := range []string{"document_get", "document_upsert", "document_delete"} {
+		if Get(name) == nil {
+			t.Errorf("verb %q not registered", name)
+		}
 	}
 }
 
@@ -96,6 +98,28 @@ func TestBuildResolutionChain(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDocumentUpsert_RejectsSystem(t *testing.T) {
+	prev := documentStore
+	documentStore = &document.Store{}
+	defer func() { documentStore = prev }()
+	_, err := Get("document_upsert").Invoke(context.Background(),
+		json.RawMessage(`{"name":"x","scope":"system","body":"y"}`))
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestDocumentDelete_RejectsSystem(t *testing.T) {
+	prev := documentStore
+	documentStore = &document.Store{}
+	defer func() { documentStore = prev }()
+	_, err := Get("document_delete").Invoke(context.Background(),
+		json.RawMessage(`{"name":"x","scope":"system"}`))
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
 }
 
