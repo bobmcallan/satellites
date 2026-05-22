@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/story"
@@ -72,6 +74,24 @@ func main() {
 
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetStoryStore(story.New(sqlDB))
+
+	// Document substrate: wire the store + seed the embedded system
+	// artifacts. SeedSystem is idempotent — a no-op when the embedded
+	// markdown matches the latest active version on disk.
+	docStore := document.New(sqlDB)
+	verb.SetDocumentStore(docStore)
+	for _, sd := range []struct {
+		name string
+		body []byte
+	}{
+		{"satellites_client_install", seed.ClientInstallMarkdown()},
+		{"satellites_mcp_load_context", seed.MCPLoadContextMarkdown()},
+	} {
+		if err := document.SeedSystem(context.Background(), docStore, sd.name, string(sd.body), "system:seed", time.Now().UTC()); err != nil {
+			arbor.Fatal("seed system document", "name", sd.name, "err", err)
+		}
+	}
+	arbor.Info("system documents seeded")
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
