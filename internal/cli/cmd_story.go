@@ -21,18 +21,22 @@ import (
 )
 
 // resolveProjectID returns flagValue when set; otherwise the project_id
-// persisted at .satellites/satellites.toml; otherwise "" with a
-// caller-facing error matching the documented contract.
-func resolveProjectID(flagValue, configPath string) (string, error) {
+// persisted at .satellites/satellites.toml; otherwise attempts a
+// self-heal (git remote → project_match → TOML write) before
+// surfacing the documented "project_id not defined" error.
+func resolveProjectID(flagValue, configPath, userArg string) (string, error) {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return v, nil
 	}
-	cfg, _, err := cliconfig.Load(configPath)
+	cfg, resolvedPath, err := cliconfig.Load(configPath)
 	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
 		return "", err
 	}
 	if v := strings.TrimSpace(cfg.ProjectID); v != "" {
 		return v, nil
+	}
+	if healed, healErr := selfHealProjectID(context.Background(), cfg, resolvedPath, userArg); healErr == nil {
+		return healed, nil
 	}
 	return "", fmt.Errorf("error project_id not defined")
 }
@@ -64,7 +68,7 @@ func newStoryCreateCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "create",
 		Short: "Create a story under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, err := resolveProjectID(req.ProjectID, *configArg)
+			pid, err := resolveProjectID(req.ProjectID, *configArg, *userArg)
 			if err != nil {
 				return err
 			}
@@ -97,7 +101,7 @@ func newStoryListCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "list",
 		Short: "List stories under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, err := resolveProjectID(req.ProjectID, *configArg)
+			pid, err := resolveProjectID(req.ProjectID, *configArg, *userArg)
 			if err != nil {
 				return err
 			}

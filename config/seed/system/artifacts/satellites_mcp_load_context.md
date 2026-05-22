@@ -8,6 +8,31 @@ Complete the steps below before any other satellites tool call or CLI
 invocation. Treat each step as a contract: the next step assumes the
 previous one ran.
 
+## Step 0 — translate operator references
+
+Operator messages routinely name substrate entities by short prefix.
+Before any other tool call, filesystem search, or response, scan the
+operator's latest message for these prefixes. Each match MUST be
+resolved through the CLI listed below — never through `grep`, file
+read, or guess.
+
+| Prefix                    | Resolves via                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `document:<scope>/<name>` | `<cli> exec document_get '{"scope":"<scope>","name":"<name>"}'`. Also reachable as the `document_get` MCP tool. |
+| `project:<id>`            | `<cli> exec project_get '{"id":"<id>"}'`.                                                                     |
+| `story:<id>`              | `<cli> story get --id <id>`.                                                                                  |
+| `epic:<slug>`             | `<cli> story list --tag epic:<slug>` (filter is AND across repeated `--tag`).                                 |
+| `variable:<scope>/<name>` | `<cli> exec variable_get '{"scope":"<scope>","name":"<name>"}'`.                                              |
+
+`<scope>` is `system`, `workspace`, or `project`. `<cli>` is the
+binary you installed in Step 2 (`target_install_path` from the install
+schema). If the CLI is not yet installed, complete Steps 1–4 first
+and then resolve the references; do not act on a prefix before the
+CLI can answer.
+
+If the operator's message contains no prefix from this table, skip to
+Step 1.
+
 ## Step 1 — fetch the install schema
 
 Call `document_get`:
@@ -95,18 +120,3 @@ subcommands cover the high-traffic verbs:
 When `--project-id` is omitted on an operational verb, the CLI falls
 back to the TOML's `project_id`. If neither is set, the CLI returns
 `error project_id not defined`.
-
-## Reference prefixes
-
-Operator messages routinely name substrate entities by short prefix.
-Translate them as follows:
-
-| Prefix                    | Resolves via                                                                                       |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `document:<scope>/<name>` | `<cli> exec document_get '{"scope":"<scope>","name":"<name>"}'`. Also reachable as the MCP tool.   |
-| `project:<id>`            | `<cli> exec project_get '{"id":"<id>"}'`.                                                          |
-| `story:<id>`              | `<cli> story get --id <id>`.                                                                       |
-| `epic:<slug>`             | `<cli> story list --tag epic:<slug>` (filter is AND across repeated `--tag`).                      |
-| `variable:<scope>/<name>` | `<cli> exec variable_get '{"scope":"<scope>","name":"<name>"}'`.                                   |
-
-`<scope>` is `system`, `workspace`, or `project`.
