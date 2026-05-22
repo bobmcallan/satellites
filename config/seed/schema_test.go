@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestClientInstallSchema_FrontmatterPopulated(t *testing.T) {
-	s, err := ClientInstallSchema()
+func TestParseFrontmatter_EmbeddedInstallArtifact(t *testing.T) {
+	s, err := ParseFrontmatter(ClientInstallMarkdown())
 	if err != nil {
-		t.Fatalf("ClientInstallSchema: %v", err)
+		t.Fatalf("ParseFrontmatter: %v", err)
 	}
 	if s.TargetInstallPath == "" {
 		t.Error("target_install_path empty")
