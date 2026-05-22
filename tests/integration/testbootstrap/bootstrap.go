@@ -96,7 +96,11 @@ func SetUp(t *testing.T) *Env {
 // bypasses row-level triggers, so it's the supported reset path.
 func Reset(t *testing.T, env *Env) {
 	t.Helper()
-	if _, err := env.DB.Exec(`TRUNCATE stories, tools, reviews, evidence RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := env.DB.Exec(`
+        TRUNCATE stories, tools, reviews, evidence,
+                 documents, document_versions
+        RESTART IDENTITY CASCADE
+    `); err != nil {
 		t.Fatalf("reset tables: %v", err)
 	}
 }
