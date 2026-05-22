@@ -1,22 +1,15 @@
-// Package satellitesinit parses the embedded install-schema markdown
-// artifact (config/seed/system/artifacts/satellites_client_install.md)
-// into a typed schema the satellites_init verb returns on the wire.
-//
-// The markdown is shipped inside the satellites-server binary via
-// //go:embed (see embed.go). Operators edit the frontmatter + rebuild
-// to flip a default. Once the document store lands, the same file
-// becomes the seed source for a DB-stored row — same struct shape, two
-// resolution paths.
-package satellitesinit
+package seed
 
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-// InstallSchema is the typed shape of the artifact's YAML frontmatter.
+// InstallSchema is the typed shape of the install-schema artifact's
+// YAML frontmatter (config/seed/system/artifacts/satellites_client_install.md).
 // Field tags use the YAML key names that appear in the markdown source;
 // the satellites_init verb re-marshals into the JSON wire shape.
 type InstallSchema struct {
@@ -62,21 +55,37 @@ func ParseFrontmatter(md []byte) (InstallSchema, error) {
 	const delim = "---"
 	trim := bytes.TrimLeft(md, "\n \t\r")
 	if !bytes.HasPrefix(trim, []byte(delim)) {
-		return InstallSchema{}, fmt.Errorf("satellitesinit: missing opening --- delimiter")
+		return InstallSchema{}, fmt.Errorf("seed: missing opening --- delimiter")
 	}
 	rest := trim[len(delim):]
-	// First newline after the opening delimiter.
 	if i := bytes.IndexByte(rest, '\n'); i >= 0 {
 		rest = rest[i+1:]
 	}
 	end := bytes.Index(rest, []byte("\n"+delim))
 	if end < 0 {
-		return InstallSchema{}, fmt.Errorf("satellitesinit: missing closing --- delimiter")
+		return InstallSchema{}, fmt.Errorf("seed: missing closing --- delimiter")
 	}
 	fm := rest[:end]
 	var schema InstallSchema
 	if err := yaml.Unmarshal(fm, &schema); err != nil {
-		return InstallSchema{}, fmt.Errorf("satellitesinit: parse frontmatter: %w", err)
+		return InstallSchema{}, fmt.Errorf("seed: parse frontmatter: %w", err)
 	}
 	return schema, nil
+}
+
+var (
+	parseOnce sync.Once
+	parsed    InstallSchema
+	parseErr  error
+)
+
+// ClientInstallSchema returns the InstallSchema parsed from the
+// install-schema artifact. Parsed lazily and cached for the process
+// lifetime — the markdown bytes are immutable for a given binary, so
+// re-parsing on every call would be pure overhead.
+func ClientInstallSchema() (InstallSchema, error) {
+	parseOnce.Do(func() {
+		parsed, parseErr = ParseFrontmatter(ClientInstallMarkdown())
+	})
+	return parsed, parseErr
 }

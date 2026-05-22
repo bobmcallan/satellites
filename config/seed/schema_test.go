@@ -1,14 +1,14 @@
-package satellitesinit
+package seed
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestEmbedded_FrontmatterPopulated(t *testing.T) {
-	s, err := Embedded()
+func TestClientInstallSchema_FrontmatterPopulated(t *testing.T) {
+	s, err := ClientInstallSchema()
 	if err != nil {
-		t.Fatalf("Embedded: %v", err)
+		t.Fatalf("ClientInstallSchema: %v", err)
 	}
 	if s.TargetInstallPath == "" {
 		t.Error("target_install_path empty")

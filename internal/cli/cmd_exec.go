@@ -3,14 +3,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/bobmcallan/satellites/internal/auth"
-	"github.com/bobmcallan/satellites/internal/cliconfig"
-	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
@@ -73,23 +70,7 @@ found, the verb is dispatched in-process against the local registry.`,
 				}
 			}
 
-			// Remote dispatch when the config is present + complete.
-			cfg, _, err := cliconfig.Load(configArg)
-			switch {
-			case err == nil && cfg.IsConfigured():
-				resp, err := httpDispatch(cfg, name, req)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), string(resp))
-				return nil
-			case err != nil && !errors.Is(err, cliconfig.ErrNotFound):
-				return err
-			}
-
-			// In-process fallback (no config or incomplete config).
-			ctx := stampCallerUser(context.Background(), resolveCallerUserID(userArg))
-			resp, err := verb.Dispatch(ctx, name, req)
+			resp, err := dispatchVerb(context.Background(), name, req, configArg, userArg)
 			if err != nil {
 				return err
 			}

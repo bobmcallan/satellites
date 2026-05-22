@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/auth"
-	"github.com/bobmcallan/satellites/internal/satellitesinit"
 )
 
 // authStore is set by the server at boot via SetAuthStore. Verbs that
@@ -32,12 +32,12 @@ type SatellitesInitRequest struct {
 
 // SatellitesInitResponse is the install payload returned by the verb.
 type SatellitesInitResponse struct {
-	State             string                       `json:"state"`
-	Install           *InstallInfo                 `json:"install,omitempty"`
-	TargetInstallPath string                       `json:"target_install_path"`
-	TargetConfigPath  string                       `json:"target_config_path"`
-	DefaultConfig     satellitesinit.DefaultConfig `json:"default_config"`
-	AuthBootstrap     *AuthBootstrap               `json:"auth_bootstrap,omitempty"`
+	State             string             `json:"state"`
+	Install           *InstallInfo       `json:"install,omitempty"`
+	TargetInstallPath string             `json:"target_install_path"`
+	TargetConfigPath  string             `json:"target_config_path"`
+	DefaultConfig     seed.DefaultConfig `json:"default_config"`
+	AuthBootstrap     *AuthBootstrap     `json:"auth_bootstrap,omitempty"`
 }
 
 // InstallInfo carries download + integrity info for the platform binary.
@@ -60,7 +60,7 @@ type AuthBootstrap struct {
 // releaseBaseURL points at GitHub's "latest release" alias so this
 // verb keeps working across tag pushes without code changes. The
 // install/config paths now come from the embedded install-schema
-// markdown via satellitesinit.Embedded().
+// markdown via seed.ClientInstallSchema().
 const releaseBaseURL = "https://github.com/bobmcallan/satellites/releases/latest/download"
 
 func init() {
@@ -85,7 +85,7 @@ func invokeSatellitesInit(ctx context.Context, raw json.RawMessage) (json.RawMes
 		req.Arch = runtime.GOARCH
 	}
 
-	schema, err := satellitesinit.Embedded()
+	schema, err := seed.ClientInstallSchema()
 	if err != nil {
 		return nil, fmt.Errorf("satellites_init: install schema: %w", err)
 	}
@@ -118,7 +118,7 @@ func computeState(currentVersion, serverVersion string) string {
 	}
 }
 
-func buildAuthBootstrap(ctx context.Context, req SatellitesInitRequest, schemaAuth satellitesinit.AuthBootstrapBlock) *AuthBootstrap {
+func buildAuthBootstrap(ctx context.Context, req SatellitesInitRequest, schemaAuth seed.AuthBootstrapBlock) *AuthBootstrap {
 	// loginFallback is the prose-driven shape from the embedded
 	// install schema. Returned when the caller is unauthenticated
 	// (CLI-local or anonymous MCP session) or when api-key minting
