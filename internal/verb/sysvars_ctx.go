@@ -69,11 +69,10 @@ func CurrentVersionFromContext(ctx context.Context) string {
 	return ""
 }
 
-// ComputeInstallState mirrors the satellites_init computeState rule:
-// empty current_version → install_required; matching → up_to_date;
-// otherwise update_available. Exposed for the system-variables
-// resolver so the `state` placeholder renders coherently from any
-// caller surface.
+// ComputeInstallState is the install-state rule: empty
+// current_version → install_required; matching → up_to_date; otherwise
+// update_available. Exposed for the system-variables resolver so the
+// `{{state}}` placeholder renders coherently from any caller surface.
 func ComputeInstallState(currentVersion, serverCLIVersion string) string {
 	switch {
 	case currentVersion == "":

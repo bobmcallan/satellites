@@ -77,3 +77,17 @@ Once up:
 curl -X POST http://localhost:8080/mcp \
      -H 'Authorization: Bearer sk_dev_admin' -d '{}'
 ```
+
+## Documents-as-substrate
+
+Operator-editable artifacts (install schemas, principles, runbooks,
+rubrics) live as **documents** in the store rather than as bespoke
+typed verbs. Documents are scoped (`system`, `workspace`, `project`)
+and versioned (every upsert appends a new row, never mutates). Sibling
+**variables** carry name/value pairs in the same scope model, and
+`document_get` substitutes `{{name}}` placeholders against a layered
+resolver: system-computed variables (non-overridable: `version`,
+`cli_version`, `os`, `arch`, `server_url`, `state`, `current_version`)
+take precedence, then project, then workspace. The MCP server exposes
+exactly one tool — `document_get` — which is enough to bootstrap a CLI
+client; everything else is dispatched through that CLI.

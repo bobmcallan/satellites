@@ -19,18 +19,11 @@ install:
   download_url: https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}
   sha256_url:   https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}.sha256
 ---
-# satellites_init · install schema
+# satellites · install schema
 
-This artifact is the **canonical, operator-editable source of truth**
-for the install schema the `satellites_init` verb returns. The schema
-describes where the consumer project drops the `satellites` CLI binary,
-where its TOML config lives, the install URLs the agent fetches, and
-the bootstrap auth flow the operator runs after the binary lands.
-
-Runtime values come from the **frontmatter** above, not the body. The
-file is seeded into the document store at server boot as a
-scope=system document; templating in the `install.*` fields renders
-against the server's system variables at retrieval time.
+The frontmatter is the operator-editable contract `document_get` returns
+to MCP clients bootstrapping the CLI. Templated `install.*` fields
+render against the server's system variables at retrieval time.
 
 ## Fields
 

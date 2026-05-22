@@ -31,7 +31,12 @@ var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 // orientation instructions. Keeping the MCP surface minimal avoids
 // duplicating the verb catalog into the agent's tool list — the CLI is
 // the primary client.
-const bootstrapVerb = "satellites_init"
+//
+// document_get is the single MCP tool. The load context instructs the
+// agent to call it with name=satellites_client_install, scope=system
+// to obtain the install schema (templated install URLs, target paths,
+// TOML defaults, bootstrap-auth flow).
+const bootstrapVerb = "document_get"
 
 // New returns a configured *mcpserver.MCPServer exposing only the
 // bootstrap verb. The orientation instructions tell the agent to

@@ -18,7 +18,7 @@ func TestServerConstructs(t *testing.T) {
 	}
 
 	catalog := verb.Catalog()
-	required := []string{"version", "session_bootstrap", "auth", "verb_discovery"}
+	required := []string{"version", "document_get", "document_upsert", "variable_get"}
 	have := map[string]bool{}
 	for _, n := range catalog {
 		have[n] = true
@@ -45,8 +45,8 @@ func TestMCPSurfaceIsMinimal(t *testing.T) {
 		}
 		t.Fatalf("MCP surface should expose exactly 1 tool, got %d: %v", len(tools), names)
 	}
-	if _, ok := tools["satellites_init"]; !ok {
-		t.Errorf("MCP surface missing satellites_init; tools = %v", tools)
+	if _, ok := tools["document_get"]; !ok {
+		t.Errorf("MCP surface missing document_get; tools = %v", tools)
 	}
 }
 

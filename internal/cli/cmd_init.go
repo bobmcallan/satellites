@@ -7,9 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Re-export for back-compat with sty_60c48d81 (satellites_init MCP verb
-// references the colocated state directory). These now live in
-// internal/config; the alias here means external callers don't break.
+// Re-export so external callers can address the canonical state-dir
+// path without importing internal/config. The values live in
+// internal/config (single source of truth).
 const (
 	StateDir   = config.ClientStateDir
 	ConfigFile = config.ClientConfigFile
@@ -36,15 +36,10 @@ args writes identical bytes.
 
 Auth modes:
   --api-key <key>   non-interactive; agents + scripts use this
-  --oauth           interactive browser flow (deferred — see below)
-
-OAuth client-side flow is a partial-delivery follow-up of sty_9b3e355c:
-the server-side scaffold exists, but launching the browser + running a
-local callback listener lands in a separate story. For now, use
---api-key (in dev mode, sk_dev_admin or sk_dev_user).`,
+  --oauth           interactive browser flow (deferred)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if useOAuth {
-				return fmt.Errorf("--oauth client-side flow deferred; use --api-key for now (sty_9b3e355c follow-up)")
+				return fmt.Errorf("--oauth client-side flow deferred; use --api-key for now")
 			}
 			cfg := config.ClientDefaults()
 			cfg.ServerURL = serverURL
@@ -55,7 +50,7 @@ local callback listener lands in a separate story. For now, use
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key for authenticating against satellites-server")
 	cmd.Flags().StringVar(&serverURL, "server-url", "http://localhost:8080", "satellites-server URL")
 	cmd.Flags().StringVar(&dir, "dir", ".", "Project root (state dir created as <dir>/.satellites/)")
-	cmd.Flags().BoolVar(&useOAuth, "oauth", false, "Use interactive OAuth flow (deferred — currently errors with a pointer to --api-key)")
+	cmd.Flags().BoolVar(&useOAuth, "oauth", false, "Use interactive OAuth flow (deferred)")
 
 	register(cmd)
 }
