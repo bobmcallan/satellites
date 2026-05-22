@@ -15,16 +15,20 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# Version stamping. The image-push workflow extracts these from .version
-# (satellites-server.version + satellites-server.build) and supplies
-# COMMIT as ${{ github.sha }}. Defaults keep ad-hoc local builds working.
+# Version stamping. The deploy workflow extracts these from .version
+# (satellites-server.{version,build} for the server binary's own stamp,
+# satellites.version for the CLI release the server advertises) and
+# supplies COMMIT as ${{ github.sha }}. Defaults keep ad-hoc local
+# builds working.
 ARG VERSION=dev
+ARG CLI_VERSION=
 ARG COMMIT=unknown
 ARG BUILD=unknown
 
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w \
       -X github.com/bobmcallan/satellites/internal/verb.Version=${VERSION} \
+      -X github.com/bobmcallan/satellites/internal/verb.CLIVersion=${CLI_VERSION} \
       -X github.com/bobmcallan/satellites/internal/verb.Commit=${COMMIT} \
       -X github.com/bobmcallan/satellites/internal/verb.BuildTime=${BUILD}" \
     -o /out/satellites-server ./cmd/satellites-server

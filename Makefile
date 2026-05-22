@@ -19,6 +19,7 @@ CLI_LDFLAGS    := -s -w \
 
 SERVER_LDFLAGS := -s -w \
   -X $(VERB_PKG).Version=v$(SERVER_VERSION) \
+  -X $(VERB_PKG).CLIVersion=v$(CLI_VERSION) \
   -X $(VERB_PKG).Commit=$(COMMIT) \
   -X $(VERB_PKG).BuildTime=$(SERVER_BUILD)
 

@@ -58,12 +58,14 @@ jobs:
           set -euo pipefail
           VERSION=$(awk '$1=="satellites-server.version:" {print $2}' .version)
           BUILD=$(awk   '$1=="satellites-server.build:"   {print $2}' .version)
-          if [ -z "$VERSION" ] || [ -z "$BUILD" ]; then
-            echo ".version missing satellites-server.{version,build}" >&2
+          CLI_VERSION=$(awk '$1=="satellites.version:" {print $2}' .version)
+          if [ -z "$VERSION" ] || [ -z "$BUILD" ] || [ -z "$CLI_VERSION" ]; then
+            echo ".version missing satellites.version or satellites-server.{version,build}" >&2
             exit 1
           fi
           {
             echo "version=v${VERSION}"
+            echo "cli_version=v${CLI_VERSION}"
             echo "build=${BUILD}"
             echo "commit=${GITHUB_SHA::8}"
           } >> "$GITHUB_OUTPUT"
@@ -85,6 +87,7 @@ jobs:
             registry.fly.io/satellites-pprod:${{ steps.meta.outputs.commit }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
+            CLI_VERSION=${{ steps.meta.outputs.cli_version }}
             BUILD=${{ steps.meta.outputs.build }}
             COMMIT=${{ steps.meta.outputs.commit }}
           provenance: false

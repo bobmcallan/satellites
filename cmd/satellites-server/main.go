@@ -140,6 +140,33 @@ func main() {
 	)
 	arbor.Info("system variables resolver wired", "names", systemVarNames)
 
+	// Story 6: route seed.ClientInstallSchema() through the document
+	// store so the install schema's bytes are sourced from the seeded
+	// scope=system document (and its install.* templates render against
+	// the system-variables resolver). satellites_init.go is unchanged —
+	// it still calls seed.ClientInstallSchema(), now via this fetcher.
+	seed.SetClientInstallSchemaSource(func(ctx context.Context) ([]byte, error) {
+		res, err := docStore.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: "satellites_client_install"}, document.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if len(res.Versions) == 0 {
+			return nil, context.Canceled // unreachable: SeedSystem ran above
+		}
+		v := res.Versions[0]
+		parsed := document.Parse(v.Body)
+		resolver := document.ResolverFunc(func(name string) (string, bool) {
+			fn, ok := systemVars[name]
+			if !ok {
+				return "", false
+			}
+			return fn(ctx), true
+		})
+		rendered, _ := parsed.Render(resolver)
+		return []byte(rendered), nil
+	})
+	arbor.Info("install schema source wired (document-backed)")
+
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
 			arbor.Fatal("dev seed", "err", err)

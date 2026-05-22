@@ -2,6 +2,7 @@ package seed
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 
@@ -19,6 +20,17 @@ type InstallSchema struct {
 	TargetConfigPath  string             `yaml:"target_config_path"`
 	DefaultConfig     DefaultConfig      `yaml:"default_config"`
 	AuthBootstrap     AuthBootstrapBlock `yaml:"auth_bootstrap"`
+	Install           InstallBlock       `yaml:"install"`
+}
+
+// InstallBlock is the templated install-URL block the schema carries.
+// Frontmatter templates render against the server's system-variables
+// resolver before YAML decoding ({{cli_version}}, {{os}}, {{arch}}).
+// satellites_init does not yet read these fields — story 7's MCP
+// cutover migrates the verb to source URLs from the schema.
+type InstallBlock struct {
+	DownloadURL string `yaml:"download_url" json:"download_url,omitempty"`
+	SHA256URL   string `yaml:"sha256_url"   json:"sha256_url,omitempty"`
 }
 
 // DefaultConfig mirrors the canonical satellites.toml defaults.
@@ -73,19 +85,58 @@ func ParseFrontmatter(md []byte) (InstallSchema, error) {
 	return schema, nil
 }
 
+// SchemaSource returns the markdown bytes to parse for the install
+// schema. The default reads from the embedded artifact; satellites-
+// server boot replaces it with a fetcher that pulls from the document
+// store and renders templates against the system-variables resolver.
+// CLI-local in-process callers (no document store wired) keep the
+// embedded fallback so 'satellites init' still works offline.
+type SchemaSource func(ctx context.Context) ([]byte, error)
+
 var (
-	parseOnce sync.Once
-	parsed    InstallSchema
-	parseErr  error
+	schemaSourceMu sync.RWMutex
+	schemaSourceFn SchemaSource = func(context.Context) ([]byte, error) {
+		return ClientInstallMarkdown(), nil
+	}
 )
 
-// ClientInstallSchema returns the InstallSchema parsed from the
-// install-schema artifact. Parsed lazily and cached for the process
-// lifetime — the markdown bytes are immutable for a given binary, so
-// re-parsing on every call would be pure overhead.
+// SetClientInstallSchemaSource installs a custom fetcher for the
+// install-schema artifact's markdown bytes. Pass nil to restore the
+// embedded default.
+func SetClientInstallSchemaSource(fn SchemaSource) {
+	schemaSourceMu.Lock()
+	defer schemaSourceMu.Unlock()
+	if fn == nil {
+		fn = func(context.Context) ([]byte, error) { return ClientInstallMarkdown(), nil }
+	}
+	schemaSourceFn = fn
+}
+
+// ClientInstallSchema fetches and parses the install schema. With the
+// default source it returns the embedded artifact's frontmatter; with
+// the document-store source wired by satellites-server boot, it
+// returns the latest scope=system document rendered against the
+// system-variables resolver.
+//
+// No caching here: a server-side render depends on per-request system
+// variables, and the rendered bytes change between (os, arch, current_
+// version) calls. The document store carries the body cache; the
+// frontmatter parse is microseconds.
 func ClientInstallSchema() (InstallSchema, error) {
-	parseOnce.Do(func() {
-		parsed, parseErr = ParseFrontmatter(ClientInstallMarkdown())
-	})
-	return parsed, parseErr
+	return ClientInstallSchemaCtx(context.Background())
+}
+
+// ClientInstallSchemaCtx is the ctx-aware variant. Callers that have a
+// request-bound context (with system-variable inputs stamped via
+// verb.WithSystemVarContext) should use this to keep the rendered
+// install URLs aligned with the caller's OS/arch.
+func ClientInstallSchemaCtx(ctx context.Context) (InstallSchema, error) {
+	schemaSourceMu.RLock()
+	fn := schemaSourceFn
+	schemaSourceMu.RUnlock()
+	md, err := fn(ctx)
+	if err != nil {
+		return InstallSchema{}, fmt.Errorf("seed: fetch install schema: %w", err)
+	}
+	return ParseFrontmatter(md)
 }

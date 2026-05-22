@@ -15,42 +15,45 @@ auth_bootstrap:
   kind: auth_login
   command: satellites auth login
   env_hint: SATELLITES_TOKEN
+install:
+  download_url: https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}
+  sha256_url:   https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}.sha256
 ---
 # satellites_init · install schema
 
 This artifact is the **canonical, operator-editable source of truth**
 for the install schema the `satellites_init` verb returns. The schema
 describes where the consumer project drops the `satellites` CLI binary,
-where its TOML config lives, and the bootstrap auth flow the operator
-runs after the binary lands.
+where its TOML config lives, the install URLs the agent fetches, and
+the bootstrap auth flow the operator runs after the binary lands.
 
 Runtime values come from the **frontmatter** above, not the body. The
-file is embedded into the satellites-server binary at build time; edit
-the frontmatter and rebuild to change a default. (Once the document
-store lands in a later PR, this same file becomes the seed source for a
-DB-stored artifact row — same shape on the wire either way.)
+file is seeded into the document store at server boot as a
+scope=system document; templating in the `install.*` fields renders
+against the server's system variables at retrieval time.
 
 ## Fields
 
-| Frontmatter key                       | Meaning                                                                                                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `target_install_path`                 | Filesystem path the consumer writes the `satellites` CLI binary to (relative to the consumer project root, by convention).     |
-| `target_config_path`                  | Filesystem path the consumer writes the canonical `satellites.toml` to.                                                         |
-| `default_config.server_url`           | TOML `[server].url` — the satellites-server URL the CLI talks to. Empty defaults to the MCP-server-injected runtime URL.        |
-| `default_config.repo_path`            | TOML `[repo].path` — the consumer project's repo root.                                                                          |
-| `default_config.worktree_root`        | TOML `[worktree].root` — where the daemon materialises per-task worktrees.                                                      |
-| `default_config.log_path`             | TOML `[logging].path` — CLI + per-task log destination.                                                                         |
-| `default_config.branch_template`      | TOML `[worktree].branch_template` — git branch name template the daemon uses when minting worktree branches.                    |
-| `default_config.auth.token`           | TOML `[auth].token` — the api-key the CLI presents on every server call. Empty in the schema; Claude fills it from `auth_bootstrap.api_key` after `satellites_init` mints one. |
-| `auth_bootstrap.kind`                 | Auth bootstrap flow kind the operator runs after the binary lands. `auth_login` for first-time human bootstrap.                 |
-| `auth_bootstrap.command`              | The shell command the operator runs for `kind=auth_login`.                                                                      |
-| `auth_bootstrap.env_hint`             | Env-var name carrying the bearer after `auth login` mints it.                                                                   |
+| Frontmatter key                  | Meaning                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target_install_path`            | Filesystem path the consumer writes the `satellites` CLI binary to (relative to the consumer project root, by convention).                            |
+| `target_config_path`             | Filesystem path the consumer writes the canonical `satellites.toml` to.                                                                                 |
+| `default_config.server_url`      | TOML `[server].url` — the satellites-server URL the CLI talks to. Empty defaults to the MCP-server-injected runtime URL.                              |
+| `default_config.repo_path`       | TOML `[repo].path` — the consumer project's repo root.                                                                                                  |
+| `default_config.worktree_root`   | TOML `[worktree].root` — where the daemon materialises per-task worktrees.                                                                              |
+| `default_config.log_path`        | TOML `[logging].path` — CLI + per-task log destination.                                                                                                 |
+| `default_config.branch_template` | TOML `[worktree].branch_template` — git branch name template the daemon uses when minting worktree branches.                                            |
+| `default_config.auth.token`      | TOML `[auth].token` — the api-key the CLI presents on every server call. Empty in the schema; the bootstrap fills it from `auth_bootstrap.api_key`.   |
+| `auth_bootstrap.kind`            | Auth bootstrap flow kind the operator runs after the binary lands. `auth_login` for first-time human bootstrap.                                         |
+| `auth_bootstrap.command`         | The shell command the operator runs for `kind=auth_login`.                                                                                              |
+| `auth_bootstrap.env_hint`        | Env-var name carrying the bearer after `auth login` mints it.                                                                                           |
+| `install.download_url`           | Templated URL the agent fetches the CLI binary from. Renders against `{{cli_version}}`, `{{os}}`, `{{arch}}`.                                          |
+| `install.sha256_url`             | Templated URL for the matching sha256 manifest. Same template variables as `download_url`.                                                              |
 
-## Release-pipeline-derived fields (NOT in this artifact)
+## Template variables
 
-The verb also emits `install.{download_url, sha256_url, version, os,
-arch}`. Those source from the satellites-server's own build-time
-version stamp + GitHub's release URL pattern — never from this
-artifact. Editing this file does not affect which binary version
-satellites_init recommends; that comes from the server binary's
-`-ldflags -X verb.Version=...` injection at release time.
+The `install.*` fields render against the server's system-variables
+resolver. `{{cli_version}}` is the CLI release the server advertises
+(ldflag-stamped at build); `{{os}}` and `{{arch}}` come from the
+request body, falling back to the server's runtime defaults when
+unsupplied.
