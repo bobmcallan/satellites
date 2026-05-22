@@ -25,32 +25,41 @@ import (
 // file just loads it.
 var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 
-// New returns a configured *mcpserver.MCPServer with every registered
-// verb attached as an MCP tool.
+// bootstrapVerb is the single verb exposed over MCP. Every other
+// substrate operation is reachable via the satellites CLI (`satellites
+// exec <verb>`) once the agent has bootstrapped the binary using the
+// orientation instructions. Keeping the MCP surface minimal avoids
+// duplicating the verb catalog into the agent's tool list — the CLI is
+// the primary client.
+const bootstrapVerb = "satellites_init"
+
+// New returns a configured *mcpserver.MCPServer exposing only the
+// bootstrap verb. The orientation instructions tell the agent to
+// install/refresh the satellites CLI and dispatch all other verbs
+// through it.
 func New() *mcpserver.MCPServer {
 	s := mcpserver.NewMCPServer("satellites", verb.Version,
 		mcpserver.WithInstructions(orientationInstructions),
 	)
 
-	for _, name := range verb.Catalog() {
-		v := verb.Get(name)
-		name, v := name, v // capture per-iteration
-
-		s.AddTool(
-			mcp.NewTool(name, mcp.WithDescription(v.Description)),
-			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				argsJSON, err := json.Marshal(req.GetArguments())
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				resp, err := verb.Dispatch(ctx, name, argsJSON)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				return mcp.NewToolResultText(string(resp)), nil
-			},
-		)
+	v := verb.Get(bootstrapVerb)
+	if v == nil {
+		panic("mcpserver: bootstrap verb " + bootstrapVerb + " not registered")
 	}
+	s.AddTool(
+		mcp.NewTool(bootstrapVerb, mcp.WithDescription(v.Description)),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			argsJSON, err := json.Marshal(req.GetArguments())
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			resp, err := verb.Dispatch(ctx, bootstrapVerb, argsJSON)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(string(resp)), nil
+		},
+	)
 	return s
 }
 

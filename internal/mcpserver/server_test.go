@@ -10,6 +10,7 @@ import (
 
 // TestServerConstructs verifies New() returns without panic and that
 // the underlying verb registry has the built-ins required by the AC.
+// These verbs reach agents via the satellites CLI, not MCP.
 func TestServerConstructs(t *testing.T) {
 	s := New()
 	if s == nil {
@@ -26,6 +27,26 @@ func TestServerConstructs(t *testing.T) {
 		if !have[r] {
 			t.Errorf("registry missing required verb %q (have %v)", r, catalog)
 		}
+	}
+}
+
+// TestMCPSurfaceIsMinimal pins the MCP tool surface to the single
+// bootstrap verb. All other verbs are reachable via the satellites CLI
+// once the agent has installed it using the orientation instructions.
+// If this test starts failing, the MCP server has regrown its surface
+// area — confirm intent before relaxing the assertion.
+func TestMCPSurfaceIsMinimal(t *testing.T) {
+	s := New()
+	tools := s.ListTools()
+	if len(tools) != 1 {
+		names := make([]string, 0, len(tools))
+		for n := range tools {
+			names = append(names, n)
+		}
+		t.Fatalf("MCP surface should expose exactly 1 tool, got %d: %v", len(tools), names)
+	}
+	if _, ok := tools["satellites_init"]; !ok {
+		t.Errorf("MCP surface missing satellites_init; tools = %v", tools)
 	}
 }
 
