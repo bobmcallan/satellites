@@ -15,11 +15,28 @@ type VersionInfo struct {
 // Build info — overridden via -ldflags at release time
 // (sty_d3270775). These are the single source of truth across both
 // satellites and satellites-server binaries.
+//
+// CLIVersion is the operator-facing CLI release version, ldflag-stamped
+// on the satellites-server binary so the install schema can advertise
+// "fetch satellites-vX.Y.Z" independent of the server's own build
+// version. The CLI binary leaves CLIVersion empty; CLIVersionEffective
+// falls back to Version, which on the CLI is the CLI build itself.
 var (
-	Version   = "dev"
-	Commit    = "none"
-	BuildTime = "unknown"
+	Version    = "dev"
+	CLIVersion = ""
+	Commit     = "none"
+	BuildTime  = "unknown"
 )
+
+// CLIVersionEffective returns CLIVersion when ldflag-stamped, otherwise
+// Version. Keeps templated install schemas working on pre-S5 builds
+// where only Version was stamped.
+func CLIVersionEffective() string {
+	if CLIVersion != "" {
+		return CLIVersion
+	}
+	return Version
+}
 
 func init() {
 	Register(&Verb{

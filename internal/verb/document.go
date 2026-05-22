@@ -25,6 +25,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
@@ -42,23 +43,44 @@ func SetDocumentStore(s *document.Store) { documentStore = s }
 //
 // Inherit=true performs project → workspace → system fallback when the
 // named document doesn't exist at the requested scope.
+//
+// OS / Arch / CurrentVersion are per-request system-variable inputs.
+// The templating layer reads them via the system-variables resolver;
+// callers that aren't rendering templates can leave them empty.
 type DocumentGetRequest struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
-	Version     string `json:"version,omitempty"`
-	Inherit     bool   `json:"inherit,omitempty"`
+	Name           string `json:"name"`
+	Scope          string `json:"scope"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Inherit        bool   `json:"inherit,omitempty"`
+	OS             string `json:"os,omitempty"`
+	Arch           string `json:"arch,omitempty"`
+	CurrentVersion string `json:"current_version,omitempty"`
 }
 
 // DocumentGetResponse bundles the resolved document row + version slice.
 // resolved_scope reports the scope the document was actually found at
 // (relevant when inherit cascade kicks in).
+//
+// raw_body / rendered_body / unresolved_vars are populated only for
+// single-version reads (latest or a specific version). version=all
+// returns the chain verbatim; rendering each historical body would
+// silently rewrite old text against today's variables, which is
+// usually not what an operator viewing history wants.
 type DocumentGetResponse struct {
-	Document      document.Document  `json:"document"`
-	Versions      []document.Version `json:"versions"`
-	ResolvedScope string             `json:"resolved_scope"`
+	Document       document.Document  `json:"document"`
+	Versions       []document.Version `json:"versions"`
+	ResolvedScope  string             `json:"resolved_scope"`
+	RawBody        string             `json:"raw_body,omitempty"`
+	RenderedBody   string             `json:"rendered_body,omitempty"`
+	UnresolvedVars []string           `json:"unresolved_vars,omitempty"`
 }
+
+// documentTemplateCache holds per-(document_id, version) parsed
+// templates. Substrate contract: a (doc, version) body is immutable,
+// so cached *Parsed values are valid for the binary's lifetime.
+var documentTemplateCache document.Cache
 
 // DocumentUpsertRequest is the input shape for document_upsert. Every
 // call creates a new version row; the store layer never updates in
@@ -138,6 +160,11 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		return nil, err
 	}
 
+	// Stamp per-request system-variable inputs onto ctx so the
+	// templating resolver and the variable_get system terminator see
+	// the same values.
+	ctx = WithSystemVarContext(ctx, req.OS, req.Arch, req.CurrentVersion)
+
 	cascade := buildResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, req.Inherit)
 	for i, key := range cascade {
 		if err := authorizeRead(ctx, key); err != nil {
@@ -145,7 +172,7 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 		res, lookupErr := documentStore.Get(ctx, key, opts)
 		if lookupErr == nil {
-			return marshalDocumentGet(res, key.Scope)
+			return marshalDocumentGet(ctx, res, key, opts, &req)
 		}
 		if !errors.Is(lookupErr, document.ErrNotFound) {
 			return nil, lookupErr
@@ -367,13 +394,72 @@ func mapStoreError(err error, prefix string) error {
 	}
 }
 
-func marshalDocumentGet(res document.GetResult, resolvedScope document.Scope) (json.RawMessage, error) {
+func marshalDocumentGet(ctx context.Context, res document.GetResult, key document.Key, opts document.GetOptions, req *DocumentGetRequest) (json.RawMessage, error) {
 	if res.Versions == nil {
 		res.Versions = []document.Version{}
 	}
-	return json.Marshal(DocumentGetResponse{
+	resp := DocumentGetResponse{
 		Document:      res.Document,
 		Versions:      res.Versions,
-		ResolvedScope: string(resolvedScope),
+		ResolvedScope: string(key.Scope),
+	}
+	// Templating only applies to single-version reads. version=all
+	// returns the chain raw — rendering historical bodies against
+	// today's variables silently rewrites the operator's past.
+	if !opts.AllVersions && len(res.Versions) == 1 {
+		v := res.Versions[0]
+		parsed := documentTemplateCache.Get(res.Document.ID, v.Version, v.Body)
+		resolver := newTemplateResolver(ctx, key, req)
+		rendered, unresolved := parsed.Render(resolver)
+		resp.RawBody = v.Body
+		resp.RenderedBody = rendered
+		if len(unresolved) > 0 {
+			resp.UnresolvedVars = unresolved
+		}
+	}
+	return json.Marshal(resp)
+}
+
+// newTemplateResolver builds the per-call resolver document_get uses
+// for {{name}} substitution. Order (highest to lowest precedence):
+//
+//  1. system variables (computed, non-overridable)
+//  2. project-scope variables  (when project_id+workspace_id supplied)
+//  3. workspace-scope variables (when workspace_id supplied)
+//
+// System vars come first by design: a workspace operator setting a
+// variable named "version" cannot shadow the platform's reported
+// version. Unresolved names are surfaced on unresolved_vars; the call
+// does not fail.
+func newTemplateResolver(ctx context.Context, key document.Key, req *DocumentGetRequest) document.Resolver {
+	wsID, pjID := req.WorkspaceID, req.ProjectID
+	if wsID == "" && key.Scope != document.ScopeSystem {
+		wsID = key.WorkspaceID
+	}
+	if pjID == "" && key.Scope == document.ScopeProject {
+		pjID = key.ProjectID
+	}
+	return document.ResolverFunc(func(name string) (string, bool) {
+		if v, ok := systemVariableResolve(ctx, name); ok {
+			return v, true
+		}
+		if variableStore == nil {
+			return "", false
+		}
+		if wsID != "" && pjID != "" {
+			if v, err := variableStore.Get(ctx, variable.Key{
+				Scope: variable.ScopeProject, WorkspaceID: wsID, ProjectID: pjID, Name: name,
+			}); err == nil {
+				return v.Value, true
+			}
+		}
+		if wsID != "" {
+			if v, err := variableStore.Get(ctx, variable.Key{
+				Scope: variable.ScopeWorkspace, WorkspaceID: wsID, Name: name,
+			}); err == nil {
+				return v.Value, true
+			}
+		}
+		return "", false
 	})
 }

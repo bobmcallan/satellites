@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"flag"
 	"net/http"
+	"os"
+	"sort"
 	"time"
 
 	"github.com/bobmcallan/satellites/config/seed"
@@ -95,6 +97,48 @@ func main() {
 	arbor.Info("system documents seeded")
 
 	verb.SetVariableStore(variable.New(sqlDB))
+
+	// System-variables resolver: the computed values document_get
+	// substitutes into {{name}} placeholders. Read-only by contract;
+	// operators who need an overridable knob set a workspace/project
+	// variable, which takes precedence over the system layer for
+	// variable_get(inherit=true) but never overrides the system layer
+	// inside a templated document body.
+	publicURL := cfg.OAuth.RedirectBaseURL
+	if v := os.Getenv("SATELLITES_PUBLIC_URL"); v != "" {
+		publicURL = v
+	}
+	systemVars := map[string]func(ctx context.Context) string{
+		"version":         func(context.Context) string { return verb.Version },
+		"cli_version":     func(context.Context) string { return verb.CLIVersionEffective() },
+		"os":              func(ctx context.Context) string { return verb.OSFromContext(ctx) },
+		"arch":            func(ctx context.Context) string { return verb.ArchFromContext(ctx) },
+		"server_url":      func(context.Context) string { return publicURL },
+		"current_version": func(ctx context.Context) string { return verb.CurrentVersionFromContext(ctx) },
+		"state": func(ctx context.Context) string {
+			return verb.ComputeInstallState(verb.CurrentVersionFromContext(ctx), verb.CLIVersionEffective())
+		},
+	}
+	systemVarNames := make([]string, 0, len(systemVars))
+	for k := range systemVars {
+		systemVarNames = append(systemVarNames, k)
+	}
+	sort.Strings(systemVarNames)
+	verb.SetSystemVariableResolver(
+		func(ctx context.Context, name string) (string, bool) {
+			fn, ok := systemVars[name]
+			if !ok {
+				return "", false
+			}
+			return fn(ctx), true
+		},
+		func(context.Context) []string {
+			out := make([]string, len(systemVarNames))
+			copy(out, systemVarNames)
+			return out
+		},
+	)
+	arbor.Info("system variables resolver wired", "names", systemVarNames)
 
 	if cfg.Dev {
 		if err := store.DevSeed(context.Background()); err != nil {
