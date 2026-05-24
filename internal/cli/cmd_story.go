@@ -21,24 +21,22 @@ import (
 )
 
 // resolveProjectID returns flagValue when set; otherwise the project_id
-// persisted at .satellites/satellites.toml; otherwise attempts a
-// self-heal (git remote → project_match → TOML write) before
-// surfacing the documented "project_id not defined" error.
-func resolveProjectID(flagValue, configPath, userArg string) (string, error) {
+// persisted at .satellites/satellites.toml. Returns the documented
+// "project_id not defined" error when neither carries a value — the
+// CLI does not write the TOML; the agent (or operator) is responsible
+// for repair per the load-context doc, Step 4.
+func resolveProjectID(flagValue, configPath string) (string, error) {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return v, nil
 	}
-	cfg, resolvedPath, err := cliconfig.Load(configPath)
+	cfg, _, err := cliconfig.Load(configPath)
 	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
 		return "", err
 	}
 	if v := strings.TrimSpace(cfg.ProjectID); v != "" {
 		return v, nil
 	}
-	if healed, healErr := selfHealProjectID(context.Background(), cfg, resolvedPath, userArg); healErr == nil {
-		return healed, nil
-	}
-	return "", fmt.Errorf("error project_id not defined")
+	return "", fmt.Errorf("project_id not defined: resolve via project_match on the consumer repo's git remote and write into .satellites/satellites.toml (see document:system/satellites_mcp_load_context Step 4)")
 }
 
 func init() {
@@ -68,7 +66,7 @@ func newStoryCreateCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "create",
 		Short: "Create a story under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, err := resolveProjectID(req.ProjectID, *configArg, *userArg)
+			pid, err := resolveProjectID(req.ProjectID, *configArg)
 			if err != nil {
 				return err
 			}
@@ -101,7 +99,7 @@ func newStoryListCmd(configArg, userArg *string) *cobra.Command {
 		Use:   "list",
 		Short: "List stories under a project",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pid, err := resolveProjectID(req.ProjectID, *configArg, *userArg)
+			pid, err := resolveProjectID(req.ProjectID, *configArg)
 			if err != nil {
 				return err
 			}

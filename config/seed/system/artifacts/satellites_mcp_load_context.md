@@ -72,11 +72,18 @@ Compare the request's `current_version` against `install.cli_version`:
 
 ## Step 3 — write the TOML
 
-Write `target_config_path` from the schema's `default_config`. When
-`auth_bootstrap.kind=auth_login`, leave `[auth].token` empty, print
-`auth_bootstrap.command` to the operator, and stop until the operator
-has run it. The minted token belongs in the TOML's `[auth].token` —
-do not reuse it on the MCP session, which authenticates separately.
+You — the agent — are the sole writer of `target_config_path`. The
+CLI reads this file; it never creates or mutates it. Copy the
+schema's `default_config` block verbatim into the TOML at
+`target_config_path`. Then run the explicit update steps below for
+fields the spec defers to caller-provided values: `project_id`
+(Step 4) and `auth.token` (this step's auth bootstrap).
+
+When `auth_bootstrap.kind=auth_login`, leave `[auth].token` empty,
+print `auth_bootstrap.command` to the operator, and stop until the
+operator has run it. The minted token belongs in the TOML's
+`[auth].token` — do not reuse it on the MCP session, which
+authenticates separately.
 
 Verify by running `<target_install_path> version`.
 
@@ -111,7 +118,6 @@ subcommands cover the high-traffic verbs:
 
 | Group         | Use                                                                |
 | ------------- | ------------------------------------------------------------------ |
-| `init`        | Re-write the TOML (accepts `--project-id`, `--api-key`, …).        |
 | `project`     | `match --remote <url>` resolves a git remote to a `project_id`.    |
 | `story`       | `create` / `list` / `get` / `update`. `list` accepts `--tag`.      |
 | `exec <verb>` | Direct verb dispatch for every other verb. JSON in, JSON out.      |
@@ -119,4 +125,7 @@ subcommands cover the high-traffic verbs:
 
 When `--project-id` is omitted on an operational verb, the CLI falls
 back to the TOML's `project_id`. If neither is set, the CLI returns
-`error project_id not defined`.
+`project_id not defined`. Treat that error as bootstrap drift: you
+are responsible for repair. Re-run Step 4 (call `project_match` on
+the consumer repo's git remote, write the result into the TOML), then
+retry the verb. The CLI does not self-repair the TOML.
