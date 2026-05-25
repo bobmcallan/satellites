@@ -34,18 +34,20 @@ const (
 
 // Story is a unit of work the operator wants tracked.
 type Story struct {
-	ID                 string    `json:"id"`
-	ProjectID          string    `json:"project_id"`
-	ParentID           string    `json:"parent_id,omitempty"`
-	Title              string    `json:"title"`
-	Body               string    `json:"body,omitempty"`
-	AcceptanceCriteria string    `json:"acceptance_criteria,omitempty"`
-	Status             string    `json:"status"`
-	Priority           string    `json:"priority"`
-	Category           string    `json:"category"`
-	Tags               []string  `json:"tags"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string     `json:"id"`
+	ProjectID          string     `json:"project_id"`
+	ParentID           string     `json:"parent_id,omitempty"`
+	Title              string     `json:"title"`
+	Body               string     `json:"body,omitempty"`
+	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
+	Status             string     `json:"status"`
+	Priority           string     `json:"priority"`
+	Category           string     `json:"category"`
+	Tags               []string   `json:"tags"`
+	Summary            string     `json:"summary,omitempty"`
+	SummaryUpdatedAt   *time.Time `json:"summary_updated_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // NewID returns a fresh story id in the canonical `sty_<8hex>`

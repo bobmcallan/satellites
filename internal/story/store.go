@@ -210,6 +210,7 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 
 const selectColumns = `SELECT id, project_id, parent_id, title, body,
     acceptance_criteria, status, priority, category, tags,
+    summary, summary_updated_at,
     created_at, updated_at`
 
 type rowScanner interface {
@@ -218,12 +219,14 @@ type rowScanner interface {
 
 func scanCommon(rs rowScanner) (Story, error) {
 	var (
-		st     Story
-		parent sql.NullString
-		tags   pq.StringArray
+		st        Story
+		parent    sql.NullString
+		tags      pq.StringArray
+		summaryAt sql.NullTime
 	)
 	if err := rs.Scan(&st.ID, &st.ProjectID, &parent, &st.Title, &st.Body,
 		&st.AcceptanceCriteria, &st.Status, &st.Priority, &st.Category, &tags,
+		&st.Summary, &summaryAt,
 		&st.CreatedAt, &st.UpdatedAt); err != nil {
 		return Story{}, err
 	}
@@ -234,7 +237,33 @@ func scanCommon(rs rowScanner) (Story, error) {
 	if st.Tags == nil {
 		st.Tags = []string{}
 	}
+	if summaryAt.Valid {
+		t := summaryAt.Time
+		st.SummaryUpdatedAt = &t
+	}
 	return st, nil
+}
+
+// SetSummary writes the summary text + bumps summary_updated_at.
+// Used by the summary regeneration hook (internal/verb/summary_hook.go).
+// Does NOT advance updated_at — that field tracks user-driven
+// mutations only.
+func (s *Store) SetSummary(ctx context.Context, id, summary string, now time.Time) error {
+	now = now.UTC()
+	res, err := s.DB.ExecContext(ctx, `
+        UPDATE stories SET summary = $1, summary_updated_at = $2 WHERE id = $3
+    `, summary, now, id)
+	if err != nil {
+		return fmt.Errorf("story: set summary: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("story: set summary rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func scanRow(row *sql.Row) (Story, error) {

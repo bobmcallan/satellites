@@ -41,6 +41,31 @@ func Run(ctx context.Context, def Definition, client Client, story any) ([]Findi
 	return out.Findings, nil
 }
 
+// RunText renders the reviewer's prompt against an input, calls
+// the LLM, and returns the raw completion as plain text (no JSON
+// parsing). Used by reviewers whose output schema is free-form
+// prose — e.g. the story_summary agent.
+//
+// Returns the empty string when the reviewer is disabled (mirrors
+// Run's nil-findings semantics).
+func RunText(ctx context.Context, def Definition, client Client, payload any) (string, error) {
+	if !def.Enabled {
+		return "", nil
+	}
+	if client == nil {
+		return "", fmt.Errorf("reviewer: %s: client not configured", def.Name)
+	}
+	prompt, err := renderPrompt(def, payload)
+	if err != nil {
+		return "", fmt.Errorf("reviewer: %s: render: %w", def.Name, err)
+	}
+	raw, err := client.Complete(ctx, def.Model, def.MaxTokens, prompt)
+	if err != nil {
+		return "", fmt.Errorf("reviewer: %s: complete: %w", def.Name, err)
+	}
+	return strings.TrimSpace(raw), nil
+}
+
 func renderPrompt(def Definition, story any) (string, error) {
 	storyJSON, err := json.MarshalIndent(story, "", "  ")
 	if err != nil {

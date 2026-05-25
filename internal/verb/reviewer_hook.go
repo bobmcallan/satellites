@@ -103,7 +103,9 @@ func runReviewersSync(ctx context.Context, s story.Story) {
 			}, time.Now().UTC()); err != nil {
 				arbor.Warn("reviewer finding ledger append failed",
 					"reviewer", name, "story_id", s.ID, "err", err)
+				continue
 			}
+			dispatchSummaryRegen(ctx, s.ID)
 		}
 	}
 }

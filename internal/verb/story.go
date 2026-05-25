@@ -121,6 +121,7 @@ func invokeStoryCreate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}, time.Now().UTC()); lerr != nil {
 			return nil, fmt.Errorf("story_create: ledger append: %w", lerr)
 		}
+		dispatchSummaryRegen(ctx, s.ID)
 	}
 	dispatchReviewers(ctx, s)
 	return json.Marshal(s)
@@ -215,6 +216,7 @@ func invokeStoryUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			}, time.Now().UTC()); lerr != nil {
 				return nil, fmt.Errorf("story_update: ledger append: %w", lerr)
 			}
+			dispatchSummaryRegen(ctx, s.ID)
 		}
 	}
 	dispatchReviewers(ctx, s)

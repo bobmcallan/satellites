@@ -83,6 +83,7 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
+	dispatchSummaryRegen(ctx, req.StoryID)
 	return json.Marshal(e)
 }
 
