@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/bobmcallan/satellites/config/reviewers"
 	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
@@ -17,6 +18,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/variable"
@@ -79,6 +81,25 @@ func main() {
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetStoryStore(story.New(sqlDB))
 	verb.SetLedgerStore(ledger.New(sqlDB))
+
+	// Reviewer registry — load every markdown definition embedded
+	// under config/reviewers/, then wire either the production
+	// Anthropic client (when ANTHROPIC_API_KEY is set) or no client
+	// at all. Without a client, dispatch is a no-op so the
+	// substrate boots cleanly in environments without LLM creds.
+	reviewerDefs, err := reviewer.Load(reviewers.FS)
+	if err != nil {
+		arbor.Fatal("reviewer load", "err", err)
+	}
+	var reviewerClient reviewer.Client
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		reviewerClient = reviewer.NewAnthropicClient(key)
+		arbor.Info("reviewer client wired (anthropic)", "defs", len(reviewerDefs))
+	} else {
+		arbor.Info("reviewer client absent — ANTHROPIC_API_KEY unset, reviews are no-ops",
+			"defs", len(reviewerDefs))
+	}
+	verb.SetReviewerRegistry(reviewer.NewRegistry(reviewerDefs, reviewerClient))
 
 	// Document substrate + system-seed registry: wire stores then
 	// reconcile each embedded artifact. ReconcileSystemSeed is

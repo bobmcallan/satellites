@@ -18,6 +18,7 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 		"github.com/bobmcallan/satellites/internal/db",
 		"github.com/bobmcallan/satellites/internal/cli",
 		"github.com/bobmcallan/satellites/internal/ledger",
+		"github.com/bobmcallan/satellites/internal/reviewer",
 		// Future substrate packages get added here as they appear.
 	}
 
