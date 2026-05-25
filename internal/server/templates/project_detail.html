@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item active" data-nav="projects">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/settings/api-keys" class="nav-item" data-nav="api-keys">API KEYS</a>
+    <a href="#" class="nav-item disabled">CONFIG</a>
+    <a href="#" class="nav-item disabled">HELP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{if .UserEmail}}
+    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
+    <form method="POST" action="/logout" class="logout-form">
+      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
+    </form>
+    {{end}}
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-section="project-detail">
+    <div class="panel-header">
+      <h2><a href="/projects" class="crumb-link">projects</a> · {{.Project.Name}}</h2>
+      <span class="project-card-status">{{.Project.Status}}</span>
+    </div>
+    {{if .Project.Description}}<p class="project-card-desc">{{.Project.Description}}</p>{{end}}
+    <dl class="project-card-meta">
+      <dt>ID</dt><dd>{{.Project.ID}}</dd>
+      {{if .Project.GitURL}}<dt>GIT</dt><dd>{{.Project.GitURL}}</dd>{{end}}
+      <dt>CREATED</dt><dd>{{.Project.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
+    </dl>
+  </section>
+
+  <section class="panel" data-section="project-stories">
+    <div class="panel-header">
+      <h2>stories</h2>
+    </div>
+
+    {{if .ActiveTags}}
+    <div class="filter-row" data-field="active-filters">
+      <span class="filter-label">filtering:</span>
+      {{range .ActiveTags}}
+        <a class="tag-chip active" href="{{toggleTagURL $.URLBase $.ActiveSort $.ActiveTags .}}" data-tag="{{.}}">{{.}} ×</a>
+      {{end}}
+      <a class="filter-clear" href="{{clearTagURL .URLBase .ActiveSort}}" data-action="filter-clear">clear</a>
+    </div>
+    {{end}}
+
+    {{if .Stories}}
+    <table class="stories-table" data-field="stories-table">
+      <thead>
+        <tr>
+          <th><a href="{{toggleSortURL .URLBase .ActiveSort "id" .ActiveTags}}" data-sort="id" class="sort-link{{if eq .ActiveSort "id"}} active{{end}}">ID</a></th>
+          <th><a href="{{toggleSortURL .URLBase .ActiveSort "title" .ActiveTags}}" data-sort="title" class="sort-link{{if eq .ActiveSort "title"}} active{{end}}">TITLE</a></th>
+          <th><a href="{{toggleSortURL .URLBase .ActiveSort "status" .ActiveTags}}" data-sort="status" class="sort-link{{if eq .ActiveSort "status"}} active{{end}}">STATUS</a></th>
+          <th><a href="{{toggleSortURL .URLBase .ActiveSort "priority" .ActiveTags}}" data-sort="priority" class="sort-link{{if eq .ActiveSort "priority"}} active{{end}}">PRIORITY</a></th>
+          <th>TAGS</th>
+          <th><a href="{{toggleSortURL .URLBase .ActiveSort "updated_at" .ActiveTags}}" data-sort="updated_at" class="sort-link{{if eq .ActiveSort "updated_at"}} active{{end}}">UPDATED</a></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Stories}}
+        <tr class="story-row" x-data="{ expanded: false }" @click="expanded = !expanded" data-field="story-row" data-story-id="{{.ID}}">
+          <td class="story-id">{{.ID}}</td>
+          <td class="story-title">{{.Title}}</td>
+          <td class="story-status">{{.Status}}</td>
+          <td class="story-priority">{{.Priority}}</td>
+          <td class="story-tags">
+            {{range .Tags}}<a class="tag-chip{{range $.ActiveTags}}{{if eq . $}} active{{end}}{{end}}" href="{{toggleTagURL $.URLBase $.ActiveSort $.ActiveTags .}}" @click.stop="" data-tag="{{.}}">{{.}}</a>{{end}}
+          </td>
+          <td class="story-updated">{{formatTime .UpdatedAt}}</td>
+        </tr>
+        <tr class="story-detail-row" x-show="expanded" x-cloak data-field="story-detail">
+          <td colspan="6">
+            <div class="story-detail">
+              <section class="story-summary" data-field="story-summary">
+                <h4>summary</h4>
+                {{if .Summary}}
+                <p>{{.Summary}}</p>
+                {{if .SummaryUpdatedAt}}<p class="muted">updated {{formatTime .SummaryUpdatedAt}}</p>{{end}}
+                {{else}}
+                <p class="empty">No summary yet — appears once the substrate generates one.</p>
+                {{end}}
+              </section>
+              <section class="story-ledger" data-field="story-ledger">
+                <h4>ledger</h4>
+                {{if .Ledger}}
+                <ol class="ledger-timeline">
+                  {{range .Ledger}}
+                  <li class="ledger-entry" data-ledger-kind="{{.Kind}}">
+                    <time>{{formatTime .CreatedAt}}</time>
+                    <span class="ledger-kind">{{.Kind}}</span>
+                    {{if .Actor}}<span class="ledger-actor">{{.Actor}}</span>{{end}}
+                    {{if .Body}}<span class="ledger-body">{{.Body}}</span>{{end}}
+                  </li>
+                  {{end}}
+                </ol>
+                {{else}}
+                <p class="empty">No ledger entries yet.</p>
+                {{end}}
+              </section>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
