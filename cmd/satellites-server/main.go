@@ -15,6 +15,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/story"
@@ -77,6 +78,7 @@ func main() {
 
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetStoryStore(story.New(sqlDB))
+	verb.SetLedgerStore(ledger.New(sqlDB))
 
 	// Document substrate + system-seed registry: wire stores then
 	// reconcile each embedded artifact. ReconcileSystemSeed is

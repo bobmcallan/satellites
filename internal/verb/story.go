@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/story"
 )
 
@@ -110,6 +111,17 @@ func invokeStoryCreate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	if ledgerStore != nil {
+		payload, _ := json.Marshal(s)
+		if _, lerr := ledgerStore.Append(ctx, ledger.AppendInput{
+			StoryID: s.ID,
+			Kind:    ledger.KindStoryCreated,
+			Actor:   actorFromContext(ctx),
+			Payload: payload,
+		}, time.Now().UTC()); lerr != nil {
+			return nil, fmt.Errorf("story_create: ledger append: %w", lerr)
+		}
+	}
 	return json.Marshal(s)
 }
 
@@ -169,6 +181,14 @@ func invokeStoryUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if strings.TrimSpace(req.ID) == "" {
 		return nil, fmt.Errorf("story_update: id required")
 	}
+	var before story.Story
+	if ledgerStore != nil {
+		var err error
+		before, err = storyStore.GetByID(ctx, req.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	s, err := storyStore.Update(ctx, req.ID, story.UpdateInput{
 		ParentID:           req.ParentID,
 		Title:              req.Title,
@@ -182,5 +202,64 @@ func invokeStoryUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	if ledgerStore != nil {
+		diff := computeStoryDiff(before, s)
+		if len(diff) > 0 {
+			payload, _ := json.Marshal(diff)
+			if _, lerr := ledgerStore.Append(ctx, ledger.AppendInput{
+				StoryID: s.ID,
+				Kind:    ledger.KindStoryUpdated,
+				Actor:   actorFromContext(ctx),
+				Payload: payload,
+			}, time.Now().UTC()); lerr != nil {
+				return nil, fmt.Errorf("story_update: ledger append: %w", lerr)
+			}
+		}
+	}
 	return json.Marshal(s)
+}
+
+// computeStoryDiff returns a {field: {before, after}} map for each
+// field whose value changed between before and after. Returns an
+// empty map when nothing changed — the caller skips the ledger
+// append in that case so no-op updates don't pollute the log.
+func computeStoryDiff(before, after story.Story) map[string]map[string]any {
+	diff := map[string]map[string]any{}
+	if before.ParentID != after.ParentID {
+		diff["parent_id"] = map[string]any{"before": before.ParentID, "after": after.ParentID}
+	}
+	if before.Title != after.Title {
+		diff["title"] = map[string]any{"before": before.Title, "after": after.Title}
+	}
+	if before.Body != after.Body {
+		diff["body"] = map[string]any{"before": before.Body, "after": after.Body}
+	}
+	if before.AcceptanceCriteria != after.AcceptanceCriteria {
+		diff["acceptance_criteria"] = map[string]any{"before": before.AcceptanceCriteria, "after": after.AcceptanceCriteria}
+	}
+	if before.Status != after.Status {
+		diff["status"] = map[string]any{"before": before.Status, "after": after.Status}
+	}
+	if before.Priority != after.Priority {
+		diff["priority"] = map[string]any{"before": before.Priority, "after": after.Priority}
+	}
+	if before.Category != after.Category {
+		diff["category"] = map[string]any{"before": before.Category, "after": after.Category}
+	}
+	if !stringSlicesEqual(before.Tags, after.Tags) {
+		diff["tags"] = map[string]any{"before": before.Tags, "after": after.Tags}
+	}
+	return diff
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

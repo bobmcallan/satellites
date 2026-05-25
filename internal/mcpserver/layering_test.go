@@ -17,6 +17,7 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 	forbidden := []string{
 		"github.com/bobmcallan/satellites/internal/db",
 		"github.com/bobmcallan/satellites/internal/cli",
+		"github.com/bobmcallan/satellites/internal/ledger",
 		// Future substrate packages get added here as they appear.
 	}
 
