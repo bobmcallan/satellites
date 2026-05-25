@@ -119,7 +119,7 @@ subcommands cover the high-traffic verbs:
 | Group         | Use                                                                |
 | ------------- | ------------------------------------------------------------------ |
 | `project`     | `match --remote <url>` resolves a git remote to a `project_id`.    |
-| `story`       | `create` / `list` / `get` / `update`. `list` accepts `--tag`.      |
+| `story`       | `create` / `list` / `get` / `update`. `list` accepts `--tag`. Field reference + conventions live in `docs/story-schema.md` in the satellites repo. |
 | `exec <verb>` | Direct verb dispatch for every other verb. JSON in, JSON out.      |
 | `version`     | Prints the CLI's stamped version.                                  |
 

@@ -78,6 +78,15 @@ curl -X POST http://localhost:8080/mcp \
      -H 'Authorization: Bearer sk_dev_admin' -d '{}'
 ```
 
+## Stories
+
+Stories are the substrate's units-of-work primitive. The fields,
+conventions (purpose paragraph, context links, epic membership tags,
+`blocked-by:` markers), and minimum invariants are documented in
+[`docs/story-schema.md`](docs/story-schema.md). The reviewer agent
+(`epic:story-reviewer-process`) checks conventions on top of the
+schema; the verb layer enforces only `project_id` and `title`.
+
 ## Documents-as-substrate
 
 Operator-editable artifacts (install schemas, principles, runbooks,
