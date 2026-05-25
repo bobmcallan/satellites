@@ -96,6 +96,10 @@ func oauthCallbackHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
 
 		cfg.Sessions.Issue(w, u.ID)
 		arbor.InfoCtx(r.Context(), "oauth: login", "provider", p.Name, "user_id", u.ID, "role", string(u.Role))
+		if dest := completeMCPSessionIfPresent(w, r, cfg, u.ID); dest != "" {
+			http.Redirect(w, r, dest, http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
 }

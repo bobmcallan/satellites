@@ -31,12 +31,12 @@ Each hit is a `block` unless noted.
 
 - **Host-repo coupling.** Reject literal phrases that assume the reader is inside the artifact's source repo: `this repo`, `this codebase`, `our codebase`, `our repo`, `in this project`, `here we`. The reader is in *their* environment, not yours.
 - **Hardcoded paths under the source repo.** Reject absolute paths (`/home/...`, `/Users/...`, `C:\\...`) and repo-internal source paths (`internal/...`, `cmd/...`, `pkg/...`, `src/...`) unless they appear inside a code fence as an *example* the reader will adapt.
-- **Rotting identifiers.** Reject UUIDs, hex slugs of the form `[a-z]{2,5}_[0-9a-f]{6,}`, ticket/epic refs (`epic:<slug>`, `JIRA-1234`, `#1234`), commit SHAs, version pins to in-flight builds. If an identifier is needed, it must be a placeholder (`<workspace_id>`, `<ticket_id>`).
+- **Rotting identifiers.** Reject *filled-in* values that rot: UUIDs, hex slugs of the form `[a-z]{2,5}_[0-9a-f]{6,}`, concrete ticket/epic refs (`epic:bootstrap-autonomy`, `JIRA-1234`, `#1234`), commit SHAs, version pins to in-flight builds. *Template* forms with angle-bracket placeholders inside (`epic:<slug>`, `story:<id>`, `project:<id>`) are fine — they document syntax, not state. If an identifier is needed, it must be a placeholder (`<workspace_id>`, `<ticket_id>`).
 - **Implementation-status narrative.** Reject `not yet wired`, `tracked under`, `until they land`, `stub until`, `TODO`, `for now`, `coming soon`, `currently`, `in progress`. If a behaviour isn't ready, the artifact must not describe it.
 - **Placeholder discipline.** Identifiers the reader supplies must appear in `<angle_brackets>` or `${BRACES}`. Literal example values that look real (e.g., `wsp_4f8c9b2a`) are `warn` — they get copy-pasted by mistake.
-- **Prescriptive verbs present.** Each artifact body must contain at least one of `MUST`, `Call`, `Read`, `Write`, `Run`, `Verify`, `Return`, `Pass`, `Reject` in its first 200 characters. Otherwise it reads as background, not instruction.
+- **Prescriptive verbs present.** The artifact body must open with imperative voice — a directive to the reader, not a description of the system. Accept any sentence-initial imperative: `MUST`, `Call`, `Read`, `Write`, `Run`, `Verify`, `Return`, `Pass`, `Reject`, `Complete`, `Treat`, `Resolve`, `Persist`, `Dispatch`, `Skip`, `Compare`, `Parse`, `Use`, `Scan`, `Check`, `Apply`, `Fetch`, `Install`, `Update`, etc. Check the first sentence of the body (skipping frontmatter, title, and any single intro paragraph). If the opening reads as background ("This document describes…", "The system supports…"), flag it.
 - **Length budget by surface.**
-  - Markdown directive / load instruction: ≤ 120 lines, ≤ 1200 words. `warn` above, `block` at 2×.
+  - Markdown directive / load instruction: ≤ 150 lines, ≤ 1500 words. `warn` above, `block` at 2×. Multi-step bootstrap artifacts (frontmatter tag `kind:mcp-startup` or similar) get the full 150; single-concern directives should still aim for ≤ 100.
   - Tool / function description string: ≤ 140 characters, single sentence, ends with a period.
   - CLI short help: ≤ 60 characters, imperative mood, no terminal period.
   - CLI long help: ≤ 40 lines.
@@ -100,7 +100,7 @@ Record each artifact's overall verdict in the report.
 
 ## Hard rules — non-negotiable
 
-- **No narrative in a directive.** A directive is a contract, not a design doc. If a sentence doesn't drive an action or state a load-bearing fact, cut it.
+- **No narrative in a directive.** A directive is a contract, not a design doc. If a sentence doesn't drive an action or state a load-bearing fact, cut it. *Load-bearing facts include*: ordering invariants ("the next step assumes the previous one ran"), ownership claims ("you are the sole writer of X"), error semantics ("treat that error as bootstrap drift"), and authority boundaries ("the CLI never mutates this file"). Keep those. Cut motivation, history, and "why this exists" prose.
 - **No live identifiers.** Story IDs, ticket numbers, commit SHAs, dated build versions — all rot. Use `<placeholders>`.
 - **No "implementation status" sections.** Either the behaviour ships, or the artifact omits it.
 - **No "in our system" framing.** Speak to the reader's environment, not yours.
