@@ -165,7 +165,8 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 }
 
 const selectColumns = `SELECT id, workspace_id, name, description,
-    git_url_canonical, owner_user_id, status, created_at, updated_at`
+    git_url_canonical, owner_user_id, status, created_at, updated_at,
+    seed_md, seed_updated_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -173,17 +174,53 @@ type rowScanner interface {
 
 func scanCommon(s rowScanner) (Project, error) {
 	var (
-		p     Project
-		owner sql.NullString
+		p         Project
+		owner     sql.NullString
+		seedAtRow sql.NullTime
 	)
 	if err := s.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description,
-		&p.GitURLCanonical, &owner, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.GitURLCanonical, &owner, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+		&p.SeedMD, &seedAtRow); err != nil {
 		return Project{}, err
 	}
 	if owner.Valid {
 		p.OwnerUserID = owner.String
 	}
+	if seedAtRow.Valid {
+		t := seedAtRow.Time
+		p.SeedUpdatedAt = &t
+	}
 	return p, nil
+}
+
+// ApplySeed writes body into seed_md and bumps seed_updated_at +
+// updated_at on the project at id. Idempotent: when body matches the
+// stored seed_md byte-for-byte, no write occurs and the second return
+// value (changed) is false.
+//
+// Sole caller is the project_seed_apply verb, driven by
+// `satellites seed push` walking
+// `.satellites/seeds/<wksp>/<proj>/project.md`.
+func (s *Store) ApplySeed(ctx context.Context, id, body string, now time.Time) (Project, bool, error) {
+	now = now.UTC()
+	p, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Project{}, false, err
+	}
+	if p.SeedMD == body {
+		return p, false, nil
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+        UPDATE projects
+        SET seed_md = $1, seed_updated_at = $2, updated_at = $2
+        WHERE id = $3
+    `, body, now, id); err != nil {
+		return Project{}, false, fmt.Errorf("project: apply seed: %w", err)
+	}
+	p.SeedMD = body
+	p.SeedUpdatedAt = &now
+	p.UpdatedAt = now
+	return p, true, nil
 }
 
 func scanRow(row *sql.Row) (Project, error) {

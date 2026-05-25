@@ -23,14 +23,20 @@ const (
 )
 
 // Workspace is the multi-tenant root row.
+//
+// SeedMD + SeedUpdatedAt carry the operator-pushed seed content from
+// `.satellites/seeds/<workspace_id>/workspace.md`. SeedUpdatedAt is nil
+// until the first `satellites seed push` lands; SeedMD is "" by default.
 type Workspace struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	OwnerUserID string    `json:"owner_user_id,omitempty"`
-	Status      string    `json:"status"`
-	IsDefault   bool      `json:"is_default"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	OwnerUserID   string     `json:"owner_user_id,omitempty"`
+	Status        string     `json:"status"`
+	IsDefault     bool       `json:"is_default"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	SeedMD        string     `json:"seed_md,omitempty"`
+	SeedUpdatedAt *time.Time `json:"seed_updated_at,omitempty"`
 }
 
 // NewID returns a fresh workspace id in the canonical `wksp_<8hex>`

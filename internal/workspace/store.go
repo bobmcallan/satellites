@@ -74,7 +74,7 @@ func (s *Store) Create(ctx context.Context, ownerUserID, name string, now time.T
 // GetByID returns the workspace with the given id, or ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id string) (Workspace, error) {
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at
+        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         WHERE id = $1
     `, id)
@@ -84,7 +84,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (Workspace, error) {
 // GetDefault returns the workspace flagged is_default, or ErrNotFound.
 func (s *Store) GetDefault(ctx context.Context) (Workspace, error) {
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at
+        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         WHERE is_default = TRUE
         LIMIT 1
@@ -96,7 +96,7 @@ func (s *Store) GetDefault(ctx context.Context) (Workspace, error) {
 // filtering arrives with the membership PR.
 func (s *Store) List(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at
+        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         ORDER BY created_at DESC, id
     `)
@@ -167,16 +167,50 @@ type rowScanner interface {
 
 func scanWorkspaceCommon(s rowScanner) (Workspace, error) {
 	var (
-		w     Workspace
-		owner sql.NullString
+		w         Workspace
+		owner     sql.NullString
+		seedAtRow sql.NullTime
 	)
-	if err := s.Scan(&w.ID, &w.Name, &owner, &w.Status, &w.IsDefault, &w.CreatedAt, &w.UpdatedAt); err != nil {
+	if err := s.Scan(&w.ID, &w.Name, &owner, &w.Status, &w.IsDefault, &w.CreatedAt, &w.UpdatedAt, &w.SeedMD, &seedAtRow); err != nil {
 		return Workspace{}, err
 	}
 	if owner.Valid {
 		w.OwnerUserID = owner.String
 	}
+	if seedAtRow.Valid {
+		t := seedAtRow.Time
+		w.SeedUpdatedAt = &t
+	}
 	return w, nil
+}
+
+// ApplySeed writes body into seed_md and bumps seed_updated_at +
+// updated_at on the workspace at id. Idempotent: when body matches the
+// stored seed_md byte-for-byte, no write occurs and the second return
+// value (changed) is false.
+//
+// Sole caller is the workspace_seed_apply verb, driven by
+// `satellites seed push` walking `.satellites/seeds/<wksp>/workspace.md`.
+func (s *Store) ApplySeed(ctx context.Context, id, body string, now time.Time) (Workspace, bool, error) {
+	now = now.UTC()
+	w, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Workspace{}, false, err
+	}
+	if w.SeedMD == body {
+		return w, false, nil
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+        UPDATE workspaces
+        SET seed_md = $1, seed_updated_at = $2, updated_at = $2
+        WHERE id = $3
+    `, body, now, id); err != nil {
+		return Workspace{}, false, fmt.Errorf("workspace: apply seed: %w", err)
+	}
+	w.SeedMD = body
+	w.SeedUpdatedAt = &now
+	w.UpdatedAt = now
+	return w, true, nil
 }
 
 func scanWorkspace(row *sql.Row) (Workspace, error) {

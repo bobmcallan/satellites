@@ -21,16 +21,23 @@ const (
 )
 
 // Project is the per-engagement container.
+//
+// SeedMD + SeedUpdatedAt carry the operator-pushed seed content from
+// `.satellites/seeds/<workspace_id>/<project_id>/project.md`.
+// SeedUpdatedAt is nil until the first `satellites seed push` lands;
+// SeedMD is "" by default.
 type Project struct {
-	ID              string    `json:"id"`
-	WorkspaceID     string    `json:"workspace_id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	GitURLCanonical string    `json:"git_url_canonical,omitempty"`
-	OwnerUserID     string    `json:"owner_user_id,omitempty"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string     `json:"id"`
+	WorkspaceID     string     `json:"workspace_id"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description,omitempty"`
+	GitURLCanonical string     `json:"git_url_canonical,omitempty"`
+	OwnerUserID     string     `json:"owner_user_id,omitempty"`
+	Status          string     `json:"status"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	SeedMD          string     `json:"seed_md,omitempty"`
+	SeedUpdatedAt   *time.Time `json:"seed_updated_at,omitempty"`
 }
 
 // NewID returns a fresh project id in the canonical `proj_<8hex>`

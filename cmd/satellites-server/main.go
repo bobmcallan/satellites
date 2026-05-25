@@ -78,11 +78,16 @@ func main() {
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetStoryStore(story.New(sqlDB))
 
-	// Document substrate: wire the store + seed the embedded system
-	// artifacts. SeedSystem is idempotent — a no-op when the embedded
-	// markdown matches the latest active version on disk.
+	// Document substrate + system-seed registry: wire stores then
+	// reconcile each embedded artifact. ReconcileSystemSeed is
+	// idempotent — a no-op when the system_seeds.embedded_hash matches
+	// the embed.FS body hash. A binary release that changes one
+	// artifact rewrites exactly that system_seeds row and appends one
+	// document_versions row.
 	docStore := document.New(sqlDB)
 	verb.SetDocumentStore(docStore)
+	sysSeedStore := document.NewSystemSeedStore(sqlDB)
+	verb.SetSystemSeedStore(sysSeedStore)
 	for _, sd := range []struct {
 		name string
 		body []byte
@@ -91,11 +96,20 @@ func main() {
 		{"satellites_mcp_load_context", seed.MCPLoadContextMarkdown()},
 		{"system_variables", seed.SystemVariablesMarkdown()},
 	} {
-		if err := document.SeedSystem(context.Background(), docStore, sd.name, string(sd.body), "system:seed", time.Now().UTC()); err != nil {
-			arbor.Fatal("seed system document", "name", sd.name, "err", err)
+		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, sd.name, string(sd.body), "system:seed", time.Now().UTC())
+		if err != nil {
+			arbor.Fatal("reconcile system seed", "name", sd.name, "err", err)
+		}
+		switch {
+		case res.Created:
+			arbor.Info("system seed installed", "name", sd.name)
+		case res.Changed:
+			arbor.Info("system seed updated (drift)", "name", sd.name)
+		default:
+			arbor.Info("system seed unchanged", "name", sd.name)
 		}
 	}
-	arbor.Info("system documents seeded")
+	arbor.Info("system seeds reconciled")
 
 	verb.SetVariableStore(variable.New(sqlDB))
 
