@@ -1,7 +1,7 @@
 /*
  * story_panel.js — Alpine factory for the project-detail story panel.
  * Ported from satellites-v4 (V3-parity) — trimmed: no realtime,
- * no bulk select, no task sub-table, no URL expand persistence.
+ * no task sub-table, no URL expand persistence.
  *
  * Token grammar parsed off `query`:
  *   status:<v[,v...]>     all|open|backlog|ready|in_progress|review|done|cancelled
@@ -48,8 +48,13 @@
             query: '',
             expanded: '',
             statusBusy: {},
+            selectedIDs: new Set(),
+            bulkTarget: 'ready',
+            bulkBusy: false,
+            bulkResultText: '',
 
             get tokens() { return parseStoryQuery(this.query); },
+            get selectionCount() { return this.selectedIDs.size; },
 
             matchesRow(el) {
                 const ds = (el && el.dataset) || {};
@@ -182,38 +187,84 @@
                 if (!id || !target || this.statusBusy[id]) { return; }
                 this.statusBusy = Object.assign({}, this.statusBusy, { [id]: true });
                 try {
+                    const res = await this._postStatus(id, target);
+                    if (res.ok) { this._patchRowStatus(id, target); }
+                    return res;
+                } finally {
+                    const next = Object.assign({}, this.statusBusy);
+                    delete next[id];
+                    this.statusBusy = next;
+                }
+            },
+
+            isSelected(id) { return this.selectedIDs.has(id); },
+
+            toggleRowSelection(id, ev) {
+                if (ev && ev.stopPropagation) { ev.stopPropagation(); }
+                if (!id) { return; }
+                const next = new Set(this.selectedIDs);
+                if (next.has(id)) { next.delete(id); } else { next.add(id); }
+                this.selectedIDs = next;
+                this.bulkResultText = '';
+            },
+
+            clearSelection() {
+                this.selectedIDs = new Set();
+                this.bulkResultText = '';
+            },
+
+            async applySelectionStatus() {
+                if (this.bulkBusy || this.selectedIDs.size === 0 || !this.bulkTarget) { return; }
+                this.bulkBusy = true;
+                this.bulkResultText = '';
+                const ids = Array.from(this.selectedIDs);
+                const target = this.bulkTarget;
+                const results = await Promise.all(ids.map(id => this._postStatus(id, target)));
+                let applied = 0, failed = 0;
+                for (let i = 0; i < results.length; i++) {
+                    if (results[i].ok) {
+                        applied++;
+                        this._patchRowStatus(ids[i], target);
+                    } else { failed++; }
+                }
+                this.bulkResultText = 'applied ' + applied + ' / failed ' + failed;
+                this.bulkBusy = false;
+            },
+
+            async _postStatus(id, target) {
+                try {
                     const resp = await fetch('/api/stories/' + encodeURIComponent(id) + '/status', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'same-origin',
                         body: JSON.stringify({ status: target }),
                     });
-                    if (resp.ok) {
-                        const row = this.$el.querySelector('tr.story-row[data-id="' + id + '"]');
-                        if (row) {
-                            row.dataset.status = target;
-                            const pill = row.querySelector('.col-status .status-pill');
-                            if (pill) { pill.textContent = target; }
-                        }
-                        const buttons = this.$el.querySelectorAll(
-                            'section[data-story-status="' + id + '"] button.status-button'
-                        );
-                        buttons.forEach(b => {
-                            if (b.dataset.statusTarget === target) {
-                                b.setAttribute('disabled', '');
-                                b.setAttribute('aria-pressed', 'true');
-                            } else {
-                                b.removeAttribute('disabled');
-                                b.removeAttribute('aria-pressed');
-                            }
-                        });
-                    }
-                } catch (err) { /* keep stale state — operator can retry */ }
-                finally {
-                    const next = Object.assign({}, this.statusBusy);
-                    delete next[id];
-                    this.statusBusy = next;
+                    const text = await resp.text();
+                    return { ok: resp.ok, status: resp.status, body: text };
+                } catch (err) {
+                    return { ok: false, status: 0, body: String(err) };
                 }
+            },
+
+            _patchRowStatus(id, target) {
+                const row = this.$el.querySelector('tr.story-row[data-id="' + id + '"]');
+                if (row) {
+                    row.dataset.status = target;
+                    const pill = row.querySelector('.col-status .status-pill');
+                    if (pill) { pill.textContent = target; }
+                }
+                const buttons = this.$el.querySelectorAll(
+                    'section[data-story-status="' + id + '"] button.status-button'
+                );
+                buttons.forEach(b => {
+                    if (b.dataset.statusTarget === target) {
+                        b.setAttribute('disabled', '');
+                        b.setAttribute('aria-pressed', 'true');
+                    } else {
+                        b.removeAttribute('disabled');
+                        b.removeAttribute('aria-pressed');
+                    }
+                });
             },
         };
     }
@@ -224,4 +275,5 @@
 
     window.storyPanel = storyPanel;
     window.storyPanel.__test__ = { parseStoryQuery };
+    window.storyPanelFactory = storyPanel;
 })();

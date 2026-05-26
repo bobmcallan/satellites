@@ -96,8 +96,13 @@ func TestProjectDetailPanel(t *testing.T) {
 		Priority:  &priorityLow,
 		Tags:      &tagsB,
 	})
-	if _, err := verb.Dispatch(ctx, "document_upsert", createReq2); err != nil {
+	createResp2, err := verb.Dispatch(ctx, "document_upsert", createReq2)
+	if err != nil {
 		t.Fatalf("create story 2: %v", err)
+	}
+	var storyB verb.DocumentUpsertResponse
+	if err := json.Unmarshal(createResp2, &storyB); err != nil {
+		t.Fatalf("decode story 2: %v", err)
 	}
 
 	sessions := auth.NewSessions([]byte("panel-test-secret"))
@@ -140,6 +145,12 @@ func TestProjectDetailPanel(t *testing.T) {
 			`data-field="story-status-buttons"`,
 			`data-field="story-description"`,
 			`data-field="story-acceptance"`,
+			`data-field="story-bulk-bar"`,
+			`data-field="story-bulk-target"`,
+			`data-field="story-bulk-apply"`,
+			`data-field="story-bulk-clear"`,
+			`data-field="story-row-select"`,
+			`class="col-select"`,
 			"wired story", "other story",
 			"area:portal", "epic:test", "area:other",
 			bodyA,
@@ -188,6 +199,33 @@ func TestProjectDetailPanel(t *testing.T) {
               data-status="ready"`
 		if !strings.Contains(body, want) {
 			t.Errorf("story row did not pick up new status; body excerpt missing %q", want)
+		}
+	})
+
+	t.Run("bulk status fan-out POSTs both round-trip", func(t *testing.T) {
+		// Mirrors the client-side Promise.all that storyPanel.applySelectionStatus
+		// issues: one POST per selected id, all hitting /api/stories/{id}/status.
+		for _, id := range []string{storyA.Document.ID, storyB.Document.ID} {
+			payload := bytes.NewReader([]byte(`{"status":"done"}`))
+			req := authedRequest(http.MethodPost, "/api/stories/"+id+"/status", payload)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				body, _ := io.ReadAll(rec.Result().Body)
+				t.Fatalf("bulk POST id=%s: code=%d body=%s", id, rec.Code, string(body))
+			}
+		}
+
+		// Verify both rows pick up the new status on re-render — what a
+		// reload after a bulk apply would show.
+		_, body := get(t, "/projects/"+pj.ID)
+		for _, id := range []string{storyA.Document.ID, storyB.Document.ID} {
+			want := `data-id="` + id + `"
+              data-status="done"`
+			if !strings.Contains(body, want) {
+				t.Errorf("bulk apply did not flip %s to done; body excerpt missing %q", id, want)
+			}
 		}
 	})
 

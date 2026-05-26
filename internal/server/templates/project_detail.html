@@ -77,9 +77,39 @@
       </div>
 
       {{if .Stories}}
+      <div class="story-bulk-bar"
+           x-show="selectedIDs.size > 0"
+           x-cloak
+           data-field="story-bulk-bar">
+        <span class="story-bulk-count" data-field="story-bulk-count" x-text="selectedIDs.size + ' selected'"></span>
+        <label class="story-bulk-target-label">set status to
+          <select x-model="bulkTarget" class="story-bulk-target" data-field="story-bulk-target">
+            <option value="backlog">backlog</option>
+            <option value="ready">ready</option>
+            <option value="in_progress">in_progress</option>
+            <option value="review">review</option>
+            <option value="done">done</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+        <button type="button"
+                class="btn primary story-bulk-apply"
+                data-field="story-bulk-apply"
+                :disabled="bulkBusy"
+                @click="applySelectionStatus">apply to selection</button>
+        <button type="button"
+                class="btn secondary story-bulk-clear"
+                data-field="story-bulk-clear"
+                @click="clearSelection">clear</button>
+        <span class="story-bulk-result"
+              data-field="story-bulk-result"
+              x-show="bulkResultText"
+              x-text="bulkResultText"></span>
+      </div>
       <table class="panel-table panel-table-stories" data-field="stories-table">
         <thead>
           <tr>
+            <th class="col-select"><span class="visually-hidden">select</span></th>
             <th class="col-id">id</th>
             <th class="col-title">title</th>
             <th class="col-status">status</th>
@@ -102,6 +132,13 @@
               :class="rowClass($el)"
               @click="toggleRow"
               data-field="story-row">
+            <td class="col-select" @click.stop>
+              <input type="checkbox"
+                     class="story-row-select"
+                     data-field="story-row-select"
+                     :checked="isSelected('{{.ID}}')"
+                     @change="toggleRowSelection('{{.ID}}', $event)" />
+            </td>
             <td class="col-id"><code>{{.ID}}</code></td>
             <td class="col-title">
               <div class="story-row-title">{{.Title}}</div>
@@ -120,7 +157,7 @@
               x-show="isExpanded($el)"
               x-cloak
               data-field="story-detail">
-            <td colspan="5">
+            <td colspan="6">
               <div class="story-detail-flat">
                 <section class="story-detail-block story-status-controls" data-story-status="{{.ID}}" data-field="story-status-buttons">
                   <h4>status</h4>
