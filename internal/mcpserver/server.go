@@ -13,9 +13,92 @@ import (
 
 	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/verb"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
+
+// inputSchemas maps each exposed verb to a typed JSON Schema option
+// generated from its Go request struct. Without these, MCP clients
+// (notably Claude web) have no field-type information and stringify
+// array values — the dispatcher then rejects the call on unmarshal.
+// Reflection-based generation keeps schema and struct in lock-step.
+var inputSchemas = map[string]mcp.ToolOption{
+	"document_get":    typedSchema[verb.DocumentGetRequest](),
+	"document_list":   typedSchema[verb.DocumentListRequest](),
+	"document_upsert": typedSchema[verb.DocumentUpsertRequest](),
+	"document_delete": typedSchema[verb.DocumentDeleteRequest](),
+	"project_match":   typedSchema[verb.ProjectMatchRequest](),
+	"project_create":  typedSchema[verb.ProjectCreateRequest](),
+	"project_list":    typedSchema[verb.ProjectListRequest](),
+	"project_get":     typedSchema[verb.ProjectGetRequest](),
+	"project_update":  typedSchema[verb.ProjectUpdateRequest](),
+}
+
+// typedSchema generates a JSON Schema from a Go request struct and
+// strips "null" from union type arrays before handing it to mcp-go.
+//
+// The underlying jsonschema-go library encodes pointer-typed and
+// slice-typed fields as ["null", T] unions — accurate JSON-Schema-wise,
+// but enough to push some hosted clients (Claude web) into a fallback
+// path that ships array values as JSON strings. Stripping "null"
+// leaves a single, unambiguous type and the client emits the value
+// as the declared array. Server-side decoding is unaffected: the
+// verb dispatcher already treats JSON null and absent identically
+// through omitempty + pointer semantics.
+func typedSchema[T any]() mcp.ToolOption {
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{IgnoreInvalidTypes: true})
+	if err != nil {
+		panic("mcpserver: typedSchema: " + err.Error())
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		panic("mcpserver: typedSchema marshal: " + err.Error())
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		panic("mcpserver: typedSchema unmarshal: " + err.Error())
+	}
+	stripNullable(doc)
+	cleaned, err := json.Marshal(doc)
+	if err != nil {
+		panic("mcpserver: typedSchema remarshal: " + err.Error())
+	}
+	return mcp.WithRawInputSchema(cleaned)
+}
+
+// stripNullable walks a JSON-Schema document and rewrites every
+// {"type": ["null", X]} union into {"type": X}.
+func stripNullable(node any) {
+	switch n := node.(type) {
+	case map[string]any:
+		if raw, ok := n["type"]; ok {
+			if arr, ok := raw.([]any); ok {
+				kept := arr[:0]
+				for _, t := range arr {
+					if s, _ := t.(string); s != "null" {
+						kept = append(kept, t)
+					}
+				}
+				switch len(kept) {
+				case 0:
+					delete(n, "type")
+				case 1:
+					n["type"] = kept[0]
+				default:
+					n["type"] = kept
+				}
+			}
+		}
+		for _, child := range n {
+			stripNullable(child)
+		}
+	case []any:
+		for _, child := range n {
+			stripNullable(child)
+		}
+	}
+}
 
 // orientationInstructions is returned in the MCP `initialize` response
 // so clients (Claude, Warp, Codex, …) read it as session-bootstrap
@@ -74,9 +157,13 @@ func New() *mcpserver.MCPServer {
 		if v == nil {
 			panic("mcpserver: exposed verb " + name + " not registered")
 		}
+		schema, ok := inputSchemas[name]
+		if !ok {
+			panic("mcpserver: exposed verb " + name + " missing input schema")
+		}
 		dispatched := name
 		s.AddTool(
-			mcp.NewTool(name, mcp.WithDescription(v.Description)),
+			mcp.NewTool(name, mcp.WithDescription(v.Description), schema),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				argsJSON, err := json.Marshal(req.GetArguments())
 				if err != nil {
