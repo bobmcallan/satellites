@@ -27,10 +27,14 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 //   - ledger_*         — append-only audit, not authoring.
 //   - system_seed_*    — system-scope mutation, operator-only.
 //   - project_seed_*   — same.
-//   - project_create   — administrative provisioning, not authoring.
 //   - story_*          — stories are documents post-unification; the
 //     document_* surface is canonical. Re-introducing story_* verbs
 //     would split the surface.
+//
+// project_create was previously on this list as "administrative
+// provisioning, not authoring", but MCP-only clients (Claude web) need
+// to register a missing project without shelling out to the CLI. The
+// entry was lifted deliberately; see exposedVerbs in server.go.
 //
 // If one of these names appears in exposedVerbs, the change is almost
 // certainly a mistake. Lift the denylist explicitly with a follow-up
@@ -43,7 +47,6 @@ func TestExposedVerbsDoNotIncludeCLIOnlyVerbs(t *testing.T) {
 		"ledger_append", "ledger_list",
 		"system_seed_set", "system_seed_list", "system_seed_delete",
 		"project_seed_set", "project_seed_list", "project_seed_delete",
-		"project_create",
 		"story_create", "story_update", "story_get", "story_delete", "story_list",
 	}
 	exposed := map[string]bool{}

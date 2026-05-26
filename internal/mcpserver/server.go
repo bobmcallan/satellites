@@ -31,6 +31,11 @@ var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 //   - project_match (bootstrap): resolves the consumer repo's git
 //     remote to a project_id. Native CLI-driven agents use this once
 //     during install; the document_* verbs cover everything after.
+//   - project_create / project_list / project_get / project_update:
+//     project registration + maintenance for MCP-only clients (Claude
+//     web, etc.) that cannot shell out to the CLI. project_create is
+//     exposed deliberately — see layering_test.go for the denylist
+//     entry that was lifted, and the operator memo behind it.
 //   - document_get / document_list / document_upsert / document_delete:
 //     the unified CRUD surface across both substrate kinds — pass
 //     type:"story" on writes/queries to operate on stories,
@@ -48,6 +53,10 @@ var exposedVerbs = []string{
 	"document_upsert",
 	"document_delete",
 	"project_match",
+	"project_create",
+	"project_list",
+	"project_get",
+	"project_update",
 }
 
 // New returns a configured *mcpserver.MCPServer exposing the verbs in

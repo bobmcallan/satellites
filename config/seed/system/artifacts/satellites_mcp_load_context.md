@@ -108,11 +108,17 @@ operator — the project must be created (out of scope for bootstrap).
 
 ## Step 5 — dispatch every other verb via the CLI
 
-`tools/list` on this MCP server returns five verbs: `document_get`,
-`document_list`, `document_upsert`, `document_delete`, and
-`project_match`. The same five verbs are reachable from the CLI via
+`tools/list` on this MCP server returns nine verbs: `document_get`,
+`document_list`, `document_upsert`, `document_delete`, `project_match`,
+`project_create`, `project_list`, `project_get`, and `project_update`.
+Every one is also reachable from the CLI via
 `satellites exec <verb> --json '<args>'`; the dispatch path is shared,
 so behaviour is byte-identical to the MCP call.
+
+Array-typed fields (`tags`, `versions`, etc.) must be passed as real
+JSON arrays — `["epic:foo","area:bar"]`, never the stringified form
+`"[\"epic:foo\"]"`. The dispatcher rejects the stringified shape with
+a bad-request error.
 
 Use `<target_install_path> --help` for the command tree. Typed
 subcommands cover the high-traffic verbs:
@@ -153,10 +159,11 @@ retry the verb. The CLI does not self-repair the TOML.
 
 Hosted assistants (Claude web, etc.) can't shell out to the CLI. For
 them, the MCP server exposes four `document_*` verbs that cover both
-free-form documents and stories. Stories are documents with
-`type:"story"`; there is no separate `story_*` surface. The Bearer
-credential on the MCP session authorises each call — no TOML, no
-installed binary.
+free-form documents and stories, plus the `project_*` verbs needed to
+register and maintain projects without the CLI. Stories are documents
+with `type:"story"`; there is no separate `story_*` surface. The
+Bearer credential on the MCP session authorises each call — no TOML,
+no installed binary.
 
 | Verb              | Use                                                                                          |
 | ----------------- | -------------------------------------------------------------------------------------------- |
@@ -164,6 +171,11 @@ installed binary.
 | `document_list`   | Paginated list with structured filters. Pass `type:"story"` to list stories, `type:"document"` for documents, omit `type` for both. |
 | `document_upsert` | Create or update. See "upsert modes" below — three call shapes serve story-create, story-update, and document-upsert.   |
 | `document_delete` | Delete by `id` (hard-delete for stories, soft-tombstone for documents) OR by `(scope, name)` (soft-tombstone).         |
+| `project_match`   | Resolve a `project_id` from a git remote URL. Returns `not_found` when the project isn't registered yet. |
+| `project_create`  | Register a new project under a workspace. Required when `project_match` returns `not_found` and the caller has no CLI. Body: `{"name":"…","git_url":"…","description":"…"}`. `workspace_id` falls back to the default workspace when omitted. |
+| `project_list`    | List projects, optionally filtered by `workspace_id`.                                                                  |
+| `project_get`     | Fetch a single project by `id`.                                                                                        |
+| `project_update`  | Patch mutable fields (`name`, `description`, `git_url`) on a project.                                                  |
 
 ### Upsert modes (document_upsert)
 

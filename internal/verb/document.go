@@ -195,7 +195,8 @@ func init() {
 		Description: "Create or update. Three modes by inspection: " +
 			"(1) type='story' + project_id + name → create story; " +
 			"(2) id present → patch story (body change appends a new version); " +
-			"(3) type='document' + scope + name → key-addressed document upsert.",
+			"(3) type='document' + scope + name → key-addressed document upsert. " +
+			"tags is a JSON array of strings, e.g. [\"epic:foo\",\"area:bar\"] — never a stringified JSON value like \"[\\\"epic:foo\\\"]\".",
 		Invoke: invokeDocumentUpsert,
 	})
 	Register(&Verb{
@@ -207,7 +208,8 @@ func init() {
 	Register(&Verb{
 		Name: "document_list",
 		Description: "List documents and/or stories with structured filters and cursor pagination. " +
-			"Pass type:'story' to list stories, type:'document' for documents, omit to list both.",
+			"Pass type:'story' to list stories, type:'document' for documents, omit to list both. " +
+			"tags is a JSON array of strings (AND filter), e.g. [\"epic:foo\",\"area:bar\"] — never a stringified JSON value.",
 		Invoke: invokeDocumentList,
 	})
 }
