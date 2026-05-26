@@ -20,7 +20,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/server"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -79,7 +78,6 @@ func main() {
 	verb.SetWorkspaceStore(wsStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
-	verb.SetStoryStore(story.New(sqlDB))
 	verb.SetLedgerStore(ledger.New(sqlDB))
 
 	// Reviewer registry — load every markdown definition embedded

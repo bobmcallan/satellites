@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -45,16 +45,16 @@ func TestReviewerHook(t *testing.T) {
 
 	wsStore := workspace.New(env.DB)
 	pjStore := project.New(env.DB)
-	stStore := story.New(env.DB)
+	docStore := document.New(env.DB)
 	ledStore := ledger.New(env.DB)
 	verb.SetWorkspaceStore(wsStore)
 	verb.SetProjectStore(pjStore)
-	verb.SetStoryStore(stStore)
+	verb.SetDocumentStore(docStore)
 	verb.SetLedgerStore(ledStore)
 	t.Cleanup(func() {
 		verb.SetWorkspaceStore(nil)
 		verb.SetProjectStore(nil)
-		verb.SetStoryStore(nil)
+		verb.SetDocumentStore(nil)
 		verb.SetLedgerStore(nil)
 		verb.SetReviewerRegistry(nil)
 		verb.SetReviewerDispatchForTest(nil)
@@ -75,23 +75,24 @@ func TestReviewerHook(t *testing.T) {
 	}
 
 	// Synchronous dispatch so assertions don't race the goroutine.
-	verb.SetReviewerDispatchForTest(func(ctx context.Context, s story.Story) {
+	verb.SetReviewerDispatchForTest(func(ctx context.Context, s verb.StoryEnvelope) {
 		runReviewersSyncForTest(ctx, s)
 	})
 
 	t.Run("empty registry produces no findings", func(t *testing.T) {
 		verb.SetReviewerRegistry(reviewer.NewRegistry(nil, nil))
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "no-reviewer story",
+			Name:      "no-reviewer story",
 		})
-		raw, err := verb.Dispatch(ctx, "story_create", req)
+		raw, err := verb.Dispatch(ctx, "document_upsert", req)
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
-		entries, err := ledStore.List(ctx, s.ID, ledger.KindReviewFinding)
+		var resp verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &resp)
+		entries, err := ledStore.List(ctx, resp.Document.ID, ledger.KindReviewFinding)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -115,16 +116,18 @@ func TestReviewerHook(t *testing.T) {
 		}
 		verb.SetReviewerRegistry(reviewer.NewRegistry(defs, client))
 
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "hi",
+			Name:      "hi",
 		})
-		raw, err := verb.Dispatch(ctx, "story_create", req)
+		raw, err := verb.Dispatch(ctx, "document_upsert", req)
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		var resp verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &resp)
+		s := resp.Document
 
 		entries, err := ledStore.List(ctx, s.ID, ledger.KindReviewFinding)
 		if err != nil {
@@ -134,12 +137,11 @@ func TestReviewerHook(t *testing.T) {
 			t.Fatalf("expected 2 findings after create, got %d", len(entries))
 		}
 		// Update triggers another review pass.
-		newTitle := "hi (renamed)"
-		updReq, _ := json.Marshal(verb.StoryUpdateRequest{
-			ID:    s.ID,
-			Title: &newTitle,
+		updReq, _ := json.Marshal(verb.DocumentUpsertRequest{
+			ID:   s.ID,
+			Name: "hi (renamed)",
 		})
-		if _, err := verb.Dispatch(ctx, "story_update", updReq); err != nil {
+		if _, err := verb.Dispatch(ctx, "document_upsert", updReq); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 		entries, _ = ledStore.List(ctx, s.ID, ledger.KindReviewFinding)
@@ -164,7 +166,7 @@ func TestReviewerHook(t *testing.T) {
 // the caller. Tests need synchronous semantics — production needs
 // the goroutine. The body diverges only on whether `go` is in
 // front of the call.
-func runReviewersSyncForTest(ctx context.Context, s story.Story) {
+func runReviewersSyncForTest(ctx context.Context, s verb.StoryEnvelope) {
 	// Re-using the package's exported synchronous path keeps the
 	// finding-shape logic single-sourced. The verb package exposes
 	// it indirectly via SetReviewerDispatchForTest hooks.

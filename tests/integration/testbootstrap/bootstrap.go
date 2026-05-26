@@ -96,8 +96,10 @@ func SetUp(t *testing.T) *Env {
 // bypasses row-level triggers, so it's the supported reset path.
 func Reset(t *testing.T, env *Env) {
 	t.Helper()
+	// stories were unified into documents in migration 0017; type='story'
+	// rows live in documents so the single TRUNCATE there covers both.
 	if _, err := env.DB.Exec(`
-        TRUNCATE stories, tools, reviews, evidence,
+        TRUNCATE tools, reviews, evidence,
                  documents, document_versions, variables,
                  system_seeds
         RESTART IDENTITY CASCADE

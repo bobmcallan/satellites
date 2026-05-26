@@ -14,7 +14,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/reviewer"
-	"github.com/bobmcallan/satellites/internal/story"
 )
 
 var (
@@ -34,7 +33,7 @@ func SetReviewerRegistry(r *reviewer.Registry) { reviewerRegistry = r }
 // SetReviewerDispatchForTest overrides the goroutine spawn with a
 // synchronous variant so tests can assert findings landed in the
 // ledger before the test returns. Pass nil to restore the default.
-func SetReviewerDispatchForTest(fn func(ctx context.Context, s story.Story)) {
+func SetReviewerDispatchForTest(fn func(ctx context.Context, s StoryEnvelope)) {
 	if fn == nil {
 		reviewerDispatch = spawnReviewers
 		return
@@ -46,7 +45,7 @@ func SetReviewerDispatchForTest(fn func(ctx context.Context, s story.Story)) {
 // call. It returns immediately; the actual reviewer + ledger work
 // happens via the configurable dispatch (spawnReviewers in prod,
 // synchronous in tests).
-func dispatchReviewers(_ context.Context, s story.Story) {
+func dispatchReviewers(_ context.Context, s StoryEnvelope) {
 	if reviewerRegistry == nil || len(reviewerRegistry.EnabledNames()) == 0 {
 		return
 	}
@@ -61,7 +60,7 @@ func dispatchReviewers(_ context.Context, s story.Story) {
 // (HTTP timeout, CLI exit) before the upstream LLM call returns.
 // The reviewer must outlive the verb response or its findings are
 // lost.
-func spawnReviewers(_ context.Context, s story.Story) {
+func spawnReviewers(_ context.Context, s StoryEnvelope) {
 	go runReviewersSync(context.Background(), s)
 }
 
@@ -69,14 +68,14 @@ func spawnReviewers(_ context.Context, s story.Story) {
 // reviewer dispatch, exported solely so integration tests can
 // assert findings landed in the ledger before the test returns.
 // Production callers stay on dispatchReviewers / spawnReviewers.
-func RunReviewersSyncForTest(ctx context.Context, s story.Story) {
+func RunReviewersSyncForTest(ctx context.Context, s StoryEnvelope) {
 	runReviewersSync(ctx, s)
 }
 
 // runReviewersSync is the work the goroutine performs. Exposed at
 // package scope (lowercase) so synchronous test dispatchers can
 // share the body without forking it.
-func runReviewersSync(ctx context.Context, s story.Story) {
+func runReviewersSync(ctx context.Context, s StoryEnvelope) {
 	if reviewerRegistry == nil || ledgerStore == nil {
 		return
 	}

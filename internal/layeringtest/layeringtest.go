@@ -29,7 +29,6 @@ var ForbiddenDomain = []string{
 	"github.com/bobmcallan/satellites/internal/ledger",
 	"github.com/bobmcallan/satellites/internal/project",
 	"github.com/bobmcallan/satellites/internal/reviewer",
-	"github.com/bobmcallan/satellites/internal/story",
 	"github.com/bobmcallan/satellites/internal/variable",
 	"github.com/bobmcallan/satellites/internal/workspace",
 }

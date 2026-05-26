@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -31,16 +31,16 @@ func TestLedgerVerbs(t *testing.T) {
 
 	wsStore := workspace.New(env.DB)
 	pjStore := project.New(env.DB)
-	stStore := story.New(env.DB)
+	docStore := document.New(env.DB)
 	ledStore := ledger.New(env.DB)
 	verb.SetWorkspaceStore(wsStore)
 	verb.SetProjectStore(pjStore)
-	verb.SetStoryStore(stStore)
+	verb.SetDocumentStore(docStore)
 	verb.SetLedgerStore(ledStore)
 	t.Cleanup(func() {
 		verb.SetWorkspaceStore(nil)
 		verb.SetProjectStore(nil)
-		verb.SetStoryStore(nil)
+		verb.SetDocumentStore(nil)
 		verb.SetLedgerStore(nil)
 	})
 
@@ -58,19 +58,21 @@ func TestLedgerVerbs(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	t.Run("story_create auto-appends kind=story_created", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+	t.Run("story create via document_upsert auto-appends kind=story_created", func(t *testing.T) {
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "ledger smoke",
+			Name:      "ledger smoke",
 		})
-		raw, err := verb.Dispatch(ctx, "story_create", req)
+		raw, err := verb.Dispatch(ctx, "document_upsert", req)
 		if err != nil {
-			t.Fatalf("story_create: %v", err)
+			t.Fatalf("document_upsert (story create): %v", err)
 		}
-		var s story.Story
-		if err := json.Unmarshal(raw, &s); err != nil {
-			t.Fatalf("unmarshal story: %v", err)
+		var resp verb.DocumentUpsertResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
 		}
+		s := resp.Document
 
 		entries, err := ledStore.List(ctx, s.ID, "")
 		if err != nil {
@@ -82,38 +84,39 @@ func TestLedgerVerbs(t *testing.T) {
 		if entries[0].Kind != ledger.KindStoryCreated {
 			t.Fatalf("kind = %q, want %q", entries[0].Kind, ledger.KindStoryCreated)
 		}
-		var payload story.Story
+		// Ledger payload is a StoryEnvelope (so reviewers + portal
+		// consumers see the title/body shape they always have).
+		var payload verb.StoryEnvelope
 		if err := json.Unmarshal(entries[0].Payload, &payload); err != nil {
-			t.Fatalf("payload not a story: %v", err)
+			t.Fatalf("payload not a story envelope: %v", err)
 		}
 		if payload.ID != s.ID || payload.Title != "ledger smoke" {
 			t.Fatalf("payload mismatch: %+v", payload)
 		}
 	})
 
-	t.Run("story_update auto-appends kind=story_updated with diff", func(t *testing.T) {
-		// Fresh story so the prior subtest's entry doesn't leak in.
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+	t.Run("story update via document_upsert auto-appends kind=story_updated with diff", func(t *testing.T) {
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "diff target",
-			Status:    "backlog",
+			Name:      "diff target",
 		})
-		raw, err := verb.Dispatch(ctx, "story_create", req)
+		raw, err := verb.Dispatch(ctx, "document_upsert", req)
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		var created verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &created)
+		s := created.Document
 
-		// Mutate status + title.
+		// Mutate status + title (Name) by id-addressed upsert.
 		newStatus := "in_progress"
-		newTitle := "diff target (renamed)"
-		upd, _ := json.Marshal(verb.StoryUpdateRequest{
+		upd, _ := json.Marshal(verb.DocumentUpsertRequest{
 			ID:     s.ID,
-			Title:  &newTitle,
+			Name:   "diff target (renamed)",
 			Status: &newStatus,
 		})
-		if _, err := verb.Dispatch(ctx, "story_update", upd); err != nil {
+		if _, err := verb.Dispatch(ctx, "document_upsert", upd); err != nil {
 			t.Fatalf("update: %v", err)
 		}
 
@@ -134,19 +137,21 @@ func TestLedgerVerbs(t *testing.T) {
 		if _, ok := diff["status"]; !ok {
 			t.Fatalf("status diff missing: %+v", diff)
 		}
-		if diff["title"]["after"] != newTitle {
-			t.Fatalf("title.after = %v, want %q", diff["title"]["after"], newTitle)
+		if diff["title"]["after"] != "diff target (renamed)" {
+			t.Fatalf("title.after = %v, want %q", diff["title"]["after"], "diff target (renamed)")
 		}
 	})
 
 	t.Run("ledger_append + ledger_list round-trip + ordering", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "round-trip target",
+			Name:      "round-trip target",
 		})
-		raw, _ := verb.Dispatch(ctx, "story_create", req)
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		raw, _ := verb.Dispatch(ctx, "document_upsert", req)
+		var createResp verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &createResp)
+		s := createResp.Document
 
 		// Append two comments + one review_finding. Sleep nudges the
 		// created_at timestamps so List ordering is deterministic.
@@ -168,12 +173,12 @@ func TestLedgerVerbs(t *testing.T) {
 
 		// List unfiltered — expect story_created + 3 appended in order.
 		listReq, _ := json.Marshal(verb.LedgerListRequest{StoryID: s.ID})
-		raw, err := verb.Dispatch(ctx, "ledger_list", listReq)
+		listRaw, err := verb.Dispatch(ctx, "ledger_list", listReq)
 		if err != nil {
 			t.Fatalf("ledger_list: %v", err)
 		}
 		var resp verb.LedgerListResponse
-		if err := json.Unmarshal(raw, &resp); err != nil {
+		if err := json.Unmarshal(listRaw, &resp); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
 		if len(resp.Entries) != 4 {
@@ -215,13 +220,15 @@ func TestLedgerVerbs(t *testing.T) {
 	})
 
 	t.Run("append-only — direct UPDATE on evidence is rejected", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "append-only target",
+			Name:      "append-only target",
 		})
-		raw, _ := verb.Dispatch(ctx, "story_create", req)
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		raw, _ := verb.Dispatch(ctx, "document_upsert", req)
+		var resp verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &resp)
+		s := resp.Document
 
 		entries, err := ledStore.List(ctx, s.ID, "")
 		if err != nil || len(entries) == 0 {

@@ -52,7 +52,7 @@ func dispatchSummaryRegen(_ context.Context, storyID string) {
 	if reviewerRegistry.Client == nil {
 		return
 	}
-	if storyStore == nil || ledgerStore == nil {
+	if documentStore == nil || ledgerStore == nil {
 		return
 	}
 	if storyID == "" {
@@ -75,18 +75,19 @@ func spawnSummaryRegen(_ context.Context, storyID string) {
 // swallowed — a failing summary regen never breaks the
 // originating verb.
 func regenerateSummary(ctx context.Context, storyID string) {
-	if reviewerRegistry == nil || storyStore == nil || ledgerStore == nil {
+	if reviewerRegistry == nil || documentStore == nil || ledgerStore == nil {
 		return
 	}
 	def, ok := reviewerRegistry.Defs[SummaryReviewerName]
 	if !ok || !def.Enabled || reviewerRegistry.Client == nil {
 		return
 	}
-	s, err := storyStore.GetByID(ctx, storyID)
+	d, body, err := documentStore.GetByIDWithLatestBody(ctx, storyID)
 	if err != nil {
 		arbor.Warn("summary regen: get story failed", "story_id", storyID, "err", err)
 		return
 	}
+	s := NewStoryEnvelope(d, body)
 	entries, err := ledgerStore.List(ctx, storyID, "")
 	if err != nil {
 		arbor.Warn("summary regen: list ledger failed", "story_id", storyID, "err", err)
@@ -98,7 +99,7 @@ func regenerateSummary(ctx context.Context, storyID string) {
 		arbor.Warn("summary regen: reviewer failed", "story_id", storyID, "err", err)
 		return
 	}
-	if err := storyStore.SetSummary(ctx, storyID, text, time.Now().UTC()); err != nil {
+	if err := documentStore.SetSummary(ctx, storyID, text, time.Now().UTC()); err != nil {
 		arbor.Warn("summary regen: set summary failed", "story_id", storyID, "err", err)
 	}
 }

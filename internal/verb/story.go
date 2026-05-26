@@ -1,6 +1,16 @@
-// Story verbs — V5's units-of-work surface, bound to projects from
-// PR 2. All four CRUDs are CLI-primary; the MCP transport gets them
-// for free via the shared verb registry.
+// Internal story envelope + after-write hooks.
+//
+// Post-unification (sty_0dd71f79) the public verb surface is the four
+// document_* verbs — there are no story_* verbs. This file holds the
+// private machinery that document_upsert uses when the row being
+// written is type='story':
+//
+//   - StoryEnvelope: the JSON shape the reviewer + summary + ledger
+//     consumers expect (title/body/tags/…). Built from a document.Document
+//     so reviewer prompt markdown doesn't need to change.
+//   - storyAfterCreate / storyAfterUpdate: dispatch reviewers, append
+//     a ledger entry, kick a summary regen. Same chain story_create /
+//     story_update used to fire before unification.
 
 package verb
 
@@ -8,262 +18,106 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
-	"github.com/bobmcallan/satellites/internal/story"
 )
 
-var storyStore *story.Store
-
-// SetStoryStore wires the server's story.Store into the verb package.
-// Called from cmd/satellites-server on boot.
-func SetStoryStore(s *story.Store) { storyStore = s }
-
-type StoryCreateRequest struct {
-	ProjectID          string   `json:"project_id"`
-	ParentID           string   `json:"parent_id,omitempty"`
-	Title              string   `json:"title"`
-	Body               string   `json:"body,omitempty"`
-	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	Priority           string   `json:"priority,omitempty"`
-	Category           string   `json:"category,omitempty"`
-	Tags               []string `json:"tags,omitempty"`
+// StoryEnvelope is the JSON shape passed to ledger payloads, reviewers,
+// and the summary regeneration hook. Field names mirror the pre-
+// unification story.Story so reviewer prompts that reference {title,
+// body, status, …} keep resolving against the same keys.
+type StoryEnvelope struct {
+	ID                 string     `json:"id"`
+	ProjectID          string     `json:"project_id"`
+	ParentID           string     `json:"parent_id,omitempty"`
+	Title              string     `json:"title"`
+	Body               string     `json:"body,omitempty"`
+	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
+	Status             string     `json:"status"`
+	Priority           string     `json:"priority"`
+	Category           string     `json:"category"`
+	Tags               []string   `json:"tags"`
+	Summary            string     `json:"summary,omitempty"`
+	SummaryUpdatedAt   *time.Time `json:"summary_updated_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
-type StoryListRequest struct {
-	ProjectID string   `json:"project_id"`
-	Tags      []string `json:"tags,omitempty"`
-}
-
-type StoryListResponse struct {
-	Stories []story.Story `json:"stories"`
-}
-
-type StoryGetRequest struct {
-	ID string `json:"id"`
-}
-
-type StoryDeleteRequest struct {
-	ID string `json:"id"`
-}
-
-type StoryDeleteResponse struct {
-	Story story.Story `json:"story"`
-}
-
-type StoryUpdateRequest struct {
-	ID                 string    `json:"id"`
-	ParentID           *string   `json:"parent_id,omitempty"`
-	Title              *string   `json:"title,omitempty"`
-	Body               *string   `json:"body,omitempty"`
-	AcceptanceCriteria *string   `json:"acceptance_criteria,omitempty"`
-	Status             *string   `json:"status,omitempty"`
-	Priority           *string   `json:"priority,omitempty"`
-	Category           *string   `json:"category,omitempty"`
-	Tags               *[]string `json:"tags,omitempty"`
-}
-
-func init() {
-	Register(&Verb{
-		Name:        "story_create",
-		Description: "Create a new story bound to a project.",
-		Invoke:      invokeStoryCreate,
-	})
-	Register(&Verb{
-		Name:        "story_list",
-		Description: "List stories under a project, ordered by status + priority + recency.",
-		Invoke:      invokeStoryList,
-	})
-	Register(&Verb{
-		Name:        "story_get",
-		Description: "Fetch a story by id.",
-		Invoke:      invokeStoryGet,
-	})
-	Register(&Verb{
-		Name:        "story_update",
-		Description: "Patch mutable fields on a story. project_id is immutable here.",
-		Invoke:      invokeStoryUpdate,
-	})
-	Register(&Verb{
-		Name:        "story_delete",
-		Description: "Hard-delete a story by id. Child parent_id is nulled; ledger entries persist (append-only).",
-		Invoke:      invokeStoryDelete,
-	})
-}
-
-func invokeStoryCreate(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	if storyStore == nil {
-		return nil, fmt.Errorf("story_create: store not configured")
+// NewStoryEnvelope projects a document.Document (which carries unified
+// fields) into the story-shaped envelope downstream consumers want.
+func NewStoryEnvelope(d document.Document, body string) StoryEnvelope {
+	tags := d.Tags
+	if tags == nil {
+		tags = []string{}
 	}
-	var req StoryCreateRequest
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, fmt.Errorf("story_create: bad request: %w", err)
-		}
+	return StoryEnvelope{
+		ID:                 d.ID,
+		ProjectID:          d.ProjectID,
+		ParentID:           d.ParentID,
+		Title:              d.Name,
+		Body:               body,
+		AcceptanceCriteria: d.AcceptanceCriteria,
+		Status:             d.Status,
+		Priority:           d.Priority,
+		Category:           d.Category,
+		Tags:               tags,
+		Summary:            d.Summary,
+		SummaryUpdatedAt:   d.SummaryUpdatedAt,
+		CreatedAt:          d.CreatedAt,
+		UpdatedAt:          d.UpdatedAt,
 	}
-	if strings.TrimSpace(req.ProjectID) == "" {
-		return nil, fmt.Errorf("story_create: project_id required")
-	}
-	if strings.TrimSpace(req.Title) == "" {
-		return nil, fmt.Errorf("story_create: title required")
-	}
-	s, err := storyStore.Create(ctx, story.CreateInput{
-		ProjectID:          req.ProjectID,
-		ParentID:           req.ParentID,
-		Title:              req.Title,
-		Body:               req.Body,
-		AcceptanceCriteria: req.AcceptanceCriteria,
-		Status:             req.Status,
-		Priority:           req.Priority,
-		Category:           req.Category,
-		Tags:               req.Tags,
-	}, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
+}
+
+// storyAfterCreate is the post-create hook chain document_upsert fires
+// when it inserts a type='story' row. Appends a ledger entry, fires the
+// reviewer registry, kicks off summary regen.
+func storyAfterCreate(ctx context.Context, d document.Document, body string) {
+	env := NewStoryEnvelope(d, body)
 	if ledgerStore != nil {
-		payload, _ := json.Marshal(s)
-		if _, lerr := ledgerStore.Append(ctx, ledger.AppendInput{
-			StoryID: s.ID,
+		payload, _ := json.Marshal(env)
+		if _, err := ledgerStore.Append(ctx, ledger.AppendInput{
+			StoryID: d.ID,
 			Kind:    ledger.KindStoryCreated,
 			Actor:   actorFromContext(ctx),
 			Payload: payload,
-		}, time.Now().UTC()); lerr != nil {
-			return nil, fmt.Errorf("story_create: ledger append: %w", lerr)
+		}, time.Now().UTC()); err != nil {
+			// Ledger append failures are surfaced to the operator
+			// via the verb response, but the document write has
+			// already succeeded — log and continue.
+			fmt.Printf("document_upsert: ledger append (create): %v\n", err)
 		}
-		dispatchSummaryRegen(ctx, s.ID)
+		dispatchSummaryRegen(ctx, d.ID)
 	}
-	dispatchReviewers(ctx, s)
-	return json.Marshal(s)
+	dispatchReviewers(ctx, env)
 }
 
-func invokeStoryList(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	if storyStore == nil {
-		return nil, fmt.Errorf("story_list: store not configured")
-	}
-	var req StoryListRequest
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, fmt.Errorf("story_list: bad request: %w", err)
-		}
-	}
-	if strings.TrimSpace(req.ProjectID) == "" {
-		return nil, fmt.Errorf("story_list: project_id required")
-	}
-	ss, err := storyStore.ListByProject(ctx, req.ProjectID, req.Tags)
-	if err != nil {
-		return nil, err
-	}
-	if ss == nil {
-		ss = []story.Story{}
-	}
-	return json.Marshal(StoryListResponse{Stories: ss})
-}
-
-func invokeStoryGet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	if storyStore == nil {
-		return nil, fmt.Errorf("story_get: store not configured")
-	}
-	var req StoryGetRequest
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, fmt.Errorf("story_get: bad request: %w", err)
-		}
-	}
-	if strings.TrimSpace(req.ID) == "" {
-		return nil, fmt.Errorf("story_get: id required")
-	}
-	s, err := storyStore.GetByID(ctx, req.ID)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(s)
-}
-
-func invokeStoryUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	if storyStore == nil {
-		return nil, fmt.Errorf("story_update: store not configured")
-	}
-	var req StoryUpdateRequest
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, fmt.Errorf("story_update: bad request: %w", err)
-		}
-	}
-	if strings.TrimSpace(req.ID) == "" {
-		return nil, fmt.Errorf("story_update: id required")
-	}
-	var before story.Story
+// storyAfterUpdate is the post-update hook chain document_upsert fires
+// when it patches a type='story' row.
+func storyAfterUpdate(ctx context.Context, before StoryEnvelope, d document.Document, body string) {
+	after := NewStoryEnvelope(d, body)
 	if ledgerStore != nil {
-		var err error
-		before, err = storyStore.GetByID(ctx, req.ID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	s, err := storyStore.Update(ctx, req.ID, story.UpdateInput{
-		ParentID:           req.ParentID,
-		Title:              req.Title,
-		Body:               req.Body,
-		AcceptanceCriteria: req.AcceptanceCriteria,
-		Status:             req.Status,
-		Priority:           req.Priority,
-		Category:           req.Category,
-		Tags:               req.Tags,
-	}, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	if ledgerStore != nil {
-		diff := computeStoryDiff(before, s)
+		diff := computeStoryDiff(before, after)
 		if len(diff) > 0 {
 			payload, _ := json.Marshal(diff)
-			if _, lerr := ledgerStore.Append(ctx, ledger.AppendInput{
-				StoryID: s.ID,
+			if _, err := ledgerStore.Append(ctx, ledger.AppendInput{
+				StoryID: d.ID,
 				Kind:    ledger.KindStoryUpdated,
 				Actor:   actorFromContext(ctx),
 				Payload: payload,
-			}, time.Now().UTC()); lerr != nil {
-				return nil, fmt.Errorf("story_update: ledger append: %w", lerr)
+			}, time.Now().UTC()); err != nil {
+				fmt.Printf("document_upsert: ledger append (update): %v\n", err)
 			}
-			dispatchSummaryRegen(ctx, s.ID)
+			dispatchSummaryRegen(ctx, d.ID)
 		}
 	}
-	dispatchReviewers(ctx, s)
-	return json.Marshal(s)
-}
-
-func invokeStoryDelete(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	if storyStore == nil {
-		return nil, fmt.Errorf("story_delete: store not configured")
-	}
-	var req StoryDeleteRequest
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &req); err != nil {
-			return nil, fmt.Errorf("story_delete: bad request: %w", err)
-		}
-	}
-	if strings.TrimSpace(req.ID) == "" {
-		return nil, fmt.Errorf("story_delete: id required")
-	}
-	s, err := storyStore.GetByID(ctx, req.ID)
-	if err != nil {
-		return nil, err
-	}
-	if err := storyStore.Delete(ctx, req.ID); err != nil {
-		return nil, err
-	}
-	return json.Marshal(StoryDeleteResponse{Story: s})
+	dispatchReviewers(ctx, after)
 }
 
 // computeStoryDiff returns a {field: {before, after}} map for each
-// field whose value changed between before and after. Returns an
-// empty map when nothing changed — the caller skips the ledger
-// append in that case so no-op updates don't pollute the log.
-func computeStoryDiff(before, after story.Story) map[string]map[string]any {
+// field whose value changed between two envelopes.
+func computeStoryDiff(before, after StoryEnvelope) map[string]map[string]any {
 	diff := map[string]map[string]any{}
 	if before.ParentID != after.ParentID {
 		diff["parent_id"] = map[string]any{"before": before.ParentID, "after": after.ParentID}

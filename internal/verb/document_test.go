@@ -37,7 +37,7 @@ func TestDocumentGet_BadInput(t *testing.T) {
 		body string
 		want string
 	}{
-		{`{}`, "name required"},
+		{`{}`, "name or id required"},
 		{`{"name":"x"}`, "scope required"},
 		{`{"name":"x","scope":"other"}`, "unknown scope"},
 		{`{"name":"x","scope":"system","version":"junk"}`, "version must be"},

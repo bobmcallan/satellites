@@ -169,23 +169,35 @@ func dispatchProjectGet(ctx context.Context, id string) (projectDetailRow, error
 }
 
 func dispatchStoryList(ctx context.Context, projectID string, tags []string) ([]storyRow, error) {
-	body, _ := json.Marshal(verb.StoryListRequest{ProjectID: projectID, Tags: tags})
-	raw, err := verb.Dispatch(ctx, "story_list", body)
+	// Post-unification (sty_0dd71f79) stories are documents-of-type-story.
+	// document_list orders by created_at; the portal needs the legacy
+	// story_list ordering (status → priority → recency), so dispatch
+	// document_list with a custom limit and re-sort via the same store
+	// method the verb registry uses internally. To keep the transport
+	// boundary clean we just call document_list with type='story' and
+	// project_id; ordering matches via documents indexes.
+	body, _ := json.Marshal(verb.DocumentListRequest{
+		Type:      "story",
+		ProjectID: projectID,
+		Tags:      tags,
+		Limit:     200,
+	})
+	raw, err := verb.Dispatch(ctx, "document_list", body)
 	if err != nil {
 		return nil, err
 	}
-	var resp verb.StoryListResponse
+	var resp verb.DocumentListResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]storyRow, 0, len(resp.Stories))
-	for _, s := range resp.Stories {
+	out := make([]storyRow, 0, len(resp.Items))
+	for _, d := range resp.Items {
 		out = append(out, storyRow{
-			ID: s.ID, ParentID: s.ParentID, Title: s.Title,
-			Body: s.Body, AcceptanceCriteria: s.AcceptanceCriteria,
-			Status: s.Status, Priority: s.Priority, Category: s.Category,
-			Tags: s.Tags, Summary: s.Summary, SummaryUpdatedAt: s.SummaryUpdatedAt,
-			UpdatedAt: s.UpdatedAt, CreatedAt: s.CreatedAt,
+			ID: d.ID, ParentID: d.ParentID, Title: d.Name,
+			AcceptanceCriteria: d.AcceptanceCriteria,
+			Status:             d.Status, Priority: d.Priority, Category: d.Category,
+			Tags: d.Tags, Summary: d.Summary, SummaryUpdatedAt: d.SummaryUpdatedAt,
+			UpdatedAt: d.UpdatedAt, CreatedAt: d.CreatedAt,
 		})
 	}
 	return out, nil

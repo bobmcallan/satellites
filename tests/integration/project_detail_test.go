@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -38,18 +38,18 @@ func TestProjectDetailPanel(t *testing.T) {
 	}
 	wsStore := workspace.New(env.DB)
 	pjStore := project.New(env.DB)
-	stStore := story.New(env.DB)
+	docStore := document.New(env.DB)
 	ledStore := ledger.New(env.DB)
 	verb.SetAuthStore(authStore)
 	verb.SetWorkspaceStore(wsStore)
 	verb.SetProjectStore(pjStore)
-	verb.SetStoryStore(stStore)
+	verb.SetDocumentStore(docStore)
 	verb.SetLedgerStore(ledStore)
 	t.Cleanup(func() {
 		verb.SetAuthStore(nil)
 		verb.SetWorkspaceStore(nil)
 		verb.SetProjectStore(nil)
-		verb.SetStoryStore(nil)
+		verb.SetDocumentStore(nil)
 		verb.SetLedgerStore(nil)
 	})
 
@@ -69,22 +69,28 @@ func TestProjectDetailPanel(t *testing.T) {
 	}
 
 	// Two stories: one with a unique tag we'll filter on, one without.
-	createReq, _ := json.Marshal(verb.StoryCreateRequest{
+	priorityHigh := "high"
+	priorityLow := "low"
+	tagsA := []string{"area:portal", "epic:test"}
+	tagsB := []string{"area:other"}
+	createReq, _ := json.Marshal(verb.DocumentUpsertRequest{
+		Type:      "story",
 		ProjectID: pj.ID,
-		Title:     "wired story",
-		Priority:  "high",
-		Tags:      []string{"area:portal", "epic:test"},
+		Name:      "wired story",
+		Priority:  &priorityHigh,
+		Tags:      &tagsA,
 	})
-	if _, err := verb.Dispatch(ctx, "story_create", createReq); err != nil {
+	if _, err := verb.Dispatch(ctx, "document_upsert", createReq); err != nil {
 		t.Fatalf("create story 1: %v", err)
 	}
-	createReq2, _ := json.Marshal(verb.StoryCreateRequest{
+	createReq2, _ := json.Marshal(verb.DocumentUpsertRequest{
+		Type:      "story",
 		ProjectID: pj.ID,
-		Title:     "other story",
-		Priority:  "low",
-		Tags:      []string{"area:other"},
+		Name:      "other story",
+		Priority:  &priorityLow,
+		Tags:      &tagsB,
 	})
-	if _, err := verb.Dispatch(ctx, "story_create", createReq2); err != nil {
+	if _, err := verb.Dispatch(ctx, "document_upsert", createReq2); err != nil {
 		t.Fatalf("create story 2: %v", err)
 	}
 

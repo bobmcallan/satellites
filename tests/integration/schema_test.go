@@ -18,13 +18,15 @@ import (
 func TestSchemaApplied(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 
-	t.Run("four tables exist after migrate-up", func(t *testing.T) {
+	t.Run("core tables exist after migrate-up", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 
+		// Migration 0017 collapsed stories into documents; the
+		// substrate-core table set is now documents/evidence/reviews/tools.
 		rows, err := env.DB.Query(`
             SELECT tablename FROM pg_tables
              WHERE schemaname = 'public'
-               AND tablename IN ('stories', 'tools', 'reviews', 'evidence')
+               AND tablename IN ('documents', 'tools', 'reviews', 'evidence')
              ORDER BY tablename
         `)
 		if err != nil {
@@ -41,7 +43,7 @@ func TestSchemaApplied(t *testing.T) {
 			seen = append(seen, name)
 		}
 
-		want := []string{"evidence", "reviews", "stories", "tools"}
+		want := []string{"documents", "evidence", "reviews", "tools"}
 		if len(seen) != 4 {
 			t.Fatalf("expected 4 tables, got %v", seen)
 		}
@@ -94,18 +96,29 @@ func TestSchemaApplied(t *testing.T) {
 func TestIsolation(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 
-	t.Run("section A inserts a story", func(t *testing.T) {
+	// Post-unification stories live in documents with type='story'.
+	// The isolation guarantee is the same — Reset truncates the
+	// documents table, so a row inserted in section A is gone in B.
+	t.Run("section A inserts a story-shaped document", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 
+		// A bare type='story' row needs a workspace + project to satisfy
+		// scope-coherence + FKs; inject them inline.
 		if _, err := env.DB.Exec(`
-            INSERT INTO stories (id, project_id, title)
-            VALUES ('sty_iso_a', 'proj_iso', 'section A story')
+            INSERT INTO workspaces (id, name, status) VALUES ('wksp_iso', 'iso', 'active');
+            INSERT INTO projects (id, workspace_id, name, status) VALUES ('proj_iso', 'wksp_iso', 'iso', 'active');
+        `); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.DB.Exec(`
+            INSERT INTO documents (id, scope, workspace_id, project_id, name, type)
+            VALUES ('sty_iso_a', 'project', 'wksp_iso', 'proj_iso', 'section A story', 'story')
         `); err != nil {
 			t.Fatal(err)
 		}
 
 		var count int
-		if err := env.DB.QueryRow(`SELECT count(*) FROM stories`).Scan(&count); err != nil {
+		if err := env.DB.QueryRow(`SELECT count(*) FROM documents WHERE type='story'`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
@@ -117,7 +130,7 @@ func TestIsolation(t *testing.T) {
 		testbootstrap.Reset(t, env)
 
 		var count int
-		if err := env.DB.QueryRow(`SELECT count(*) FROM stories`).Scan(&count); err != nil {
+		if err := env.DB.QueryRow(`SELECT count(*) FROM documents WHERE type='story'`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 0 {

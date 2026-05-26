@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
-	"github.com/bobmcallan/satellites/internal/story"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -44,16 +44,16 @@ func TestStorySummary(t *testing.T) {
 
 	wsStore := workspace.New(env.DB)
 	pjStore := project.New(env.DB)
-	stStore := story.New(env.DB)
+	docStore := document.New(env.DB)
 	ledStore := ledger.New(env.DB)
 	verb.SetWorkspaceStore(wsStore)
 	verb.SetProjectStore(pjStore)
-	verb.SetStoryStore(stStore)
+	verb.SetDocumentStore(docStore)
 	verb.SetLedgerStore(ledStore)
 	t.Cleanup(func() {
 		verb.SetWorkspaceStore(nil)
 		verb.SetProjectStore(nil)
-		verb.SetStoryStore(nil)
+		verb.SetDocumentStore(nil)
 		verb.SetLedgerStore(nil)
 		verb.SetReviewerRegistry(nil)
 		verb.SetSummaryDispatchForTest(nil)
@@ -93,42 +93,46 @@ func TestStorySummary(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	t.Run("story_create triggers summary regen via ledger hook", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+	t.Run("story create triggers summary regen via ledger hook", func(t *testing.T) {
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "summary target",
+			Name:      "summary target",
 		})
-		raw, err := verb.Dispatch(ctx, "story_create", req)
+		raw, err := verb.Dispatch(ctx, "document_upsert", req)
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		var created verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &created)
+		s := created.Document
 
-		// story_get returns the persisted summary.
-		getReq, _ := json.Marshal(verb.StoryGetRequest{ID: s.ID})
-		raw, err = verb.Dispatch(ctx, "story_get", getReq)
+		// document_get returns the persisted summary (on the Document row).
+		getReq, _ := json.Marshal(verb.DocumentGetRequest{ID: s.ID})
+		raw, err = verb.Dispatch(ctx, "document_get", getReq)
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
-		var got story.Story
+		var got verb.DocumentGetResponse
 		_ = json.Unmarshal(raw, &got)
-		if got.Summary != "test-stub summary" {
-			t.Fatalf("summary = %q, want %q", got.Summary, "test-stub summary")
+		if got.Document.Summary != "test-stub summary" {
+			t.Fatalf("summary = %q, want %q", got.Document.Summary, "test-stub summary")
 		}
-		if got.SummaryUpdatedAt == nil {
+		if got.Document.SummaryUpdatedAt == nil {
 			t.Fatalf("summary_updated_at unset after regen")
 		}
 	})
 
 	t.Run("ledger_append on existing story triggers regen", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "ledger trigger",
+			Name:      "ledger trigger",
 		})
-		raw, _ := verb.Dispatch(ctx, "story_create", req)
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		raw, _ := verb.Dispatch(ctx, "document_upsert", req)
+		var created verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &created)
+		s := created.Document
 
 		// Swap to a new stub so we can distinguish the second regen.
 		newClient := &fakeSummaryClient{prefix: "after-comment"}
@@ -151,7 +155,7 @@ func TestStorySummary(t *testing.T) {
 			t.Fatalf("ledger_append: %v", err)
 		}
 
-		got, err := stStore.GetByID(ctx, s.ID)
+		got, err := docStore.GetByID(ctx, s.ID)
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
@@ -161,13 +165,15 @@ func TestStorySummary(t *testing.T) {
 	})
 
 	t.Run("story_summary_regenerate verb works synchronously", func(t *testing.T) {
-		req, _ := json.Marshal(verb.StoryCreateRequest{
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
 			ProjectID: pj.ID,
-			Title:     "manual regen target",
+			Name:      "manual regen target",
 		})
-		raw, _ := verb.Dispatch(ctx, "story_create", req)
-		var s story.Story
-		_ = json.Unmarshal(raw, &s)
+		raw, _ := verb.Dispatch(ctx, "document_upsert", req)
+		var created verb.DocumentUpsertResponse
+		_ = json.Unmarshal(raw, &created)
+		s := created.Document
 
 		newClient := &fakeSummaryClient{prefix: "manual"}
 		defs3 := map[string]reviewer.Definition{
@@ -189,7 +195,7 @@ func TestStorySummary(t *testing.T) {
 		if !resp.Dispatched {
 			t.Fatalf("dispatched = false")
 		}
-		got, _ := stStore.GetByID(ctx, s.ID)
+		got, _ := docStore.GetByID(ctx, s.ID)
 		if got.Summary != "manual summary" {
 			t.Fatalf("summary = %q, want %q", got.Summary, "manual summary")
 		}

@@ -53,17 +53,37 @@ var ErrNotFound = errors.New("document: not found")
 // triple does not satisfy the scope-coherence rules.
 var ErrScopeMismatch = errors.New("document: scope coherence violation")
 
-// Document is the latest-pointer row on documents.
+// Document is the latest-pointer row on documents. The struct unifies
+// "document" (free-form authored substrate) and "story" (unit-of-work)
+// behind a single shape, distinguished by Type. Story-only metadata
+// (Tags, Status, Priority, Category, ParentID, AcceptanceCriteria,
+// Summary) lives on the row directly; for type='document' rows these
+// fields are at their zero value.
 type Document struct {
-	ID            string    `json:"id"`
-	Scope         Scope     `json:"scope"`
-	WorkspaceID   string    `json:"workspace_id,omitempty"`
-	ProjectID     string    `json:"project_id,omitempty"`
-	Name          string    `json:"name"`
-	LatestVersion int       `json:"latest_version"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                 string     `json:"id"`
+	Type               string     `json:"type"`
+	Scope              Scope      `json:"scope"`
+	WorkspaceID        string     `json:"workspace_id,omitempty"`
+	ProjectID          string     `json:"project_id,omitempty"`
+	Name               string     `json:"name"`
+	LatestVersion      int        `json:"latest_version"`
+	Tags               []string   `json:"tags"`
+	Status             string     `json:"status"`
+	Priority           string     `json:"priority,omitempty"`
+	Category           string     `json:"category,omitempty"`
+	ParentID           string     `json:"parent_id,omitempty"`
+	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
+	Summary            string     `json:"summary,omitempty"`
+	SummaryUpdatedAt   *time.Time `json:"summary_updated_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
+
+// Type values for the documents.type discriminator.
+const (
+	TypeDocument = "document"
+	TypeStory    = "story"
+)
 
 // Version is an immutable row from document_versions.
 type Version struct {

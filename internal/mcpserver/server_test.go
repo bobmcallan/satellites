@@ -30,17 +30,25 @@ func TestServerConstructs(t *testing.T) {
 	}
 }
 
-// TestMCPSurfaceIsBootstrapOnly pins the MCP tool surface to the
-// bootstrap verbs. document_get returns the install schema; project_match
-// resolves a project_id from the consumer repo's git remote. Every
-// operational verb is reachable via the satellites CLI once the agent
-// has installed it using the orientation instructions. If this test
-// starts failing, the MCP server has regrown its surface area — confirm
-// intent before relaxing the assertion.
-func TestMCPSurfaceIsBootstrapOnly(t *testing.T) {
+// TestMCPSurfaceIsExpected pins the MCP tool surface to the exact set
+// the substrate is willing to expose. Two cohorts:
+//   - Bootstrap (CLI-installable agents): document_get, project_match
+//   - MCP-only write surface (Claude web etc.):
+//     document_upsert, document_delete,
+//     story_create, story_update, story_get, story_delete
+//
+// If this test fails, the MCP server has grown or shrunk its surface —
+// confirm intent and update both this test and exposedVerbs in server.go.
+func TestMCPSurfaceIsExpected(t *testing.T) {
 	s := New()
 	tools := s.ListTools()
-	want := map[string]bool{"document_get": true, "project_match": true}
+	want := map[string]bool{
+		"document_get":    true,
+		"document_list":   true,
+		"document_upsert": true,
+		"document_delete": true,
+		"project_match":   true,
+	}
 	if len(tools) != len(want) {
 		names := make([]string, 0, len(tools))
 		for n := range tools {

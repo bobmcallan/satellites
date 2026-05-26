@@ -48,10 +48,17 @@ func SetDocumentStore(s *document.Store) { documentStore = s }
 // The templating layer reads them via the system-variables resolver;
 // callers that aren't rendering templates can leave them empty.
 type DocumentGetRequest struct {
-	Name           string `json:"name"`
-	Scope          string `json:"scope"`
-	WorkspaceID    string `json:"workspace_id,omitempty"`
-	ProjectID      string `json:"project_id,omitempty"`
+	// ID-based fetch (used for stories and any document addressable by
+	// id). When present, scope/name/workspace_id/project_id are ignored.
+	ID string `json:"id,omitempty"`
+
+	// Key-based fetch (used for free-form documents). Required when ID
+	// is empty.
+	Name        string `json:"name,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+
 	Version        string `json:"version,omitempty"`
 	Inherit        bool   `json:"inherit,omitempty"`
 	OS             string `json:"os,omitempty"`
@@ -82,16 +89,41 @@ type DocumentGetResponse struct {
 // so cached *Parsed values are valid for the binary's lifetime.
 var documentTemplateCache document.Cache
 
-// DocumentUpsertRequest is the input shape for document_upsert. Every
-// call creates a new version row; the store layer never updates in
-// place. scope=system is rejected (system-scope writes go through the
-// internal seed path, not user-facing verbs).
+// DocumentUpsertRequest is the input shape for document_upsert. Three
+// modes, chosen on inspection:
+//
+//  1. id present → patch the row at id. Body change appends a new
+//     document_versions row; metadata fields (Tags, Status, Priority,
+//     Category, ParentID, AcceptanceCriteria, and Name as title for
+//     stories) apply in place. Currently used for stories only.
+//
+//  2. id empty + type=='story' → create a new story (fresh sty_<id>).
+//     project_id + name (title) required.
+//
+//  3. id empty + type=='document' (or empty) → key-addressed upsert
+//     against (scope, workspace_id, project_id, name). On first call
+//     for that key, inserts a documents row; subsequent calls append
+//     a new version. Existing pre-unification behaviour.
+//
+// scope='system' is rejected at the store boundary (ErrScopeReadonly).
 type DocumentUpsertRequest struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
+	ID          string `json:"id,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Scope       string `json:"scope,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
-	Body        string `json:"body"`
+	Body        string `json:"body,omitempty"`
+
+	// Story-shaped metadata. Pointer-typed so the dispatcher can tell
+	// "unset" from "explicit empty" on patch — nil means leave alone,
+	// non-nil means apply.
+	Tags               *[]string `json:"tags,omitempty"`
+	Status             *string   `json:"status,omitempty"`
+	Priority           *string   `json:"priority,omitempty"`
+	Category           *string   `json:"category,omitempty"`
+	ParentID           *string   `json:"parent_id,omitempty"`
+	AcceptanceCriteria *string   `json:"acceptance_criteria,omitempty"`
 }
 
 // DocumentUpsertResponse mirrors document_get's shape so callers can
@@ -102,12 +134,20 @@ type DocumentUpsertResponse struct {
 	Version  document.Version  `json:"version"`
 }
 
-// DocumentDeleteRequest is the input shape for document_delete. Same
-// addressing model as upsert; delete is soft (appends a tombstone
-// version) so version=all preserves the chain.
+// DocumentDeleteRequest is the input shape for document_delete. Two
+// modes, chosen on inspection:
+//
+//  1. id present → the stored row's type chooses behaviour. type='story'
+//     rows are hard-deleted (DELETE FROM documents — children's
+//     parent_id is nulled, ledger entries persist). type='document' rows
+//     get the pre-unification soft-delete (append tombstone version).
+//
+//  2. id empty → key-addressed soft delete against (scope, workspace_id,
+//     project_id, name). Existing pre-unification behaviour.
 type DocumentDeleteRequest struct {
-	Name        string `json:"name"`
-	Scope       string `json:"scope"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Scope       string `json:"scope,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
 }
@@ -119,22 +159,88 @@ type DocumentDeleteResponse struct {
 	Version  document.Version  `json:"version"`
 }
 
+// DocumentListRequest is the structured filter shape for document_list.
+// Every field is optional. type/status="all" or "" disables that
+// predicate. tags acts as an AND filter. limit defaults to 50, capped
+// at 200. cursor is opaque base64 returned in the previous page's
+// next_cursor; pass empty to fetch the first page.
+type DocumentListRequest struct {
+	Type        string   `json:"type,omitempty"`
+	Scope       string   `json:"scope,omitempty"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	ProjectID   string   `json:"project_id,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	NamePrefix  string   `json:"name_prefix,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
+	Cursor      string   `json:"cursor,omitempty"`
+}
+
+// DocumentListResponse is the paged response from document_list.
+// next_cursor is empty when there are no more pages; non-empty means
+// the client should issue the next call with that value in cursor.
+type DocumentListResponse struct {
+	Items      []document.Document `json:"items"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "document_get",
-		Description: "Fetch a document by (scope, name) with version selection + inherit cascade.",
+		Description: "Fetch a document by id (any row, including stories) OR by (scope, name) with version selection + inherit cascade (free-form documents).",
 		Invoke:      invokeDocumentGet,
 	})
 	Register(&Verb{
-		Name:        "document_upsert",
-		Description: "Append a new version to a workspace/project-scoped document.",
-		Invoke:      invokeDocumentUpsert,
+		Name: "document_upsert",
+		Description: "Create or update. Three modes by inspection: " +
+			"(1) type='story' + project_id + name → create story; " +
+			"(2) id present → patch story (body change appends a new version); " +
+			"(3) type='document' + scope + name → key-addressed document upsert.",
+		Invoke: invokeDocumentUpsert,
 	})
 	Register(&Verb{
-		Name:        "document_delete",
-		Description: "Soft-delete a workspace/project-scoped document by appending a tombstone version.",
-		Invoke:      invokeDocumentDelete,
+		Name: "document_delete",
+		Description: "Delete by id (hard-delete for stories, soft-tombstone for documents — chosen by stored type) " +
+			"OR by (scope, name) (soft-tombstone).",
+		Invoke: invokeDocumentDelete,
 	})
+	Register(&Verb{
+		Name: "document_list",
+		Description: "List documents and/or stories with structured filters and cursor pagination. " +
+			"Pass type:'story' to list stories, type:'document' for documents, omit to list both.",
+		Invoke: invokeDocumentList,
+	})
+}
+
+func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if documentStore == nil {
+		return nil, fmt.Errorf("document_list: store not configured")
+	}
+	var req DocumentListRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("document_list: %w: %v", ErrBadRequest, err)
+		}
+	}
+	res, err := documentStore.List(ctx, document.ListFilter{
+		Type:        req.Type,
+		Scope:       document.Scope(req.Scope),
+		WorkspaceID: req.WorkspaceID,
+		ProjectID:   req.ProjectID,
+		Tags:        req.Tags,
+		Status:      req.Status,
+		NamePrefix:  req.NamePrefix,
+	}, document.ListOptions{
+		Limit:  req.Limit,
+		Cursor: req.Cursor,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res.Items == nil {
+		res.Items = []document.Document{}
+	}
+	return json.Marshal(DocumentListResponse{Items: res.Items, NextCursor: res.NextCursor})
 }
 
 func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -147,8 +253,26 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			return nil, fmt.Errorf("document_get: %w: %v", ErrBadRequest, err)
 		}
 	}
+
+	// ID-addressed fetch — used for stories and any document fetched by
+	// id rather than by (scope, name) key.
+	if strings.TrimSpace(req.ID) != "" {
+		d, body, err := documentStore.GetByIDWithLatestBody(ctx, req.ID)
+		if err != nil {
+			return nil, mapStoreError(err, "document_get")
+		}
+		resp := DocumentGetResponse{
+			Document:      d,
+			Versions:      []document.Version{{DocumentID: d.ID, Version: d.LatestVersion, Body: body, Status: document.StatusActive}},
+			ResolvedScope: string(d.Scope),
+			RawBody:       body,
+			RenderedBody:  body,
+		}
+		return json.Marshal(resp)
+	}
+
 	if strings.TrimSpace(req.Name) == "" {
-		return nil, fmt.Errorf("document_get: %w: name required", ErrBadRequest)
+		return nil, fmt.Errorf("document_get: %w: name or id required", ErrBadRequest)
 	}
 	scope, err := parseScope(req.Scope)
 	if err != nil {
@@ -298,6 +422,19 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 			return nil, fmt.Errorf("document_upsert: %w: %v", ErrBadRequest, err)
 		}
 	}
+
+	// Mode 1: patch by id. Currently only stories support id-addressed
+	// upsert; documents are key-addressed via (scope, name).
+	if strings.TrimSpace(req.ID) != "" {
+		return upsertByID(ctx, req)
+	}
+
+	// Mode 2: create a new story.
+	if req.Type == document.TypeStory {
+		return createStory(ctx, req)
+	}
+
+	// Mode 3: key-addressed document upsert (pre-unification behaviour).
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("document_upsert: %w: name required", ErrBadRequest)
 	}
@@ -320,6 +457,138 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
 }
 
+// createStory is the document_upsert path for {type:"story"} with no id.
+// Resolves the workspace from the project, mints a fresh sty_<id>,
+// inserts the documents row + v1 body, and fires the reviewer + ledger
+// + summary hooks that the pre-unification story_create used to.
+func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage, error) {
+	if strings.TrimSpace(req.ProjectID) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: project_id required for type=story", ErrBadRequest)
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: name (title) required for type=story", ErrBadRequest)
+	}
+	wsID := req.WorkspaceID
+	if wsID == "" {
+		if projectStore == nil {
+			return nil, fmt.Errorf("document_upsert: project store not configured")
+		}
+		p, err := projectStore.GetByID(ctx, req.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("document_upsert: resolve workspace: %w", err)
+		}
+		wsID = p.WorkspaceID
+	}
+	in := document.CreateStoryInput{
+		ProjectID:          req.ProjectID,
+		WorkspaceID:        wsID,
+		Title:              req.Name,
+		Body:               req.Body,
+		AcceptanceCriteria: strDeref(req.AcceptanceCriteria),
+		Status:             strDeref(req.Status),
+		Priority:           strDeref(req.Priority),
+		Category:           strDeref(req.Category),
+		ParentID:           strDeref(req.ParentID),
+		Tags:               sliceDeref(req.Tags),
+		CreatedBy:          callerUserID(ctx),
+	}
+	d, err := documentStore.CreateStory(ctx, in, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
+
+	// Reviewer + ledger + summary hooks — same chain story_create used
+	// to fire pre-unification. The internal envelope is story-shaped so
+	// existing reviewer prompts keep working without an md change.
+	storyAfterCreate(ctx, d, req.Body)
+
+	return json.Marshal(DocumentUpsertResponse{
+		Document: d,
+		Version:  document.Version{DocumentID: d.ID, Version: 1, Body: req.Body, Status: document.StatusActive, CreatedAt: d.CreatedAt, CreatedBy: callerUserID(ctx)},
+	})
+}
+
+// upsertByID patches the row at req.ID. For type='story' rows this maps
+// to UpdateStory; for type='document' rows it is rejected (documents
+// use key-addressed upsert).
+func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage, error) {
+	d, _, err := documentStore.GetByIDWithLatestBody(ctx, req.ID)
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
+	if d.Type != document.TypeStory {
+		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
+	}
+
+	var beforeEnv StoryEnvelope
+	beforeEnv = NewStoryEnvelope(d, "")
+	if d.LatestVersion > 0 {
+		_, bodyBefore, _ := documentStore.GetByIDWithLatestBody(ctx, req.ID)
+		beforeEnv = NewStoryEnvelope(d, bodyBefore)
+	}
+
+	patch := document.UpdateStoryPatch{
+		Title:              ptrIfNonEmpty(req.Name),
+		Body:               ptrIfPresent(req.Body, len(req.Body) > 0),
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Status:             req.Status,
+		Priority:           req.Priority,
+		Category:           req.Category,
+		ParentID:           req.ParentID,
+		Tags:               req.Tags,
+		CreatedBy:          callerUserID(ctx),
+	}
+	d2, err := documentStore.UpdateStory(ctx, req.ID, patch, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
+	body := ""
+	if d2.LatestVersion > 0 {
+		_, b, _ := documentStore.GetByIDWithLatestBody(ctx, d2.ID)
+		body = b
+	}
+	storyAfterUpdate(ctx, beforeEnv, d2, body)
+
+	return json.Marshal(DocumentUpsertResponse{
+		Document: d2,
+		Version:  document.Version{DocumentID: d2.ID, Version: d2.LatestVersion, Body: body, Status: document.StatusActive},
+	})
+}
+
+func strDeref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func sliceDeref(p *[]string) []string {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// ptrIfNonEmpty returns &s when s is non-empty, nil otherwise. Used so
+// the document_upsert request shape can express "set this field" vs
+// "leave alone" for string fields whose JSON omission ⇒ "leave alone".
+func ptrIfNonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// ptrIfPresent is the pointer-shaped twin for fields where the caller
+// might genuinely want to set an empty value (e.g. Body=""). The caller
+// passes a boolean explicitly indicating presence.
+func ptrIfPresent(s string, present bool) *string {
+	if !present {
+		return nil
+	}
+	return &s
+}
+
 func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	if documentStore == nil {
 		return nil, fmt.Errorf("document_delete: store not configured")
@@ -330,8 +599,43 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 			return nil, fmt.Errorf("document_delete: %w: %v", ErrBadRequest, err)
 		}
 	}
+
+	// ID-addressed delete. Behaviour is chosen by stored type so
+	// pre-unification semantics are preserved: stories were hard-deleted,
+	// documents soft-tombstoned.
+	if strings.TrimSpace(req.ID) != "" {
+		d, body, err := documentStore.GetByIDWithLatestBody(ctx, req.ID)
+		if err != nil {
+			return nil, mapStoreError(err, "document_delete")
+		}
+		if d.Type == document.TypeStory {
+			if err := documentStore.HardDelete(ctx, req.ID); err != nil {
+				return nil, mapStoreError(err, "document_delete")
+			}
+			// Story shape consumers (portal, reviewers) expect the
+			// pre-deletion document plus a synthetic "deleted" version
+			// row so the response stays shape-compatible with the
+			// document_delete soft-delete path.
+			return json.Marshal(DocumentDeleteResponse{
+				Document: d,
+				Version:  document.Version{DocumentID: d.ID, Version: d.LatestVersion, Body: body, Status: document.StatusDeleted, CreatedBy: callerUserID(ctx)},
+			})
+		}
+		// Document soft-delete by id. Reconstruct the key from the row
+		// so we reuse the existing tombstone-append path.
+		key := document.Key{Scope: d.Scope, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID, Name: d.Name}
+		if err := authorizeWrite(ctx, key); err != nil {
+			return nil, err
+		}
+		doc2, v, err := documentStore.Delete(ctx, key, callerUserID(ctx), false, time.Now().UTC())
+		if err != nil {
+			return nil, mapStoreError(err, "document_delete")
+		}
+		return json.Marshal(DocumentDeleteResponse{Document: doc2, Version: v})
+	}
+
 	if strings.TrimSpace(req.Name) == "" {
-		return nil, fmt.Errorf("document_delete: %w: name required", ErrBadRequest)
+		return nil, fmt.Errorf("document_delete: %w: name or id required", ErrBadRequest)
 	}
 	scope, err := parseScope(req.Scope)
 	if err != nil {

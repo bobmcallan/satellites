@@ -25,34 +25,45 @@ import (
 // file just loads it.
 var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 
-// bootstrapVerbs are the verbs exposed over MCP. Every operational
-// substrate verb is reachable via the satellites CLI once the agent has
-// bootstrapped the binary using the orientation instructions. Keeping
-// the MCP surface minimal avoids duplicating the verb catalog into the
-// agent's tool list — the CLI is the primary client.
+// exposedVerbs are the verbs the MCP HTTP transport advertises and
+// dispatches. The surface is intentionally narrow:
 //
-// The bootstrap surface is intentionally two-step:
-//   - document_get returns the install schema (templated install URLs,
-//     target paths, TOML defaults, bootstrap-auth flow).
-//   - project_match resolves the consumer repo's git remote to a
-//     project_id so the agent can persist it into the TOML.
+//   - project_match (bootstrap): resolves the consumer repo's git
+//     remote to a project_id. Native CLI-driven agents use this once
+//     during install; the document_* verbs cover everything after.
+//   - document_get / document_list / document_upsert / document_delete:
+//     the unified CRUD surface across both substrate kinds — pass
+//     type:"story" on writes/queries to operate on stories,
+//     type:"document" (default) for free-form documents.
 //
-// Together they are everything a fresh agent needs to install the CLI
-// and configure it against the right project.
-var bootstrapVerbs = []string{"document_get", "project_match"}
+// Stories are documents with type='story' post-unification (sty_0dd71f79);
+// there are no story_* verbs on the surface. The CLI offers no typed
+// wrappers either — operators dispatch document_* directly.
+//
+// Layering is preserved: each dispatch call still goes through
+// verb.Dispatch, so all transports share one execution path.
+var exposedVerbs = []string{
+	"document_get",
+	"document_list",
+	"document_upsert",
+	"document_delete",
+	"project_match",
+}
 
-// New returns a configured *mcpserver.MCPServer exposing the bootstrap
-// verbs. The orientation instructions tell the agent to install/refresh
-// the satellites CLI and dispatch every other verb through it.
+// New returns a configured *mcpserver.MCPServer exposing the verbs in
+// exposedVerbs. The orientation instructions tell native CLI agents to
+// install the binary and run every other verb through it; MCP-only
+// agents read the same orientation and use the directly-exposed write
+// verbs documented there.
 func New() *mcpserver.MCPServer {
 	s := mcpserver.NewMCPServer("satellites", verb.Version,
 		mcpserver.WithInstructions(orientationInstructions),
 	)
 
-	for _, name := range bootstrapVerbs {
+	for _, name := range exposedVerbs {
 		v := verb.Get(name)
 		if v == nil {
-			panic("mcpserver: bootstrap verb " + name + " not registered")
+			panic("mcpserver: exposed verb " + name + " not registered")
 		}
 		dispatched := name
 		s.AddTool(

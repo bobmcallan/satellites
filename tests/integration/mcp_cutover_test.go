@@ -60,10 +60,13 @@ func TestMCPCutover(t *testing.T) {
 		},
 	)
 
-	t.Run("MCP surface exposes the bootstrap verbs", func(t *testing.T) {
+	t.Run("MCP surface exposes the bootstrap + write verbs", func(t *testing.T) {
 		s := mcpserver.New()
 		tools := s.ListTools()
-		want := []string{"document_get", "project_match"}
+		want := []string{
+			"document_get", "document_list", "document_upsert", "document_delete",
+			"project_match",
+		}
 		if len(tools) != len(want) {
 			t.Fatalf("expected %d tools, got %d: %v", len(want), len(tools), tools)
 		}

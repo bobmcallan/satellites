@@ -108,10 +108,11 @@ operator — the project must be created (out of scope for bootstrap).
 
 ## Step 5 — dispatch every other verb via the CLI
 
-`tools/list` on this MCP server returns `document_get` and
-`project_match` only. Both are bootstrap surfaces. Every operational
-verb (story, document, variable, workspace, exec, …) reaches the
-substrate through the CLI you installed in Step 2.
+`tools/list` on this MCP server returns five verbs: `document_get`,
+`document_list`, `document_upsert`, `document_delete`, and
+`project_match`. The same five verbs are reachable from the CLI via
+`satellites exec <verb> --json '<args>'`; the dispatch path is shared,
+so behaviour is byte-identical to the MCP call.
 
 Use `<target_install_path> --help` for the command tree. Typed
 subcommands cover the high-traffic verbs:
@@ -119,9 +120,27 @@ subcommands cover the high-traffic verbs:
 | Group         | Use                                                                |
 | ------------- | ------------------------------------------------------------------ |
 | `project`     | `match --remote <url>` resolves a git remote to a `project_id`.    |
-| `story`       | `create` / `list` / `get` / `update`. `list` accepts `--tag`. Field reference + conventions live in `docs/story-schema.md` in the satellites repo. |
-| `exec <verb>` | Direct verb dispatch for every other verb. JSON in, JSON out.      |
+| `exec <verb>` | Direct verb dispatch — JSON in, JSON out. Covers every verb in the registry, including the four `document_*` verbs. |
 | `version`     | Prints the CLI's stamped version.                                  |
+
+### Stories are documents with `type:"story"`
+
+There is no `satellites story <op>` subcommand and no `story_*` verb.
+Story workflows go through the `document_*` verbs by passing
+`type:"story"` (or addressing by `id` for updates/reads/deletes). The
+`document_upsert` "upsert modes" table below has the exact request
+shapes; the same shapes apply to MCP and CLI calls.
+
+| Story action  | CLI call                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Create story  | `satellites exec document_upsert --json '{"type":"story","project_id":"proj_…","name":"Title","body":"…","tags":["epic:foo"]}'` |
+| Read story    | `satellites exec document_get --json '{"id":"sty_…"}'`                                                          |
+| Update story  | `satellites exec document_upsert --json '{"id":"sty_…","status":"in_progress","tags":["…"]}'`                  |
+| Delete story  | `satellites exec document_delete --json '{"id":"sty_…"}'`                                                      |
+| List stories  | `satellites exec document_list --json '{"type":"story","project_id":"proj_…"}'`                                |
+
+Story field reference + tag conventions: `docs/story-schema.md` in the
+satellites repo.
 
 When `--project-id` is omitted on an operational verb, the CLI falls
 back to the TOML's `project_id`. If neither is set, the CLI returns
@@ -129,3 +148,71 @@ back to the TOML's `project_id`. If neither is set, the CLI returns
 are responsible for repair. Re-run Step 4 (call `project_match` on
 the consumer repo's git remote, write the result into the TOML), then
 retry the verb. The CLI does not self-repair the TOML.
+
+## MCP-only clients (no CLI install)
+
+Hosted assistants (Claude web, etc.) can't shell out to the CLI. For
+them, the MCP server exposes four `document_*` verbs that cover both
+free-form documents and stories. Stories are documents with
+`type:"story"`; there is no separate `story_*` surface. The Bearer
+credential on the MCP session authorises each call — no TOML, no
+installed binary.
+
+| Verb              | Use                                                                                          |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `document_get`    | Fetch by `id` (any document, including stories) OR by `(scope, name)` for free-form documents. |
+| `document_list`   | Paginated list with structured filters. Pass `type:"story"` to list stories, `type:"document"` for documents, omit `type` for both. |
+| `document_upsert` | Create or update. See "upsert modes" below — three call shapes serve story-create, story-update, and document-upsert.   |
+| `document_delete` | Delete by `id` (hard-delete for stories, soft-tombstone for documents) OR by `(scope, name)` (soft-tombstone).         |
+
+### Upsert modes (document_upsert)
+
+`document_upsert` chooses its mode on inspection of the request:
+
+| Shape | Mode |
+| ----- | ---- |
+| `{"type":"story", "project_id":"proj_…", "name":"My story", "body":"…", "tags":["epic:foo"]}` | Story create. Mints a fresh `sty_<id>`, inserts the row, fires reviewer + ledger + summary hooks. |
+| `{"id":"sty_…", "status":"in_progress", "tags":["…"], "body":"…"}` | Story update. Patches metadata in place; body change appends a new `document_versions` row. Pointer-shaped fields (`tags`, `status`, `priority`, `category`, `parent_id`, `acceptance_criteria`) ignore omitted keys. |
+| `{"type":"document", "scope":"project", "workspace_id":"…", "project_id":"…", "name":"release-notes", "body":"…"}` | Document upsert. Key-addressed; first call inserts, subsequent calls append a new version. |
+
+### List filter shape (document_list)
+
+Stories and documents are the same substrate kind (one row in the
+`documents` table, distinguished by `type`). One `document_list` verb
+covers both, with structured filters:
+
+```json
+{
+  "type": "story",                  // or "document" or "" / "all" for both
+  "scope": "project",               // optional: system | workspace | project
+  "workspace_id": "wksp_…",         // optional
+  "project_id":   "proj_…",         // optional
+  "tags": ["epic:foo", "area:bar"], // AND filter
+  "status": "in_progress",          // "all" / omit disables
+  "name_prefix": "release-",        // case-insensitive prefix on `name`
+  "limit": 50,                      // default 50, max 200
+  "cursor": ""                      // opaque, from previous page's next_cursor
+}
+```
+
+Response:
+
+```json
+{
+  "items": [ { /* document.Document */ } ],
+  "next_cursor": "…"   // empty when no more pages
+}
+```
+
+Pass `next_cursor` back as `cursor` on the next call. Ordering is
+`created_at DESC, id DESC` so cursors stay stable under inserts.
+
+Field shapes for stories: see `docs/story-schema.md` in the satellites
+repo. Tag conventions (`epic:<slug>`, `area:<topic>`, `priority:<level>`)
+are the same ones the CLI uses, so MCP-only and CLI-driven authors share
+one taxonomy.
+
+`project_id` is required on `document_upsert` for `type:"story"` (the
+story create mode) and on workspace/project-scoped document upsert /
+delete. Use `project_match` to resolve it from the operator's repo URL
+when the operator names a repo rather than an id.
