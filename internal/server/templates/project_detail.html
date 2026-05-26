@@ -5,8 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{.Title}}</title>
 <link rel="stylesheet" href="/static/styles.css">
-<script defer src="/static/alpine.min.js"></script>
+<!-- story_panel.js MUST load before alpine.min.js. The bundled Alpine
+     starts via queueMicrotask(start) at script-eval time, so a defer
+     script that comes AFTER alpine.min.js registers its alpine:init
+     listener too late — Alpine has already walked and treated
+     x-data="storyPanel" as a bare expression. Loading story_panel.js
+     first means its alpine:init listener is attached before Alpine
+     fires the event. -->
 <script defer src="/static/story_panel.js"></script>
+<script defer src="/static/alpine.min.js"></script>
 </head>
 <body>
 

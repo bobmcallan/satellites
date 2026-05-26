@@ -53,13 +53,17 @@
             bulkBusy: false,
             bulkResultText: '',
 
-            get tokens() { return parseStoryQuery(this.query); },
             get selectionCount() { return this.selectedIDs.size; },
 
             matchesRow(el) {
                 const ds = (el && el.dataset) || {};
                 if (ds.id && ds.id === this.expanded) { return true; }
-                const t = this.tokens;
+                // Read this.query directly so Alpine's reactive proxy
+                // tracks the dependency. A `get tokens()` accessor used
+                // to wrap this, but Alpine 3.15.12 did not re-trigger
+                // x-show on every row when the query changed via the
+                // getter path — direct property access works.
+                const t = parseStoryQuery(this.query);
                 if (t.status.length === 0) {
                     if (ds.status === 'done' || ds.status === 'cancelled') { return false; }
                 } else if (t.status.indexOf('all') === -1) {
@@ -119,7 +123,7 @@
             },
 
             getEffectiveChips() {
-                const t = this.tokens;
+                const t = parseStoryQuery(this.query);
                 const chips = [];
                 if (t.status.length === 0) {
                     chips.push({ key: 'status', value: 'open', isDefault: true });
@@ -269,11 +273,18 @@
         };
     }
 
+    // The template loads story_panel.js BEFORE alpine.min.js so this
+    // alpine:init listener is attached before Alpine fires the event.
+    // Reversing those <script> tags causes Alpine to walk the DOM and
+    // treat x-data="storyPanel" as a bare expression (yielding the
+    // function value, not the data object) — chip strip + row x-show
+    // bind to an empty stack and nothing renders. Keep the order.
     document.addEventListener('alpine:init', function () {
-        window.Alpine.data('storyPanel', storyPanel);
+        if (window.Alpine && typeof window.Alpine.data === 'function') {
+            window.Alpine.data('storyPanel', storyPanel);
+        }
     });
 
-    window.storyPanel = storyPanel;
-    window.storyPanel.__test__ = { parseStoryQuery };
     window.storyPanelFactory = storyPanel;
+    window.storyPanelFactory.__test__ = { parseStoryQuery };
 })();
