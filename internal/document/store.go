@@ -820,3 +820,113 @@ func newStoryID() string {
 	id := NewID() // doc_<hex>
 	return "sty_" + id[len("doc_"):]
 }
+
+// newTaskID returns a fresh task id in the `tsk_<8hex>` form, matching
+// the per-type prefix convention (doc_, sty_, tsk_).
+func newTaskID() string {
+	id := NewID()
+	return "tsk_" + id[len("doc_"):]
+}
+
+// CreateTaskInput is the write payload for CreateTask. ParentID is
+// required — every task belongs to a story. Optional fields fall back
+// to substrate defaults: status='planned', priority='medium', tags=[].
+type CreateTaskInput struct {
+	ProjectID   string
+	WorkspaceID string
+	ParentID    string // must reference a type='story' row
+	Title       string
+	Body        string
+	Status      string
+	Priority    string
+	Tags        []string
+	CreatedBy   string
+}
+
+// CreateTask inserts a new type='task' documents row plus its v1
+// document_versions body. The parent story is verified inside the same
+// transaction so a deleted story can't orphan tasks via a TOCTOU race.
+func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Time) (Document, error) {
+	if in.ProjectID == "" {
+		return Document{}, fmt.Errorf("document: project_id required")
+	}
+	if in.WorkspaceID == "" {
+		return Document{}, fmt.Errorf("document: workspace_id required")
+	}
+	if in.ParentID == "" {
+		return Document{}, fmt.Errorf("document: parent_id required for task")
+	}
+	if in.Title == "" {
+		return Document{}, fmt.Errorf("document: title required")
+	}
+	if in.Status == "" {
+		in.Status = "planned"
+	}
+	if in.Priority == "" {
+		in.Priority = "medium"
+	}
+	if in.Tags == nil {
+		in.Tags = []string{}
+	}
+	now = now.UTC()
+	id := newTaskID()
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Document{}, fmt.Errorf("document: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Verify parent is a story under the same project — a task can't
+	// belong to a document, another task, or a story in a different
+	// project. The DB-level parent_id FK only checks the row exists;
+	// this query enforces the semantic constraint.
+	var parentType, parentProjectID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT type, COALESCE(project_id,'') FROM documents WHERE id = $1`, in.ParentID,
+	).Scan(&parentType, &parentProjectID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Document{}, fmt.Errorf("document: parent_id %q not found: %w", in.ParentID, ErrNotFound)
+		}
+		return Document{}, fmt.Errorf("document: parent lookup: %w", err)
+	}
+	if parentType != TypeStory {
+		return Document{}, fmt.Errorf("document: task parent must be a story, got type=%s", parentType)
+	}
+	if parentProjectID != in.ProjectID {
+		return Document{}, fmt.Errorf("document: task project_id must match parent story project_id")
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO documents
+            (id, scope, workspace_id, project_id, name, latest_version,
+             type, tags, status, priority, parent_id,
+             created_at, updated_at)
+        VALUES ($1, 'project', $2, $3, $4, 1,
+                'task', $5, $6, $7, $8,
+                $9, $9)
+    `, id, in.WorkspaceID, in.ProjectID, in.Title,
+		pq.Array(in.Tags), in.Status, in.Priority, in.ParentID,
+		now); err != nil {
+		return Document{}, fmt.Errorf("document: insert task: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO document_versions (document_id, version, body, status, created_at, created_by)
+        VALUES ($1, 1, $2, 'active', $3, $4)
+    `, id, in.Body, now, in.CreatedBy); err != nil {
+		return Document{}, fmt.Errorf("document: insert task v1: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Document{}, fmt.Errorf("document: commit task: %w", err)
+	}
+
+	return Document{
+		ID: id, Type: TypeTask, Scope: ScopeProject,
+		WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID,
+		Name: in.Title, LatestVersion: 1,
+		Tags: in.Tags, Status: in.Status,
+		Priority: in.Priority, ParentID: in.ParentID,
+		CreatedAt: now, UpdatedAt: now,
+	}, nil
+}

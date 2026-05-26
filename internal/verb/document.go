@@ -434,6 +434,12 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return createStory(ctx, req)
 	}
 
+	// Mode 2b: create a new task. Always id-less; tasks are minted with
+	// a fresh tsk_<id>. parent_id is required and must reference a story.
+	if req.Type == document.TypeTask {
+		return createTask(ctx, req)
+	}
+
 	// Mode 3: key-addressed document upsert (pre-unification behaviour).
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("document_upsert: %w: name required", ErrBadRequest)
@@ -502,6 +508,53 @@ func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessag
 	// existing reviewer prompts keep working without an md change.
 	storyAfterCreate(ctx, d, req.Body)
 
+	return json.Marshal(DocumentUpsertResponse{
+		Document: d,
+		Version:  document.Version{DocumentID: d.ID, Version: 1, Body: req.Body, Status: document.StatusActive, CreatedAt: d.CreatedAt, CreatedBy: callerUserID(ctx)},
+	})
+}
+
+// createTask is the document_upsert path for {type:"task"} with no id.
+// Tasks are project-scoped + parent-required; the parent must be a
+// type='story' row in the same project. Tasks share the document_versions
+// body channel but don't fire the story reviewer/ledger/summary hooks —
+// those are story-specific signals.
+func createTask(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage, error) {
+	if strings.TrimSpace(req.ProjectID) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: project_id required for type=task", ErrBadRequest)
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: name (title) required for type=task", ErrBadRequest)
+	}
+	if strDeref(req.ParentID) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: parent_id required for type=task", ErrBadRequest)
+	}
+	wsID := req.WorkspaceID
+	if wsID == "" {
+		if projectStore == nil {
+			return nil, fmt.Errorf("document_upsert: project store not configured")
+		}
+		p, err := projectStore.GetByID(ctx, req.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("document_upsert: resolve workspace: %w", err)
+		}
+		wsID = p.WorkspaceID
+	}
+	in := document.CreateTaskInput{
+		ProjectID:   req.ProjectID,
+		WorkspaceID: wsID,
+		ParentID:    strDeref(req.ParentID),
+		Title:       req.Name,
+		Body:        req.Body,
+		Status:      strDeref(req.Status),
+		Priority:    strDeref(req.Priority),
+		Tags:        sliceDeref(req.Tags),
+		CreatedBy:   callerUserID(ctx),
+	}
+	d, err := documentStore.CreateTask(ctx, in, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
 	return json.Marshal(DocumentUpsertResponse{
 		Document: d,
 		Version:  document.Version{DocumentID: d.ID, Version: 1, Body: req.Body, Status: document.StatusActive, CreatedAt: d.CreatedAt, CreatedBy: callerUserID(ctx)},

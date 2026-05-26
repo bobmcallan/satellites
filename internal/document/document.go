@@ -83,6 +83,7 @@ type Document struct {
 const (
 	TypeDocument = "document"
 	TypeStory    = "story"
+	TypeTask     = "task"
 )
 
 // Version is an immutable row from document_versions.
