@@ -583,3 +583,33 @@ button.status-button[disabled] {
   font-variant-numeric: tabular-nums;
   margin-left: auto;
 }
+
+.panel-paginator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0;
+  border-top: 1px solid #222;
+  font-size: 0.78rem;
+}
+.panel-paginator-link {
+  color: #4ade80;
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #333;
+  border-radius: 3px;
+}
+.panel-paginator-link:hover { background: #1a1a1a; }
+.panel-paginator-link.is-disabled {
+  color: #555;
+  border-color: #1a1a1a;
+  cursor: not-allowed;
+}
+.panel-paginator-indicator {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}

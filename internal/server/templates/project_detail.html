@@ -190,6 +190,26 @@
       {{else}}
       <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
       {{end}}
+
+      {{if gt .Paginator.Total .Paginator.PageSize}}
+      <nav class="panel-paginator" aria-label="Stories pagination" data-field="panel-stories-paginator">
+        {{if .Paginator.HasPrev}}
+        <a class="panel-paginator-link prev"
+           href="?stories_page={{.Paginator.PrevPage}}&amp;{{.Paginator.PageQuery}}"
+           data-field="panel-stories-prev">prev</a>
+        {{else}}
+        <span class="panel-paginator-link is-disabled">prev</span>
+        {{end}}
+        <span class="panel-paginator-indicator" data-field="panel-stories-page-indicator">page {{.Paginator.Page}} of {{.Paginator.PageCount}}</span>
+        {{if .Paginator.HasNext}}
+        <a class="panel-paginator-link next"
+           href="?stories_page={{.Paginator.NextPage}}&amp;{{.Paginator.PageQuery}}"
+           data-field="panel-stories-next">next</a>
+        {{else}}
+        <span class="panel-paginator-link is-disabled">next</span>
+        {{end}}
+      </nav>
+      {{end}}
     </div>
   </section>
 </main>

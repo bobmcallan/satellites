@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,11 @@ func TestProjectDetailPanel(t *testing.T) {
 		if strings.Contains(body, `data-form="projects-create"`) {
 			t.Error("create form leaked into project detail page")
 		}
+		// Paginator only renders when total > page_size; with two
+		// stories and the default page_size=50 it must be absent.
+		if strings.Contains(body, `data-field="panel-stories-paginator"`) {
+			t.Error("paginator rendered for a story count below page_size")
+		}
 	})
 
 	t.Run("status buttons render one per enum value", func(t *testing.T) {
@@ -234,6 +240,151 @@ func TestProjectDetailPanel(t *testing.T) {
 		want := `href="/projects/` + pj.ID + `"`
 		if !strings.Contains(body, want) {
 			t.Errorf("project list missing detail link %q", want)
+		}
+	})
+}
+
+// TestProjectDetailPagination exercises sty_4e6dcbec — page-based
+// paginator below the stories panel. Seeds 7 stories under a fresh
+// project; walks page 1/2/3 at page_size=3 and asserts each row
+// appears exactly once across the three pages.
+func TestProjectDetailPagination(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	authStore := auth.New(env.DB)
+	if err := authStore.DevSeed(context.Background()); err != nil {
+		t.Fatalf("dev seed: %v", err)
+	}
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	docStore := document.New(env.DB)
+	ledStore := ledger.New(env.DB)
+	verb.SetAuthStore(authStore)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetDocumentStore(docStore)
+	verb.SetLedgerStore(ledStore)
+	t.Cleanup(func() {
+		verb.SetAuthStore(nil)
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetDocumentStore(nil)
+		verb.SetLedgerStore(nil)
+	})
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 25, 16, 0, 0, 0, time.UTC)
+	ws, err := wsStore.Create(ctx, "", "pag-ws", now)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	pj, err := pjStore.Create(ctx, project.CreateInput{
+		WorkspaceID: ws.ID,
+		Name:        "pag-project",
+		Description: "pagination project",
+	}, now)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	const want = 7
+	ids := make([]string, 0, want)
+	for i := 0; i < want; i++ {
+		name := "pag-story-" + strconv.Itoa(i)
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
+			ProjectID: pj.ID,
+			Name:      name,
+		})
+		resp, err := verb.Dispatch(ctx, "document_upsert", req)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		var r verb.DocumentUpsertResponse
+		if err := json.Unmarshal(resp, &r); err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		ids = append(ids, r.Document.ID)
+	}
+
+	sessions := auth.NewSessions([]byte("pag-test-secret"))
+	handler := server.Build(server.Config{
+		Store:    authStore,
+		Sessions: sessions,
+		DevMode:  true,
+	})
+	get := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		sessions.Issue(rec, "usr_dev_admin")
+		for _, c := range rec.Result().Cookies() {
+			req.AddCookie(c)
+		}
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d", path, rec.Code)
+		}
+		body, _ := io.ReadAll(rec.Result().Body)
+		return string(body)
+	}
+	countIDs := func(body string) []string {
+		out := make([]string, 0, want)
+		for _, id := range ids {
+			if strings.Contains(body, `data-id="`+id+`"`) {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+
+	t.Run("paginator renders at total > page_size", func(t *testing.T) {
+		body := get("/projects/" + pj.ID + "?stories_page=1&stories_page_size=3")
+		for _, want := range []string{
+			`data-field="panel-stories-paginator"`,
+			`data-field="panel-stories-next"`,
+			`data-field="panel-stories-page-indicator"`,
+			"page 1 of 3",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("page 1: missing %q", want)
+			}
+		}
+		// Prev is disabled on page 1 (span, not anchor).
+		if strings.Contains(body, `data-field="panel-stories-prev"`) {
+			t.Error("page 1 should not render an active prev link")
+		}
+	})
+
+	t.Run("pages partition the row set", func(t *testing.T) {
+		seen := make(map[string]int, want)
+		for page := 1; page <= 3; page++ {
+			body := get("/projects/" + pj.ID + "?stories_page=" + strconv.Itoa(page) + "&stories_page_size=3")
+			for _, id := range countIDs(body) {
+				seen[id]++
+			}
+		}
+		if len(seen) != want {
+			t.Errorf("union of pages: got %d unique rows, want %d", len(seen), want)
+		}
+		for id, n := range seen {
+			if n != 1 {
+				t.Errorf("row %s appeared on %d pages, want exactly 1", id, n)
+			}
+		}
+	})
+
+	t.Run("last page disables next", func(t *testing.T) {
+		body := get("/projects/" + pj.ID + "?stories_page=3&stories_page_size=3")
+		if !strings.Contains(body, "page 3 of 3") {
+			t.Error("page 3 indicator missing")
+		}
+		if !strings.Contains(body, `data-field="panel-stories-prev"`) {
+			t.Error("page 3 should render an active prev link")
+		}
+		if strings.Contains(body, `data-field="panel-stories-next"`) {
+			t.Error("page 3 should not render an active next link")
 		}
 	})
 }
