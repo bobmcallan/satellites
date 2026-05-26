@@ -64,7 +64,13 @@ func typedSchema[T any]() mcp.ToolOption {
 	if err != nil {
 		panic("mcpserver: typedSchema remarshal: " + err.Error())
 	}
-	return mcp.WithRawInputSchema(cleaned)
+	// Clear the default InputSchema.Type ("object") set by NewTool —
+	// otherwise mcp.Tool.MarshalJSON refuses to serialize because both
+	// InputSchema and RawInputSchema are populated.
+	return func(t *mcp.Tool) {
+		t.InputSchema.Type = ""
+		t.RawInputSchema = cleaned
+	}
 }
 
 // stripNullable walks a JSON-Schema document and rewrites every

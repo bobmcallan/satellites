@@ -69,6 +69,23 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 	}
 }
 
+// TestExposedToolsMarshalJSON makes sure every exposed tool serialises
+// over the wire. mcp.Tool.MarshalJSON refuses tools that have both
+// InputSchema and RawInputSchema populated — NewTool seeds
+// InputSchema.Type="object" by default, so any ToolOption that sets
+// RawInputSchema must also clear InputSchema.Type. Caught in
+// production: prod tools/list returned 500 with
+// `tool document_delete has both InputSchema and RawInputSchema set`.
+func TestExposedToolsMarshalJSON(t *testing.T) {
+	s := New()
+	tools := s.ListTools()
+	for name, st := range tools {
+		if _, err := json.Marshal(st.Tool); err != nil {
+			t.Errorf("tool %q failed to marshal: %v", name, err)
+		}
+	}
+}
+
 // TestTagsSchemaIsArrayOfStrings pins the input schema for tags on the
 // two verbs that accept it (document_upsert, document_list). The bug
 // behind this contract: without an inputSchema, hosted MCP clients
