@@ -28,7 +28,7 @@ type Config struct {
 	DevMode     bool
 	OAuth       auth.OAuthConfig
 	Providers   *auth.ProviderSet
-	OAuthStates *auth.StateStore
+	OAuthStates auth.StateStore
 	OAuthServer *auth.OAuthServer
 }
 

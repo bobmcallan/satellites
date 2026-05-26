@@ -65,7 +65,7 @@ func fakeProvider(t *testing.T, name string, info auth.ProviderUserInfo) *auth.P
 // bootOAuthServer wires a satellites-server with a single fake provider
 // and returns an httptest URL plus the auth.Store + state mint helper.
 // Cleanup is registered on t.
-func bootOAuthServer(t *testing.T, provider *auth.Provider, adminEmails []string) (string, *auth.Store, *auth.StateStore) {
+func bootOAuthServer(t *testing.T, provider *auth.Provider, adminEmails []string) (string, *auth.Store, *auth.MemStateStore) {
 	t.Helper()
 	env := testbootstrap.SetUp(t)
 	store := auth.New(env.DB)
@@ -238,6 +238,88 @@ func TestOAuth_Callback_Idempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("user count: got %d want 1 (idempotency broken)", count)
+	}
+}
+
+// TestOAuth_Callback_StateSurvivesAcrossInstances is the HTTP-layer
+// regression test for the Fly "invalid state" outage. Two satellites-
+// server handlers share one Postgres but hold *different* PGStateStore
+// wrappers (simulating two Fly machines). A login on instance A
+// followed by a callback on instance B must round-trip successfully —
+// i.e. the state must be looked up from the DB, not from the process
+// memory of whichever machine handled /login.
+//
+// Before the fix (in-memory StateStore in main.go) this test fails with
+// 400 invalid state. Keep this test in place even if MemStateStore is
+// later deleted: it guards the production wiring.
+func TestOAuth_Callback_StateSurvivesAcrossInstances(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	store := auth.New(env.DB)
+	provider := fakeProvider(t, "google", auth.ProviderUserInfo{
+		Sub:         "google-multi",
+		Email:       "multi@example.com",
+		DisplayName: "Multi",
+	})
+
+	build := func(states auth.StateStore) *httptest.Server {
+		h := server.Build(server.Config{
+			Store:       store,
+			Sessions:    auth.NewSessions([]byte("multi-instance-secret")),
+			Providers:   &auth.ProviderSet{Google: provider},
+			OAuthStates: states,
+		})
+		s := httptest.NewServer(h)
+		t.Cleanup(s.Close)
+		return s
+	}
+	// Two distinct PGStateStore wrappers, same DB — the production
+	// shape under Fly's auto_stop / rolling deploys / multi-machine.
+	srvA := build(auth.NewPGStateStore(env.DB, 0))
+	srvB := build(auth.NewPGStateStore(env.DB, 0))
+
+	noRedirect := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+
+	// Step 1: /oauth/google/login on instance A. Capture the state
+	// query param from the redirect to the (fake) provider authorize URL.
+	resp, err := noRedirect.Get(srvA.URL + "/oauth/google/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login status: got %d want 303", resp.StatusCode)
+	}
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	state := loc.Query().Get("state")
+	if state == "" {
+		t.Fatalf("login redirect missing state param: %s", resp.Header.Get("Location"))
+	}
+
+	// Step 2: /oauth/google/callback on instance B. With a process-
+	// local state store this is 400 "invalid state"; with PGStateStore
+	// it succeeds and issues a session cookie.
+	cbURL := fmt.Sprintf("%s/oauth/google/callback?state=%s&code=fakecode", srvB.URL, state)
+	resp, err = noRedirect.Get(cbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("callback on B: status %d, body=%s — state did not survive cross-instance boundary", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Location"); got != "/" {
+		t.Errorf("callback Location: got %q want /", got)
+	}
+
+	// Confirm the user row was actually created.
+	if _, err := store.GetUserByEmail(context.Background(), "multi@example.com"); err != nil {
+		t.Errorf("user not upserted after cross-instance callback: %v", err)
 	}
 }
 

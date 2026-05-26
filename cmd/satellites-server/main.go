@@ -273,7 +273,7 @@ func main() {
 		DevMode:     cfg.Dev,
 		OAuth:       oauthCfg,
 		Providers:   providers,
-		OAuthStates: auth.NewStateStore(0),
+		OAuthStates: auth.NewPGStateStore(sqlDB, 0),
 		OAuthServer: oauthServer,
 	})
 
