@@ -6,6 +6,7 @@
 <title>{{.Title}}</title>
 <link rel="stylesheet" href="/static/styles.css">
 <script defer src="/static/alpine.min.js"></script>
+<script defer src="/static/story_panel.js"></script>
 </head>
 <body>
 
@@ -47,78 +48,112 @@
       <h2>stories</h2>
     </div>
 
-    {{if .ActiveTags}}
-    <div class="filter-row" data-field="active-filters">
-      <span class="filter-label">filtering:</span>
-      {{range .ActiveTags}}
-        <a class="tag-chip active" href="{{toggleTagURL $.URLBase $.ActiveSort $.ActiveTags .}}" data-tag="{{.}}">{{.}} ×</a>
-      {{end}}
-      <a class="filter-clear" href="{{clearTagURL .URLBase .ActiveSort}}" data-action="filter-clear">clear</a>
-    </div>
-    {{end}}
+    <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body">
+      <input type="text"
+             class="panel-search"
+             placeholder="search (free text + chips: tags:foo priority:high status:open category:feature)"
+             x-model="query"
+             data-field="panel-stories-search">
 
-    {{if .Stories}}
-    <table class="stories-table" data-field="stories-table">
-      <thead>
-        <tr>
-          <th><a href="{{toggleSortURL .URLBase .ActiveSort "id" .ActiveTags}}" data-sort="id" class="sort-link{{if eq .ActiveSort "id"}} active{{end}}">ID</a></th>
-          <th><a href="{{toggleSortURL .URLBase .ActiveSort "title" .ActiveTags}}" data-sort="title" class="sort-link{{if eq .ActiveSort "title"}} active{{end}}">TITLE</a></th>
-          <th><a href="{{toggleSortURL .URLBase .ActiveSort "status" .ActiveTags}}" data-sort="status" class="sort-link{{if eq .ActiveSort "status"}} active{{end}}">STATUS</a></th>
-          <th><a href="{{toggleSortURL .URLBase .ActiveSort "priority" .ActiveTags}}" data-sort="priority" class="sort-link{{if eq .ActiveSort "priority"}} active{{end}}">PRIORITY</a></th>
-          <th>TAGS</th>
-          <th><a href="{{toggleSortURL .URLBase .ActiveSort "updated_at" .ActiveTags}}" data-sort="updated_at" class="sort-link{{if eq .ActiveSort "updated_at"}} active{{end}}">UPDATED</a></th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Stories}}
-        <tr class="story-row" x-data="{ expanded: false }" @click="expanded = !expanded" data-field="story-row" data-story-id="{{.ID}}">
-          <td class="story-id">{{.ID}}</td>
-          <td class="story-title">{{.Title}}</td>
-          <td class="story-status">{{.Status}}</td>
-          <td class="story-priority">{{.Priority}}</td>
-          <td class="story-tags">
-            {{range .Tags}}<a class="tag-chip{{range $.ActiveTags}}{{if eq . $}} active{{end}}{{end}}" href="{{toggleTagURL $.URLBase $.ActiveSort $.ActiveTags .}}" @click.stop="" data-tag="{{.}}">{{.}}</a>{{end}}
-          </td>
-          <td class="story-updated">{{formatTime .UpdatedAt}}</td>
-        </tr>
-        <tr class="story-detail-row" x-show="expanded" x-cloak data-field="story-detail">
-          <td colspan="6">
-            <div class="story-detail">
-              <section class="story-summary" data-field="story-summary">
-                <h4>summary</h4>
-                {{if .Summary}}
-                <p>{{.Summary}}</p>
-                {{if .SummaryUpdatedAt}}<p class="muted">updated {{formatTime .SummaryUpdatedAt}}</p>{{end}}
-                {{else}}
-                <p class="empty">No summary yet — appears once the substrate generates one.</p>
-                {{end}}
-              </section>
-              <section class="story-ledger" data-field="story-ledger">
-                <h4>ledger</h4>
-                {{if .Ledger}}
-                <ol class="ledger-timeline">
-                  {{range .Ledger}}
-                  <li class="ledger-entry" data-ledger-kind="{{.Kind}}">
-                    <time>{{formatTime .CreatedAt}}</time>
-                    <span class="ledger-kind">{{.Kind}}</span>
-                    {{if .Actor}}<span class="ledger-actor">{{.Actor}}</span>{{end}}
-                    {{if .Body}}<span class="ledger-body">{{.Body}}</span>{{end}}
-                  </li>
-                  {{end}}
-                </ol>
-                {{else}}
-                <p class="empty">No ledger entries yet.</p>
-                {{end}}
-              </section>
-            </div>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-    {{else}}
-    <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
-    {{end}}
+      <div class="panel-filter-chips" data-field="panel-stories-chips">
+        <template x-for="chip in getEffectiveChips()" :key="chip.key + ':' + chip.value + ':' + chip.isDefault">
+          <span class="panel-filter-chip"
+                :class="{ 'is-default': chip.isDefault, 'is-user': !chip.isDefault }"
+                :data-field="'panel-stories-chip-' + chip.key + '-' + chip.value">
+            <span class="panel-filter-chip-label" x-text="chip.key + ':' + chip.value"></span>
+            <button type="button"
+                    class="panel-filter-chip-remove"
+                    x-show="!chip.isDefault"
+                    @click="removeChip(chip.key, chip.value)"
+                    :title="'Remove ' + chip.key + ':' + chip.value">&times;</button>
+          </span>
+        </template>
+        <button type="button"
+                class="panel-filter-chip-clear"
+                x-show="query.length > 0"
+                @click="clearAllFilters"
+                data-action="panel-stories-clear-all"
+                title="Reset to default filters">clear all</button>
+      </div>
+
+      {{if .Stories}}
+      <table class="panel-table panel-table-stories" data-field="stories-table">
+        <thead>
+          <tr>
+            <th class="col-id">id</th>
+            <th class="col-title">title</th>
+            <th class="col-status">status</th>
+            <th class="col-priority">priority</th>
+            <th class="col-updated">updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Stories}}
+          <tr class="story-row"
+              data-id="{{.ID}}"
+              data-status="{{.Status}}"
+              data-priority="{{.Priority}}"
+              data-category="{{.Category}}"
+              data-title="{{.Title}}"
+              data-updated="{{formatTime .UpdatedAt}}"
+              data-tags="{{range .Tags}}{{.}} {{end}}"
+              data-search="{{.ID}} {{.Title}} {{range .Tags}}{{.}} {{end}}"
+              x-show="matchesRow($el)"
+              :class="rowClass($el)"
+              @click="toggleRow"
+              data-field="story-row">
+            <td class="col-id"><code>{{.ID}}</code></td>
+            <td class="col-title">
+              <div class="story-row-title">{{.Title}}</div>
+              {{if .Tags}}
+              <div class="story-row-tags" data-field="story-row-tags">
+                {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery" title="Click to filter by this tag">{{.}}</button>{{end}}
+              </div>
+              {{end}}
+            </td>
+            <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
+            <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
+            <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
+          </tr>
+          <tr class="story-detail"
+              data-detail-for="{{.ID}}"
+              x-show="isExpanded($el)"
+              x-cloak
+              data-field="story-detail">
+            <td colspan="5">
+              <div class="story-detail-flat">
+                <section class="story-detail-block story-status-controls" data-story-status="{{.ID}}" data-field="story-status-buttons">
+                  <h4>status</h4>
+                  <div class="status-button-group">
+                    {{$id := .ID}}{{$cur := .Status}}
+                    {{range $s := list "backlog" "ready" "in_progress" "review" "done" "cancelled"}}
+                    <button type="button"
+                            class="status-button"
+                            data-status-target="{{$s}}"
+                            data-field="story-status-button-{{$s}}"
+                            {{if eq $cur $s}}disabled aria-pressed="true"{{end}}
+                            @click.stop="applyRowStatus('{{$id}}', '{{$s}}')">{{$s}}</button>
+                    {{end}}
+                  </div>
+                </section>
+                <section class="story-detail-block" data-field="story-description">
+                  <h4>description</h4>
+                  {{if .Body}}<pre class="story-detail-pre">{{.Body}}</pre>{{else}}<p class="empty">—</p>{{end}}
+                </section>
+                <section class="story-detail-block" data-field="story-acceptance">
+                  <h4>acceptance criteria</h4>
+                  {{if .AcceptanceCriteria}}<pre class="story-detail-pre">{{.AcceptanceCriteria}}</pre>{{else}}<p class="empty">—</p>{{end}}
+                </section>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
+      {{end}}
+    </div>
   </section>
 </main>
 

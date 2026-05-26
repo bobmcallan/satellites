@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -22,12 +23,11 @@ import (
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
 )
 
-// TestProjectDetailPanel exercises sty_045b00e3:
-//   - GET /projects/{id} renders stories panel
-//   - Table columns + tag chips + sort links present
-//   - Row click reveals summary + ledger sections
-//   - Tag filter URL toggles the active set
-//   - No mutation forms on the page
+// TestProjectDetailPanel exercises sty_f6911663 — V4-style story panel.
+// Asserts the search input + chip strip + expandable rows + quick
+// status-flip POST round-trip are present. The filter chips and row
+// expansion are driven by Alpine client-side; tests assert the markup
+// scaffolding is wired (data-field hooks the JS factory reads).
 func TestProjectDetailPanel(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 	testbootstrap.Reset(t, env)
@@ -68,20 +68,26 @@ func TestProjectDetailPanel(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	// Two stories: one with a unique tag we'll filter on, one without.
 	priorityHigh := "high"
 	priorityLow := "low"
 	tagsA := []string{"area:portal", "epic:test"}
 	tagsB := []string{"area:other"}
+	bodyA := "panel description body A"
 	createReq, _ := json.Marshal(verb.DocumentUpsertRequest{
 		Type:      "story",
 		ProjectID: pj.ID,
 		Name:      "wired story",
+		Body:      bodyA,
 		Priority:  &priorityHigh,
 		Tags:      &tagsA,
 	})
-	if _, err := verb.Dispatch(ctx, "document_upsert", createReq); err != nil {
+	createResp, err := verb.Dispatch(ctx, "document_upsert", createReq)
+	if err != nil {
 		t.Fatalf("create story 1: %v", err)
+	}
+	var storyA verb.DocumentUpsertResponse
+	if err := json.Unmarshal(createResp, &storyA); err != nil {
+		t.Fatalf("decode story 1: %v", err)
 	}
 	createReq2, _ := json.Marshal(verb.DocumentUpsertRequest{
 		Type:      "story",
@@ -101,73 +107,87 @@ func TestProjectDetailPanel(t *testing.T) {
 		DevMode:  true,
 	})
 
-	get := func(t *testing.T, path string) (int, string) {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+	authedRequest := func(method, path string, body io.Reader) *http.Request {
+		req := httptest.NewRequest(method, path, body)
 		rec := httptest.NewRecorder()
-		// Need a real user_id from DevSeed.
 		sessions.Issue(rec, "usr_dev_admin")
 		for _, c := range rec.Result().Cookies() {
 			req.AddCookie(c)
 		}
-		rec = httptest.NewRecorder()
+		return req
+	}
+	get := func(t *testing.T, path string) (int, string) {
+		t.Helper()
+		req := authedRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		body, _ := io.ReadAll(rec.Result().Body)
 		return rec.Code, string(body)
 	}
 
-	t.Run("renders stories table + columns", func(t *testing.T) {
+	t.Run("panel renders search + chip strip + table scaffold", func(t *testing.T) {
 		code, body := get(t, "/projects/"+pj.ID)
 		if code != http.StatusOK {
 			t.Fatalf("status %d, body=%s", code, body)
 		}
 		for _, want := range []string{
+			`x-data="storyPanel"`,
+			`data-field="panel-stories-search"`,
+			`data-field="panel-stories-chips"`,
 			`data-field="stories-table"`,
-			`data-sort="id"`, `data-sort="title"`, `data-sort="status"`,
-			`data-sort="priority"`, `data-sort="updated_at"`,
+			`data-field="story-row"`,
+			`data-field="story-detail"`,
+			`data-field="story-status-buttons"`,
+			`data-field="story-description"`,
+			`data-field="story-acceptance"`,
 			"wired story", "other story",
 			"area:portal", "epic:test", "area:other",
+			bodyA,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing %q", want)
 			}
 		}
-		// AC #6: no create/edit/delete forms on this page.
+		// No create/edit/delete forms leak onto the page.
 		if strings.Contains(body, `data-form="projects-create"`) {
 			t.Error("create form leaked into project detail page")
 		}
 	})
 
-	t.Run("tag filter narrows the table", func(t *testing.T) {
-		code, body := get(t, "/projects/"+pj.ID+"?tag=area:portal")
-		if code != http.StatusOK {
-			t.Fatalf("status %d", code)
-		}
-		if !strings.Contains(body, "wired story") {
-			t.Error("tag-filtered list missing matching story")
-		}
-		if strings.Contains(body, "other story") {
-			t.Error("tag-filtered list leaked non-matching story")
-		}
-		if !strings.Contains(body, `data-field="active-filters"`) {
-			t.Error("active-filters chip section missing")
-		}
-	})
-
-	t.Run("expanded row exposes summary + ledger placeholders", func(t *testing.T) {
+	t.Run("status buttons render one per enum value", func(t *testing.T) {
 		_, body := get(t, "/projects/"+pj.ID)
 		for _, want := range []string{
-			`data-field="story-detail"`,
-			`data-field="story-summary"`,
-			`data-field="story-ledger"`,
+			`data-field="story-status-button-backlog"`,
+			`data-field="story-status-button-ready"`,
+			`data-field="story-status-button-in_progress"`,
+			`data-field="story-status-button-review"`,
+			`data-field="story-status-button-done"`,
+			`data-field="story-status-button-cancelled"`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing %q", want)
 			}
 		}
-		// Story_created ledger entry from story_create should render.
-		if !strings.Contains(body, "story_created") {
-			t.Error("body missing story_created ledger entry")
+	})
+
+	t.Run("status POST round-trips through document_upsert", func(t *testing.T) {
+		payload := bytes.NewReader([]byte(`{"status":"ready"}`))
+		req := authedRequest(http.MethodPost, "/api/stories/"+storyA.Document.ID+"/status", payload)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			body, _ := io.ReadAll(rec.Result().Body)
+			t.Fatalf("status POST: code=%d body=%s", rec.Code, string(body))
+		}
+
+		// Verify the new status survives a re-render.
+		_, body := get(t, "/projects/"+pj.ID)
+		want := `<tr class="story-row"
+              data-id="` + storyA.Document.ID + `"
+              data-status="ready"`
+		if !strings.Contains(body, want) {
+			t.Errorf("story row did not pick up new status; body excerpt missing %q", want)
 		}
 	})
 
