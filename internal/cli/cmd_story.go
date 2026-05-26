@@ -47,7 +47,7 @@ func init() {
 
 	story := &cobra.Command{
 		Use:   "story",
-		Short: "Manage stories under a project (create / list / get / update)",
+		Short: "Manage stories under a project (create / list / get / update / delete)",
 	}
 	story.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	story.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")
@@ -56,6 +56,7 @@ func init() {
 	story.AddCommand(newStoryListCmd(&configArg, &userArg))
 	story.AddCommand(newStoryGetCmd(&configArg, &userArg))
 	story.AddCommand(newStoryUpdateCmd(&configArg, &userArg))
+	story.AddCommand(newStoryDeleteCmd(&configArg, &userArg))
 
 	register(story)
 }
@@ -199,6 +200,26 @@ func newStoryUpdateCmd(configArg, userArg *string) *cobra.Command {
 	cmd.Flags().StringVar(&priority, "priority", "", "Priority")
 	cmd.Flags().StringVar(&category, "category", "", "Category")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Tag (repeat to replace the tag set)")
+	return cmd
+}
+
+func newStoryDeleteCmd(configArg, userArg *string) *cobra.Command {
+	var id string
+	cmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Hard-delete a story by id (children's parent_id is nulled; ledger entries persist)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(id) == "" {
+				return fmt.Errorf("--id required")
+			}
+			body, err := json.Marshal(verb.StoryDeleteRequest{ID: id})
+			if err != nil {
+				return err
+			}
+			return runStoryVerb(cmd, "story_delete", body, *configArg, *userArg)
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "Story id (required)")
 	return cmd
 }
 

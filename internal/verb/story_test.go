@@ -10,7 +10,7 @@ import (
 )
 
 func TestStoryVerbs_Registered(t *testing.T) {
-	want := []string{"story_create", "story_list", "story_get", "story_update"}
+	want := []string{"story_create", "story_list", "story_get", "story_update", "story_delete"}
 	for _, name := range want {
 		if Get(name) == nil {
 			t.Errorf("verb %q not registered", name)
@@ -77,6 +77,27 @@ func TestStoryUpdate_RequiresID(t *testing.T) {
 	defer func() { storyStore = prev }()
 	storyStore = &story.Store{}
 	_, err := Get("story_update").Invoke(context.Background(), json.RawMessage(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "id required") {
+		t.Fatalf("expected id-required error, got %v", err)
+	}
+}
+
+func TestStoryDelete_StoreNotConfigured(t *testing.T) {
+	prev := storyStore
+	storyStore = nil
+	defer func() { storyStore = prev }()
+	_, err := Get("story_delete").Invoke(context.Background(),
+		json.RawMessage(`{"id":"sty_x"}`))
+	if err == nil || !strings.Contains(err.Error(), "store not configured") {
+		t.Fatalf("expected store-not-configured error, got %v", err)
+	}
+}
+
+func TestStoryDelete_RequiresID(t *testing.T) {
+	prev := storyStore
+	defer func() { storyStore = prev }()
+	storyStore = &story.Store{}
+	_, err := Get("story_delete").Invoke(context.Background(), json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "id required") {
 		t.Fatalf("expected id-required error, got %v", err)
 	}

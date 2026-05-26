@@ -140,6 +140,27 @@ func (s *Store) ListByProject(ctx context.Context, projectID string, tags []stri
 	return out, rows.Err()
 }
 
+// Delete removes the story row at id. Returns ErrNotFound when no row
+// matches. The stories self-FK on parent_id is declared ON DELETE SET
+// NULL (migration 0007), so child rows have their parent_id nulled
+// atomically by the DB. The evidence (ledger) table is append-only
+// and has no FK to stories — ledger entries authored against the
+// deleted story persist as audit history.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM stories WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("story: delete: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("story: delete rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdateInput carries the mutable fields story_update accepts. Each
 // pointer field is "set when non-nil"; project_id is immutable here
 // (a cross-project move would be a separate verb).

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
-	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
@@ -143,15 +142,28 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-func dispatchProjectGet(ctx context.Context, id string) (project.Project, error) {
+// projectDetailRow is the local shape this handler needs from
+// project_get. Defined here (not imported from internal/project) so
+// the transport stays decoupled from the domain package — the
+// layering guard enforces that.
+type projectDetailRow struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	GitURLCanonical string    `json:"git_url_canonical"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func dispatchProjectGet(ctx context.Context, id string) (projectDetailRow, error) {
 	body, _ := json.Marshal(verb.ProjectGetRequest{ID: id})
 	raw, err := verb.Dispatch(ctx, "project_get", body)
 	if err != nil {
-		return project.Project{}, err
+		return projectDetailRow{}, err
 	}
-	var p project.Project
+	var p projectDetailRow
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return project.Project{}, err
+		return projectDetailRow{}, err
 	}
 	return p, nil
 }

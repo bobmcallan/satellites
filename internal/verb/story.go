@@ -46,6 +46,14 @@ type StoryGetRequest struct {
 	ID string `json:"id"`
 }
 
+type StoryDeleteRequest struct {
+	ID string `json:"id"`
+}
+
+type StoryDeleteResponse struct {
+	Story story.Story `json:"story"`
+}
+
 type StoryUpdateRequest struct {
 	ID                 string    `json:"id"`
 	ParentID           *string   `json:"parent_id,omitempty"`
@@ -78,6 +86,11 @@ func init() {
 		Name:        "story_update",
 		Description: "Patch mutable fields on a story. project_id is immutable here.",
 		Invoke:      invokeStoryUpdate,
+	})
+	Register(&Verb{
+		Name:        "story_delete",
+		Description: "Hard-delete a story by id. Child parent_id is nulled; ledger entries persist (append-only).",
+		Invoke:      invokeStoryDelete,
 	})
 }
 
@@ -221,6 +234,29 @@ func invokeStoryUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	}
 	dispatchReviewers(ctx, s)
 	return json.Marshal(s)
+}
+
+func invokeStoryDelete(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if storyStore == nil {
+		return nil, fmt.Errorf("story_delete: store not configured")
+	}
+	var req StoryDeleteRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("story_delete: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return nil, fmt.Errorf("story_delete: id required")
+	}
+	s, err := storyStore.GetByID(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := storyStore.Delete(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	return json.Marshal(StoryDeleteResponse{Story: s})
 }
 
 // computeStoryDiff returns a {field: {before, after}} map for each

@@ -63,6 +63,22 @@ clear purpose paragraph) is **convention** and lives in the reviewer
 agent's markdown rubric (`config/reviewers/story_reviewer.md`), not in
 Go source.
 
+## Deletion semantics
+
+`story_delete` is a hard delete (no soft-delete tombstone — the
+`cancelled` status already covers "kept for visibility"). Two
+substrate invariants govern what survives:
+
+- **Children stay** — the self-FK on `parent_id` is `ON DELETE SET
+  NULL` (migration 0007). Child rows whose `parent_id` pointed at the
+  deleted story have their `parent_id` cleared atomically; the
+  children themselves are untouched.
+- **Ledger entries stay** — the `evidence` table is append-only at the
+  trigger layer (migration 0001) and has no FK to `stories`. Entries
+  authored against the deleted story persist as audit history, now
+  orphaned. This is the only behaviour compatible with the
+  append-only invariant.
+
 ## Well-formed example
 
 ```text
