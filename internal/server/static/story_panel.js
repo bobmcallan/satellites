@@ -43,6 +43,25 @@
         return out;
     }
 
+    // writeQueryToURL persists the current filter query as ?stories_q=
+    // on the URL via history.replaceState (NOT pushState — every
+    // keystroke is not a history entry). Empty value removes the param.
+    // Pagination params (stories_cursor / stories_page / stories_back)
+    // and any other URL params are preserved.
+    function writeQueryToURL(value) {
+        if (typeof window === 'undefined' || !window.history ||
+            typeof window.history.replaceState !== 'function') { return; }
+        try {
+            const url = new URL(window.location.href);
+            if (value && value.length > 0) {
+                url.searchParams.set('stories_q', value);
+            } else {
+                url.searchParams.delete('stories_q');
+            }
+            window.history.replaceState(window.history.state, '', url.toString());
+        } catch (e) { /* URL ctor or replaceState unavailable — best effort */ }
+    }
+
     function storyPanel() {
         return {
             query: '',
@@ -52,6 +71,21 @@
             bulkTarget: 'ready',
             bulkBusy: false,
             bulkResultText: '',
+
+            // Seed this.query from the URL ?stories_q= param so refresh
+            // + deep-link preserve the filter. The $watch wired below
+            // mirrors mutations back to the URL via replaceState. Both
+            // halves preserve the cursor-pagination params already on
+            // the URL (stories_cursor / stories_page / stories_back) —
+            // only stories_q rotates.
+            init() {
+                try {
+                    const url = new URL(window.location.href);
+                    const seed = url.searchParams.get('stories_q');
+                    if (seed) { this.query = seed; }
+                } catch (e) { /* URL ctor unavailable — best effort */ }
+                this.$watch('query', (value) => writeQueryToURL(value));
+            },
 
             get selectionCount() { return this.selectedIDs.size; },
 

@@ -7,5 +7,5 @@
 satellites.version: 0.0.36
 satellites.build: 2026-05-26-15-02-43
 
-satellites-server.version: 0.0.59
-satellites-server.build: 2026-05-27-02-01-01
+satellites-server.version: 0.0.60
+satellites-server.build: 2026-05-27-02-07-54
