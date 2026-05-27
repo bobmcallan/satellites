@@ -170,18 +170,23 @@ func TestParity_VerbVsRegistry(t *testing.T) {
 }
 
 // TestOrientationMentionsPrinciples pins the load-context seed to the
-// principles-ride-along section. Agents discover the sidecar by reading
-// the load-context at session start; if the section is dropped, fresh
-// sessions silently stop reading principle blocks on read verbs.
+// fetch-pointers that drive principle loading and reference-doc
+// discovery. The v2 body inlines neither — agents fetch via
+// document_list / document_get instead — so the pin enforces that
+// those fetch instructions remain in the body. Dropping any of them
+// leaves a fresh session unable to find principles or reference
+// material.
 func TestOrientationMentionsPrinciples(t *testing.T) {
 	body := string(seed.MCPLoadContextMarkdown())
 	for _, want := range []string{
-		"Principles ride along on read verbs",
-		"principles:<scope>",
-		"docs/principle-loading.md",
+		"principles:global",
+		"principles:workspace",
+		"principles:project",
+		"satellites_mcp_reference_dispatch",
+		"satellites_mcp_reference_documents",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("load-context body missing %q — substrate ride-along undocumented", want)
+			t.Errorf("load-context body missing %q — fetch-pointer dropped", want)
 		}
 	}
 }

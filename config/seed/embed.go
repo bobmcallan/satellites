@@ -24,6 +24,12 @@ var clientInstallMD []byte
 //go:embed system/artifacts/satellites_mcp_load_context.md
 var mcpLoadContextMD []byte
 
+//go:embed system/artifacts/satellites_mcp_reference_dispatch.md
+var mcpReferenceDispatchMD []byte
+
+//go:embed system/artifacts/satellites_mcp_reference_documents.md
+var mcpReferenceDocumentsMD []byte
+
 //go:embed system/artifacts/system_variables.md
 var systemVariablesMD []byte
 
@@ -35,8 +41,20 @@ func ClientInstallMarkdown() []byte { return clientInstallMD }
 
 // MCPLoadContextMarkdown returns the raw MCP load-context artifact
 // bytes — the document the MCP server returns to every client on
-// `initialize`.
+// `initialize`. Held to the mcp_instructions_budget_bytes system
+// variable; reference material lives in the separate
+// satellites_mcp_reference_* artifacts which agents fetch on demand.
 func MCPLoadContextMarkdown() []byte { return mcpLoadContextMD }
+
+// MCPReferenceDispatchMarkdown returns the raw bytes of the CLI
+// dispatch reference — Step-5 content fetched on demand via
+// document_get rather than shipped in the initialize blob.
+func MCPReferenceDispatchMarkdown() []byte { return mcpReferenceDispatchMD }
+
+// MCPReferenceDocumentsMarkdown returns the raw bytes of the document
+// and story reference — upsert modes, list filter shape, MCP-only
+// client surface. Fetched on demand via document_get.
+func MCPReferenceDocumentsMarkdown() []byte { return mcpReferenceDocumentsMD }
 
 // SystemVariablesMarkdown returns the raw system-variables taxonomy
 // artifact bytes — the operator-facing contract enumerating every

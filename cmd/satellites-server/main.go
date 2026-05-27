@@ -120,6 +120,8 @@ func main() {
 	}{
 		{"satellites_client_install", seed.ClientInstallMarkdown()},
 		{"satellites_mcp_load_context", seed.MCPLoadContextMarkdown()},
+		{"satellites_mcp_reference_dispatch", seed.MCPReferenceDispatchMarkdown()},
+		{"satellites_mcp_reference_documents", seed.MCPReferenceDocumentsMarkdown()},
 		{"system_variables", seed.SystemVariablesMarkdown()},
 		{"principle-configuration-over-code", seed.PrincipleConfigurationOverCodeMarkdown()},
 	} {
