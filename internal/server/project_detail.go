@@ -104,7 +104,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 				page = n
 			}
 		}
-		backStack := readBackStack(q)
+		backStack := readBackStack(q, storyPaginatorKeys)
 
 		stories, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
 		if err != nil {
@@ -136,10 +136,10 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 		}
 		base := "/projects/" + projectID
 		if paginator.HasPrev {
-			paginator.PrevURL = prevPageURL(base, page, backStack)
+			paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
 		}
 		if paginator.HasNext {
-			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack)
+			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
 		}
 
 		// Per-story body fetch so the expanded row can render the
@@ -330,18 +330,28 @@ func readStoryPageSize(ctx context.Context) int {
 }
 
 // emptyCursorSentinel encodes "no cursor" inside the comma-separated
-// stories_back URL param. Cursors are base64; the underscore is not
+// back-stack URL param. Cursors are base64; the underscore is not
 // part of the base64 alphabet, so a sentinel of "_" doesn't collide
 // with a real cursor value.
 const emptyCursorSentinel = "_"
 
+// paginatorKeys names the URL params a paginator uses. The same
+// cursor-stack model serves story-panel pagination and the /changelog
+// page; the only thing that differs is the param prefix.
+type paginatorKeys struct {
+	Page, Cursor, Back string
+}
+
+var storyPaginatorKeys = paginatorKeys{
+	Page: "stories_page", Cursor: "stories_cursor", Back: "stories_back",
+}
+
 // readBackStack pulls the comma-separated list of cursors we came from
-// out of the URL. Each entry is the document_list cursor that produced
-// the page at that depth. The first page's "cursor" is the empty
-// string, encoded as emptyCursorSentinel in the URL so it survives the
-// comma-split.
-func readBackStack(q url.Values) []string {
-	s := q.Get("stories_back")
+// out of the URL. Each entry is the cursor that produced the page at
+// that depth. The first page's "cursor" is the empty string, encoded
+// as emptyCursorSentinel so it survives the comma-split.
+func readBackStack(q url.Values, keys paginatorKeys) []string {
+	s := q.Get(keys.Back)
 	if s == "" {
 		return nil
 	}
@@ -374,19 +384,19 @@ func encodeBackStack(stack []string) string {
 // nextPageURL pushes the current cursor onto the back stack and uses
 // nextCursor as the new cursor — the link the operator clicks to go
 // forward.
-func nextPageURL(base string, currentPage int, currentCursor, nextCursor string, backStack []string) string {
+func nextPageURL(base string, currentPage int, currentCursor, nextCursor string, backStack []string, keys paginatorKeys) string {
 	newBack := append([]string(nil), backStack...)
 	newBack = append(newBack, currentCursor)
 	v := url.Values{}
-	v.Set("stories_page", strconv.Itoa(currentPage+1))
-	v.Set("stories_cursor", nextCursor)
-	v.Set("stories_back", encodeBackStack(newBack))
+	v.Set(keys.Page, strconv.Itoa(currentPage+1))
+	v.Set(keys.Cursor, nextCursor)
+	v.Set(keys.Back, encodeBackStack(newBack))
 	return base + "?" + v.Encode()
 }
 
 // prevPageURL pops the top of the back stack to get the previous
 // page's cursor. The back stack shrinks by one entry.
-func prevPageURL(base string, currentPage int, backStack []string) string {
+func prevPageURL(base string, currentPage int, backStack []string, keys paginatorKeys) string {
 	if len(backStack) == 0 {
 		return base
 	}
@@ -394,13 +404,13 @@ func prevPageURL(base string, currentPage int, backStack []string) string {
 	newBack := backStack[:len(backStack)-1]
 	v := url.Values{}
 	if currentPage-1 > 1 {
-		v.Set("stories_page", strconv.Itoa(currentPage-1))
+		v.Set(keys.Page, strconv.Itoa(currentPage-1))
 	}
 	if prevCursor != "" {
-		v.Set("stories_cursor", prevCursor)
+		v.Set(keys.Cursor, prevCursor)
 	}
 	if len(newBack) > 0 {
-		v.Set("stories_back", encodeBackStack(newBack))
+		v.Set(keys.Back, encodeBackStack(newBack))
 	}
 	enc := v.Encode()
 	if enc == "" {

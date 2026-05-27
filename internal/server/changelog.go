@@ -2,15 +2,30 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer/html"
 
+	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/changelog"
+	"github.com/bobmcallan/satellites/internal/verb"
+)
+
+var changelogPaginatorKeys = paginatorKeys{
+	Page: "changelog_page", Cursor: "changelog_cursor", Back: "changelog_back",
+}
+
+const (
+	changelogPageSizeFallback = 20
+	changelogPageSizeMax      = 200
 )
 
 // changelogStore is wired by the server boot path. Unwired callers
@@ -65,6 +80,7 @@ type changelogEntryView struct {
 type changelogPageData struct {
 	Title       string
 	Groups      []changelogGroupView
+	Paginator   paginatorData
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
@@ -72,6 +88,38 @@ type changelogPageData struct {
 	FooterName  string
 	FooterEmail string
 	Version     string
+}
+
+// readChangelogPageSize mirrors readStoryPageSize: pulls the
+// operator-tuned page size from the system KV via variable_get. Falls
+// back to the const on miss / decode failure / non-numeric value with
+// a WARN log so the misconfiguration is visible.
+func readChangelogPageSize(ctx context.Context) int {
+	body, _ := json.Marshal(verb.VariableGetRequest{
+		Name:  "changelog.page_size",
+		Scope: "system",
+	})
+	raw, err := verb.Dispatch(ctx, "variable_get", body)
+	if err != nil {
+		arbor.WarnCtx(ctx, "changelog page_size: variable_get failed, using fallback",
+			"fallback", changelogPageSizeFallback, "err", err)
+		return changelogPageSizeFallback
+	}
+	var resp verb.VariableGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		arbor.WarnCtx(ctx, "changelog page_size: decode failed, using fallback", "err", err)
+		return changelogPageSizeFallback
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(resp.Value))
+	if err != nil || n < 1 {
+		arbor.WarnCtx(ctx, "changelog page_size: non-numeric KV value, using fallback",
+			"value", resp.Value, "fallback", changelogPageSizeFallback)
+		return changelogPageSizeFallback
+	}
+	if n > changelogPageSizeMax {
+		return changelogPageSizeMax
+	}
+	return n
 }
 
 // changelogHandler serves GET /changelog. Public — no auth required;
@@ -89,10 +137,38 @@ func changelogHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		res, err := changelogStore.List(r.Context(), changelog.ListOptions{Limit: 200})
+		ctx := r.Context()
+		q := r.URL.Query()
+		pageSize := readChangelogPageSize(ctx)
+		cursor := q.Get(changelogPaginatorKeys.Cursor)
+		page := 1
+		if p := strings.TrimSpace(q.Get(changelogPaginatorKeys.Page)); p != "" {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				page = n
+			}
+		}
+		backStack := readBackStack(q, changelogPaginatorKeys)
+
+		res, err := changelogStore.List(ctx, changelog.ListOptions{
+			Cursor: cursor,
+			Limit:  pageSize,
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		paginator := paginatorData{
+			Page:     page,
+			HasPrev:  len(backStack) > 0,
+			HasNext:  res.NextCursor != "",
+			PageSize: pageSize,
+		}
+		if paginator.HasPrev {
+			paginator.PrevURL = prevPageURL("/changelog", page, backStack, changelogPaginatorKeys)
+		}
+		if paginator.HasNext {
+			paginator.NextURL = nextPageURL("/changelog", page, cursor, res.NextCursor, backStack, changelogPaginatorKeys)
 		}
 
 		groups := groupByService(res.Items)
@@ -118,6 +194,7 @@ func changelogHandler(cfg Config) http.HandlerFunc {
 		data := changelogPageData{
 			Title:       "changelog · satellites",
 			Groups:      views,
+			Paginator:   paginator,
 			ActiveNav:   "changelog",
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
@@ -127,7 +204,7 @@ func changelogHandler(cfg Config) http.HandlerFunc {
 		// as indexHandler.
 		if cfg.Sessions != nil {
 			if userID, err := cfg.Sessions.UserID(r); err == nil && cfg.Store != nil && cfg.Store.DB != nil {
-				if u, err := cfg.Store.GetUserByID(r.Context(), userID); err == nil && u != nil {
+				if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
 					data.UserEmail = u.Email
 					data.UserName = u.DisplayName
 					data.UserAvatar = avatarLetter(u.DisplayName, u.Email)

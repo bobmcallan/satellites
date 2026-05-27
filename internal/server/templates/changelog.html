@@ -53,6 +53,26 @@
       <p class="empty">No changelog entries yet — write one with <code>satellites exec changelog_add</code>.</p>
     </section>
   {{end}}
+
+  {{if or .Paginator.HasPrev .Paginator.HasNext}}
+  <nav class="panel-paginator" aria-label="Changelog pagination" data-field="changelog-paginator">
+    {{if .Paginator.HasPrev}}
+    <a class="panel-paginator-link prev"
+       href="{{.Paginator.PrevURL}}"
+       data-field="changelog-prev">prev</a>
+    {{else}}
+    <span class="panel-paginator-link is-disabled">prev</span>
+    {{end}}
+    <span class="panel-paginator-indicator" data-field="changelog-page-indicator">page {{.Paginator.Page}}</span>
+    {{if .Paginator.HasNext}}
+    <a class="panel-paginator-link next"
+       href="{{.Paginator.NextURL}}"
+       data-field="changelog-next">next</a>
+    {{else}}
+    <span class="panel-paginator-link is-disabled">next</span>
+    {{end}}
+  </nav>
+  {{end}}
 </main>
 
 <footer class="site-footer">

@@ -145,7 +145,8 @@ func main() {
 	// value. Add new knobs here; the consumer reads via
 	// variable_get(scope='system', name=...).
 	for name, defaultValue := range map[string]string{
-		"stories.page_size": "50",
+		"stories.page_size":   "50",
+		"changelog.page_size": "20",
 	} {
 		created, err := variableStore.SeedSystem(context.Background(), name, defaultValue, time.Now().UTC())
 		if err != nil {
