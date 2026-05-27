@@ -542,6 +542,9 @@ main {
 .panel-table tbody tr.story-row { cursor: pointer; }
 .panel-table tbody tr.story-row:hover { background: #1a1a1a; }
 .panel-table tbody tr.story-row.is-expanded { background: #1f1f1f; }
+.panel-table tbody td.col-id { cursor: copy; }
+.panel-table tbody td.col-id:hover code { color: #b8d8c0; text-decoration: underline dotted; }
+.panel-table tbody td.col-id.is-copied code { color: #b8d8c0; }
 .panel-table tbody tr.story-detail > td { background: #0a0a0a; padding: 0.75rem 1rem; }
 .panel-table tbody tr.story-row + tr.story-row > td { border-top: 1px solid #1c1c1c; }
 .panel-table tbody tr.story-detail + tr.story-row > td { border-top: 1px solid #1c1c1c; }

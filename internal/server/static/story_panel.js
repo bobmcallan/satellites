@@ -17,6 +17,28 @@
 (function () {
     'use strict';
 
+    // legacyCopy writes value to the clipboard via a temporary textarea
+    // + document.execCommand('copy'). Used as the fallback when
+    // navigator.clipboard is missing (older browsers) or rejected
+    // (non-secure-context Chrome). Returns true on success.
+    function legacyCopy(value) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = value;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (e) {
+            return false;
+        }
+    }
+
     // orderFields lists the columns the panel can reorder by. Mirrors
     // v4's whitelist. id is appended here because data-id is always
     // stamped on tr.story-row and operators occasionally want a stable
@@ -220,6 +242,37 @@
                 const id = (target && target.dataset && target.dataset.id) || '';
                 if (!id) { return; }
                 this.expanded = this.expanded === id ? '' : id;
+            },
+
+            // copyStoryID writes the story id to the clipboard and flips
+            // the cell text to "copied!" for ~1.2s. Bound to the .col-id
+            // cell with @click.stop so it short-circuits the row-expand
+            // handler. Falls back to a hidden-textarea + execCommand path
+            // on browsers without async clipboard (or when the page is
+            // served over plain http — Chrome gates navigator.clipboard
+            // behind secure-context).
+            copyStoryID(id, ev) {
+                if (!id) { return; }
+                const cell = ev && ev.currentTarget;
+                const flash = function () {
+                    if (!cell) { return; }
+                    const code = cell.querySelector('code');
+                    if (!code) { return; }
+                    const original = code.textContent;
+                    code.textContent = 'copied!';
+                    cell.classList.add('is-copied');
+                    setTimeout(function () {
+                        code.textContent = original;
+                        cell.classList.remove('is-copied');
+                    }, 1200);
+                };
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(id).then(flash).catch(function () {
+                        legacyCopy(id) && flash();
+                    });
+                    return;
+                }
+                if (legacyCopy(id)) { flash(); }
             },
 
             addTagToQuery(ev) {

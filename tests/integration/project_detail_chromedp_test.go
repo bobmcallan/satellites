@@ -284,6 +284,54 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	if !strings.Contains(searchVal, "tags:area:other") {
 		t.Errorf("search input after row-chip click: got %q, want it to contain tags:area:other", searchVal)
 	}
+
+	// sty_abb0f450: clicking the .col-id cell copies the story id to the
+	// clipboard and short-circuits the row-expand handler. Assertions:
+	//   - the row's .col-id cell briefly flips to "copied!" + gets
+	//     the is-copied class (the visible-confirmation contract);
+	//   - the row's detail row stays hidden (offsetParent === null);
+	//   - 127.0.0.1 is a Chromium secure-context so navigator.clipboard
+	//     is reachable — we don't read the clipboard back (headless
+	//     permission gate), but the flash UI is the user-facing
+	//     contract from the AC.
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const cells = document.querySelectorAll('td.col-id[data-field="story-id-copy"]');
+		for (const c of cells) {
+			const row = c.closest('tr.story-row');
+			if (row && row.offsetParent !== null) { c.click(); return row.dataset.id || true; }
+		}
+		return null;
+	})()`, nil)); err != nil {
+		t.Fatalf("click col-id: %v", err)
+	}
+	var copiedFlash struct {
+		HasClass bool   `json:"hasClass"`
+		Text     string `json:"text"`
+		Expanded bool   `json:"expanded"`
+	}
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const cell = Array.from(document.querySelectorAll('td.col-id.is-copied'))[0];
+		if (!cell) { return {hasClass:false,text:'',expanded:false}; }
+		const row = cell.closest('tr.story-row');
+		const id = row && row.dataset && row.dataset.id;
+		const detail = id && document.querySelector('tr.story-detail[data-detail-for="'+id+'"]');
+		return {
+			hasClass: cell.classList.contains('is-copied'),
+			text: cell.querySelector('code').textContent,
+			expanded: !!(detail && detail.offsetParent !== null),
+		};
+	})()`, &copiedFlash)); err != nil {
+		t.Fatalf("read copy state: %v", err)
+	}
+	if !copiedFlash.HasClass {
+		t.Errorf("col-id click did not flip the cell to is-copied")
+	}
+	if copiedFlash.Text != "copied!" {
+		t.Errorf("col-id click: cell text = %q, want %q", copiedFlash.Text, "copied!")
+	}
+	if copiedFlash.Expanded {
+		t.Errorf("col-id click expanded the row — @click.stop missing")
+	}
 }
 
 // chromedpHeadlessOpts returns the shared headless-Chrome allocator

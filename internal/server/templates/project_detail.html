@@ -144,7 +144,10 @@
                      :checked="isSelected('{{.ID}}')"
                      @change="toggleRowSelection('{{.ID}}', $event)" />
             </td>
-            <td class="col-id"><code>{{.ID}}</code></td>
+            <td class="col-id"
+                @click.stop="copyStoryID('{{.ID}}', $event)"
+                title="Copy story id to clipboard"
+                data-field="story-id-copy"><code>{{.ID}}</code></td>
             <td class="col-title">
               <div class="story-row-title">{{.Title}}</div>
               {{if .Tags}}
