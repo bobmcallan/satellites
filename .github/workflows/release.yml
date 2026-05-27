@@ -26,7 +26,7 @@ jobs:
       server_build: ${{ steps.read.outputs.server_build }}
       needs_release: ${{ steps.check.outputs.needs_release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # need full history for tag listing
       - id: read
@@ -74,8 +74,8 @@ jobs:
           - { goos: darwin, goarch: arm64, binary: satellites,        validate: false }
           - { goos: linux,  goarch: amd64, binary: satellites-server, validate: false }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           check-latest: true
@@ -131,7 +131,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
