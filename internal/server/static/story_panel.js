@@ -89,6 +89,28 @@
 
             get selectionCount() { return this.selectedIDs.size; },
 
+            // visibleRowCount returns the number of story rows currently
+            // visible in the panel — used by the "shown / total" header
+            // indicator. Reads this.query so the getter re-evaluates
+            // reactively when the chip filter changes. The actual count
+            // is from matchesRow (the same predicate x-show uses) so the
+            // indicator and the visible rows stay synchronised.
+            //
+            // Uses $root (the x-data ancestor) rather than $el (which
+            // resolves to the binding's own element — the counter span,
+            // not the panel root that contains the rows).
+            get visibleRowCount() {
+                void this.query;
+                const root = this.$root || this.$el;
+                if (!root) { return 0; }
+                const rows = root.querySelectorAll('tr.story-row');
+                let n = 0;
+                for (let i = 0; i < rows.length; i++) {
+                    if (this.matchesRow(rows[i])) { n++; }
+                }
+                return n;
+            },
+
             matchesRow(el) {
                 const ds = (el && el.dataset) || {};
                 if (ds.id && ds.id === this.expanded) { return true; }

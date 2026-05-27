@@ -169,6 +169,19 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 		t.Errorf("row %q (status=done) should be hidden under default status:open chip", "panel story delta")
 	}
 
+	// sty_975afe24: counter chip reads "shown / total". 4 stories
+	// total, 3 visible under the default status:open chip (delta is
+	// done → hidden).
+	var counterText string
+	if err := chromedp.Run(bctx,
+		chromedp.Text(`[data-field="stories-count-indicator"]`, &counterText, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("counter text: %v", err)
+	}
+	if !strings.Contains(counterText, "3 / 4") {
+		t.Errorf("counter chip under default filter: got %q want contains '3 / 4'", counterText)
+	}
+
 	// AC 5: typing tags:area:portal narrows to two matching rows + adds
 	// a user-set chip. Set the value directly + dispatch input rather
 	// than chromedp.SendKeys to skip the per-character reactive churn
@@ -199,6 +212,18 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	}
 	if visibleTitles["panel story beta"] {
 		t.Error("beta (area:other) should hide after tags:area:portal filter")
+	}
+
+	// sty_975afe24: after filter narrows visible rows to 2, the
+	// "shown" half of the counter chip drops to 2; the "total" half
+	// (project-wide count, path B) stays at 4.
+	if err := chromedp.Run(bctx,
+		chromedp.Text(`[data-field="stories-count-indicator"]`, &counterText, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("counter text after filter: %v", err)
+	}
+	if !strings.Contains(counterText, "2 / 4") {
+		t.Errorf("counter chip under tags filter: got %q want contains '2 / 4'", counterText)
 	}
 
 	// AC 6: clear all returns to defaults — alpha/beta/gamma visible,

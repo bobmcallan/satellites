@@ -698,3 +698,16 @@ button.status-button[disabled] {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.05em;
 }
+
+/* Stories panel counter chip — top-right of the panel-header,
+   "shown / total" semantics. */
+.stories-count-indicator {
+  margin-left: auto;
+  color: #888;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  border: 1px solid #333;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+}

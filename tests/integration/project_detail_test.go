@@ -377,13 +377,17 @@ func TestProjectDetailPagination(t *testing.T) {
 		return strings.ReplaceAll(href, "&amp;", "&")
 	}
 
-	t.Run("page 1: no prev, next present, page indicator", func(t *testing.T) {
+	t.Run("page 1: no prev, next present, page indicator with total", func(t *testing.T) {
 		body := get("/projects/" + pj.ID)
 		for _, w := range []string{
 			`data-field="panel-stories-paginator"`,
 			`data-field="panel-stories-next"`,
 			`data-field="panel-stories-page-indicator"`,
-			"page 1",
+			// sty_975afe24: total is back via document_count. 7 stories
+			// at page_size=3 → 3 pages.
+			"page 1 of 3",
+			// sty_975afe24: shown/total chip in the panel header.
+			`data-field="stories-count-indicator"`,
 		} {
 			if !strings.Contains(body, w) {
 				t.Errorf("page 1 missing %q", w)
@@ -393,11 +397,6 @@ func TestProjectDetailPagination(t *testing.T) {
 		// because the active anchor element isn't present).
 		if strings.Contains(body, `data-field="panel-stories-prev"`) {
 			t.Error("page 1 should not render an active prev link")
-		}
-		// Total disappears with cursor pagination — assert it's gone.
-		if strings.Contains(body, " of ") && strings.Contains(body, "page ") {
-			// "page N of M" string is forbidden; "page N" alone is ok.
-			t.Error(`paginator should not render "page N of M" under cursor pagination`)
 		}
 	})
 

@@ -46,11 +46,14 @@
   </section>
 
   <section class="panel" data-section="project-stories">
+    <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body">
     <div class="panel-header">
       <h2>stories</h2>
+      <span class="stories-count-indicator" data-field="stories-count-indicator"
+            title="shown on this page / total in project (filter is client-side; total ignores chips)">
+        <span x-text="visibleRowCount + ' / {{.StoryTotal}}'">{{.StoryShown}} / {{.StoryTotal}}</span>
+      </span>
     </div>
-
-    <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body">
       <input type="text"
              class="panel-search"
              placeholder="search (free text + chips: tags:foo priority:high status:open category:feature)"
@@ -202,7 +205,7 @@
         {{else}}
         <span class="panel-paginator-link is-disabled">prev</span>
         {{end}}
-        <span class="panel-paginator-indicator" data-field="panel-stories-page-indicator">page {{.Paginator.Page}}</span>
+        <span class="panel-paginator-indicator" data-field="panel-stories-page-indicator">page {{.Paginator.Page}}{{if gt .Paginator.PageCount 0}} of {{.Paginator.PageCount}}{{end}}</span>
         {{if .Paginator.HasNext}}
         <a class="panel-paginator-link next"
            href="{{.Paginator.NextURL}}"

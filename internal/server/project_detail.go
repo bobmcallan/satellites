@@ -34,6 +34,8 @@ type projectDetailData struct {
 	UserAvatar  string
 	Project     projectRow
 	Stories     []storyRow
+	StoryShown  int // initial visible count = len(Stories); Alpine x-text overwrites on filter change
+	StoryTotal  int // project-wide total from document_count; 0 = unavailable
 	Paginator   paginatorData
 	DevMode     bool
 	FooterName  string
@@ -42,17 +44,18 @@ type projectDetailData struct {
 }
 
 // paginatorData carries the cursor-paginator state the template
-// renders. Total + PageCount are absent — cursor pagination doesn't
-// give them for free, and the cost of a separate count query isn't
-// justified for this surface. PrevURL/NextURL are precomputed by the
-// handler so the template doesn't need URL-construction helpers.
+// renders. Total + PageCount come from document_count (sty_cc20c0f5)
+// alongside dispatchStoryList; if that call fails the template falls
+// back to a "page N" rendering with no total.
 type paginatorData struct {
-	Page     int
-	HasPrev  bool
-	HasNext  bool
-	PrevURL  string
-	NextURL  string
-	PageSize int // surfaced for diagnostics + debug overlay
+	Page      int
+	PageCount int // 0 = unknown; renders as "page N" instead of "page N of M"
+	Total     int // unfiltered project-wide story count
+	HasPrev   bool
+	HasNext   bool
+	PrevURL   string
+	NextURL   string
+	PageSize  int // surfaced for diagnostics + debug overlay
 }
 
 type storyRow struct {
@@ -109,11 +112,26 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
+		// document_count for the total + PageCount. Failure here
+		// degrades the indicator to "page N" without a total, but the
+		// page still renders. Path B from sty_975afe24's body: the
+		// count is project-wide and does NOT reflect the panel's
+		// client-side chip filter — the indicator label spells this
+		// out so operators aren't misled.
+		total := dispatchStoryCount(ctx, projectID)
+
 		paginator := paginatorData{
 			Page:     page,
+			Total:    total,
 			HasPrev:  len(backStack) > 0,
 			HasNext:  nextCursor != "",
 			PageSize: pageSize,
+		}
+		if total > 0 && pageSize > 0 {
+			paginator.PageCount = (total + pageSize - 1) / pageSize
+			if paginator.PageCount < 1 {
+				paginator.PageCount = 1
+			}
 		}
 		base := "/projects/" + projectID
 		if paginator.HasPrev {
@@ -154,6 +172,8 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			UserName:    userName,
 			UserAvatar:  userAvatar,
 			Stories:     stories,
+			StoryShown:  len(stories),
+			StoryTotal:  paginator.Total,
 			Paginator:   paginator,
 			DevMode:     cfg.DevMode,
 			FooterName:  footerName,
@@ -222,6 +242,28 @@ func dispatchStoryList(ctx context.Context, projectID, cursor string, limit int)
 		})
 	}
 	return out, resp.NextCursor, nil
+}
+
+// dispatchStoryCount returns the total story count for the project
+// (path B per sty_975afe24 — count ignores the panel's client-side
+// chip filter). Failures degrade silently; the handler falls back to
+// 0 which the template renders as "page N" without an "of M".
+func dispatchStoryCount(ctx context.Context, projectID string) int {
+	body, _ := json.Marshal(verb.DocumentCountRequest{
+		Type:      "story",
+		ProjectID: projectID,
+	})
+	raw, err := verb.Dispatch(ctx, "document_count", body)
+	if err != nil {
+		arbor.WarnCtx(ctx, "story count: dispatch failed, total unavailable", "err", err)
+		return 0
+	}
+	var resp verb.DocumentCountResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		arbor.WarnCtx(ctx, "story count: decode failed, total unavailable", "err", err)
+		return 0
+	}
+	return resp.Count
 }
 
 // dispatchStoryBody fetches the latest body for a story via
