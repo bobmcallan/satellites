@@ -23,7 +23,7 @@
       <a href="/projects" class="user-menu-item{{if eq .ActiveNav "projects"}} active{{end}}" data-nav="projects" role="menuitem">Projects</a>
       <a href="#" class="user-menu-item disabled" role="menuitem">Ledger</a>
       <a href="/docs/mcp" class="user-menu-item{{if eq .ActiveNav "mcp"}} active{{end}}" data-nav="mcp" role="menuitem">MCP</a>
-      <a href="#" class="user-menu-item disabled" role="menuitem">Config</a>
+      <a href="/changelog" class="user-menu-item{{if eq .ActiveNav "changelog"}} active{{end}}" data-nav="changelog" role="menuitem">Changelog</a>
       <a href="#" class="user-menu-item disabled" role="menuitem">Help</a>
     </section>
     <div class="user-menu-divider user-menu-mobile-divider"></div>
@@ -32,6 +32,7 @@
       <div class="user-menu-email" data-field="user-email">{{.UserEmail}}</div>
     </div>
     <div class="user-menu-divider"></div>
+    <a href="/changelog" class="user-menu-item{{if eq .ActiveNav "changelog"}} active{{end}}" data-field="user-menu-changelog" role="menuitem">Changelog</a>
     <a href="/settings/api-keys" class="user-menu-item{{if eq .ActiveNav "api-keys"}} active{{end}}" data-field="user-menu-keys" role="menuitem">API Keys</a>
     <a href="/settings/system-kv" class="user-menu-item{{if eq .ActiveNav "system-kv"}} active{{end}}" data-field="user-menu-kv" role="menuitem">KV Values</a>
     <div class="user-menu-divider"></div>
