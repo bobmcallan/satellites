@@ -58,7 +58,8 @@ Read these fields:
 | `install.cli_version`       | The CLI release this schema points at.                                                    |
 | `install.download_url`      | Where to fetch the CLI binary.                                                            |
 | `install.sha256_url`        | Matching sha256 manifest URL.                                                             |
-| `auth_bootstrap.kind`       | Auth flow to run. `auth_login` = operator runs `auth_bootstrap.command` to mint a token. |
+| `auth_bootstrap.kind`       | Auth flow to run. `mcp_mint` = dispatch `auth_bootstrap.verb` on the current MCP session to mint a token in-band. |
+| `auth_bootstrap.verb`       | Verb to dispatch under `kind=mcp_mint`. Currently `apikey_create`. |
 
 ## Step 2 — install or update the CLI
 
@@ -79,11 +80,31 @@ schema's `default_config` block verbatim into the TOML at
 fields the spec defers to caller-provided values: `project_id`
 (Step 4) and `auth.token` (this step's auth bootstrap).
 
-When `auth_bootstrap.kind=auth_login`, leave `[auth].token` empty,
-print `auth_bootstrap.command` to the operator, and stop until the
-operator has run it. The minted token belongs in the TOML's
-`[auth].token` — do not reuse it on the MCP session, which
-authenticates separately.
+When `auth_bootstrap.kind=mcp_mint`, dispatch `auth_bootstrap.verb`
+(currently `apikey_create`) on the current MCP session — the session
+is already authenticated by the operator's bearer credential, and the
+verb inherits that identity. Request shape:
+
+```json
+{"workspace_id":"wksp_…","project_id":"proj_…","agent_name":"<slug>","scopes":[]}
+```
+
+Response:
+
+```json
+{"apikey":"sk_…","key_id":"apk_…","workspace_id":"…","project_id":"…","agent_name":"…","created_at":"…"}
+```
+
+Write the response's `apikey` value into the TOML's `[auth].token`.
+That key is project-scoped under the caller's identity; the MCP
+session's own bearer is separate and unaffected. If the operator's
+identity does not have membership on the target workspace, the verb
+returns a `forbidden` error — surface it; the operator must be added
+to the workspace before bootstrap can finish.
+
+For CLI-only or operator-driven flows that need to revoke or rotate
+the minted token, use `apikey_list` to enumerate the caller's keys
+and `apikey_revoke` with the returned `key_id`.
 
 Verify by running `<target_install_path> version`.
 
@@ -108,10 +129,11 @@ operator — the project must be created (out of scope for bootstrap).
 
 ## Step 5 — dispatch every other verb via the CLI
 
-`tools/list` on this MCP server returns nine verbs: `document_get`,
-`document_list`, `document_upsert`, `document_delete`, `project_match`,
-`project_create`, `project_list`, `project_get`, and `project_update`.
-Every one is also reachable from the CLI via
+`tools/list` on this MCP server returns thirteen verbs:
+`document_get`, `document_list`, `document_count`, `document_upsert`,
+`document_delete`, `project_match`, `project_create`, `project_list`,
+`project_get`, `project_update`, `apikey_create`, `apikey_list`, and
+`apikey_revoke`. Every one is also reachable from the CLI via
 `satellites exec <verb> --json '<args>'`; the dispatch path is shared,
 so behaviour is byte-identical to the MCP call.
 
@@ -158,12 +180,13 @@ retry the verb. The CLI does not self-repair the TOML.
 ## MCP-only clients (no CLI install)
 
 Hosted assistants (Claude web, etc.) can't shell out to the CLI. For
-them, the MCP server exposes four `document_*` verbs that cover both
-free-form documents and stories, plus the `project_*` verbs needed to
-register and maintain projects without the CLI. Stories are documents
-with `type:"story"`; there is no separate `story_*` surface. The
-Bearer credential on the MCP session authorises each call — no TOML,
-no installed binary.
+them, the MCP server exposes the `document_*` verbs covering both
+free-form documents and stories, the `project_*` verbs needed to
+register and maintain projects without the CLI, and the `apikey_*`
+verbs that mint, list, and revoke api-keys in-band. Stories are
+documents with `type:"story"`; there is no separate `story_*`
+surface. The Bearer credential on the MCP session authorises each
+call — no TOML, no installed binary.
 
 | Verb              | Use                                                                                          |
 | ----------------- | -------------------------------------------------------------------------------------------- |
@@ -176,6 +199,9 @@ no installed binary.
 | `project_list`    | List projects, optionally filtered by `workspace_id`.                                                                  |
 | `project_get`     | Fetch a single project by `id`.                                                                                        |
 | `project_update`  | Patch mutable fields (`name`, `description`, `git_url`) on a project.                                                  |
+| `apikey_create`   | Mint a project-scoped api-key for the authenticated caller. Body: `{"workspace_id":"wksp_…","project_id":"proj_…","agent_name":"<slug>","scopes":[…]}`. Caller must be a member of the target workspace. Returns the raw `apikey` (only visible at mint time) plus `key_id`. |
+| `apikey_list`     | List the authenticated caller's non-revoked api-keys, filtered by any combination of `workspace_id` / `project_id` / `agent_name`. Returns redacted rows (no raw key). |
+| `apikey_revoke`   | Revoke one of the authenticated caller's api-keys by `key_id`. Existing keys belonging to other callers cannot be revoked. |
 
 ### Upsert modes (document_upsert)
 

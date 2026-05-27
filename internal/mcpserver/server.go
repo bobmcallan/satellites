@@ -34,6 +34,9 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"project_list":    typedSchema[verb.ProjectListRequest](),
 	"project_get":     typedSchema[verb.ProjectGetRequest](),
 	"project_update":  typedSchema[verb.ProjectUpdateRequest](),
+	"apikey_create":   typedSchema[verb.APIKeyCreateRequest](),
+	"apikey_list":     typedSchema[verb.APIKeyListRequest](),
+	"apikey_revoke":   typedSchema[verb.APIKeyRevokeRequest](),
 }
 
 // typedSchema generates a JSON Schema from a Go request struct and
@@ -130,6 +133,12 @@ var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 //     the unified CRUD surface across both substrate kinds — pass
 //     type:"story" on writes/queries to operate on stories,
 //     type:"document" (default) for free-form documents.
+//   - apikey_create / apikey_list / apikey_revoke: in-band token
+//     minting for MCP-only agents. apikey_create mints a project-
+//     scoped key under the authenticated caller; siblings list and
+//     revoke caller-owned keys. Membership on the target workspace
+//     is verified before minting. Closes the auth_bootstrap gap that
+//     used to force an out-of-band `auth login` shell-out.
 //
 // Stories are documents with type='story' post-unification (sty_0dd71f79);
 // there are no story_* verbs on the surface. The CLI offers no typed
@@ -148,6 +157,9 @@ var exposedVerbs = []string{
 	"project_list",
 	"project_get",
 	"project_update",
+	"apikey_create",
+	"apikey_list",
+	"apikey_revoke",
 }
 
 // New returns a configured *mcpserver.MCPServer exposing the verbs in

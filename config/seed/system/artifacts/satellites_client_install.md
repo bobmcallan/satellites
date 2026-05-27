@@ -1,6 +1,6 @@
 ---
 name: satellites_client_install
-tags: [kind:install-schema, v1]
+tags: [kind:install-schema, v2]
 target_install_path: ./.satellites/satellites
 target_config_path: ./.satellites/satellites.toml
 default_config:
@@ -13,8 +13,8 @@ default_config:
   auth:
     token: ""
 auth_bootstrap:
-  kind: auth_login
-  command: satellites auth login
+  kind: mcp_mint
+  verb: apikey_create
   env_hint: SATELLITES_TOKEN
 install:
   cli_version:  "{{cli_version}}"
@@ -47,9 +47,9 @@ sole writer of that file (load-context Step 3).
 | `default_config.log_path`        | TOML `log_path` — CLI + per-task log destination.                                                                  |
 | `default_config.branch_template` | TOML `branch_template` — git branch name template. The inner `{task_id}` / `{base_sha}` are CLI-time substitutions, not server-side. |
 | `default_config.auth.token`      | TOML `[auth].token` — the api-key the CLI presents on every server call. Empty until `auth_bootstrap` completes.   |
-| `auth_bootstrap.kind`            | Auth flow to run after install. `auth_login` = run `auth_bootstrap.command` and read the bearer from its output.   |
-| `auth_bootstrap.command`         | Shell command the operator runs for `kind=auth_login`.                                                             |
-| `auth_bootstrap.env_hint`        | Env-var name carrying the bearer after `auth login` mints it.                                                      |
+| `auth_bootstrap.kind`            | Auth flow to run after install. `mcp_mint` = MCP caller dispatches the named verb on its already-authenticated session to mint a project-scoped api-key; no shell-out required. |
+| `auth_bootstrap.verb`            | Substrate verb name to dispatch for `kind=mcp_mint`. Currently `apikey_create`; see load-context Step 3.            |
+| `auth_bootstrap.env_hint`        | Env-var name carrying the bearer when callers prefer to inject it via environment rather than the TOML.            |
 | `install.cli_version`            | The CLI release this schema points at. Server-rendered from `{{cli_version}}`.                                     |
 | `install.download_url`           | URL to fetch the CLI binary from. Server-rendered.                                                                 |
 | `install.sha256_url`             | Matching sha256 manifest URL. Server-rendered.                                                                     |

@@ -31,13 +31,15 @@ func TestServerConstructs(t *testing.T) {
 }
 
 // TestMCPSurfaceIsExpected pins the MCP tool surface to the exact set
-// the substrate is willing to expose. Three cohorts:
+// the substrate is willing to expose. Four cohorts:
 //   - Bootstrap (CLI-installable agents): document_get, project_match
 //   - Document CRUD (MCP-only and CLI): document_get, document_list,
 //     document_upsert, document_delete
 //   - Project CRUD (MCP-only registration + maintenance):
 //     project_create, project_list, project_get, project_update,
 //     project_match
+//   - API-key minting (in-band auth for MCP-only agents):
+//     apikey_create, apikey_list, apikey_revoke
 //
 // If this test fails, the MCP server has grown or shrunk its surface —
 // confirm intent and update both this test and exposedVerbs in server.go.
@@ -55,6 +57,9 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 		"project_list":    true,
 		"project_get":     true,
 		"project_update":  true,
+		"apikey_create":   true,
+		"apikey_list":     true,
+		"apikey_revoke":   true,
 	}
 	if len(tools) != len(want) {
 		names := make([]string, 0, len(tools))
