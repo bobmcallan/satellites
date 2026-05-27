@@ -39,20 +39,18 @@ type projectDetailData struct {
 	Version     string
 }
 
-// paginatorData carries the page-based paginator state the template
-// needs to render the prev/next strip + "page N of M" indicator. Total
-// is over the whole pre-filtered story set; the panel's client-side
-// chip filtering operates inside the current server page.
+// paginatorData carries the cursor-paginator state the template
+// renders. Total + PageCount are absent — cursor pagination doesn't
+// give them for free, and the cost of a separate count query isn't
+// justified for this surface. PrevURL/NextURL are precomputed by the
+// handler so the template doesn't need URL-construction helpers.
 type paginatorData struct {
-	Total     int
-	Page      int
-	PageSize  int
-	PageCount int
-	HasPrev   bool
-	HasNext   bool
-	PrevPage  int
-	NextPage  int
-	PageQuery string // pre-encoded "stories_page_size=N" suffix
+	Page     int
+	HasPrev  bool
+	HasNext  bool
+	PrevURL  string
+	NextURL  string
+	PageSize int // surfaced for diagnostics + debug overlay
 }
 
 type storyRow struct {
@@ -91,17 +89,37 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		all, err := dispatchStoryList(ctx, projectID)
+		q := r.URL.Query()
+		pageSize := readStoryPageSize(ctx)
+		cursor := q.Get("stories_cursor")
+		page := 1
+		if p := strings.TrimSpace(q.Get("stories_page")); p != "" {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				page = n
+			}
+		}
+		backStack := readBackStack(q)
+
+		stories, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
 		if err != nil {
 			arbor.ErrorCtx(ctx, "project_detail: story_list", "id", projectID, "err", err)
 			http.Error(w, "could not list stories", http.StatusInternalServerError)
 			return
 		}
 
-		// Slice the result set into the requested page before fetching
-		// bodies — saves round-trips on large projects.
-		page, pageSize := parseStoryPagination(r.URL.Query())
-		stories, paginator := paginate(all, page, pageSize)
+		paginator := paginatorData{
+			Page:     page,
+			HasPrev:  len(backStack) > 0,
+			HasNext:  nextCursor != "",
+			PageSize: pageSize,
+		}
+		base := "/projects/" + projectID
+		if paginator.HasPrev {
+			paginator.PrevURL = prevPageURL(base, page, backStack)
+		}
+		if paginator.HasNext {
+			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack)
+		}
 
 		// Per-story body fetch so the expanded row can render the
 		// description section. Loop only over the visible slice.
@@ -170,23 +188,23 @@ func dispatchProjectGet(ctx context.Context, id string) (projectDetailRow, error
 	return p, nil
 }
 
-func dispatchStoryList(ctx context.Context, projectID string) ([]storyRow, error) {
+func dispatchStoryList(ctx context.Context, projectID, cursor string, limit int) ([]storyRow, string, error) {
 	// Post-unification (sty_0dd71f79) stories are documents-of-type-story.
-	// The portal pulls every story for the project; the V4-style panel
-	// filters client-side, so we no longer thread tag filters through
-	// the URL.
+	// Server-side cursor pagination (sty_5c41f316) — Limit is the page
+	// size, Cursor is the opaque token document_list emits.
 	body, _ := json.Marshal(verb.DocumentListRequest{
 		Type:      "story",
 		ProjectID: projectID,
-		Limit:     200,
+		Limit:     limit,
+		Cursor:    cursor,
 	})
 	raw, err := verb.Dispatch(ctx, "document_list", body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var resp verb.DocumentListResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]storyRow, 0, len(resp.Items))
 	for _, d := range resp.Items {
@@ -197,7 +215,7 @@ func dispatchStoryList(ctx context.Context, projectID string) ([]storyRow, error
 			Tags: d.Tags, UpdatedAt: d.UpdatedAt, CreatedAt: d.CreatedAt,
 		})
 	}
-	return out, nil
+	return out, resp.NextCursor, nil
 }
 
 // dispatchStoryBody fetches the latest body for a story via
@@ -220,73 +238,123 @@ func formatRowTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02 15:04")
 }
 
-// storyPageSizeDefault is the default page size when ?stories_page_size
-// is absent. storyPageSizeMax is the upper clamp — aligned with
+// storyPageSizeFallback is used when the system KV lookup misses or
+// returns a non-numeric value. storyPageSizeMax aligns with
 // document_list's own Limit ceiling so we never exceed what the verb
 // will return in a single fetch.
 const (
-	storyPageSizeDefault = 50
-	storyPageSizeMax     = 200
+	storyPageSizeFallback = 50
+	storyPageSizeMax      = 200
 )
 
-// parseStoryPagination reads stories_page + stories_page_size off the
-// request URL with the documented defaults + clamps. Invalid values
-// fall back to defaults rather than failing the request — the
-// paginator is a navigation aid, not the source of truth.
-func parseStoryPagination(q url.Values) (page, pageSize int) {
-	pageSize = storyPageSizeDefault
-	if raw := strings.TrimSpace(q.Get("stories_page_size")); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			pageSize = n
-		}
+// readStoryPageSize fetches the operator-tuned page size from the
+// system KV (sty_cc4c671a) via variable_get. Falls back to the const on
+// miss / non-numeric value / verb error with a WARN log so the
+// misconfiguration is visible without breaking the panel.
+func readStoryPageSize(ctx context.Context) int {
+	body, _ := json.Marshal(verb.VariableGetRequest{
+		Name:  "stories.page_size",
+		Scope: "system",
+	})
+	raw, err := verb.Dispatch(ctx, "variable_get", body)
+	if err != nil {
+		arbor.WarnCtx(ctx, "story page_size: variable_get failed, using fallback",
+			"fallback", storyPageSizeFallback, "err", err)
+		return storyPageSizeFallback
 	}
-	if pageSize < 1 {
-		pageSize = 1
+	var resp verb.VariableGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		arbor.WarnCtx(ctx, "story page_size: decode failed, using fallback", "err", err)
+		return storyPageSizeFallback
 	}
-	if pageSize > storyPageSizeMax {
-		pageSize = storyPageSizeMax
+	n, err := strconv.Atoi(strings.TrimSpace(resp.Value))
+	if err != nil || n < 1 {
+		arbor.WarnCtx(ctx, "story page_size: non-numeric KV value, using fallback",
+			"value", resp.Value, "fallback", storyPageSizeFallback)
+		return storyPageSizeFallback
 	}
-	page = 1
-	if raw := strings.TrimSpace(q.Get("stories_page")); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			page = n
-		}
+	if n > storyPageSizeMax {
+		return storyPageSizeMax
 	}
-	return page, pageSize
+	return n
 }
 
-// paginate slices `all` into the requested page and returns the slice
-// alongside the paginator state the template renders. Out-of-range
-// pages clamp to the last page so a stale URL still renders something
-// sensible.
-func paginate(all []storyRow, page, pageSize int) ([]storyRow, paginatorData) {
-	total := len(all)
-	pageCount := (total + pageSize - 1) / pageSize
-	if pageCount < 1 {
-		pageCount = 1
+// emptyCursorSentinel encodes "no cursor" inside the comma-separated
+// stories_back URL param. Cursors are base64; the underscore is not
+// part of the base64 alphabet, so a sentinel of "_" doesn't collide
+// with a real cursor value.
+const emptyCursorSentinel = "_"
+
+// readBackStack pulls the comma-separated list of cursors we came from
+// out of the URL. Each entry is the document_list cursor that produced
+// the page at that depth. The first page's "cursor" is the empty
+// string, encoded as emptyCursorSentinel in the URL so it survives the
+// comma-split.
+func readBackStack(q url.Values) []string {
+	s := q.Get("stories_back")
+	if s == "" {
+		return nil
 	}
-	if page > pageCount {
-		page = pageCount
+	parts := strings.Split(s, ",")
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		if p == emptyCursorSentinel {
+			out[i] = ""
+		} else {
+			out[i] = p
+		}
 	}
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
+	return out
+}
+
+// encodeBackStack inverts readBackStack — replaces empty cursors with
+// the sentinel so the joined URL value carries N entries unambiguously.
+func encodeBackStack(stack []string) string {
+	parts := make([]string, len(stack))
+	for i, c := range stack {
+		if c == "" {
+			parts[i] = emptyCursorSentinel
+		} else {
+			parts[i] = c
+		}
 	}
-	end := start + pageSize
-	if end > total {
-		end = total
+	return strings.Join(parts, ",")
+}
+
+// nextPageURL pushes the current cursor onto the back stack and uses
+// nextCursor as the new cursor — the link the operator clicks to go
+// forward.
+func nextPageURL(base string, currentPage int, currentCursor, nextCursor string, backStack []string) string {
+	newBack := append([]string(nil), backStack...)
+	newBack = append(newBack, currentCursor)
+	v := url.Values{}
+	v.Set("stories_page", strconv.Itoa(currentPage+1))
+	v.Set("stories_cursor", nextCursor)
+	v.Set("stories_back", encodeBackStack(newBack))
+	return base + "?" + v.Encode()
+}
+
+// prevPageURL pops the top of the back stack to get the previous
+// page's cursor. The back stack shrinks by one entry.
+func prevPageURL(base string, currentPage int, backStack []string) string {
+	if len(backStack) == 0 {
+		return base
 	}
-	slice := all[start:end]
-	p := paginatorData{
-		Total:     total,
-		Page:      page,
-		PageSize:  pageSize,
-		PageCount: pageCount,
-		HasPrev:   page > 1,
-		HasNext:   page < pageCount,
-		PrevPage:  page - 1,
-		NextPage:  page + 1,
-		PageQuery: "stories_page_size=" + strconv.Itoa(pageSize),
+	prevCursor := backStack[len(backStack)-1]
+	newBack := backStack[:len(backStack)-1]
+	v := url.Values{}
+	if currentPage-1 > 1 {
+		v.Set("stories_page", strconv.Itoa(currentPage-1))
 	}
-	return slice, p
+	if prevCursor != "" {
+		v.Set("stories_cursor", prevCursor)
+	}
+	if len(newBack) > 0 {
+		v.Set("stories_back", encodeBackStack(newBack))
+	}
+	enc := v.Encode()
+	if enc == "" {
+		return base
+	}
+	return base + "?" + enc
 }

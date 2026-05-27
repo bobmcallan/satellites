@@ -19,6 +19,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/server"
+	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -244,10 +245,12 @@ func TestProjectDetailPanel(t *testing.T) {
 	})
 }
 
-// TestProjectDetailPagination exercises sty_4e6dcbec — page-based
-// paginator below the stories panel. Seeds 7 stories under a fresh
-// project; walks page 1/2/3 at page_size=3 and asserts each row
-// appears exactly once across the three pages.
+// TestProjectDetailPagination exercises sty_5c41f316 — server-side
+// cursor pagination with page size read from the system KV
+// (sty_cc4c671a). Seeds 7 stories under a fresh project, sets
+// stories.page_size=3 in the KV, then walks the prev/next links to
+// verify each row appears on exactly one page and the back stack
+// round-trips cleanly.
 func TestProjectDetailPagination(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 	testbootstrap.Reset(t, env)
@@ -260,21 +263,32 @@ func TestProjectDetailPagination(t *testing.T) {
 	pjStore := project.New(env.DB)
 	docStore := document.New(env.DB)
 	ledStore := ledger.New(env.DB)
+	varStore := variable.New(env.DB)
 	verb.SetAuthStore(authStore)
 	verb.SetWorkspaceStore(wsStore)
 	verb.SetProjectStore(pjStore)
 	verb.SetDocumentStore(docStore)
 	verb.SetLedgerStore(ledStore)
+	verb.SetVariableStore(varStore)
 	t.Cleanup(func() {
 		verb.SetAuthStore(nil)
 		verb.SetWorkspaceStore(nil)
 		verb.SetProjectStore(nil)
 		verb.SetDocumentStore(nil)
 		verb.SetLedgerStore(nil)
+		verb.SetVariableStore(nil)
 	})
 
 	ctx := context.Background()
 	now := time.Date(2026, 5, 25, 16, 0, 0, 0, time.UTC)
+
+	// Seed the page-size system KV — the handler reads this for every
+	// /projects/{id} render, so the test must install it before the
+	// first GET.
+	if _, err := varStore.SeedSystem(ctx, "stories.page_size", "3", now); err != nil {
+		t.Fatalf("seed page_size: %v", err)
+	}
+
 	ws, err := wsStore.Create(ctx, "", "pag-ws", now)
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -338,53 +352,128 @@ func TestProjectDetailPagination(t *testing.T) {
 		}
 		return out
 	}
+	// extractLink pulls href="..." for the link with the given
+	// data-field selector. The handler URL-encodes ampersands; we
+	// decode them back so the link is a re-usable path for the next GET.
+	extractLink := func(body, dataField string) string {
+		t.Helper()
+		idx := strings.Index(body, `data-field="`+dataField+`"`)
+		if idx == -1 {
+			return ""
+		}
+		// Walk back from idx to find href="...".
+		seg := body[:idx]
+		hrefStart := strings.LastIndex(seg, `href="`)
+		if hrefStart == -1 {
+			return ""
+		}
+		hrefStart += len(`href="`)
+		hrefEnd := strings.Index(body[hrefStart:], `"`)
+		if hrefEnd == -1 {
+			return ""
+		}
+		href := body[hrefStart : hrefStart+hrefEnd]
+		// html/template renders & as &amp; in attribute values.
+		return strings.ReplaceAll(href, "&amp;", "&")
+	}
 
-	t.Run("paginator renders at total > page_size", func(t *testing.T) {
-		body := get("/projects/" + pj.ID + "?stories_page=1&stories_page_size=3")
-		for _, want := range []string{
+	t.Run("page 1: no prev, next present, page indicator", func(t *testing.T) {
+		body := get("/projects/" + pj.ID)
+		for _, w := range []string{
 			`data-field="panel-stories-paginator"`,
 			`data-field="panel-stories-next"`,
 			`data-field="panel-stories-page-indicator"`,
-			"page 1 of 3",
+			"page 1",
 		} {
-			if !strings.Contains(body, want) {
-				t.Errorf("page 1: missing %q", want)
+			if !strings.Contains(body, w) {
+				t.Errorf("page 1 missing %q", w)
 			}
 		}
-		// Prev is disabled on page 1 (span, not anchor).
+		// Prev is disabled on page 1 (rendered as span, no data-field
+		// because the active anchor element isn't present).
 		if strings.Contains(body, `data-field="panel-stories-prev"`) {
 			t.Error("page 1 should not render an active prev link")
 		}
+		// Total disappears with cursor pagination — assert it's gone.
+		if strings.Contains(body, " of ") && strings.Contains(body, "page ") {
+			// "page N of M" string is forbidden; "page N" alone is ok.
+			t.Error(`paginator should not render "page N of M" under cursor pagination`)
+		}
 	})
 
-	t.Run("pages partition the row set", func(t *testing.T) {
+	t.Run("walking next reaches every row exactly once", func(t *testing.T) {
 		seen := make(map[string]int, want)
-		for page := 1; page <= 3; page++ {
-			body := get("/projects/" + pj.ID + "?stories_page=" + strconv.Itoa(page) + "&stories_page_size=3")
+		path := "/projects/" + pj.ID
+		for visited := 0; visited < 5; visited++ { // 3 pages + safety
+			body := get(path)
 			for _, id := range countIDs(body) {
 				seen[id]++
 			}
+			next := extractLink(body, "panel-stories-next")
+			if next == "" {
+				break // no more pages
+			}
+			path = next
 		}
 		if len(seen) != want {
-			t.Errorf("union of pages: got %d unique rows, want %d", len(seen), want)
+			t.Errorf("union of forward walk: got %d unique rows, want %d", len(seen), want)
 		}
 		for id, n := range seen {
 			if n != 1 {
-				t.Errorf("row %s appeared on %d pages, want exactly 1", id, n)
+				t.Errorf("row %s appeared on %d pages during forward walk, want 1", id, n)
 			}
 		}
 	})
 
-	t.Run("last page disables next", func(t *testing.T) {
-		body := get("/projects/" + pj.ID + "?stories_page=3&stories_page_size=3")
-		if !strings.Contains(body, "page 3 of 3") {
-			t.Error("page 3 indicator missing")
-		}
-		if !strings.Contains(body, `data-field="panel-stories-prev"`) {
-			t.Error("page 3 should render an active prev link")
+	t.Run("last page disables next, prev present", func(t *testing.T) {
+		// Walk forward to the last page by following next links until
+		// no next remains.
+		path := "/projects/" + pj.ID
+		var body string
+		for i := 0; i < 5; i++ {
+			body = get(path)
+			next := extractLink(body, "panel-stories-next")
+			if next == "" {
+				break
+			}
+			path = next
 		}
 		if strings.Contains(body, `data-field="panel-stories-next"`) {
-			t.Error("page 3 should not render an active next link")
+			t.Error("last page should not render an active next link")
+		}
+		if !strings.Contains(body, `data-field="panel-stories-prev"`) {
+			t.Error("last page should render an active prev link")
+		}
+	})
+
+	t.Run("prev round-trips back to page 1", func(t *testing.T) {
+		// Walk forward to page 3, then walk back via prev — should
+		// land on a page with no active prev link (page 1 again).
+		path := "/projects/" + pj.ID
+		for i := 0; i < 2; i++ {
+			body := get(path)
+			next := extractLink(body, "panel-stories-next")
+			if next == "" {
+				t.Fatalf("forward walk step %d: no next link", i)
+			}
+			path = next
+		}
+		// We're now on page 3 (the last page). Walk back twice.
+		for i := 0; i < 2; i++ {
+			body := get(path)
+			prev := extractLink(body, "panel-stories-prev")
+			if prev == "" {
+				t.Fatalf("backward walk step %d: no prev link", i)
+			}
+			path = prev
+		}
+		// path should now be page 1 (no active prev link).
+		body := get(path)
+		if strings.Contains(body, `data-field="panel-stories-prev"`) {
+			t.Error("after two prev clicks from page 3, expected to land on page 1 (no active prev link)")
+		}
+		if !strings.Contains(body, "page 1") {
+			t.Error("after back-walk, expected page 1 indicator")
 		}
 	})
 }
