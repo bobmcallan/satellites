@@ -13,6 +13,7 @@ import (
 	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
@@ -79,6 +80,7 @@ func main() {
 
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetLedgerStore(ledger.New(sqlDB))
+	verb.SetChangelogStore(changelog.New(sqlDB))
 
 	// Reviewer registry — load every markdown definition embedded
 	// under config/reviewers/, then wire either the production

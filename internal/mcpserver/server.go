@@ -24,19 +24,23 @@ import (
 // array values — the dispatcher then rejects the call on unmarshal.
 // Reflection-based generation keeps schema and struct in lock-step.
 var inputSchemas = map[string]mcp.ToolOption{
-	"document_get":    typedSchema[verb.DocumentGetRequest](),
-	"document_list":   typedSchema[verb.DocumentListRequest](),
-	"document_count":  typedSchema[verb.DocumentCountRequest](),
-	"document_upsert": typedSchema[verb.DocumentUpsertRequest](),
-	"document_delete": typedSchema[verb.DocumentDeleteRequest](),
-	"project_match":   typedSchema[verb.ProjectMatchRequest](),
-	"project_create":  typedSchema[verb.ProjectCreateRequest](),
-	"project_list":    typedSchema[verb.ProjectListRequest](),
-	"project_get":     typedSchema[verb.ProjectGetRequest](),
-	"project_update":  typedSchema[verb.ProjectUpdateRequest](),
-	"apikey_create":   typedSchema[verb.APIKeyCreateRequest](),
-	"apikey_list":     typedSchema[verb.APIKeyListRequest](),
-	"apikey_revoke":   typedSchema[verb.APIKeyRevokeRequest](),
+	"document_get":     typedSchema[verb.DocumentGetRequest](),
+	"document_list":    typedSchema[verb.DocumentListRequest](),
+	"document_count":   typedSchema[verb.DocumentCountRequest](),
+	"document_upsert":  typedSchema[verb.DocumentUpsertRequest](),
+	"document_delete":  typedSchema[verb.DocumentDeleteRequest](),
+	"project_match":    typedSchema[verb.ProjectMatchRequest](),
+	"project_create":   typedSchema[verb.ProjectCreateRequest](),
+	"project_list":     typedSchema[verb.ProjectListRequest](),
+	"project_get":      typedSchema[verb.ProjectGetRequest](),
+	"project_update":   typedSchema[verb.ProjectUpdateRequest](),
+	"apikey_create":    typedSchema[verb.APIKeyCreateRequest](),
+	"apikey_list":      typedSchema[verb.APIKeyListRequest](),
+	"apikey_revoke":    typedSchema[verb.APIKeyRevokeRequest](),
+	"changelog_add":    typedSchema[verb.ChangelogAddRequest](),
+	"changelog_list":   typedSchema[verb.ChangelogListRequest](),
+	"changelog_update": typedSchema[verb.ChangelogUpdateRequest](),
+	"changelog_delete": typedSchema[verb.ChangelogDeleteRequest](),
 }
 
 // typedSchema generates a JSON Schema from a Go request struct and
@@ -160,6 +164,10 @@ var exposedVerbs = []string{
 	"apikey_create",
 	"apikey_list",
 	"apikey_revoke",
+	"changelog_add",
+	"changelog_list",
+	"changelog_update",
+	"changelog_delete",
 }
 
 // New returns a configured *mcpserver.MCPServer exposing the verbs in
