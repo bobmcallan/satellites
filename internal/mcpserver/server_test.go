@@ -47,6 +47,7 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 	want := map[string]bool{
 		"document_get":    true,
 		"document_list":   true,
+		"document_count":  true,
 		"document_upsert": true,
 		"document_delete": true,
 		"project_match":   true,

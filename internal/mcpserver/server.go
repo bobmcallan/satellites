@@ -26,6 +26,7 @@ import (
 var inputSchemas = map[string]mcp.ToolOption{
 	"document_get":    typedSchema[verb.DocumentGetRequest](),
 	"document_list":   typedSchema[verb.DocumentListRequest](),
+	"document_count":  typedSchema[verb.DocumentCountRequest](),
 	"document_upsert": typedSchema[verb.DocumentUpsertRequest](),
 	"document_delete": typedSchema[verb.DocumentDeleteRequest](),
 	"project_match":   typedSchema[verb.ProjectMatchRequest](),
@@ -139,6 +140,7 @@ var orientationInstructions = string(seed.MCPLoadContextMarkdown())
 var exposedVerbs = []string{
 	"document_get",
 	"document_list",
+	"document_count",
 	"document_upsert",
 	"document_delete",
 	"project_match",

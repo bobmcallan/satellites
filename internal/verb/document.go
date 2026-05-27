@@ -184,6 +184,26 @@ type DocumentListResponse struct {
 	NextCursor string              `json:"next_cursor,omitempty"`
 }
 
+// DocumentCountRequest mirrors DocumentListRequest's filter fields. No
+// Limit / Cursor — count is over the entire matching set. Paired with
+// document_list for "page N of M"-style indicators and total-row
+// counters in the portal.
+type DocumentCountRequest struct {
+	Type        string   `json:"type,omitempty"`
+	Scope       string   `json:"scope,omitempty"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	ProjectID   string   `json:"project_id,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	NamePrefix  string   `json:"name_prefix,omitempty"`
+}
+
+// DocumentCountResponse is the count for a filter — a single int wire
+// shape so callers don't bring in the whole document.Document type.
+type DocumentCountResponse struct {
+	Count int `json:"count"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "document_get",
@@ -209,6 +229,12 @@ func init() {
 		Description: "List documents and/or stories with structured filters and cursor pagination. " +
 			"Pass type:'story' to list stories, type:'document' for documents, omit to list both.",
 		Invoke: invokeDocumentList,
+	})
+	Register(&Verb{
+		Name: "document_count",
+		Description: "Count rows matching the same filter shape document_list accepts. " +
+			"Paired with document_list for total-row indicators and 'page N of M' style paginators.",
+		Invoke: invokeDocumentCount,
 	})
 }
 
@@ -241,6 +267,31 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		res.Items = []document.Document{}
 	}
 	return json.Marshal(DocumentListResponse{Items: res.Items, NextCursor: res.NextCursor})
+}
+
+func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if documentStore == nil {
+		return nil, fmt.Errorf("document_count: store not configured")
+	}
+	var req DocumentCountRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("document_count: %w: %v", ErrBadRequest, err)
+		}
+	}
+	n, err := documentStore.Count(ctx, document.ListFilter{
+		Type:        req.Type,
+		Scope:       document.Scope(req.Scope),
+		WorkspaceID: req.WorkspaceID,
+		ProjectID:   req.ProjectID,
+		Tags:        req.Tags,
+		Status:      req.Status,
+		NamePrefix:  req.NamePrefix,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(DocumentCountResponse{Count: n})
 }
 
 func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

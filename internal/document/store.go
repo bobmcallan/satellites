@@ -566,6 +566,52 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	return ListResult{Items: out, NextCursor: next}, nil
 }
 
+// Count returns the number of rows matching the filter. Mirrors List's
+// WHERE clause exactly so the count is consistent with what a cursor
+// walk would surface across pages.
+func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
+	var (
+		preds []string
+		args  []any
+	)
+	add := func(pred string, v any) {
+		args = append(args, v)
+		preds = append(preds, strings.Replace(pred, "?", fmt.Sprintf("$%d", len(args)), 1))
+	}
+
+	if f.Type != "" && f.Type != "all" {
+		add("type = ?", f.Type)
+	}
+	if f.Scope != "" {
+		add("scope = ?", string(f.Scope))
+	}
+	if f.WorkspaceID != "" {
+		add("workspace_id = ?", f.WorkspaceID)
+	}
+	if f.ProjectID != "" {
+		add("project_id = ?", f.ProjectID)
+	}
+	if len(f.Tags) > 0 {
+		add("tags @> ?", pq.Array(f.Tags))
+	}
+	if f.Status != "" && f.Status != "all" {
+		add("status = ?", f.Status)
+	}
+	if f.NamePrefix != "" {
+		add("name ILIKE ?", f.NamePrefix+"%")
+	}
+
+	q := "SELECT COUNT(*) FROM documents"
+	if len(preds) > 0 {
+		q += " WHERE " + strings.Join(preds, " AND ")
+	}
+	var n int
+	if err := s.DB.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("document: count: %w", err)
+	}
+	return n, nil
+}
+
 func encodeCursor(t time.Time, id string) string {
 	raw := fmt.Sprintf("%s|%s", t.UTC().Format(time.RFC3339Nano), id)
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
