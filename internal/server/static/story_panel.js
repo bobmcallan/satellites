@@ -163,19 +163,39 @@
         }
     }
 
+    // isKnownToken returns true when `p` parses as a recognised key:value
+    // token (status / priority / category / tags / tag / order with a
+    // valid order field). Mirrors parseStoryQuery's structured-bucket
+    // discrimination — anything isKnownToken says is false will end up
+    // in parseStoryQuery's free-text bucket (out.text).
+    function isKnownToken(p) {
+        const idx = p.indexOf(':');
+        if (idx <= 0) { return false; }
+        const k = p.slice(0, idx).toLowerCase();
+        const v = p.slice(idx + 1).toLowerCase();
+        if (k === 'status' || k === 'priority' || k === 'category') { return true; }
+        if (k === 'tags' || k === 'tag') { return v.length > 0; }
+        if (k === 'order') { return !!(orderFields[v] || orderTagFields[v]); }
+        return false;
+    }
+
     // removeFromQuery is the pure half of removeChip — given a current
     // query string, a key (status / priority / category / tags / order
     // / search), and the value being dropped, returns the rewritten
     // query. Pulled out of the Alpine method so unit tests can exercise
     // the rewrite logic directly via window.storyPanelFactory.__test__.
+    //
+    // The `search` key drops the entire free-text bucket. Free text is
+    // anything parseStoryQuery would not pull into a structured field —
+    // including colon-bearing tokens with an unrecognised key (e.g.
+    // `order:order`, which falls through because `order` isn't an
+    // orderFields entry). isKnownToken handles the discrimination so the
+    // two paths stay in sync.
     function removeFromQuery(query, key, value) {
         if (!key) { return query || ''; }
         if (key === 'search') {
             const parts = (query || '').trim().split(/\s+/).filter(Boolean);
-            const kept = [];
-            for (let i = 0; i < parts.length; i++) {
-                if (parts[i].indexOf(':') > 0) { kept.push(parts[i]); }
-            }
+            const kept = parts.filter(isKnownToken);
             return kept.join(' ');
         }
         const parts = (query || '').trim().split(/\s+/).filter(Boolean);

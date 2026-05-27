@@ -527,20 +527,28 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	// Bug 3 (pure-logic sanity): exercise removeFromQuery via the
 	// panel's __test__ accessor. Confirms the pure rewrite returns the
 	// expected string for the common chip-x scenarios. Hits the same
-	// code path the Alpine handler uses.
+	// code path the Alpine handler uses. The drop_search_typo case is
+	// the regression that motivated this story: an unrecognised
+	// `order:<typo>` token falls through to the free-text bucket but
+	// retains its colon, and the old removeFromQuery search-case kept
+	// every colon-bearing token (it should drop free-text).
 	var rewrites struct {
-		DropOneTag    string `json:"drop_one_tag"`
-		DropOrder     string `json:"drop_order"`
-		DropSearch    string `json:"drop_search"`
-		DropOneStatus string `json:"drop_one_status"`
+		DropOneTag      string `json:"drop_one_tag"`
+		DropOrder       string `json:"drop_order"`
+		DropSearch      string `json:"drop_search"`
+		DropSearchTypo  string `json:"drop_search_typo"`
+		DropSearchMixed string `json:"drop_search_mixed"`
+		DropOneStatus   string `json:"drop_one_status"`
 	}
 	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
 		const r = window.storyPanelFactory.__test__.removeFromQuery;
 		return {
-			drop_one_tag: r("tags:epic:changelog tags:epic:other order:title", "tags", "epic:changelog"),
-			drop_order:   r("tags:area:portal order:title", "order", "title"),
-			drop_search:  r("tags:area:portal free text here", "search", ""),
-			drop_one_status: r("status:ready,review priority:high", "status", "ready"),
+			drop_one_tag:     r("tags:epic:changelog tags:epic:other order:title", "tags", "epic:changelog"),
+			drop_order:       r("tags:area:portal order:title", "order", "title"),
+			drop_search:      r("tags:area:portal free text here", "search", ""),
+			drop_search_typo: r("order:order", "search", "order:order"),
+			drop_search_mixed: r("tags:area:portal order:order spare", "search", "order:order spare"),
+			drop_one_status:  r("status:ready,review priority:high", "status", "ready"),
 		};
 	})()`, &rewrites)); err != nil {
 		t.Fatalf("evaluate removeFromQuery: %v", err)
@@ -554,8 +562,56 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	if rewrites.DropSearch != "tags:area:portal" {
 		t.Errorf("drop_search: got %q", rewrites.DropSearch)
 	}
+	if rewrites.DropSearchTypo != "" {
+		t.Errorf("drop_search_typo (order:order): got %q want \"\"", rewrites.DropSearchTypo)
+	}
+	if rewrites.DropSearchMixed != "tags:area:portal" {
+		t.Errorf("drop_search_mixed: got %q want \"tags:area:portal\"", rewrites.DropSearchMixed)
+	}
 	if rewrites.DropOneStatus != "status:review priority:high" {
 		t.Errorf("drop_one_status: got %q", rewrites.DropOneStatus)
+	}
+
+	// Bug 3 (end-to-end repro): the operator's exact typo from the
+	// sty_f4a72a6e bug report — type `order:order`, the unknown order
+	// field falls through to a `search:order:order` chip, clicking the
+	// X must drop the chip AND clear the search input. Before the fix,
+	// removeFromQuery's search-case retained colon-bearing tokens and
+	// the X was a no-op.
+	if err := chromedp.Run(bctx,
+		chromedp.Click(`[data-action="panel-stories-clear-all"]`, chromedp.ByQuery),
+		chromedp.Sleep(100*time.Millisecond),
+	); err != nil {
+		t.Fatalf("clear pre-typo: %v", err)
+	}
+	if err := setStorySearch(bctx, "order:order"); err != nil {
+		t.Fatalf("set order:order: %v", err)
+	}
+	if err := chromedp.Run(bctx,
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-search-order:order"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("search:order:order chip never appeared: %v", err)
+	}
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const chip = document.querySelector('[data-field="panel-stories-chip-search-order:order"]');
+		const btn = chip && chip.querySelector('.panel-filter-chip-remove');
+		if (!btn) { return false; }
+		btn.click();
+		return true;
+	})()`, nil)); err != nil {
+		t.Fatalf("click typo chip x: %v", err)
+	}
+	if err := waitChipAbsent(bctx, `[data-field="panel-stories-chip-search-order:order"]`); err != nil {
+		t.Fatalf("search:order:order chip never cleared (chip-x no-op regression): %v", err)
+	}
+	var searchAfter string
+	if err := chromedp.Run(bctx,
+		chromedp.Value(`[data-field="panel-stories-search"]`, &searchAfter, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("read search input post-x: %v", err)
+	}
+	if searchAfter != "" {
+		t.Errorf("search input not cleared after chip x: got %q want empty", searchAfter)
 	}
 }
 
