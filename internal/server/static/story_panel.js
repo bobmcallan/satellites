@@ -5,6 +5,9 @@
  *
  * Token grammar parsed off `query`:
  *   status:<v[,v...]>     all|open|backlog|ready|in_progress|review|done|cancelled
+ *                         (`open` = anything not done/cancelled —
+ *                          `completed` and other non-canonical statuses
+ *                          stay in open)
  *   priority:<v[,v...]>   critical|high|medium|low|all
  *   category:<v[,v...]>   feature|bug|improvement|...
  *   tags:<v>              single tag; multiple tokens OR (union of matched rows)
@@ -43,16 +46,12 @@
         }
     }
 
-    // orderFields lists the columns the panel can reorder by. Mirrors
-    // v4's whitelist. id is appended here because data-id is always
-    // stamped on tr.story-row and operators occasionally want a stable
-    // alpha sort by id.
+    // orderFields lists the columns the panel can reorder by — these
+    // resolve to `row.dataset[field]` for sort key. Any other value
+    // passed to applyStoryOrder is interpreted as a tag prefix, so
+    // `order:epic-order`, `order:order`, or any project-specific
+    // sequencing tag works uniformly.
     const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1, id: 1 };
-
-    // orderTagFields lists order keys whose sort value is extracted
-    // from a numeric tag (e.g. `epic-order:<n>`) rather than a row
-    // dataset attribute. Rows missing the tag sink to the bottom.
-    const orderTagFields = { 'epic-order': 1 };
 
     function parseStoryQuery(q) {
         const out = { status: [], priority: [], category: [], tags: [], order: '', text: '' };
@@ -92,28 +91,33 @@
         return out;
     }
 
-    // tagOrderValue pulls the numeric value out of a `<prefix>:<n>`
-    // tag in the row's space-joined data-tags attribute. Returns
-    // Number.POSITIVE_INFINITY when the tag is absent so missing-tag
-    // rows sink to the bottom of an ascending sort.
+    // tagOrderValue pulls the value out of a `<prefix>:<v>` tag in the
+    // row's space-joined data-tags attribute. Value is alphanumeric
+    // (any non-whitespace) — projects use `epic-order:1`, `order:a`,
+    // `priority-rank:p0`, etc.; sort uses localeCompare(numeric:true)
+    // for natural `1 < 2 < 10 < a < b` ordering. Returns null when the
+    // tag is absent so the caller can sink missing-tag rows.
     function tagOrderValue(row, prefix) {
         const tags = (row.dataset.tags || '').toLowerCase();
-        const re = new RegExp('(?:^|\\s)' + prefix + ':(\\d+)(?:\\s|$)');
+        const re = new RegExp('(?:^|\\s)' + prefix + ':([^\\s]+)');
         const m = re.exec(tags);
-        if (!m) { return Number.POSITIVE_INFINITY; }
-        return parseInt(m[1], 10);
+        if (!m) { return null; }
+        return m[1];
     }
 
     // applyStoryOrder physically reorders the tbody story-row pairs by
     // the given field. Each story has TWO rows (the row itself + the
     // detail row); pairs are kept together so click-to-expand keeps
-    // binding to the correct detail. Field is one of orderFields' keys,
-    // one of orderTagFields' keys (tag-derived numeric sort), OR
-    // '' / unknown — the last leaves the table untouched.
+    // binding to the correct detail.
+    //
+    // Field resolution:
+    //   - in orderFields → sort by row.dataset[field]
+    //   - anything else  → sort by the tag prefix `<field>:<v>`
+    //                      (alphanumeric values, natural sort,
+    //                       missing-tag rows sink to bottom)
     function applyStoryOrder(host, field) {
         if (!host || !field) { return; }
-        const tagSort = !!orderTagFields[field];
-        if (!tagSort && !orderFields[field]) { return; }
+        const tagSort = !orderFields[field];
         const tbody = host.querySelector('tbody');
         if (!tbody) { return; }
         const rows = tbody.querySelectorAll('tr.story-row');
@@ -127,8 +131,15 @@
             if (tagSort) {
                 const av = tagOrderValue(a.row, field);
                 const bv = tagOrderValue(b.row, field);
-                if (av === bv) { return a.idx - b.idx; }
-                return av < bv ? -1 : 1;
+                // Missing-tag rows sink to the bottom of an ascending
+                // sort; localeCompare with numeric:true handles
+                // `1 < 2 < 10 < a < b` natural ordering for the rest.
+                if (av === null && bv === null) { return a.idx - b.idx; }
+                if (av === null) { return 1; }
+                if (bv === null) { return -1; }
+                const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+                if (cmp === 0) { return a.idx - b.idx; }
+                return cmp;
             }
             const aval = (a.row.dataset[field] || '').toLowerCase();
             const bval = (b.row.dataset[field] || '').toLowerCase();

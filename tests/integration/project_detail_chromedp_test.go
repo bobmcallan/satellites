@@ -380,14 +380,21 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	// Two epics, two stories each. Tag-OR test wants rows that match
 	// EITHER epic; chip-x test wants to remove one of two tag tokens
 	// and see the surviving filter narrow correctly.
+	// Seeds carry an arbitrary `order:<v>` tag alongside `epic-order:<n>`
+	// so the test can exercise both the canonical satellites prefix
+	// (`epic-order`) and an alphanumeric prefix (`order` — vire's
+	// convention, screenshot from sty_f4a72a6e). Values are picked to
+	// catch a naive lexicographic sort: "2" < "10" requires the
+	// localeCompare(numeric:true) path; "10" < "a" requires
+	// digits-before-letters ordering.
 	seeds := []struct {
 		Name string
 		Tags []string
 	}{
-		{"alpha changelog", []string{"epic:changelog", "epic-order:1"}},
-		{"beta changelog", []string{"epic:changelog", "epic-order:2"}},
-		{"gamma site-content", []string{"epic:site-content-refresh", "epic-order:1"}},
-		{"delta site-content", []string{"epic:site-content-refresh", "epic-order:2"}},
+		{"alpha changelog", []string{"epic:changelog", "epic-order:1", "order:10"}},
+		{"beta changelog", []string{"epic:changelog", "epic-order:2", "order:2"}},
+		{"gamma site-content", []string{"epic:site-content-refresh", "epic-order:1", "order:a"}},
+		{"delta site-content", []string{"epic:site-content-refresh", "epic-order:2", "order:b"}},
 	}
 	status, priority := "backlog", "medium"
 	for _, s := range seeds {
@@ -492,6 +499,68 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	wantSorted := []string{"alpha changelog", "beta changelog", "delta site-content", "gamma site-content"}
 	if !equalSlices(titlesOrdered, wantSorted) {
 		t.Errorf("order:title: got %v want %v", titlesOrdered, wantSorted)
+	}
+
+	// Bug 1 (alphanumeric tag-prefix sort): `order:order` is NOT an
+	// orderFields key, so applyStoryOrder treats it as the tag prefix.
+	// Seeds use values `10`, `2`, `a`, `b` — natural sort yields
+	// `2 < 10 < a < b` (numeric-before-letters via localeCompare with
+	// numeric:true). Repro of the operator screenshot from sty_f4a72a6e:
+	// vire stories tagged `order:<n>` did not sort under `order:order`
+	// before the fix (the panel only knew about `epic-order`).
+	if err := chromedp.Run(bctx,
+		chromedp.Click(`[data-action="panel-stories-clear-all"]`, chromedp.ByQuery),
+		chromedp.Sleep(100*time.Millisecond),
+	); err != nil {
+		t.Fatalf("clear before order:order: %v", err)
+	}
+	if err := setStorySearch(bctx, "order:order"); err != nil {
+		t.Fatalf("set order:order: %v", err)
+	}
+	if err := chromedp.Run(bctx,
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-order-order"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
+	); err != nil {
+		t.Fatalf("wait order:order chip: %v", err)
+	}
+	titlesOrdered, err = orderedVisibleTitles(bctx)
+	if err != nil {
+		t.Fatalf("read order:order titles: %v", err)
+	}
+	wantNatural := []string{"beta changelog", "alpha changelog", "gamma site-content", "delta site-content"}
+	if !equalSlices(titlesOrdered, wantNatural) {
+		t.Errorf("order:order natural-sort: got %v want %v", titlesOrdered, wantNatural)
+	}
+
+	// Bug 1c: remove the order chip — rows return to their original
+	// insertion order (newest-first: delta, gamma, beta, alpha given
+	// the seed loop's chronological inserts).
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const chip = document.querySelector('[data-field="panel-stories-chip-order-order"]');
+		const btn = chip && chip.querySelector('.panel-filter-chip-remove');
+		if (!btn) { return false; }
+		btn.click();
+		return true;
+	})()`, nil)); err != nil {
+		t.Fatalf("click order:order x: %v", err)
+	}
+	if err := waitChipAbsent(bctx, `[data-field="panel-stories-chip-order-order"]`); err != nil {
+		t.Fatalf("order:order chip never cleared: %v", err)
+	}
+	if err := chromedp.Run(bctx, chromedp.Sleep(150*time.Millisecond)); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+
+	// Bug 1d: re-apply order:title — sanity that the prior order:title
+	// path still works after the natural-sort generalisation.
+	if err := setStorySearch(bctx, "order:title"); err != nil {
+		t.Fatalf("re-set order:title: %v", err)
+	}
+	if err := chromedp.Run(bctx,
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-order-title"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
+	); err != nil {
+		t.Fatalf("wait order:title chip: %v", err)
 	}
 
 	// Bug 1b: remove the order chip — rows return to their original
