@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -175,9 +176,17 @@ var exposedVerbs = []string{
 // install the binary and run every other verb through it; MCP-only
 // agents read the same orientation and use the directly-exposed write
 // verbs documented there.
+//
+// Global principles (any system-scope document tagged
+// `principles:global`) are appended to the instructions at boot. The
+// MCP `initialize` payload is computed once per server instance — a
+// principle change therefore needs a server restart to surface to new
+// sessions. Per-call scopes (workspace / project / story) ride along
+// on every read verb response and pick up edits immediately.
 func New() *mcpserver.MCPServer {
+	instructions := buildOrientationInstructions(context.Background())
 	s := mcpserver.NewMCPServer("satellites", verb.Version,
-		mcpserver.WithInstructions(orientationInstructions),
+		mcpserver.WithInstructions(instructions),
 	)
 
 	for _, name := range exposedVerbs {
@@ -212,4 +221,33 @@ func New() *mcpserver.MCPServer {
 // streamable HTTP (MCP spec's recommended HTTP transport).
 func HTTPHandler(s *mcpserver.MCPServer) http.Handler {
 	return mcpserver.NewStreamableHTTPServer(s)
+}
+
+// buildOrientationInstructions returns the embedded load-context body
+// with any active `principles:global` documents appended. Lookup
+// failures (store unwired, no documents) yield the bare body — the
+// load-context section itself tells the agent how to discover them via
+// document_list as a fallback path.
+func buildOrientationInstructions(ctx context.Context) string {
+	principles := verb.LoadPrinciples(ctx,
+		verb.PrincipleScopeRequest{Scope: verb.PrincipleScopeGlobal},
+	)
+	if len(principles) == 0 {
+		return orientationInstructions
+	}
+	var b strings.Builder
+	b.WriteString(orientationInstructions)
+	if !strings.HasSuffix(orientationInstructions, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n## Principles (global)\n\n")
+	b.WriteString("Loaded at MCP initialize. Workspace / project / story principles arrive on the read verbs that name their scope.\n\n")
+	for _, p := range principles {
+		b.WriteString("### ")
+		b.WriteString(p.Name)
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(p.Body))
+		b.WriteString("\n\n")
+	}
+	return b.String()
 }

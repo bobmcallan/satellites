@@ -3,8 +3,10 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
@@ -164,5 +166,33 @@ func TestParity_VerbVsRegistry(t *testing.T) {
 	}
 	if info.Version == "" {
 		t.Fatal("empty version")
+	}
+}
+
+// TestOrientationMentionsPrinciples pins the load-context seed to the
+// principles-ride-along section. Agents discover the sidecar by reading
+// the load-context at session start; if the section is dropped, fresh
+// sessions silently stop reading principle blocks on read verbs.
+func TestOrientationMentionsPrinciples(t *testing.T) {
+	body := string(seed.MCPLoadContextMarkdown())
+	for _, want := range []string{
+		"Principles ride along on read verbs",
+		"principles:<scope>",
+		"docs/principle-loading.md",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("load-context body missing %q — substrate ride-along undocumented", want)
+		}
+	}
+}
+
+// TestBuildOrientationInstructions_NoStore confirms the graceful path
+// when no documentStore is wired: the build function returns the bare
+// embedded body rather than panicking. Server boot needs this for the
+// CLI-local and test paths where the store is configured after New().
+func TestBuildOrientationInstructions_NoStore(t *testing.T) {
+	out := buildOrientationInstructions(context.Background())
+	if out != orientationInstructions {
+		t.Fatalf("with no store wired, expected raw load-context body; got %d extra bytes", len(out)-len(orientationInstructions))
 	}
 }

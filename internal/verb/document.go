@@ -82,6 +82,7 @@ type DocumentGetResponse struct {
 	RawBody        string             `json:"raw_body,omitempty"`
 	RenderedBody   string             `json:"rendered_body,omitempty"`
 	UnresolvedVars []string           `json:"unresolved_vars,omitempty"`
+	Principles     []Principle        `json:"principles,omitempty"`
 }
 
 // documentTemplateCache holds per-(document_id, version) parsed
@@ -319,6 +320,12 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			RawBody:       body,
 			RenderedBody:  body,
 		}
+		if d.Type == document.TypeStory && d.WorkspaceID != "" && d.ProjectID != "" {
+			resp.Principles = LoadPrinciples(ctx,
+				PrincipleScopeRequest{Scope: PrincipleScopeProject, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID},
+				PrincipleScopeRequest{Scope: PrincipleScopeStory, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID},
+			)
+		}
 		return json.Marshal(resp)
 	}
 
@@ -510,6 +517,16 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	}, time.Now().UTC())
 	if err != nil {
 		return nil, mapStoreError(err, "document_upsert")
+	}
+	// Tags are document-level metadata (not versioned with the body).
+	// Apply only when the request carries them — nil means "leave alone",
+	// which matches the patch semantics elsewhere in this surface.
+	if req.Tags != nil {
+		doc2, err := documentStore.SetDocumentTags(ctx, doc.ID, *req.Tags, time.Now().UTC())
+		if err != nil {
+			return nil, mapStoreError(err, "document_upsert")
+		}
+		doc = doc2
 	}
 	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
 }

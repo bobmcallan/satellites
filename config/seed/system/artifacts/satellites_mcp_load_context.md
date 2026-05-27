@@ -127,6 +127,21 @@ consumer repo's git remote and persist it into the TOML:
 If `project_match` returns `not_found`, surface the error to the
 operator — the project must be created (out of scope for bootstrap).
 
+## Principles ride along on read verbs
+
+Substrate documents tagged `principles:<scope>` (scope ∈ global, workspace,
+project, story) arrive in the `principles` field of read-verb responses
+whose scope matches:
+
+- MCP `initialize` (this body) — appends global principles below.
+- `project_match`, `project_get` — workspace + project principles.
+- `project_list` with `workspace_id` filter — workspace principles.
+- `document_get` on a story — story + project principles.
+
+Read every `principles` block on arrival. They are short, prescriptive,
+re-delivered fresh per call; do not cache them in agent memory. Format
+and authoring rules: `docs/principle-loading.md` in the satellites repo.
+
 ## Step 5 — dispatch every other verb via the CLI
 
 `tools/list` on this MCP server returns thirteen verbs:

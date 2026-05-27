@@ -37,7 +37,8 @@ type ProjectListRequest struct {
 }
 
 type ProjectListResponse struct {
-	Projects []project.Project `json:"projects"`
+	Projects   []project.Project `json:"projects"`
+	Principles []Principle       `json:"principles,omitempty"`
 }
 
 type ProjectGetRequest struct {
@@ -56,10 +57,20 @@ type ProjectMatchRequest struct {
 }
 
 type ProjectMatchResponse struct {
-	ProjectID   string `json:"project_id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	MatchedURL  string `json:"matched_url"`
+	ProjectID   string      `json:"project_id"`
+	WorkspaceID string      `json:"workspace_id"`
+	Name        string      `json:"name"`
+	MatchedURL  string      `json:"matched_url"`
+	Principles  []Principle `json:"principles,omitempty"`
+}
+
+// projectGetResponse is the wire shape for project_get. The base Project
+// fields stay top-level (preserves the existing wire contract), with
+// the principles sidecar attached as an optional field. Anonymous
+// embedding keeps callers that only parse the project fields working.
+type projectGetResponse struct {
+	project.Project
+	Principles []Principle `json:"principles,omitempty"`
 }
 
 func init() {
@@ -142,14 +153,22 @@ func invokeProjectList(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			return nil, fmt.Errorf("project_list: bad request: %w", err)
 		}
 	}
-	ps, err := projectStore.ListByWorkspace(ctx, strings.TrimSpace(req.WorkspaceID))
+	wsID := strings.TrimSpace(req.WorkspaceID)
+	ps, err := projectStore.ListByWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
 	if ps == nil {
 		ps = []project.Project{}
 	}
-	return json.Marshal(ProjectListResponse{Projects: ps})
+	// Workspace is identified when the caller filtered by it; deliver
+	// workspace principles. Project principles wait for a specific
+	// project lookup (project_get / project_match).
+	var principles []Principle
+	if wsID != "" {
+		principles = LoadPrinciples(ctx, PrincipleScopeRequest{Scope: PrincipleScopeWorkspace, WorkspaceID: wsID})
+	}
+	return json.Marshal(ProjectListResponse{Projects: ps, Principles: principles})
 }
 
 func invokeProjectGet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -169,7 +188,11 @@ func invokeProjectGet(ctx context.Context, raw json.RawMessage) (json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(p)
+	principles := LoadPrinciples(ctx,
+		PrincipleScopeRequest{Scope: PrincipleScopeWorkspace, WorkspaceID: p.WorkspaceID},
+		PrincipleScopeRequest{Scope: PrincipleScopeProject, WorkspaceID: p.WorkspaceID, ProjectID: p.ID},
+	)
+	return json.Marshal(projectGetResponse{Project: p, Principles: principles})
 }
 
 func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -222,11 +245,16 @@ func invokeProjectMatch(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		}
 		return nil, err
 	}
+	principles := LoadPrinciples(ctx,
+		PrincipleScopeRequest{Scope: PrincipleScopeWorkspace, WorkspaceID: p.WorkspaceID},
+		PrincipleScopeRequest{Scope: PrincipleScopeProject, WorkspaceID: p.WorkspaceID, ProjectID: p.ID},
+	)
 	return json.Marshal(ProjectMatchResponse{
 		ProjectID:   p.ID,
 		WorkspaceID: p.WorkspaceID,
 		Name:        p.Name,
 		MatchedURL:  p.GitURLCanonical,
+		Principles:  principles,
 	})
 }
 

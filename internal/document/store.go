@@ -269,6 +269,65 @@ func (s *Store) UpdateStory(ctx context.Context, id string, patch UpdateStoryPat
 	return doc, nil
 }
 
+// LatestVersionStatus returns the status of the most recent version
+// row for the given document id, regardless of whether it is active or
+// deleted. Useful for callers that need to distinguish a live document
+// from one whose latest version is a soft-delete tombstone — the
+// `*WithLatestBody` helpers filter to active versions and so cannot
+// surface a tombstone on their own. Returns ErrNotFound when the
+// document has no versions at all.
+func (s *Store) LatestVersionStatus(ctx context.Context, id string) (Status, error) {
+	var status Status
+	row := s.DB.QueryRowContext(ctx, `
+        SELECT status FROM document_versions
+        WHERE document_id = $1
+        ORDER BY version DESC LIMIT 1
+    `, id)
+	if err := row.Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("document: latest version status: %w", err)
+	}
+	return status, nil
+}
+
+// SetDocumentTags replaces the tags array on a type='document' row.
+// Stories carry tags through UpdateStory; this is the equivalent path
+// for free-form documents (notably the principle-tag flow). Reject on
+// non-document rows so the story update path stays the only writer of
+// tags on stories.
+func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, now time.Time) (Document, error) {
+	now = now.UTC()
+	if tags == nil {
+		tags = []string{}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Document{}, fmt.Errorf("document: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // commit path handles success
+
+	doc, err := lockDocumentByID(ctx, tx, id)
+	if err != nil {
+		return Document{}, err
+	}
+	if doc.Type != TypeDocument {
+		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document", id, doc.Type)
+	}
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE documents SET tags = $1, updated_at = $2 WHERE id = $3
+    `, pq.Array(tags), now, id); err != nil {
+		return Document{}, fmt.Errorf("document: set tags: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Document{}, fmt.Errorf("document: commit: %w", err)
+	}
+	doc.Tags = append([]string(nil), tags...)
+	doc.UpdatedAt = now
+	return doc, nil
+}
+
 // SetSummary writes summary + summary_updated_at on the documents row.
 // Does NOT advance updated_at — the summary regen path runs after
 // user-driven writes and would otherwise smear summary regen events
