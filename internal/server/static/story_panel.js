@@ -9,6 +9,8 @@
  *   category:<v[,v...]>   feature|bug|improvement|...
  *   tags:<v>              single tag; multiple tokens OR (union of matched rows)
  *   order:<field>         updated|created|priority|status|title|id|epic-order
+ *                         (unknown fields render as an order: chip too,
+ *                         they just have no sort effect)
  *   <free text>           lowercased substring match against data-search
  *
  * Defaults rendered as is-default chips: status:open, priority:all,
@@ -71,13 +73,18 @@
                     if (v) { out.tags.push(v); }
                     continue;
                 }
-                if (k === 'order' && (orderFields[v] || orderTagFields[v])) {
-                    out.order = v;
+                if (k === 'order') {
+                    // Accept any order:<v> structurally — the chip
+                    // always renders as `order:<v>`, never as search
+                    // free-text. Unknown fields just have no sort
+                    // effect (applyStoryOrder bails when the field
+                    // isn't in orderFields / orderTagFields).
+                    if (v) { out.order = v; }
                     continue;
                 }
-                // Unknown key OR `order:<unknown>` falls through to free
-                // text — matches v4's behaviour. Operators get a hint
-                // when their typo doesn't surface as a chip.
+                // Unknown key (any other `<word>:<val>`) falls through
+                // to free text — matches v4's behaviour. Operators get
+                // a hint when their typo doesn't surface as a chip.
             }
             free.push(p.toLowerCase());
         }
@@ -164,10 +171,12 @@
     }
 
     // isKnownToken returns true when `p` parses as a recognised key:value
-    // token (status / priority / category / tags / tag / order with a
-    // valid order field). Mirrors parseStoryQuery's structured-bucket
-    // discrimination — anything isKnownToken says is false will end up
-    // in parseStoryQuery's free-text bucket (out.text).
+    // token (status / priority / category / tags / tag / order). Mirrors
+    // parseStoryQuery's structured-bucket discrimination — anything
+    // isKnownToken says is false will end up in parseStoryQuery's
+    // free-text bucket (out.text). `order:<anything>` is structurally
+    // known even when the field isn't in orderFields / orderTagFields;
+    // applyStoryOrder no-ops on unknown fields so the chip is harmless.
     function isKnownToken(p) {
         const idx = p.indexOf(':');
         if (idx <= 0) { return false; }
@@ -175,7 +184,7 @@
         const v = p.slice(idx + 1).toLowerCase();
         if (k === 'status' || k === 'priority' || k === 'category') { return true; }
         if (k === 'tags' || k === 'tag') { return v.length > 0; }
-        if (k === 'order') { return !!(orderFields[v] || orderTagFields[v]); }
+        if (k === 'order') { return v.length > 0; }
         return false;
     }
 
