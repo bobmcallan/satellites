@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/bobmcallan/satellites/config/reviewers"
@@ -19,6 +20,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/server"
@@ -153,8 +155,9 @@ func main() {
 	// value. Add new knobs here; the consumer reads via
 	// variable_get(scope='system', name=...).
 	for name, defaultValue := range map[string]string{
-		"stories.page_size":   "50",
-		"changelog.page_size": "20",
+		"stories.page_size":             "50",
+		"changelog.page_size":           "20",
+		"mcp_instructions_budget_bytes": "1500",
 	} {
 		created, err := variableStore.SeedSystem(context.Background(), name, defaultValue, time.Now().UTC())
 		if err != nil {
@@ -164,6 +167,20 @@ func main() {
 			arbor.Info("system kv seeded", "name", name, "default", defaultValue)
 		} else {
 			arbor.Info("system kv unchanged", "name", name)
+		}
+	}
+
+	// Push the operator-tunable MCP initialize budget into the
+	// mcpserver package before server.Build() constructs the MCP
+	// handler. Falls back to the package default on parse failure or
+	// missing row.
+	if v, err := variableStore.Get(context.Background(), variable.Key{Scope: variable.ScopeSystem, Name: "mcp_instructions_budget_bytes"}); err == nil {
+		if n, perr := strconv.Atoi(v.Value); perr == nil {
+			mcpserver.SetInstructionsBudget(n)
+			arbor.Info("mcp instructions budget wired", "bytes", n)
+		} else {
+			arbor.Warn("mcp instructions budget unparseable; using default",
+				"value", v.Value, "default", mcpserver.DefaultInstructionsBudgetBytes, "err", perr)
 		}
 	}
 

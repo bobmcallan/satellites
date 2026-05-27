@@ -10,14 +10,38 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/bobmcallan/satellites/config/seed"
+	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
+
+// DefaultInstructionsBudgetBytes caps the size of the assembled MCP
+// `initialize.instructions` payload. The default tracks the observed
+// host reminder cap (~2 KB in Claude Code as of 2026-05) with safety
+// headroom for principle ride-along. Operators tune via the
+// mcp_instructions_budget_bytes system variable; cmd/satellites-server
+// reads that value at boot and calls SetInstructionsBudget. Budget
+// breach logs a WARN but never panics — a degraded session is still
+// preferable to a crashed server.
+const DefaultInstructionsBudgetBytes = 1500
+
+// instructionsBudgetBytes is the live cap consulted by
+// buildOrientationInstructions. cmd/satellites-server overrides via
+// SetInstructionsBudget after the system variable is read.
+var instructionsBudgetBytes = DefaultInstructionsBudgetBytes
+
+// SetInstructionsBudget sets the byte cap consulted by
+// buildOrientationInstructions when assembling the MCP initialize
+// payload. n <= 0 is ignored (caller bug / unparseable variable).
+func SetInstructionsBudget(n int) {
+	if n > 0 {
+		instructionsBudgetBytes = n
+	}
+}
 
 // inputSchemas maps each exposed verb to a typed JSON Schema option
 // generated from its Go request struct. Without these, MCP clients
@@ -224,30 +248,20 @@ func HTTPHandler(s *mcpserver.MCPServer) http.Handler {
 }
 
 // buildOrientationInstructions returns the embedded load-context body
-// with any active `principles:global` documents appended. Lookup
-// failures (store unwired, no documents) yield the bare body — the
-// load-context section itself tells the agent how to discover them via
-// document_list as a fallback path.
+// and logs a WARN if its size exceeds instructionsBudgetBytes. Global
+// principles are no longer inlined — the load-context body itself
+// directs agents to fetch them via document_list, which keeps the
+// initialize payload inside the host's reminder cap and lets principle
+// edits ship without an MCP session restart. The ctx argument is kept
+// for API stability with prior call sites.
 func buildOrientationInstructions(ctx context.Context) string {
-	principles := verb.LoadPrinciples(ctx,
-		verb.PrincipleScopeRequest{Scope: verb.PrincipleScopeGlobal},
-	)
-	if len(principles) == 0 {
-		return orientationInstructions
+	_ = ctx
+	out := orientationInstructions
+	if budget := instructionsBudgetBytes; budget > 0 && len(out) > budget {
+		arbor.Warn("mcp orientation instructions exceed budget",
+			"len", len(out),
+			"budget", budget,
+			"variable", "mcp_instructions_budget_bytes")
 	}
-	var b strings.Builder
-	b.WriteString(orientationInstructions)
-	if !strings.HasSuffix(orientationInstructions, "\n") {
-		b.WriteString("\n")
-	}
-	b.WriteString("\n## Principles (global)\n\n")
-	b.WriteString("Loaded at MCP initialize. Workspace / project / story principles arrive on the read verbs that name their scope.\n\n")
-	for _, p := range principles {
-		b.WriteString("### ")
-		b.WriteString(p.Name)
-		b.WriteString("\n\n")
-		b.WriteString(strings.TrimSpace(p.Body))
-		b.WriteString("\n\n")
-	}
-	return b.String()
+	return out
 }

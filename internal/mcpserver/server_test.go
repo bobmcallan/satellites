@@ -201,3 +201,37 @@ func TestBuildOrientationInstructions_NoStore(t *testing.T) {
 		t.Fatalf("with no store wired, expected raw load-context body; got %d extra bytes", len(out)-len(orientationInstructions))
 	}
 }
+
+// TestOrientationInstructionsUnderBudget pins the assembled MCP
+// initialize.instructions payload to the in-process budget. Host
+// reminder caps (observed ~2 KB in Claude Code) silently clip anything
+// past their threshold and leave agents with a half-loaded bootstrap
+// contract; this test catches the regression at compile time so an
+// over-large load-context never reaches a session.
+func TestOrientationInstructionsUnderBudget(t *testing.T) {
+	got := buildOrientationInstructions(context.Background())
+	if len(got) > instructionsBudgetBytes {
+		t.Fatalf("orientation instructions %d bytes > budget %d (variable mcp_instructions_budget_bytes)",
+			len(got), instructionsBudgetBytes)
+	}
+}
+
+// TestSetInstructionsBudgetIgnoresNonPositive guards against
+// unparseable variable values silently disabling the budget. A nil /
+// invalid override leaves the existing budget in place.
+func TestSetInstructionsBudgetIgnoresNonPositive(t *testing.T) {
+	prev := instructionsBudgetBytes
+	t.Cleanup(func() { instructionsBudgetBytes = prev })
+	SetInstructionsBudget(0)
+	if instructionsBudgetBytes != prev {
+		t.Fatalf("SetInstructionsBudget(0) mutated cap to %d; want unchanged", instructionsBudgetBytes)
+	}
+	SetInstructionsBudget(-1)
+	if instructionsBudgetBytes != prev {
+		t.Fatalf("SetInstructionsBudget(-1) mutated cap to %d; want unchanged", instructionsBudgetBytes)
+	}
+	SetInstructionsBudget(2048)
+	if instructionsBudgetBytes != 2048 {
+		t.Fatalf("SetInstructionsBudget(2048) cap = %d; want 2048", instructionsBudgetBytes)
+	}
+}

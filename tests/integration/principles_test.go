@@ -254,7 +254,7 @@ func TestPrinciplesRideAlong(t *testing.T) {
 		}
 	})
 
-	_ = globalP // global principles ride via MCP initialize, exercised separately
+	_ = globalP // global principles are fetched via document_list per the load-context — not inlined on MCP initialize
 }
 
 func assertPrincipleIDs(t *testing.T, got []verb.Principle, want ...string) {
