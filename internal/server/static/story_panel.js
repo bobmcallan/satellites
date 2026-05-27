@@ -17,8 +17,14 @@
 (function () {
     'use strict';
 
+    // orderFields lists the columns the panel can reorder by. Mirrors
+    // v4's whitelist. id is appended here because data-id is always
+    // stamped on tr.story-row and operators occasionally want a stable
+    // alpha sort by id.
+    const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1, id: 1 };
+
     function parseStoryQuery(q) {
-        const out = { status: [], priority: [], category: [], tags: [], text: '' };
+        const out = { status: [], priority: [], category: [], tags: [], order: '', text: '' };
         const free = [];
         const parts = (q || '').trim().split(/\s+/).filter(Boolean);
         for (let i = 0; i < parts.length; i++) {
@@ -36,11 +42,49 @@
                     if (v) { out.tags.push(v); }
                     continue;
                 }
+                if (k === 'order' && orderFields[v]) {
+                    out.order = v;
+                    continue;
+                }
+                // Unknown key OR `order:<unknown>` falls through to free
+                // text — matches v4's behaviour. Operators get a hint
+                // when their typo doesn't surface as a chip.
             }
             free.push(p.toLowerCase());
         }
         out.text = free.join(' ');
         return out;
+    }
+
+    // applyStoryOrder physically reorders the tbody story-row pairs by
+    // the given field. Each story has TWO rows (the row itself + the
+    // detail row); pairs are kept together so click-to-expand keeps
+    // binding to the correct detail. Field is one of orderFields' keys
+    // OR '' / unknown — both leave the table untouched.
+    function applyStoryOrder(host, field) {
+        if (!host || !field || !orderFields[field]) { return; }
+        const tbody = host.querySelector('tbody');
+        if (!tbody) { return; }
+        const rows = tbody.querySelectorAll('tr.story-row');
+        const pairs = [];
+        rows.forEach((row, idx) => {
+            const id = row.dataset.id;
+            const detail = id ? tbody.querySelector('tr.story-detail[data-detail-for="' + id + '"]') : null;
+            pairs.push({ row, detail, idx });
+        });
+        pairs.sort((a, b) => {
+            const aval = (a.row.dataset[field] || '').toLowerCase();
+            const bval = (b.row.dataset[field] || '').toLowerCase();
+            if (aval === bval) { return a.idx - b.idx; }
+            // Title sorts ascending (alphabetical reads naturally);
+            // every other field descends (newest / highest first).
+            if (field === 'title') { return aval < bval ? -1 : 1; }
+            return aval < bval ? 1 : -1;
+        });
+        for (let i = 0; i < pairs.length; i++) {
+            tbody.appendChild(pairs[i].row);
+            if (pairs[i].detail) { tbody.appendChild(pairs[i].detail); }
+        }
     }
 
     // writeQueryToURL persists the current filter query as ?stories_q=
@@ -77,14 +121,26 @@
             // mirrors mutations back to the URL via replaceState. Both
             // halves preserve the cursor-pagination params already on
             // the URL (stories_cursor / stories_page / stories_back) —
-            // only stories_q rotates.
+            // only stories_q rotates. The watcher also re-applies the
+            // order:<field> reorder on every query change so typing or
+            // removing the order chip rearranges the visible rows
+            // without a server round-trip.
             init() {
                 try {
                     const url = new URL(window.location.href);
                     const seed = url.searchParams.get('stories_q');
                     if (seed) { this.query = seed; }
                 } catch (e) { /* URL ctor unavailable — best effort */ }
-                this.$watch('query', (value) => writeQueryToURL(value));
+                const root = this.$root || this.$el;
+                this.$watch('query', (value) => {
+                    writeQueryToURL(value);
+                    applyStoryOrder(root, parseStoryQuery(value).order);
+                });
+                // Apply once on mount so a seeded URL filter with
+                // order:<field> takes effect after the first paint.
+                this.$nextTick(() => {
+                    applyStoryOrder(root, parseStoryQuery(this.query).order);
+                });
             },
 
             get selectionCount() { return this.selectedIDs.size; },
@@ -205,6 +261,12 @@
                 for (let i = 0; i < t.tags.length; i++) {
                     chips.push({ key: 'tags', value: t.tags[i], isDefault: false });
                 }
+                // order is NOT seeded as a default chip — matches v4.
+                // The default chip strip is status / priority / category
+                // only; order surfaces only when the operator types it.
+                if (t.order) {
+                    chips.push({ key: 'order', value: t.order, isDefault: false });
+                }
                 if (t.text) {
                     chips.push({ key: 'search', value: t.text, isDefault: false });
                 }
@@ -231,7 +293,8 @@
                     const k = p.slice(0, idx).toLowerCase();
                     const v = p.slice(idx + 1).toLowerCase();
                     if (k !== key) { kept.push(p); continue; }
-                    if (k === 'tags') {
+                    if (k === 'tags' || k === 'order') {
+                        // Single-value keys: drop the matching token; keep others.
                         if (v !== String(value).toLowerCase()) { kept.push(p); }
                         continue;
                     }
