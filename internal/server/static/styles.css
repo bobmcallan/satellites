@@ -114,6 +114,24 @@ main {
 .warning { color: #fbbf24; margin: 0 0 1rem; }
 .empty { color: #888; margin: 0; }
 .error { color: #f87171; margin: 0 0 1rem; }
+.success { color: #4ade80; margin: 0 0 1rem; }
+
+/* System KV admin page (sty_5d03c1a0) — table rows with inline edit. */
+.kv-edit-form, .kv-delete-form { margin: 0; display: inline-flex; gap: 0.4rem; align-items: center; }
+.kv-input {
+  background: #050505;
+  border: 1px solid #333;
+  color: #e0e0e0;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+  border-radius: 3px;
+  min-width: 18rem;
+}
+.kv-input:focus { outline: none; border-color: #4ade80; }
+.kv-save { padding: 0.25rem 0.7rem; font-size: 0.72rem; }
+.kv-name code { color: #e0e0e0; font-size: 0.85rem; }
+.kv-value code { color: #c8c8c8; font-size: 0.8rem; }
 
 .endpoints { width: 100%; }
 .endpoints th {

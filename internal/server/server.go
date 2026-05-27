@@ -72,6 +72,7 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/", indexHandler(cfg))
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
 	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
+	mux.HandleFunc("/settings/system-kv", systemKVHandler(cfg))
 	mux.HandleFunc("/projects", projectsHandler(cfg))
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))

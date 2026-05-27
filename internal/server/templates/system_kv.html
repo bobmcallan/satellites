@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/settings/api-keys" class="nav-item" data-nav="api-keys">API KEYS</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="system-kv">
+  <section class="panel" data-section="system-kv-stored">
+    <div class="panel-header">
+      <h2>system kv · stored</h2>
+    </div>
+    <p class="muted">Operator-tunable values persisted at scope=<code>system</code>. Edits round-trip through <code>variable_set</code> and survive server restart.</p>
+    {{if .FlashError}}<p class="error" data-field="system-kv-error">{{.FlashError}}</p>{{end}}
+    {{if .FlashOK}}<p class="success" data-field="system-kv-ok">{{.FlashOK}}</p>{{end}}
+
+    {{if .Stored}}
+    <table class="panel-table" data-field="system-kv-table">
+      <thead>
+        <tr>
+          <th>NAME</th>
+          <th>VALUE</th>
+          <th>UPDATED</th>
+          <th>ACTION</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Stored}}
+        <tr class="kv-row" data-field="kv-row" data-kv-name="{{.Name}}">
+          <td class="kv-name"><code>{{.Name}}</code></td>
+          <td class="kv-value">
+            <form method="POST" action="/settings/system-kv" class="kv-edit-form" data-form="kv-edit">
+              <input type="hidden" name="action" value="set">
+              <input type="hidden" name="name" value="{{.Name}}">
+              <input type="text" name="value" value="{{.Value}}" class="kv-input" data-field="kv-value-input">
+              <button type="submit" class="btn primary kv-save" data-action="kv-save">SAVE</button>
+            </form>
+          </td>
+          <td class="kv-updated muted">{{formatTime .UpdatedAt}}</td>
+          <td class="kv-action">
+            <form method="POST" action="/settings/system-kv" class="kv-delete-form">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="name" value="{{.Name}}">
+              <button type="submit" class="btn danger" data-action="kv-delete">DELETE</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="system-kv-empty">No stored system KV values. Boot seeds populate <code>stories.page_size</code> on first start.</p>
+    {{end}}
+  </section>
+
+  <section class="panel" data-section="system-kv-add">
+    <div class="panel-header">
+      <h2>add value</h2>
+    </div>
+    <form method="POST" action="/settings/system-kv" class="form-stack" data-form="kv-add">
+      <input type="hidden" name="action" value="set">
+      <label>
+        <span>NAME</span>
+        <input type="text" name="name" placeholder="my.knob" autocomplete="off" required>
+      </label>
+      <label>
+        <span>VALUE</span>
+        <input type="text" name="value" autocomplete="off">
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn primary" data-action="kv-add">ADD KV</button>
+      </div>
+    </form>
+  </section>
+
+  {{if .Computed}}
+  <section class="panel" data-section="system-kv-computed">
+    <div class="panel-header">
+      <h2>computed · read-only</h2>
+    </div>
+    <p class="muted">Derived per-request by the templating layer — not editable. Listed for completeness.</p>
+    <table class="panel-table" data-field="system-kv-computed-table">
+      <thead><tr><th>NAME</th><th>VALUE</th></tr></thead>
+      <tbody>
+        {{range .Computed}}
+        <tr data-field="kv-computed-row" data-kv-name="{{.Name}}">
+          <td class="kv-name"><code>{{.Name}}</code></td>
+          <td class="kv-value"><code>{{.Value}}</code></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
