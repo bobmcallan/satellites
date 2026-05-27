@@ -12,11 +12,13 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
-var projectsTmpl = template.Must(template.ParseFS(assets, "templates/projects.html"))
+var projectsTmpl = template.Must(template.ParseFS(assets, "templates/projects.html", "templates/_user_menu.html"))
 
 type projectsData struct {
 	Title       string
 	UserEmail   string
+	UserName    string
+	UserAvatar  string
 	Projects    []projectRow
 	FlashError  string
 	DevMode     bool
@@ -103,16 +105,20 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 		})
 	}
 
-	var userEmail string
+	var userEmail, userName, userAvatar string
 	if cfg.Store != nil && cfg.Store.DB != nil {
 		if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
 			userEmail = u.Email
+			userName = u.DisplayName
+			userAvatar = avatarLetter(u.DisplayName, u.Email)
 		}
 	}
 
 	data := projectsData{
 		Title:       "projects · satellites",
 		UserEmail:   userEmail,
+		UserName:    userName,
+		UserAvatar:  userAvatar,
 		Projects:    rows,
 		FlashError:  flashErr,
 		DevMode:     cfg.DevMode,

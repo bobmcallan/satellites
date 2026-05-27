@@ -5,15 +5,38 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strings"
+	"unicode"
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
+// avatarLetter returns a single uppercase letter for the user-menu
+// avatar circle. Prefers the first letter of DisplayName; falls back
+// to the email local-part; falls back to `?` for missing/odd input.
+func avatarLetter(displayName, email string) string {
+	for _, source := range []string{displayName, emailLocalPart(email)} {
+		for _, r := range source {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				return strings.ToUpper(string(r))
+			}
+		}
+	}
+	return "?"
+}
+
+func emailLocalPart(email string) string {
+	if i := strings.IndexByte(email, '@'); i >= 0 {
+		return email[:i]
+	}
+	return email
+}
+
 //go:embed templates/*.html static/*
 var assets embed.FS
 
-var indexTmpl = template.Must(template.ParseFS(assets, "templates/index.html"))
+var indexTmpl = template.Must(template.ParseFS(assets, "templates/index.html", "templates/_user_menu.html"))
 
 type indexData struct {
 	Title       string
@@ -25,6 +48,8 @@ type indexData struct {
 	DevUserKey  string
 	Endpoints   []endpoint
 	UserEmail   string
+	UserName    string
+	UserAvatar  string
 	FooterName  string
 	FooterEmail string
 }
@@ -70,10 +95,12 @@ func indexHandler(cfg Config) http.HandlerFunc {
 
 		// Resolve the authenticated user for display. Best-effort —
 		// rendering still works without it (UserEmail stays empty).
-		var userEmail string
+		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(r.Context(), userID); err == nil && u != nil {
 				userEmail = u.Email
+				userName = u.DisplayName
+				userAvatar = avatarLetter(u.DisplayName, u.Email)
 			}
 		}
 
@@ -84,6 +111,8 @@ func indexHandler(cfg Config) http.HandlerFunc {
 			BuildTime:   verb.BuildTime,
 			DevMode:     cfg.DevMode,
 			UserEmail:   userEmail,
+			UserName:    userName,
+			UserAvatar:  userAvatar,
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
 			Endpoints: []endpoint{

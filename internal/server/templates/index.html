@@ -19,12 +19,7 @@
     <a href="#" class="nav-item disabled">CONFIG</a>
     <a href="#" class="nav-item disabled">HELP</a>
     {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
-    {{if .UserEmail}}
-    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
-    <form method="POST" action="/logout" class="logout-form">
-      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
-    </form>
-    {{end}}
+    {{template "user_menu" .}}
   </nav>
 </header>
 

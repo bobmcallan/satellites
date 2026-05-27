@@ -82,11 +82,15 @@ func TestLogin_DevButtons_LandsOnPortal(t *testing.T) {
 		t.Error("footer-version empty")
 	}
 
-	// Phase 2: click the dev-admin quick-login button.
+	// Phase 2: click the dev-admin quick-login button. user-email +
+	// logout moved into the avatar dropdown (sty_c07c94a3) — open it
+	// before reading email / clicking logout.
 	err = chromedp.Run(ctx,
 		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
 		chromedp.Text(`.brand`, &portalBrand, chromedp.ByQuery),
+		chromedp.Click(`[data-action="user-menu-toggle"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="user-menu-panel"]`, chromedp.ByQuery),
 		chromedp.Text(`[data-field="user-email"]`, &userEmail, chromedp.ByQuery),
 		chromedp.Text(`[data-field="dev-mode"]`, &devMode, chromedp.ByQuery),
 		chromedp.Text(`[data-field="dev-admin-key"]`, &devAdminKey, chromedp.ByQuery),
@@ -232,6 +236,10 @@ func TestSession_PersistsAcrossRefresh(t *testing.T) {
 
 		chromedp.Reload(),
 		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+		// user-email lives inside the avatar dropdown (sty_c07c94a3) —
+		// open it before reading.
+		chromedp.Click(`[data-action="user-menu-toggle"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="user-menu-panel"]`, chromedp.ByQuery),
 		chromedp.Text(`[data-field="user-email"]`, &emailAfterRefresh, chromedp.ByQuery),
 	)
 	if err != nil {

@@ -17,12 +17,7 @@
     <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
     <a href="/settings/api-keys" class="nav-item active" data-nav="api-keys">API KEYS</a>
     {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
-    {{if .UserEmail}}
-    <span class="user-chip" data-field="user-email">{{.UserEmail}}</span>
-    <form method="POST" action="/logout" class="logout-form">
-      <button type="submit" class="nav-item logout-btn" data-action="logout">LOGOUT</button>
-    </form>
-    {{end}}
+    {{template "user_menu" .}}
   </nav>
 </header>
 

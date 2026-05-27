@@ -19,7 +19,7 @@ var projectDetailTmpl = template.Must(
 	template.New("project_detail.html").Funcs(template.FuncMap{
 		"formatTime": formatRowTime,
 		"list":       templateList,
-	}).ParseFS(assets, "templates/project_detail.html"),
+	}).ParseFS(assets, "templates/project_detail.html", "templates/_user_menu.html"),
 )
 
 // templateList is a html/template helper that builds a []string for
@@ -30,6 +30,8 @@ func templateList(items ...string) []string { return items }
 type projectDetailData struct {
 	Title       string
 	UserEmail   string
+	UserName    string
+	UserAvatar  string
 	Project     projectRow
 	Stories     []storyRow
 	Paginator   paginatorData
@@ -133,10 +135,12 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			stories[i].Body = body
 		}
 
-		var userEmail string
+		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
 				userEmail = u.Email
+				userName = u.DisplayName
+				userAvatar = avatarLetter(u.DisplayName, u.Email)
 			}
 		}
 
@@ -147,6 +151,8 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 				GitURL: pj.GitURLCanonical, Status: pj.Status, CreatedAt: pj.CreatedAt,
 			},
 			UserEmail:   userEmail,
+			UserName:    userName,
+			UserAvatar:  userAvatar,
 			Stories:     stories,
 			Paginator:   paginator,
 			DevMode:     cfg.DevMode,

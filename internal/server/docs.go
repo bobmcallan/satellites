@@ -7,7 +7,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 )
 
-var docsMCPTmpl = template.Must(template.ParseFS(assets, "templates/docs_mcp.html"))
+var docsMCPTmpl = template.Must(template.ParseFS(assets, "templates/docs_mcp.html", "templates/_user_menu.html"))
 
 type docsMCPData struct {
 	Title       string
@@ -15,6 +15,8 @@ type docsMCPData struct {
 	DevAdminKey string
 	DevUserKey  string
 	UserEmail   string
+	UserName    string
+	UserAvatar  string
 	ExampleURL  string
 	ExampleKey  string
 	FooterName  string
@@ -30,10 +32,12 @@ func docsMCPHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		var userEmail string
+		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(r.Context(), userID); err == nil && u != nil {
 				userEmail = u.Email
+				userName = u.DisplayName
+				userAvatar = avatarLetter(u.DisplayName, u.Email)
 			}
 		}
 
@@ -41,6 +45,8 @@ func docsMCPHandler(cfg Config) http.HandlerFunc {
 			Title:       "mcp · satellites",
 			DevMode:     cfg.DevMode,
 			UserEmail:   userEmail,
+			UserName:    userName,
+			UserAvatar:  userAvatar,
 			ExampleURL:  "http://localhost:8080",
 			ExampleKey:  "<your-api-key>",
 			FooterName:  footerName,

@@ -11,11 +11,13 @@ import (
 	"github.com/bobmcallan/satellites/internal/arbor"
 )
 
-var apiKeysTmpl = template.Must(template.ParseFS(assets, "templates/api_keys.html"))
+var apiKeysTmpl = template.Must(template.ParseFS(assets, "templates/api_keys.html", "templates/_user_menu.html"))
 
 type apiKeysData struct {
 	Title       string
 	UserEmail   string
+	UserName    string
+	UserAvatar  string
 	Keys        []apiKeyRow
 	JustIssued  *issuedKey // non-nil immediately after a successful POST issue
 	FlashError  string
@@ -111,14 +113,18 @@ func renderAPIKeys(w http.ResponseWriter, r *http.Request, cfg Config, userID st
 		rows = append(rows, apiKeyRow{ID: k.ID, AgentName: displayAgent(k.AgentName), CreatedAt: k.CreatedAt})
 	}
 
-	var userEmail string
+	var userEmail, userName, userAvatar string
 	if u, err := cfg.Store.GetUserByID(r.Context(), userID); err == nil && u != nil {
 		userEmail = u.Email
+		userName = u.DisplayName
+		userAvatar = avatarLetter(u.DisplayName, u.Email)
 	}
 
 	data := apiKeysData{
 		Title:       "api-keys · satellites",
 		UserEmail:   userEmail,
+		UserName:    userName,
+		UserAvatar:  userAvatar,
 		Keys:        rows,
 		JustIssued:  issued,
 		FlashError:  flashErr,

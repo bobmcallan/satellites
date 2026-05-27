@@ -332,22 +332,89 @@ main {
 }
 .secondary-auth label span { color: #666; }
 
-.user-chip {
-  color: #888;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid #333;
-  border-radius: 999px;
+/* User menu — avatar button + dropdown panel. Replaces the legacy
+   inline user-chip + LOGOUT pair. */
+.user-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
-.logout-form { margin: 0; }
-.logout-btn {
-  background: none;
-  border: none;
-  color: #d0d0d0;
+.user-menu-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  background: #0a0a0a;
+  color: #4ade80;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0;
   cursor: pointer;
-  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
 }
-.logout-btn:hover { color: #fff; }
+.user-menu-avatar:hover { border-color: #4ade80; }
+.user-menu-avatar.is-open { border-color: #4ade80; background: #142013; }
+.user-menu-avatar:focus-visible { outline: 2px solid #4ade80; outline-offset: 2px; }
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 220px;
+  background: #0a0a0a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0;
+  z-index: 200;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.user-menu-chip {
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.user-menu-name {
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.user-menu-email {
+  color: #888;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+.user-menu-divider {
+  height: 1px;
+  background: #222;
+  margin: 0.25rem 0;
+}
+.user-menu-item {
+  display: block;
+  padding: 0.5rem 0.9rem;
+  color: #d0d0d0;
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+.user-menu-item:hover { background: #1a1a1a; color: #fff; }
+.user-menu-item:focus-visible { outline: 2px solid #4ade80; outline-offset: -2px; }
+.user-menu-logout { color: #d0d0d0; }
+.user-menu-logout:hover { color: #f87171; }
+.user-menu-form { margin: 0; }
 
 /* V4-style story panel — search input, chip strip, expandable rows. */
 .panel-stories { display: block; }

@@ -64,7 +64,7 @@ func TestMCPCutover(t *testing.T) {
 		s := mcpserver.New()
 		tools := s.ListTools()
 		want := []string{
-			"document_get", "document_list", "document_upsert", "document_delete",
+			"document_get", "document_list", "document_count", "document_upsert", "document_delete",
 			"project_match", "project_create", "project_list", "project_get", "project_update",
 		}
 		if len(tools) != len(want) {

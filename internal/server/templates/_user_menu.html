@@ -1,0 +1,32 @@
+{{define "user_menu"}}
+{{if .UserEmail}}
+<div class="user-menu" x-data="{ open: false }" @keydown.escape.window="open = false" @click.outside="open = false">
+  <button type="button"
+          class="user-menu-avatar"
+          :class="{ 'is-open': open }"
+          aria-haspopup="menu"
+          :aria-expanded="open ? 'true' : 'false'"
+          data-action="user-menu-toggle"
+          data-field="user-menu-avatar"
+          title="{{.UserEmail}}"
+          @click="open = !open">{{.UserAvatar}}</button>
+  <div class="user-menu-panel"
+       x-show="open"
+       x-cloak
+       role="menu"
+       data-field="user-menu-panel">
+    <div class="user-menu-chip" data-field="user-menu-chip">
+      {{if .UserName}}<div class="user-menu-name">{{.UserName}}</div>{{end}}
+      <div class="user-menu-email" data-field="user-email">{{.UserEmail}}</div>
+    </div>
+    <div class="user-menu-divider"></div>
+    <a href="/settings/api-keys" class="user-menu-item" data-field="user-menu-keys" role="menuitem">API Keys</a>
+    <a href="/settings/system-kv" class="user-menu-item" data-field="user-menu-kv" role="menuitem">KV Values</a>
+    <div class="user-menu-divider"></div>
+    <form method="POST" action="/logout" class="user-menu-form">
+      <button type="submit" class="user-menu-item user-menu-logout" data-action="logout" role="menuitem">Logout</button>
+    </form>
+  </div>
+</div>
+{{end}}
+{{end}}
