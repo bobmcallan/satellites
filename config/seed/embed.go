@@ -27,6 +27,9 @@ var mcpLoadContextMD []byte
 //go:embed system/artifacts/system_variables.md
 var systemVariablesMD []byte
 
+//go:embed system/artifacts/principle-configuration-over-code.md
+var principleConfigurationOverCodeMD []byte
+
 // ClientInstallMarkdown returns the raw install-schema artifact bytes.
 func ClientInstallMarkdown() []byte { return clientInstallMD }
 
@@ -39,3 +42,9 @@ func MCPLoadContextMarkdown() []byte { return mcpLoadContextMD }
 // artifact bytes — the operator-facing contract enumerating every
 // computed system variable a document template can reference.
 func SystemVariablesMarkdown() []byte { return systemVariablesMD }
+
+// PrincipleConfigurationOverCodeMarkdown returns the raw bytes of the
+// global "configuration over code" principle. The file carries
+// frontmatter tagging it `principles:global`, so the system-seed
+// reconciler delivers it via the principles sidecar on MCP initialize.
+func PrincipleConfigurationOverCodeMarkdown() []byte { return principleConfigurationOverCodeMD }

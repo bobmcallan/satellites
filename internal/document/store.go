@@ -79,6 +79,25 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 		return Document{}, Version{}, err
 	}
 
+	// Body-equality short-circuit. When the latest version is active and
+	// its body matches the incoming bytes, no new version is written —
+	// the substrate stays byte-exact on re-pushes from .satellites/
+	// documents/, satellites_seed reconciliation, and any other caller
+	// that repeats an unchanged write. Tags are handled separately by
+	// SetDocumentTags, which has its own equality check.
+	if doc.LatestVersion > 0 {
+		existing, lookupErr := latestVersionInTx(ctx, tx, doc.ID)
+		if lookupErr == nil && existing.Status == StatusActive && existing.Body == in.Body {
+			if err := tx.Commit(); err != nil {
+				return Document{}, Version{}, fmt.Errorf("document: commit: %w", err)
+			}
+			return doc, existing, nil
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return Document{}, Version{}, lookupErr
+		}
+	}
+
 	doc, v, err := appendVersion(ctx, tx, doc, in.Body, in.CreatedBy, now, StatusActive)
 	if err != nil {
 		return Document{}, Version{}, err
@@ -88,6 +107,20 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 		return Document{}, Version{}, fmt.Errorf("document: commit: %w", err)
 	}
 	return doc, v, nil
+}
+
+// latestVersionInTx reads the most recent document_versions row for an
+// id inside the supplied transaction. Used by Upsert's idempotency
+// short-circuit, which must see the same snapshot the subsequent
+// appendVersion call would lock.
+func latestVersionInTx(ctx context.Context, tx *sql.Tx, id string) (Version, error) {
+	row := tx.QueryRowContext(ctx, `
+        SELECT document_id, version, body, status, created_at, created_by
+        FROM document_versions
+        WHERE document_id = $1
+        ORDER BY version DESC LIMIT 1
+    `, id)
+	return scanVersionRow(row)
 }
 
 // CreateStoryInput is the write payload for CreateStory. All metadata
@@ -315,6 +348,16 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	if doc.Type != TypeDocument {
 		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document", id, doc.Type)
 	}
+	// Tag-equality short-circuit. Re-applying the same tag set is a
+	// no-op (no UPDATE, no updated_at bump) — keeps `satellites
+	// documents upload` idempotent end-to-end on the documents row, not
+	// just on document_versions.
+	if stringSlicesEqualUnordered(doc.Tags, tags) {
+		if err := tx.Commit(); err != nil {
+			return Document{}, fmt.Errorf("document: commit: %w", err)
+		}
+		return doc, nil
+	}
 	if _, err := tx.ExecContext(ctx, `
         UPDATE documents SET tags = $1, updated_at = $2 WHERE id = $3
     `, pq.Array(tags), now, id); err != nil {
@@ -326,6 +369,28 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	doc.Tags = append([]string(nil), tags...)
 	doc.UpdatedAt = now
 	return doc, nil
+}
+
+// stringSlicesEqualUnordered compares two string slices ignoring order
+// and duplicates — Postgres array equality semantics treat
+// `{a,b} = {b,a}` as true on `=`, but ARRAY[...] literals compare by
+// position, so the in-Go check stays unordered to match the column's
+// set-like meaning.
+func stringSlicesEqualUnordered(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, v := range a {
+		counts[v]++
+	}
+	for _, v := range b {
+		counts[v]--
+		if counts[v] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // SetSummary writes summary + summary_updated_at on the documents row.

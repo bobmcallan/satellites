@@ -17,6 +17,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
@@ -120,8 +121,13 @@ func main() {
 		{"satellites_client_install", seed.ClientInstallMarkdown()},
 		{"satellites_mcp_load_context", seed.MCPLoadContextMarkdown()},
 		{"system_variables", seed.SystemVariablesMarkdown()},
+		{"principle-configuration-over-code", seed.PrincipleConfigurationOverCodeMarkdown()},
 	} {
-		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, sd.name, string(sd.body), "system:seed", time.Now().UTC())
+		fm, body, err := frontmatter.Parse(sd.body)
+		if err != nil {
+			arbor.Fatal("parse system seed frontmatter", "name", sd.name, "err", err)
+		}
+		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, sd.name, string(body), fm.Tags, "system:seed", time.Now().UTC())
 		if err != nil {
 			arbor.Fatal("reconcile system seed", "name", sd.name, "err", err)
 		}

@@ -36,12 +36,18 @@ go.work.sum
 /bin/
 /dist/
 
-# Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md)
-.satellites/
+# Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md).
+# Use `.satellites/*` (glob) not `.satellites/` (directory): a directory
+# exclude blocks every re-include underneath it; the glob form excludes
+# the contents while leaving the directory traversable, so the negation
+# rules below actually take effect.
+.satellites/*
 # Filebased seeds at .satellites/seeds/ are version-controlled (operator-
-# authored substrate config; see docs/seeds.md). Mirrors the pattern of
-# tracking .claude/skills/ inside an otherwise-ignored .claude/.
+# authored substrate config; see docs/seeds.md).
 !.satellites/seeds/
+# File-based documents at .satellites/documents/ are version-controlled
+# (operator-authored principles + free-form docs; see docs/document-upload.md).
+!.satellites/documents/
 
 # Operator-supplied config — may contain OAuth client secrets. The
 # `*.example` templates stay in git; the live files do not.

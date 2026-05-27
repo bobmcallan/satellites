@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,6 +102,21 @@ func HashBody(body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// HashBodyAndTags is the embedded-hash function used when an artifact
+// carries frontmatter-declared tags. The hash incorporates both the
+// body and the (sorted) tag set so a binary release that changes only
+// the tags still flips the hash and triggers re-application. Tags are
+// sorted before hashing so input order is not significant.
+func HashBodyAndTags(body string, tags []string) string {
+	sorted := append([]string(nil), tags...)
+	sort.Strings(sorted)
+	h := sha256.New()
+	h.Write([]byte(body))
+	h.Write([]byte{0x1f}) // unit separator — disambiguates body from tag bytes
+	h.Write([]byte(strings.Join(sorted, "\x1f")))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // ReconcileResult reports what changed during one reconciliation pass.
 type ReconcileResult struct {
 	Name    string // seed name
@@ -108,15 +125,18 @@ type ReconcileResult struct {
 }
 
 // ReconcileSystemSeed brings (system_seeds[name], documents[system/name])
-// into agreement with the supplied body. Idempotent: when the stored
-// embedded_hash matches the body's hash, zero writes occur and Changed
-// is false.
+// into agreement with the supplied body + tags. Idempotent: when the
+// stored embedded_hash matches the hash of (body, tags), zero writes
+// occur and Changed is false.
 //
 // Boot calls this once per embedded artifact. A binary release that
-// changes one artifact rewrites exactly that row + appends one
-// document_versions row; unchanged artifacts trigger no writes.
-func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store, name, body, createdBy string, now time.Time) (ReconcileResult, error) {
-	hash := HashBody(body)
+// changes one artifact (body or tags) rewrites exactly that row +
+// appends one document_versions row and, when tags shifted, patches
+// the documents.tags array; unchanged artifacts trigger no writes.
+//
+// Pass nil/empty tags for legacy artifacts that have no frontmatter.
+func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store, name, body string, tags []string, createdBy string, now time.Time) (ReconcileResult, error) {
+	hash := HashBodyAndTags(body, tags)
 	existing, err := sys.Get(ctx, name)
 	switch {
 	case err == nil && existing.EmbeddedHash == hash:
@@ -130,6 +150,18 @@ func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store,
 	}
 	if err := SeedSystem(ctx, docs, name, body, createdBy, now); err != nil {
 		return ReconcileResult{}, fmt.Errorf("system_seed: mirror to documents: %w", err)
+	}
+	// Apply tags after the document row exists. SetDocumentTags is a
+	// targeted update — it leaves body and version history alone, just
+	// flips the documents.tags array.
+	if tags != nil {
+		doc, lookupErr := docs.lookupDocument(ctx, Key{Scope: ScopeSystem, Name: name})
+		if lookupErr != nil {
+			return ReconcileResult{}, fmt.Errorf("system_seed: lookup after seed: %w", lookupErr)
+		}
+		if _, err := docs.SetDocumentTags(ctx, doc.ID, tags, now); err != nil {
+			return ReconcileResult{}, fmt.Errorf("system_seed: apply tags: %w", err)
+		}
 	}
 	return ReconcileResult{Name: name, Changed: true, Created: created}, nil
 }

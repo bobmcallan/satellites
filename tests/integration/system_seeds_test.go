@@ -27,7 +27,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 
 	t.Run("fresh DB inserts both rows", func(t *testing.T) {
 		now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, "system:seed", now)
+		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, nil, "system:seed", now)
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
 		}
@@ -56,7 +56,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 			t.Fatalf("get before: %v", err)
 		}
 		later := before.AppliedAt.Add(1 * time.Hour)
-		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, "system:seed", later)
+		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, nil, "system:seed", later)
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
 		}
@@ -93,7 +93,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 		// use a value 1s past the previous to make the assertion robust
 		// against same-instant clock reads.
 		later := before.AppliedAt.Add(1 * time.Second)
-		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, "system:seed", later)
+		res, err := document.ReconcileSystemSeed(ctx, sys, docs, name, body, nil, "system:seed", later)
 		if err != nil {
 			t.Fatalf("reconcile: %v", err)
 		}
