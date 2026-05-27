@@ -131,6 +131,6 @@ jobs:
             flyctl deploy \
               --app satellites-pprod \
               --image registry.fly.io/satellites-pprod:latest \
-              --strategy rolling \
+              --strategy immediate \
               --wait-timeout 300 \
               --yes
