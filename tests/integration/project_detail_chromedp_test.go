@@ -181,6 +181,12 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	); err != nil {
 		t.Fatalf("apply tag filter: %v", err)
 	}
+	// Alpine 3.15.12 batches x-show updates — the chip x-for produces
+	// its element before every row's x-show effect re-runs. Sleep so
+	// the per-row display state catches up before we assert.
+	if err := chromedp.Run(bctx, chromedp.Sleep(150*time.Millisecond)); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
 	visibleTitles, err = visibleRowTitles(bctx)
 	if err != nil {
 		t.Fatalf("read filtered titles: %v", err)

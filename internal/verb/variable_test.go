@@ -18,25 +18,30 @@ func TestVariableVerbs_Registered(t *testing.T) {
 	}
 }
 
-func TestVariableSet_RejectsSystem(t *testing.T) {
+func TestVariableSet_RejectsComputedSystemName(t *testing.T) {
+	// sty_cc4c671a: scope='system' writes are allowed for stored knobs;
+	// the rejection is now name-specific — only names served by the
+	// computed resolver fail.
 	prev := variableStore
 	variableStore = &variable.Store{}
 	defer func() { variableStore = prev }()
+	SetSystemVariableResolver(
+		func(_ context.Context, name string) (string, bool) {
+			if name == "version" {
+				return "v0.0.0", true
+			}
+			return "", false
+		},
+		func(context.Context) []string { return []string{"version"} },
+	)
+	defer SetSystemVariableResolver(nil, nil)
 	_, err := Get("variable_set").Invoke(context.Background(),
-		json.RawMessage(`{"name":"x","scope":"system","value":"y"}`))
+		json.RawMessage(`{"name":"version","scope":"system","value":"forged"}`))
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("expected ErrForbidden, got %v", err)
+		t.Fatalf("expected ErrForbidden for computed name, got %v", err)
 	}
-}
-
-func TestVariableDelete_RejectsSystem(t *testing.T) {
-	prev := variableStore
-	variableStore = &variable.Store{}
-	defer func() { variableStore = prev }()
-	_, err := Get("variable_delete").Invoke(context.Background(),
-		json.RawMessage(`{"name":"x","scope":"system"}`))
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("expected ErrForbidden, got %v", err)
+	if !strings.Contains(err.Error(), "computed") {
+		t.Fatalf("error message should mention 'computed', got %v", err)
 	}
 }
 

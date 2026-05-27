@@ -177,6 +177,17 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	}
 	for _, key := range buildVariableResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, req.Inherit) {
 		if key.Scope == variable.ScopeSystem {
+			// Stored-system rows take precedence over the computed
+			// resolver. A seeded knob like stories.page_size lives in
+			// the table; a computed name like version is never stored
+			// and falls through to the resolver below.
+			v, lookupErr := variableStore.Get(ctx, key)
+			if lookupErr == nil {
+				return json.Marshal(VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: "system"})
+			}
+			if !errors.Is(lookupErr, variable.ErrNotFound) {
+				return nil, mapVariableStoreError(lookupErr, "variable_get")
+			}
 			if v, ok := systemVariableResolve(ctx, key.Name); ok {
 				return json.Marshal(VariableGetResponse{Name: key.Name, Value: v, ResolvedScope: "system"})
 			}
@@ -216,6 +227,15 @@ func invokeVariableSet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	key := variable.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
 	if err := authorizeVariableWrite(ctx, key); err != nil {
 		return nil, err
+	}
+	// Reject writes that target a name owned by the computed-system
+	// resolver — those values are derived per request and can't be
+	// persisted. Unknown system names ARE allowed; operators add new
+	// knobs without code changes.
+	if scope == variable.ScopeSystem {
+		if _, isComputed := systemVariableResolve(ctx, req.Name); isComputed {
+			return nil, fmt.Errorf("variable_set: %w: %q is a computed system variable (read-only)", ErrForbidden, req.Name)
+		}
 	}
 	v, err := variableStore.Set(ctx, variable.SetInput{Key: key, Value: req.Value}, time.Now().UTC())
 	if err != nil {
@@ -288,6 +308,16 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	for _, layerKey := range buildVariableResolutionChain("", scope, req.WorkspaceID, req.ProjectID, req.Inherit) {
 		switch layerKey.Scope {
 		case variable.ScopeSystem:
+			// Stored-system rows take precedence over computed names
+			// (addRow is first-wins). A seeded knob like
+			// stories.page_size surfaces here as scope='system'.
+			vs, err := variableStore.ListByScope(ctx, variable.ScopeSystem, "", "")
+			if err != nil {
+				return nil, mapVariableStoreError(err, "variable_list")
+			}
+			for _, v := range vs {
+				addRow(v.Name, v.Value, variable.ScopeSystem)
+			}
 			for _, name := range systemVariableNames(ctx) {
 				if v, ok := systemVariableResolve(ctx, name); ok {
 					addRow(name, v, variable.ScopeSystem)
@@ -386,7 +416,17 @@ func authorizeVariableRead(ctx context.Context, key variable.Key) error {
 
 func authorizeVariableWrite(ctx context.Context, key variable.Key) error {
 	if key.Scope == variable.ScopeSystem {
-		return fmt.Errorf("variable write: %w: system variables are computed, not stored", ErrForbidden)
+		// Stored-system writes are allowed for any authenticated caller;
+		// names owned by the computed resolver are rejected separately
+		// inside invokeVariableSet so the error message can name the
+		// specific name that's read-only.
+		if authStore == nil {
+			return nil
+		}
+		if u := auth.FromContext(ctx); u == nil {
+			return fmt.Errorf("variable write: %w: bearer required for system scope", ErrUnauthorized)
+		}
+		return nil
 	}
 	return authorizeVariableRead(ctx, key)
 }

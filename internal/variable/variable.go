@@ -1,11 +1,18 @@
 // Package variable is V5's name/value substrate, scoped the same way
-// as documents (workspace, project) but without versioning — variables
-// are point-in-time configuration, not append-only artifacts.
+// as documents (system, workspace, project) but without versioning —
+// variables are point-in-time configuration, not append-only artifacts.
 //
-// System variables (version, os, arch, server_url, state, current_version)
-// are computed per-request by the templating layer, not stored here.
-// The store's CHECK constraint refuses scope='system' so a stray insert
-// can't masquerade as a system var.
+// Two flavours coexist at scope='system':
+//   - Computed (version, os, arch, server_url, state, current_version)
+//     are resolved per-request by the templating layer and never stored.
+//   - Stored (operator-tunable knobs like stories.page_size) live in
+//     the variables table at scope='system' with workspace_id/
+//     project_id NULL. Seeded at boot, editable via variable_set.
+//
+// The verb-layer resolver checks stored-system rows first and falls
+// back to the computed resolver, so a name collision is impossible
+// against the computed set and a missing seed gracefully degrades to
+// the computed terminator (which returns ok=false for unknown names).
 package variable
 
 import (
@@ -28,9 +35,16 @@ const (
 // ErrNotFound is returned when a variable lookup misses.
 var ErrNotFound = errors.New("variable: not found")
 
-// ErrScopeReadonly is returned when a caller tries to write at
-// scope=system. System variables are computed, not stored.
+// ErrScopeReadonly is retained for backwards compatibility with callers
+// that branched on it before stored-system rows existed. New code uses
+// ErrComputedName for the narrower case — a write to a name owned by
+// the computed-system resolver.
 var ErrScopeReadonly = errors.New("variable: system scope is read-only (computed, not stored)")
+
+// ErrComputedName is returned when a write targets a system name owned
+// by the computed-variables resolver (version, os, arch, …). Those
+// names map to per-request derived state and cannot be persisted.
+var ErrComputedName = errors.New("variable: name is computed at request time, not storable")
 
 // ErrScopeMismatch is returned when (scope, workspace_id, project_id)
 // disagree per the scope-coherence rules.

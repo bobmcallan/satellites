@@ -132,7 +132,27 @@ func main() {
 	}
 	arbor.Info("system seeds reconciled")
 
-	verb.SetVariableStore(variable.New(sqlDB))
+	variableStore := variable.New(sqlDB)
+	verb.SetVariableStore(variableStore)
+
+	// Stored-system KV seed registry — operator-tunable defaults that
+	// land in the variables table at scope='system'. Seed is idempotent
+	// on name presence: a re-boot does NOT overwrite an operator-set
+	// value. Add new knobs here; the consumer reads via
+	// variable_get(scope='system', name=...).
+	for name, defaultValue := range map[string]string{
+		"stories.page_size": "50",
+	} {
+		created, err := variableStore.SeedSystem(context.Background(), name, defaultValue, time.Now().UTC())
+		if err != nil {
+			arbor.Fatal("variable: seed system", "name", name, "err", err)
+		}
+		if created {
+			arbor.Info("system kv seeded", "name", name, "default", defaultValue)
+		} else {
+			arbor.Info("system kv unchanged", "name", name)
+		}
+	}
 
 	// System-variables resolver: the computed values document_get
 	// substitutes into {{name}} placeholders. Read-only by contract;

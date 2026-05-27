@@ -17,21 +17,19 @@ type Store struct {
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
 // SetInput is the write payload for Set. Upsert semantics: replaces
-// the value in place (variables aren't versioned). System scope is
-// rejected (ErrScopeReadonly) — system vars are computed, not stored.
+// the value in place (variables aren't versioned).
 type SetInput struct {
 	Key   Key
 	Value string
 }
 
 // Set upserts a (scope, workspace_id, project_id, name) row to the
-// given value. Returns the resulting Variable row.
+// given value. Returns the resulting Variable row. Accepts every scope
+// the table admits (system, workspace, project); the verb layer is
+// responsible for refusing system names owned by the computed resolver.
 func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, error) {
 	if err := in.Key.Validate(); err != nil {
 		return Variable{}, err
-	}
-	if in.Key.Scope == ScopeSystem {
-		return Variable{}, ErrScopeReadonly
 	}
 	now = now.UTC()
 	v, err := s.Get(ctx, in.Key)
@@ -47,11 +45,12 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 		return v, nil
 	case errors.Is(err, ErrNotFound):
 		id := NewID()
+		wsArg := nullStr(in.Key.WorkspaceID)
 		pjArg := nullStr(in.Key.ProjectID)
 		if _, err := s.DB.ExecContext(ctx, `
             INSERT INTO variables (id, scope, workspace_id, project_id, name, value, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-        `, id, string(in.Key.Scope), in.Key.WorkspaceID, pjArg, in.Key.Name, in.Value, now); err != nil {
+        `, id, string(in.Key.Scope), wsArg, pjArg, in.Key.Name, in.Value, now); err != nil {
 			return Variable{}, fmt.Errorf("variable: insert: %w", err)
 		}
 		return Variable{
@@ -69,45 +68,68 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 	}
 }
 
-// Get returns the Variable for the given Key, or ErrNotFound.
+// SeedSystem inserts a (system, name) row only if it does not already
+// exist. Returns created=true when a fresh row was written. Used at
+// server boot to install operator-tunable defaults idempotently:
+// re-running the seed on a database with operator-set values must not
+// overwrite them.
+func (s *Store) SeedSystem(ctx context.Context, name, defaultValue string, now time.Time) (created bool, err error) {
+	if name == "" {
+		return false, fmt.Errorf("variable: name required")
+	}
+	now = now.UTC()
+	id := NewID()
+	res, err := s.DB.ExecContext(ctx, `
+        INSERT INTO variables (id, scope, workspace_id, project_id, name, value, created_at, updated_at)
+        VALUES ($1, 'system', NULL, NULL, $2, $3, $4, $4)
+        ON CONFLICT (name) WHERE scope = 'system' DO NOTHING
+    `, id, name, defaultValue, now)
+	if err != nil {
+		return false, fmt.Errorf("variable: seed system: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("variable: seed system rows: %w", err)
+	}
+	return n == 1, nil
+}
+
+// Get returns the Variable for the given Key, or ErrNotFound. Stored
+// system rows resolve here; the computed-system resolver lives at the
+// verb layer and is consulted only when this returns ErrNotFound.
 func (s *Store) Get(ctx context.Context, key Key) (Variable, error) {
 	if err := key.Validate(); err != nil {
 		return Variable{}, err
 	}
-	if key.Scope == ScopeSystem {
-		// System vars are computed, not stored. The verb-layer resolver
-		// terminates at scope=system; the store never holds rows there.
-		return Variable{}, ErrNotFound
-	}
+	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, scope, workspace_id, COALESCE(project_id,''), name, value, created_at, updated_at
+        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
         FROM variables
         WHERE scope = $1
-          AND workspace_id = $2
+          AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id IS NOT DISTINCT FROM $3
           AND name = $4
-    `, string(key.Scope), key.WorkspaceID, pjArg, key.Name)
+    `, string(key.Scope), wsArg, pjArg, key.Name)
 	return scanVariableRow(row)
 }
 
 // Delete removes the row at Key. ErrNotFound when no row matches.
-// System scope is read-only (ErrScopeReadonly).
+// Accepts every scope; system deletes drop the stored row only — the
+// computed resolver still terminates the cascade.
 func (s *Store) Delete(ctx context.Context, key Key) error {
 	if err := key.Validate(); err != nil {
 		return err
 	}
-	if key.Scope == ScopeSystem {
-		return ErrScopeReadonly
-	}
+	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
 	res, err := s.DB.ExecContext(ctx, `
         DELETE FROM variables
         WHERE scope = $1
-          AND workspace_id = $2
+          AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id IS NOT DISTINCT FROM $3
           AND name = $4
-    `, string(key.Scope), key.WorkspaceID, pjArg, key.Name)
+    `, string(key.Scope), wsArg, pjArg, key.Name)
 	if err != nil {
 		return fmt.Errorf("variable: delete: %w", err)
 	}
@@ -131,7 +153,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, workspace_id, COALESCE(project_id,''), name, value, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
             FROM variables WHERE scope = 'workspace' AND workspace_id = $1
             ORDER BY name
         `, workspaceID)
@@ -145,7 +167,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id+project_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, workspace_id, COALESCE(project_id,''), name, value, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
             FROM variables WHERE scope = 'project' AND workspace_id = $1 AND project_id = $2
             ORDER BY name
         `, workspaceID, projectID)
@@ -155,9 +177,18 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 		defer rows.Close()
 		return collectRows(rows)
 	case ScopeSystem:
-		// System vars are computed; the verb layer joins them in for
-		// inheriting listings. Empty here.
-		return []Variable{}, nil
+		// Stored-system rows live in the table; the computed-system
+		// resolver lives at the verb layer and is folded in there.
+		rows, err := s.DB.QueryContext(ctx, `
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
+            FROM variables WHERE scope = 'system'
+            ORDER BY name
+        `)
+		if err != nil {
+			return nil, fmt.Errorf("variable: list system: %w", err)
+		}
+		defer rows.Close()
+		return collectRows(rows)
 	default:
 		return nil, fmt.Errorf("variable: unknown scope %q", scope)
 	}
