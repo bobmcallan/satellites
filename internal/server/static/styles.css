@@ -434,6 +434,27 @@ main {
 .user-menu-logout:hover { color: #f87171; }
 .user-menu-form { margin: 0; }
 
+/* Active state for nav items inside the dropdown — matches the
+   inline .nav-item.active green colour. */
+.user-menu-item.active { color: #4ade80; }
+
+/* sty_63116a75: mobile-responsive nav. At <= 768px the inline
+   primary-nav links collapse and re-appear inside the user-menu
+   dropdown's mobile-nav section. At >= 769px the inline nav is
+   visible and the dropdown's mobile-nav section is hidden so the
+   operator never sees both copies.
+
+   Base rule first so the media-query overrides take precedence on
+   equal-specificity selectors. */
+.user-menu-mobile-nav { display: flex; flex-direction: column; }
+@media (min-width: 769px) {
+  .user-menu-mobile-nav,
+  .user-menu-mobile-divider { display: none; }
+}
+@media (max-width: 768px) {
+  .primary-nav .nav-item { display: none; }
+}
+
 /* V4-style story panel — search input, chip strip, expandable rows. */
 .panel-stories { display: block; }
 .panel-search {

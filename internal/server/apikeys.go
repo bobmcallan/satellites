@@ -18,6 +18,7 @@ type apiKeysData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	Keys        []apiKeyRow
 	JustIssued  *issuedKey // non-nil immediately after a successful POST issue
 	FlashError  string
@@ -125,6 +126,7 @@ func renderAPIKeys(w http.ResponseWriter, r *http.Request, cfg Config, userID st
 		UserEmail:   userEmail,
 		UserName:    userName,
 		UserAvatar:  userAvatar,
+		ActiveNav:   "api-keys",
 		Keys:        rows,
 		JustIssued:  issued,
 		FlashError:  flashErr,

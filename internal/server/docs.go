@@ -17,6 +17,7 @@ type docsMCPData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	ExampleURL  string
 	ExampleKey  string
 	FooterName  string
@@ -47,6 +48,7 @@ func docsMCPHandler(cfg Config) http.HandlerFunc {
 			UserEmail:   userEmail,
 			UserName:    userName,
 			UserAvatar:  userAvatar,
+			ActiveNav:   "mcp",
 			ExampleURL:  "http://localhost:8080",
 			ExampleKey:  "<your-api-key>",
 			FooterName:  footerName,

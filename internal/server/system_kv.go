@@ -23,6 +23,7 @@ type systemKVData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	Stored      []systemKVRow
 	Computed    []systemKVRow
 	FlashError  string
@@ -126,6 +127,7 @@ func renderSystemKV(w http.ResponseWriter, r *http.Request, cfg Config, userID s
 		UserEmail:   userEmail,
 		UserName:    userName,
 		UserAvatar:  userAvatar,
+		ActiveNav:   "system-kv",
 		Stored:      stored,
 		Computed:    computed,
 		FlashError:  flashErr,

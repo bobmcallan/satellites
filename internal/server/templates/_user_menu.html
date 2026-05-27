@@ -15,13 +15,25 @@
        x-cloak
        role="menu"
        data-field="user-menu-panel">
+    {{/* sty_63116a75: mobile-nav section. CSS @media query hides it
+         at >= 769px so desktop users only see the primary-nav inline.
+         At narrow viewports the inline nav is hidden and these links
+         surface here instead. */}}
+    <section class="user-menu-mobile-nav" data-field="mobile-nav" role="menu">
+      <a href="/projects" class="user-menu-item{{if eq .ActiveNav "projects"}} active{{end}}" data-nav="projects" role="menuitem">Projects</a>
+      <a href="#" class="user-menu-item disabled" role="menuitem">Ledger</a>
+      <a href="/docs/mcp" class="user-menu-item{{if eq .ActiveNav "mcp"}} active{{end}}" data-nav="mcp" role="menuitem">MCP</a>
+      <a href="#" class="user-menu-item disabled" role="menuitem">Config</a>
+      <a href="#" class="user-menu-item disabled" role="menuitem">Help</a>
+    </section>
+    <div class="user-menu-divider user-menu-mobile-divider"></div>
     <div class="user-menu-chip" data-field="user-menu-chip">
       {{if .UserName}}<div class="user-menu-name">{{.UserName}}</div>{{end}}
       <div class="user-menu-email" data-field="user-email">{{.UserEmail}}</div>
     </div>
     <div class="user-menu-divider"></div>
-    <a href="/settings/api-keys" class="user-menu-item" data-field="user-menu-keys" role="menuitem">API Keys</a>
-    <a href="/settings/system-kv" class="user-menu-item" data-field="user-menu-kv" role="menuitem">KV Values</a>
+    <a href="/settings/api-keys" class="user-menu-item{{if eq .ActiveNav "api-keys"}} active{{end}}" data-field="user-menu-keys" role="menuitem">API Keys</a>
+    <a href="/settings/system-kv" class="user-menu-item{{if eq .ActiveNav "system-kv"}} active{{end}}" data-field="user-menu-kv" role="menuitem">KV Values</a>
     <div class="user-menu-divider"></div>
     <form method="POST" action="/logout" class="user-menu-form">
       <button type="submit" class="user-menu-item user-menu-logout" data-action="logout" role="menuitem">Logout</button>

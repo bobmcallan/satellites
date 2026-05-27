@@ -19,6 +19,7 @@ type projectsData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	Projects    []projectRow
 	FlashError  string
 	DevMode     bool
@@ -119,6 +120,7 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 		UserEmail:   userEmail,
 		UserName:    userName,
 		UserAvatar:  userAvatar,
+		ActiveNav:   "projects",
 		Projects:    rows,
 		FlashError:  flashErr,
 		DevMode:     cfg.DevMode,

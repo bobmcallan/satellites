@@ -32,6 +32,7 @@ type projectDetailData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	Project     projectRow
 	Stories     []storyRow
 	StoryShown  int // initial visible count = len(Stories); Alpine x-text overwrites on filter change
@@ -171,6 +172,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			UserEmail:   userEmail,
 			UserName:    userName,
 			UserAvatar:  userAvatar,
+			ActiveNav:   "projects",
 			Stories:     stories,
 			StoryShown:  len(stories),
 			StoryTotal:  paginator.Total,

@@ -50,6 +50,7 @@ type indexData struct {
 	UserEmail   string
 	UserName    string
 	UserAvatar  string
+	ActiveNav   string
 	FooterName  string
 	FooterEmail string
 }
