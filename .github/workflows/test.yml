@@ -1,4 +1,10 @@
-name: ci
+name: test
+
+# Unit tests only. Integration tests are gated by `//go:build
+# integration` and require `-tags integration` plus the testcontainers
+# Postgres machinery — they don't run here. release.yml and deploy.yml
+# both gate on this workflow via `workflow_run`, so a red test job
+# blocks both the GitHub release and the Fly rollout.
 
 on:
   push:

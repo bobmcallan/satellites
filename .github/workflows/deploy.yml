@@ -1,8 +1,13 @@
 name: deploy
 
-# On push to main: compile + vet, build the satellites-server image and
-# push it straight to registry.fly.io, then `flyctl deploy --image` to
-# roll it out.
+# After the upstream `test` workflow succeeds on main, build the
+# satellites-server image and push it straight to registry.fly.io,
+# then `flyctl deploy --image` to roll it out.
+#
+# The Go compile/vet gate moved out of this workflow — release.yml's
+# matrix build covers every binary, and test.yml's vet+test gate this
+# job via `workflow_run`. The Docker build below is the only image
+# the Fly registry needs.
 #
 # This workflow skips GHCR as an intermediate registry — Fly is the
 # only registry that matters for serving, and using a single registry
@@ -13,7 +18,9 @@ name: deploy
 #   FLY_API_TOKEN — `fly tokens create deploy -a satellites-pprod`
 
 on:
-  push:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -21,25 +28,14 @@ env:
   FLY_APP: satellites-pprod
 
 jobs:
-  # Sanity build + vet. ci.yml runs the test suite; this exists so an
-  # unbuildable commit never reaches the deploy stage.
-  compile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - name: build
-        run: |
-          go build ./cmd/satellites-server/
-          go build ./cmd/satellites/
-      - name: vet
-        run: go vet ./...
-
   deploy:
-    needs: compile
-    if: github.ref == 'refs/heads/main'
+    # Gate: only run when the upstream `test` workflow succeeded, OR
+    # the operator triggered this workflow manually. workflow_run fires
+    # on every completion (success + failure) so the conclusion check
+    # is mandatory.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: fly-deploy-satellites-pprod
@@ -47,6 +43,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Pin to the SHA that triggered the upstream test run so the
+          # image we build matches the commit that passed CI, not
+          # whatever main looks like at job-start time.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -54,6 +55,13 @@ jobs:
 
       - name: read .version
         id: meta
+        env:
+          # Under workflow_run, GITHUB_SHA points at the workflow_run
+          # event's SHA (the default-branch HEAD when the upstream test
+          # job started), which can drift past the commit we actually
+          # checked out. Prefer head_sha; fall back to GITHUB_SHA for
+          # workflow_dispatch invocations.
+          BUILD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           VERSION=$(awk '$1=="satellites-server.version:" {print $2}' .version)
@@ -67,7 +75,7 @@ jobs:
             echo "version=v${VERSION}"
             echo "cli_version=v${CLI_VERSION}"
             echo "build=${BUILD}"
-            echo "commit=${GITHUB_SHA::8}"
+            echo "commit=${BUILD_SHA:0:8}"
           } >> "$GITHUB_OUTPUT"
 
       - name: auth to Fly registry

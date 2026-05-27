@@ -7,7 +7,9 @@ name: release
 # satellites-server can rev independently — their asset filenames
 # include their per-binary versions.
 on:
-  push:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -17,6 +19,13 @@ permissions:
 jobs:
   derive-tag:
     name: derive release tag from .version
+    # Gate: only run when the upstream `test` workflow succeeded, OR
+    # the operator triggered this workflow manually. workflow_run fires
+    # on every completion (success + failure) so the conclusion check
+    # is mandatory.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.read.outputs.tag }}
@@ -28,6 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # workflow_run defaults to checking out the workflow file's
+          # branch HEAD, which can race ahead of the SHA that triggered
+          # this run. Pin to head_sha so .version and the build matrix
+          # both reflect the commit being released.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0   # need full history for tag listing
       - id: read
         run: |
@@ -75,6 +89,8 @@ jobs:
           - { goos: linux,  goarch: amd64, binary: satellites-server, validate: false }
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
@@ -90,6 +106,11 @@ jobs:
           CLI_BUILD:      ${{ needs.derive-tag.outputs.cli_build }}
           SERVER_VERSION: ${{ needs.derive-tag.outputs.server_version }}
           SERVER_BUILD:   ${{ needs.derive-tag.outputs.server_build }}
+          # Under workflow_run, GITHUB_SHA reflects the workflow_run
+          # event SHA (default-branch HEAD when the upstream test job
+          # started), not the commit we checked out. Use head_sha so
+          # the ldflag stamps the same SHA the binary was built from.
+          BUILD_SHA:      ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           if [ "$BINARY" = "satellites" ]; then
@@ -104,7 +125,7 @@ jobs:
             -trimpath \
             -ldflags="-s -w \
               -X github.com/bobmcallan/satellites/internal/verb.Version=v${BIN_VER} \
-              -X github.com/bobmcallan/satellites/internal/verb.Commit=${GITHUB_SHA} \
+              -X github.com/bobmcallan/satellites/internal/verb.Commit=${BUILD_SHA} \
               -X github.com/bobmcallan/satellites/internal/verb.BuildTime=${BIN_BUILD}" \
             -o "${OUT}" ./cmd/${BINARY}
           sha256sum "${OUT}" > "${OUT}.sha256"
@@ -133,6 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - uses: actions/download-artifact@v4
