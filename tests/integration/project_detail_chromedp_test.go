@@ -334,6 +334,257 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	}
 }
 
+// TestStoryPanel_FilterBugs covers the three sty_f4a72a6e defects:
+//
+//  1. Repeated `tags:` tokens combine with OR (was AND); multi-tag
+//     queries return the union of matched rows.
+//  2. Removing a user-added chip (the x button on tags / order chips)
+//     drops only that predicate, leaving siblings intact. Verified by
+//     calling removeFromQuery directly via the panel's __test__ accessor.
+//  3. Typing `order:<field>` sorts the table; dropping the order chip
+//     restores the server-rendered DOM order.
+func TestStoryPanel_FilterBugs(t *testing.T) {
+	env := testbootstrap.SetUpWithServer(t)
+
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	docStore := document.New(env.DB)
+	ledStore := ledger.New(env.DB)
+	verb.SetAuthStore(env.Store)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetDocumentStore(docStore)
+	verb.SetLedgerStore(ledStore)
+	t.Cleanup(func() {
+		verb.SetAuthStore(nil)
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetDocumentStore(nil)
+		verb.SetLedgerStore(nil)
+	})
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 4, 0, 0, 0, time.UTC)
+	ws, err := wsStore.Create(ctx, "", "filter-bugs-ws", now)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	pj, err := pjStore.Create(ctx, project.CreateInput{
+		WorkspaceID: ws.ID,
+		Name:        "filter-bugs-project",
+	}, now)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Two epics, two stories each. Tag-OR test wants rows that match
+	// EITHER epic; chip-x test wants to remove one of two tag tokens
+	// and see the surviving filter narrow correctly.
+	seeds := []struct {
+		Name string
+		Tags []string
+	}{
+		{"alpha changelog", []string{"epic:changelog", "epic-order:1"}},
+		{"beta changelog", []string{"epic:changelog", "epic-order:2"}},
+		{"gamma site-content", []string{"epic:site-content-refresh", "epic-order:1"}},
+		{"delta site-content", []string{"epic:site-content-refresh", "epic-order:2"}},
+	}
+	status, priority := "backlog", "medium"
+	for _, s := range seeds {
+		tg := append([]string(nil), s.Tags...)
+		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
+			ProjectID: pj.ID,
+			Name:      s.Name,
+			Status:    &status,
+			Priority:  &priority,
+			Tags:      &tg,
+		})
+		if _, err := verb.Dispatch(ctx, "document_upsert", req); err != nil {
+			t.Fatalf("create %s: %v", s.Name, err)
+		}
+	}
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), chromedpHeadlessOpts()...)
+	t.Cleanup(cancelAlloc)
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	t.Cleanup(cancelBrowser)
+	bctx, cancelRun := context.WithTimeout(browserCtx, 60*time.Second)
+	t.Cleanup(cancelRun)
+
+	if err := chromedp.Run(bctx,
+		chromedp.Navigate(env.ServerURL+"/login"),
+		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
+		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-status-open"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("nav: %v", err)
+	}
+
+	// Bug 2: two tag tokens — expect the UNION (all four stories).
+	if err := setStorySearch(bctx, "tags:epic:changelog tags:epic:site-content-refresh"); err != nil {
+		t.Fatalf("set tag union: %v", err)
+	}
+	if err := chromedp.Run(bctx,
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-tags-epic:changelog"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-tags-epic:site-content-refresh"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
+	); err != nil {
+		t.Fatalf("wait both tag chips: %v", err)
+	}
+	titles, err := visibleRowTitles(bctx)
+	if err != nil {
+		t.Fatalf("read titles after tag union: %v", err)
+	}
+	for _, want := range []string{"alpha changelog", "beta changelog", "gamma site-content", "delta site-content"} {
+		if !titles[want] {
+			t.Errorf("tag OR: %q missing from union; visible=%v", want, titles)
+		}
+	}
+
+	// Bug 3: click the x on one tag chip — only the other epic's
+	// stories should remain visible. Driving via JS (not chromedp.Click)
+	// to avoid CSS-selector quoting issues around the colons in the
+	// chip data-field.
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const chip = document.querySelector('[data-field="panel-stories-chip-tags-epic:changelog"]');
+		const btn = chip && chip.querySelector('.panel-filter-chip-remove');
+		if (!btn) { return false; }
+		btn.click();
+		return true;
+	})()`, nil)); err != nil {
+		t.Fatalf("click chip x: %v", err)
+	}
+	if err := waitChipAbsent(bctx, `[data-field="panel-stories-chip-tags-epic:changelog"]`); err != nil {
+		t.Fatalf("changelog chip never cleared: %v", err)
+	}
+	if err := chromedp.Run(bctx, chromedp.Sleep(150*time.Millisecond)); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	titles, err = visibleRowTitles(bctx)
+	if err != nil {
+		t.Fatalf("read titles after chip-x: %v", err)
+	}
+	if !titles["gamma site-content"] || !titles["delta site-content"] {
+		t.Errorf("chip-x: site-content rows should remain visible; got %v", titles)
+	}
+	if titles["alpha changelog"] || titles["beta changelog"] {
+		t.Errorf("chip-x: changelog rows should be hidden after removing the changelog tag chip; got %v", titles)
+	}
+
+	// Bug 1a: type order:title — verify rows ordered alphabetically.
+	// alpha → beta → delta → gamma is the ASCII title sort.
+	if err := setStorySearch(bctx, "order:title"); err != nil {
+		t.Fatalf("set order:title: %v", err)
+	}
+	if err := chromedp.Run(bctx,
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-order-title"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
+	); err != nil {
+		t.Fatalf("wait order chip: %v", err)
+	}
+	titlesOrdered, err := orderedVisibleTitles(bctx)
+	if err != nil {
+		t.Fatalf("read ordered titles: %v", err)
+	}
+	wantSorted := []string{"alpha changelog", "beta changelog", "delta site-content", "gamma site-content"}
+	if !equalSlices(titlesOrdered, wantSorted) {
+		t.Errorf("order:title: got %v want %v", titlesOrdered, wantSorted)
+	}
+
+	// Bug 1b: remove the order chip — rows return to their original
+	// insertion order (newest-first: delta, gamma, beta, alpha given
+	// the seed loop's chronological inserts).
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const chip = document.querySelector('[data-field="panel-stories-chip-order-title"]');
+		const btn = chip && chip.querySelector('.panel-filter-chip-remove');
+		if (!btn) { return false; }
+		btn.click();
+		return true;
+	})()`, nil)); err != nil {
+		t.Fatalf("click order x: %v", err)
+	}
+	if err := waitChipAbsent(bctx, `[data-field="panel-stories-chip-order-title"]`); err != nil {
+		t.Fatalf("order chip never cleared: %v", err)
+	}
+	if err := chromedp.Run(bctx, chromedp.Sleep(150*time.Millisecond)); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	titlesOrdered, err = orderedVisibleTitles(bctx)
+	if err != nil {
+		t.Fatalf("read post-restore titles: %v", err)
+	}
+	// First item after restore should NOT be alpha (which would be the
+	// case if the table stayed in alphabetical order). Stories list
+	// newest-first; alpha was the first insert and therefore last in
+	// the rendered order.
+	if len(titlesOrdered) > 0 && titlesOrdered[0] == "alpha changelog" {
+		t.Errorf("order restore failed — table is still sorted alphabetically: %v", titlesOrdered)
+	}
+
+	// Bug 3 (pure-logic sanity): exercise removeFromQuery via the
+	// panel's __test__ accessor. Confirms the pure rewrite returns the
+	// expected string for the common chip-x scenarios. Hits the same
+	// code path the Alpine handler uses.
+	var rewrites struct {
+		DropOneTag    string `json:"drop_one_tag"`
+		DropOrder     string `json:"drop_order"`
+		DropSearch    string `json:"drop_search"`
+		DropOneStatus string `json:"drop_one_status"`
+	}
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const r = window.storyPanelFactory.__test__.removeFromQuery;
+		return {
+			drop_one_tag: r("tags:epic:changelog tags:epic:other order:title", "tags", "epic:changelog"),
+			drop_order:   r("tags:area:portal order:title", "order", "title"),
+			drop_search:  r("tags:area:portal free text here", "search", ""),
+			drop_one_status: r("status:ready,review priority:high", "status", "ready"),
+		};
+	})()`, &rewrites)); err != nil {
+		t.Fatalf("evaluate removeFromQuery: %v", err)
+	}
+	if rewrites.DropOneTag != "tags:epic:other order:title" {
+		t.Errorf("drop_one_tag: got %q", rewrites.DropOneTag)
+	}
+	if rewrites.DropOrder != "tags:area:portal" {
+		t.Errorf("drop_order: got %q", rewrites.DropOrder)
+	}
+	if rewrites.DropSearch != "tags:area:portal" {
+		t.Errorf("drop_search: got %q", rewrites.DropSearch)
+	}
+	if rewrites.DropOneStatus != "status:review priority:high" {
+		t.Errorf("drop_one_status: got %q", rewrites.DropOneStatus)
+	}
+}
+
+// orderedVisibleTitles reads the visible story-row titles in DOM order
+// (after any reordering applyStoryOrder has done).
+func orderedVisibleTitles(ctx context.Context) ([]string, error) {
+	var titles []string
+	err := chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			Array.from(document.querySelectorAll('tr.story-row'))
+				.filter(r => r.offsetParent !== null)
+				.map(r => r.dataset.title || '')
+		`, &titles),
+	)
+	return titles, err
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // chromedpHeadlessOpts returns the shared headless-Chrome allocator
 // options used by every browser test in this package.
 func chromedpHeadlessOpts() []chromedp.ExecAllocatorOption {

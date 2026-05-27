@@ -7,12 +7,14 @@
  *   status:<v[,v...]>     all|open|backlog|ready|in_progress|review|done|cancelled
  *   priority:<v[,v...]>   critical|high|medium|low|all
  *   category:<v[,v...]>   feature|bug|improvement|...
- *   tags:<v>              single tag; multiple tokens AND
+ *   tags:<v>              single tag; multiple tokens OR (union of matched rows)
+ *   order:<field>         updated|created|priority|status|title|id|epic-order
  *   <free text>           lowercased substring match against data-search
  *
  * Defaults rendered as is-default chips: status:open, priority:all,
  * category:all. Removing a default chip drops the predicate (e.g.
- * status:open → status:all).
+ * status:open → status:all). Removing the order chip restores the
+ * server-rendered DOM order.
  */
 (function () {
     'use strict';
@@ -135,6 +137,67 @@
         }
     }
 
+    // restoreStoryOrder puts story-row + story-detail pairs back into
+    // the original server-rendered order captured at init(). Called
+    // when the operator removes the order chip — without this, the
+    // table stays in whatever applyStoryOrder last sorted it into.
+    function restoreStoryOrder(host, originalOrder) {
+        if (!host || !originalOrder || originalOrder.length === 0) { return; }
+        const tbody = host.querySelector('tbody');
+        if (!tbody) { return; }
+        const rowByID = new Map();
+        const detailByID = new Map();
+        tbody.querySelectorAll('tr.story-row').forEach(r => {
+            if (r.dataset.id) { rowByID.set(r.dataset.id, r); }
+        });
+        tbody.querySelectorAll('tr.story-detail').forEach(d => {
+            const id = d.dataset.detailFor;
+            if (id) { detailByID.set(id, d); }
+        });
+        for (let i = 0; i < originalOrder.length; i++) {
+            const id = originalOrder[i];
+            const row = rowByID.get(id);
+            if (row) { tbody.appendChild(row); }
+            const detail = detailByID.get(id);
+            if (detail) { tbody.appendChild(detail); }
+        }
+    }
+
+    // removeFromQuery is the pure half of removeChip — given a current
+    // query string, a key (status / priority / category / tags / order
+    // / search), and the value being dropped, returns the rewritten
+    // query. Pulled out of the Alpine method so unit tests can exercise
+    // the rewrite logic directly via window.storyPanelFactory.__test__.
+    function removeFromQuery(query, key, value) {
+        if (!key) { return query || ''; }
+        if (key === 'search') {
+            const parts = (query || '').trim().split(/\s+/).filter(Boolean);
+            const kept = [];
+            for (let i = 0; i < parts.length; i++) {
+                if (parts[i].indexOf(':') > 0) { kept.push(parts[i]); }
+            }
+            return kept.join(' ');
+        }
+        const parts = (query || '').trim().split(/\s+/).filter(Boolean);
+        const kept = [];
+        const wantVal = String(value).toLowerCase();
+        for (let i = 0; i < parts.length; i++) {
+            const p = parts[i];
+            const idx = p.indexOf(':');
+            if (idx <= 0) { kept.push(p); continue; }
+            const k = p.slice(0, idx).toLowerCase();
+            const v = p.slice(idx + 1).toLowerCase();
+            if (k !== key) { kept.push(p); continue; }
+            if (k === 'tags' || k === 'order') {
+                if (v !== wantVal) { kept.push(p); }
+                continue;
+            }
+            const vals = v.split(',').filter(s => s !== wantVal);
+            if (vals.length > 0) { kept.push(k + ':' + vals.join(',')); }
+        }
+        return kept.join(' ');
+    }
+
     // writeQueryToURL persists the current filter query as ?stories_q=
     // on the URL via history.replaceState (NOT pushState — every
     // keystroke is not a history entry). Empty value removes the param.
@@ -163,6 +226,10 @@
             bulkTarget: 'ready',
             bulkBusy: false,
             bulkResultText: '',
+            // _originalRowOrder is the snapshot of story-row ids in
+            // server-rendered order, captured once on init() so removing
+            // the order chip can restore the table.
+            _originalRowOrder: [],
 
             // Seed this.query from the URL ?stories_q= param so refresh
             // + deep-link preserve the filter. The $watch wired below
@@ -172,7 +239,9 @@
             // only stories_q rotates. The watcher also re-applies the
             // order:<field> reorder on every query change so typing or
             // removing the order chip rearranges the visible rows
-            // without a server round-trip.
+            // without a server round-trip. When the operator drops the
+            // order chip the watcher hands off to restoreStoryOrder
+            // which puts rows back into _originalRowOrder.
             init() {
                 try {
                     const url = new URL(window.location.href);
@@ -180,9 +249,24 @@
                     if (seed) { this.query = seed; }
                 } catch (e) { /* URL ctor unavailable — best effort */ }
                 const root = this.$root || this.$el;
+                // Capture original DOM order BEFORE any applyStoryOrder
+                // call. This is what restoreStoryOrder uses on chip-remove.
+                if (root) {
+                    const initialRows = root.querySelectorAll('tbody tr.story-row');
+                    const order = [];
+                    initialRows.forEach(r => {
+                        if (r.dataset && r.dataset.id) { order.push(r.dataset.id); }
+                    });
+                    this._originalRowOrder = order;
+                }
                 this.$watch('query', (value) => {
                     writeQueryToURL(value);
-                    applyStoryOrder(root, parseStoryQuery(value).order);
+                    const ord = parseStoryQuery(value).order;
+                    if (ord) {
+                        applyStoryOrder(root, ord);
+                    } else {
+                        restoreStoryOrder(root, this._originalRowOrder);
+                    }
                 });
                 // Apply once on mount so a seeded URL filter with
                 // order:<field> takes effect after the first paint.
@@ -243,10 +327,19 @@
                     if (t.category.indexOf((ds.category || '').toLowerCase()) === -1) { return false; }
                 }
                 if (t.tags.length > 0) {
+                    // Multiple `tags:` tokens combine with OR — a row
+                    // matches when at least one tag token is present in
+                    // its data-tags. Operators reach the AND surface by
+                    // typing a single token; OR is the multi-token
+                    // default because it serves the common "stories in
+                    // either epic" query (epic:foo + epic:bar are
+                    // mutually exclusive memberships).
                     const rowTags = ' ' + (ds.tags || '').toLowerCase() + ' ';
+                    let tagOk = false;
                     for (let i = 0; i < t.tags.length; i++) {
-                        if (rowTags.indexOf(' ' + t.tags[i] + ' ') === -1) { return false; }
+                        if (rowTags.indexOf(' ' + t.tags[i] + ' ') !== -1) { tagOk = true; break; }
                     }
+                    if (!tagOk) { return false; }
                 }
                 if (!t.text) { return true; }
                 const hay = (ds.search || '').toLowerCase();
@@ -353,34 +446,7 @@
             },
 
             removeChip(key, value) {
-                if (!key) { return; }
-                if (key === 'search') {
-                    const parts = (this.query || '').trim().split(/\s+/).filter(Boolean);
-                    const kept = [];
-                    for (let i = 0; i < parts.length; i++) {
-                        if (parts[i].indexOf(':') > 0) { kept.push(parts[i]); }
-                    }
-                    this.query = kept.join(' ');
-                    return;
-                }
-                const parts = (this.query || '').trim().split(/\s+/).filter(Boolean);
-                const kept = [];
-                for (let i = 0; i < parts.length; i++) {
-                    const p = parts[i];
-                    const idx = p.indexOf(':');
-                    if (idx <= 0) { kept.push(p); continue; }
-                    const k = p.slice(0, idx).toLowerCase();
-                    const v = p.slice(idx + 1).toLowerCase();
-                    if (k !== key) { kept.push(p); continue; }
-                    if (k === 'tags' || k === 'order') {
-                        // Single-value keys: drop the matching token; keep others.
-                        if (v !== String(value).toLowerCase()) { kept.push(p); }
-                        continue;
-                    }
-                    const vals = v.split(',').filter(s => s !== String(value).toLowerCase());
-                    if (vals.length > 0) { kept.push(k + ':' + vals.join(',')); }
-                }
-                this.query = kept.join(' ');
+                this.query = removeFromQuery(this.query, key, value);
             },
 
             clearAllFilters() { this.query = ''; },
@@ -484,5 +550,5 @@
     });
 
     window.storyPanelFactory = storyPanel;
-    window.storyPanelFactory.__test__ = { parseStoryQuery };
+    window.storyPanelFactory.__test__ = { parseStoryQuery, removeFromQuery };
 })();
