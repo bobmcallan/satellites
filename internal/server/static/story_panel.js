@@ -45,6 +45,11 @@
     // alpha sort by id.
     const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1, id: 1 };
 
+    // orderTagFields lists order keys whose sort value is extracted
+    // from a numeric tag (e.g. `epic-order:<n>`) rather than a row
+    // dataset attribute. Rows missing the tag sink to the bottom.
+    const orderTagFields = { 'epic-order': 1 };
+
     function parseStoryQuery(q) {
         const out = { status: [], priority: [], category: [], tags: [], order: '', text: '' };
         const free = [];
@@ -64,7 +69,7 @@
                     if (v) { out.tags.push(v); }
                     continue;
                 }
-                if (k === 'order' && orderFields[v]) {
+                if (k === 'order' && (orderFields[v] || orderTagFields[v])) {
                     out.order = v;
                     continue;
                 }
@@ -78,13 +83,28 @@
         return out;
     }
 
+    // tagOrderValue pulls the numeric value out of a `<prefix>:<n>`
+    // tag in the row's space-joined data-tags attribute. Returns
+    // Number.POSITIVE_INFINITY when the tag is absent so missing-tag
+    // rows sink to the bottom of an ascending sort.
+    function tagOrderValue(row, prefix) {
+        const tags = (row.dataset.tags || '').toLowerCase();
+        const re = new RegExp('(?:^|\\s)' + prefix + ':(\\d+)(?:\\s|$)');
+        const m = re.exec(tags);
+        if (!m) { return Number.POSITIVE_INFINITY; }
+        return parseInt(m[1], 10);
+    }
+
     // applyStoryOrder physically reorders the tbody story-row pairs by
     // the given field. Each story has TWO rows (the row itself + the
     // detail row); pairs are kept together so click-to-expand keeps
-    // binding to the correct detail. Field is one of orderFields' keys
-    // OR '' / unknown — both leave the table untouched.
+    // binding to the correct detail. Field is one of orderFields' keys,
+    // one of orderTagFields' keys (tag-derived numeric sort), OR
+    // '' / unknown — the last leaves the table untouched.
     function applyStoryOrder(host, field) {
-        if (!host || !field || !orderFields[field]) { return; }
+        if (!host || !field) { return; }
+        const tagSort = !!orderTagFields[field];
+        if (!tagSort && !orderFields[field]) { return; }
         const tbody = host.querySelector('tbody');
         if (!tbody) { return; }
         const rows = tbody.querySelectorAll('tr.story-row');
@@ -95,6 +115,12 @@
             pairs.push({ row, detail, idx });
         });
         pairs.sort((a, b) => {
+            if (tagSort) {
+                const av = tagOrderValue(a.row, field);
+                const bv = tagOrderValue(b.row, field);
+                if (av === bv) { return a.idx - b.idx; }
+                return av < bv ? -1 : 1;
+            }
             const aval = (a.row.dataset[field] || '').toLowerCase();
             const bval = (b.row.dataset[field] || '').toLowerCase();
             if (aval === bval) { return a.idx - b.idx; }

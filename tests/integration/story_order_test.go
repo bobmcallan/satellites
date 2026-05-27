@@ -61,15 +61,30 @@ func TestStoryPanelOrder(t *testing.T) {
 	}
 
 	// Seed in non-alpha creation order so the default vs ordered
-	// states are distinguishable.
-	for _, title := range []string{"alpha", "gamma", "beta"} {
-		req, _ := json.Marshal(verb.DocumentUpsertRequest{
+	// states are distinguishable. Two of the three carry epic-order:<n>
+	// tags so the order:epic-order subtest can prove numeric sort AND
+	// missing-tag fallback (the untagged story sinks to the bottom).
+	seeds := []struct {
+		title string
+		tags  []string
+	}{
+		{"alpha", []string{"epic-order:2"}},
+		{"gamma", nil},
+		{"beta", []string{"epic-order:1"}},
+	}
+	for _, s := range seeds {
+		req := verb.DocumentUpsertRequest{
 			Type:      "story",
 			ProjectID: pj.ID,
-			Name:      title,
-		})
-		if _, err := verb.Dispatch(ctx, "document_upsert", req); err != nil {
-			t.Fatalf("seed %s: %v", title, err)
+			Name:      s.title,
+		}
+		if s.tags != nil {
+			tags := s.tags
+			req.Tags = &tags
+		}
+		body, _ := json.Marshal(req)
+		if _, err := verb.Dispatch(ctx, "document_upsert", body); err != nil {
+			t.Fatalf("seed %s: %v", s.title, err)
 		}
 	}
 
@@ -177,6 +192,30 @@ func TestStoryPanelOrder(t *testing.T) {
 		want := []string{"alpha", "beta", "gamma"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("deep-link order:title got %v want %v", got, want)
+		}
+	})
+
+	t.Run("order:epic-order sorts by numeric tag value, missing tag sinks", func(t *testing.T) {
+		if err := chromedp.Run(bctx,
+			chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
+			chromedp.WaitVisible(`[data-field="panel-stories-chip-status-open"]`, chromedp.ByQuery),
+		); err != nil {
+			t.Fatalf("nav: %v", err)
+		}
+		if err := setStorySearch(bctx, "order:epic-order"); err != nil {
+			t.Fatalf("set: %v", err)
+		}
+		if err := chromedp.Run(bctx,
+			chromedp.WaitVisible(`[data-field="panel-stories-chip-order-epic-order"]`, chromedp.ByQuery),
+			chromedp.Sleep(150*time.Millisecond),
+		); err != nil {
+			t.Fatalf("wait order chip: %v", err)
+		}
+		got := titlesInDOMOrder(t)
+		// beta=epic-order:1, alpha=epic-order:2, gamma=(no tag, sinks).
+		want := []string{"beta", "alpha", "gamma"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("order:epic-order got %v want %v", got, want)
 		}
 	})
 
