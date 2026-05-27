@@ -24,6 +24,160 @@
 </header>
 
 <main>
+  <section class="thesis" data-section="thesis">
+    <h2 class="thesis-title">A reviewer-gated harness for agentic engineering.</h2>
+    <p class="thesis-lede">As AI moves from stateless prompt-response to autonomous agents that determine their own path over time, systemic failures emerge. Agents loop endlessly, run down wrong roads, stall, or declare success on a stalled task. These are rarely problems with the underlying model — they are failures of <strong>the harness</strong>.</p>
+    <p class="thesis-lede">Harness engineering optimises four levers: <strong>context</strong>, <strong>tools</strong>, <strong>loop</strong>, <strong>governance</strong>. Satellites is opinionated about all four.</p>
+  </section>
+
+  <section class="levers" data-section="levers">
+    <h2 class="section-heading">The four levers</h2>
+    <div class="levers-grid">
+
+      <article class="lever-card" data-lever="context">
+        <header class="lever-card-head">
+          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M12 3C8 3 5 6 5 10v3a3 3 0 0 0 3 3v2a3 3 0 0 0 6 0v-2a3 3 0 0 0 3-3v-3c0-4-3-7-5-7Z"/>
+            <path d="M9 11h6M9 14h6"/>
+          </svg>
+          <h3>1 · Context</h3>
+          <p class="lever-sub">what the model sees</p>
+        </header>
+        <p class="lever-body">The complete state-space available at the millisecond the model picks its next action — system prompts, prior execution steps, retrieved documents, memory, active variables.</p>
+        <dl class="lever-pair">
+          <dt>Failure mode</dt><dd>Missing, contextually disconnected, or over-saturated — bloat buries the high-priority signal.</dd>
+          <dt>Architecture lens</dt><dd>The right information, shaped precisely, injected at the right moment.</dd>
+        </dl>
+      </article>
+
+      <article class="lever-card" data-lever="tools">
+        <header class="lever-card-head">
+          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M14 4l6 6-9 9-6-6 9-9Z"/>
+            <path d="M4 20l3-3"/>
+            <circle cx="16" cy="8" r="1.2" fill="currentColor"/>
+          </svg>
+          <h3>2 · Tools</h3>
+          <p class="lever-sub">what the model can do</p>
+        </header>
+        <p class="lever-body">The exposed action surface that lets a text-generation engine execute state changes — codebase endpoints, MCP, sandboxed CLIs.</p>
+        <dl class="lever-pair">
+          <dt>Failure mode</dt><dd>Raw integrations without semantic schemas, or unstructured shells with no safety boundary.</dd>
+          <dt>Architecture lens</dt><dd>Tools packaged as precise, self-describing schemas tailored to one capability boundary.</dd>
+        </dl>
+      </article>
+
+      <article class="lever-card" data-lever="loop">
+        <header class="lever-card-head">
+          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M4 12a8 8 0 0 1 13.7-5.7L20 9"/>
+            <path d="M20 4v5h-5"/>
+            <path d="M20 12a8 8 0 0 1-13.7 5.7L4 15"/>
+            <path d="M4 20v-5h5"/>
+          </svg>
+          <h3>3 · Loop</h3>
+          <p class="lever-sub">how the agent runs</p>
+        </header>
+        <p class="lever-body">Intake context → execute tool → interpret output → evaluate continuation → repeat until complete.</p>
+        <dl class="lever-pair">
+          <dt>Failure mode</dt><dd>Runaway chains, infinite generation, false-positive completion when the task has stalled.</dd>
+          <dt>Architecture lens</dt><dd>Deterministic wrapper assertions — step counts, timeouts, progression detection, definitive exit states.</dd>
+        </dl>
+      </article>
+
+      <article class="lever-card" data-lever="governance">
+        <header class="lever-card-head">
+          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+          <h3>4 · Governance</h3>
+          <p class="lever-sub">what boundaries it has</p>
+        </header>
+        <p class="lever-body">Permissions, sandboxes, environment limits, audit logging, human-in-the-loop approval gates that keep automated actions safely bounded.</p>
+        <dl class="lever-pair">
+          <dt>Failure mode</dt><dd>Broad write/delete permissions without verification — or restrictions so tight the agent can't make necessary updates.</dd>
+          <dt>Architecture lens</dt><dd>Separated permissioned boundaries — deciding what runs autonomously vs. what requires a hard stop.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="realisation" data-section="realisation">
+    <h2 class="section-heading">How Satellites realises the four levers</h2>
+    <p class="realisation-lede">Satellites does not let a single model manage an open-ended loop over a giant context window. The framework is built around a single load-bearing premise: <strong>Separation of roles is structural, not advisory.</strong></p>
+
+    <div class="mapping-grid">
+      <div class="mapping-row">
+        <span class="mapping-lever">Context</span>
+        <span class="mapping-arrow" aria-hidden="true">→</span>
+        <span class="mapping-impl">The satellite as an isolated sub-harness — a dedicated compartment with a minimised context surface. Stories are the working spine; the ledger is bookkeeping the model needn't read most of the time.</span>
+      </div>
+      <div class="mapping-row">
+        <span class="mapping-lever">Tools</span>
+        <span class="mapping-arrow" aria-hidden="true">→</span>
+        <span class="mapping-impl">Packaged capability through <code>document_*</code> / <code>variable_*</code> / <code>project_*</code> / <code>apikey_*</code> verbs over MCP, plus operator-authored <em>skills</em>. Skills are pure capability — they report, they do not decide what the result means.</span>
+      </div>
+      <div class="mapping-row">
+        <span class="mapping-lever">Loop</span>
+        <span class="mapping-arrow" aria-hidden="true">→</span>
+        <span class="mapping-impl">Orchestrated phases. The executor has two verbs — <code>start</code> and <code>done</code> — and cannot mark its own work complete. No runaway loops, no false-positive completion.</span>
+      </div>
+      <div class="mapping-row">
+        <span class="mapping-lever">Governance</span>
+        <span class="mapping-arrow" aria-hidden="true">→</span>
+        <span class="mapping-impl">Embedded reviewers as the gate — <code>agent</code> · <code>static</code> · <code>external</code> · <code>process</code> · <code>composite</code>. Only reviewers can change story status. Scopes (<code>system</code>, <code>workspace</code>, <code>project</code>) gate the verb layer.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="state-machine" data-section="state-machine">
+    <h2 class="section-heading">The state machine</h2>
+    <p class="sm-lede">Each phase has three states. Reviewer <code>accept</code> advances. <code>reject</code> returns the phase to in-progress with notes. <code>accept_with_additional_phase</code> inserts a new phase before the next — the workflow adapts without the executor deciding to skip.</p>
+
+    <svg class="sm-diagram" viewBox="0 0 720 240" role="img" aria-label="Phase state machine: pending → inprogress → reviewer → done, with reject loop back to inprogress">
+      <defs>
+        <marker id="sm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#4ade80"/>
+        </marker>
+      </defs>
+
+      <g class="sm-node" data-node="pending">
+        <rect x="20" y="100" width="120" height="44" rx="4"/>
+        <text x="80" y="127" text-anchor="middle">pending</text>
+      </g>
+
+      <g class="sm-node" data-node="inprogress">
+        <rect x="200" y="100" width="140" height="44" rx="4"/>
+        <text x="270" y="127" text-anchor="middle">inprogress</text>
+      </g>
+
+      <g class="sm-node sm-node--reviewer" data-node="reviewer">
+        <rect x="400" y="100" width="140" height="44" rx="4"/>
+        <text x="470" y="127" text-anchor="middle">[ reviewer ]</text>
+      </g>
+
+      <g class="sm-node sm-node--done" data-node="done">
+        <rect x="600" y="100" width="100" height="44" rx="4"/>
+        <text x="650" y="127" text-anchor="middle">done</text>
+      </g>
+
+      <line x1="140" y1="122" x2="200" y2="122" stroke="#4ade80" stroke-width="1.6" marker-end="url(#sm-arrow)"/>
+      <text x="170" y="112" text-anchor="middle" class="sm-edge">start</text>
+
+      <line x1="340" y1="122" x2="400" y2="122" stroke="#4ade80" stroke-width="1.6" marker-end="url(#sm-arrow)"/>
+      <text x="370" y="112" text-anchor="middle" class="sm-edge">done</text>
+
+      <line x1="540" y1="122" x2="600" y2="122" stroke="#4ade80" stroke-width="1.6" marker-end="url(#sm-arrow)"/>
+      <text x="570" y="112" text-anchor="middle" class="sm-edge">accept</text>
+
+      <path d="M 470 144 Q 470 200 270 200 Q 270 168 270 144"
+            fill="none" stroke="#f87171" stroke-width="1.6" marker-end="url(#sm-arrow)"/>
+      <text x="370" y="215" text-anchor="middle" class="sm-edge sm-edge--reject">reject — notes appended to story</text>
+    </svg>
+  </section>
+
   <section class="panel" data-section="server">
     <h2>server</h2>
     <dl class="metadata">

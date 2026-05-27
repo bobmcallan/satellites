@@ -57,6 +57,10 @@ func TestIndex_AuthedRendersPortal_NoDev(t *testing.T) {
 		"SATELLITES", "PROJECTS", `data-field="version"`, `data-section="endpoints"`,
 		`data-field="footer-name"`, `data-field="footer-email"`, `data-field="footer-version"`,
 		"/static/alpine.min.js",
+		`data-section="thesis"`, `data-section="levers"`,
+		`data-section="realisation"`, `data-section="state-machine"`,
+		`data-lever="context"`, `data-lever="tools"`, `data-lever="loop"`, `data-lever="governance"`,
+		`data-node="pending"`, `data-node="inprogress"`, `data-node="reviewer"`, `data-node="done"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)

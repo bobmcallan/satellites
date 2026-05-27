@@ -735,3 +735,185 @@ button.status-button[disabled] {
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
 }
+
+/* Landing thesis — four-levers framing on /. Section ordering on the
+   page: thesis lede → 2x2 lever grid → lever→implementation mapping →
+   state-machine SVG → operator panels (server / dev-users / endpoints). */
+.thesis {
+  padding: 1.5rem 0 0;
+  border-bottom: 1px solid #222;
+  padding-bottom: 1.5rem;
+}
+.thesis-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  margin: 0 0 1rem;
+}
+.thesis-lede {
+  color: #c8c8c8;
+  margin: 0 0 0.8rem;
+  max-width: 70ch;
+}
+.thesis-lede strong { color: #4ade80; font-weight: 700; }
+
+.section-heading {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #fff;
+  margin: 0 0 1rem;
+  text-transform: uppercase;
+}
+
+/* Four-lever cards as a 2x2 grid on wide viewports, collapsing to one
+   column under ~720px. Inline SVG icons share the .lever-icon class so
+   their stroke matches surrounding text colour. */
+.levers-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 720px) { .levers-grid { grid-template-columns: 1fr; } }
+
+.lever-card {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 4px;
+  padding: 1rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.lever-card-head {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.6rem;
+  align-items: center;
+}
+.lever-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  color: #4ade80;
+  grid-row: 1 / span 2;
+}
+.lever-card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #fff;
+}
+.lever-sub {
+  margin: 0;
+  color: #888;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+}
+.lever-body {
+  margin: 0;
+  color: #c8c8c8;
+}
+.lever-pair {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 0.8rem;
+  margin: 0;
+}
+.lever-pair dt {
+  color: #888;
+  letter-spacing: 0.05em;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+.lever-pair dd { margin: 0; color: #d8d8d8; font-size: 0.85rem; }
+
+/* lever → implementation mapping — single-column rows on narrow,
+   three-column (lever / arrow / impl) on wide. */
+.realisation-lede {
+  color: #c8c8c8;
+  margin: 0 0 1.25rem;
+  max-width: 70ch;
+}
+.realisation-lede strong { color: #4ade80; font-weight: 700; }
+
+.mapping-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: 7rem 1.5rem 1fr;
+  align-items: start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #0d0d0d;
+  border: 1px solid #222;
+  border-radius: 3px;
+}
+@media (max-width: 720px) {
+  .mapping-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .mapping-arrow { display: none; }
+}
+.mapping-lever {
+  color: #4ade80;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+.mapping-arrow { color: #555; text-align: center; }
+.mapping-impl { color: #c8c8c8; }
+.mapping-impl code {
+  color: #d8d8d8;
+  background: #050505;
+  border: 1px solid #222;
+  padding: 0 0.3rem;
+  border-radius: 2px;
+  font-size: 0.85rem;
+}
+
+/* State-machine SVG — green nodes for normal flow, red edge for reject. */
+.sm-lede {
+  color: #c8c8c8;
+  margin: 0 0 1rem;
+  max-width: 70ch;
+}
+.sm-lede code {
+  color: #d8d8d8;
+  background: #050505;
+  border: 1px solid #222;
+  padding: 0 0.3rem;
+  border-radius: 2px;
+  font-size: 0.85rem;
+}
+.sm-diagram {
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  background: #0d0d0d;
+  border: 1px solid #222;
+  border-radius: 3px;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+.sm-node rect { fill: #111; stroke: #4ade80; stroke-width: 1.2; }
+.sm-node--reviewer rect { stroke: #fbbf24; }
+.sm-node--done rect { stroke: #4ade80; fill: #0f1f12; }
+.sm-node text {
+  fill: #e0e0e0;
+  font: 600 0.78rem ui-monospace, 'SF Mono', Menlo, monospace;
+  letter-spacing: 0.05em;
+}
+.sm-edge {
+  fill: #888;
+  font: 0.7rem ui-monospace, 'SF Mono', Menlo, monospace;
+  letter-spacing: 0.05em;
+}
+.sm-edge--reject { fill: #f87171; }
