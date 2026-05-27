@@ -80,7 +80,9 @@ func main() {
 
 	verb.SetProjectStore(project.New(sqlDB))
 	verb.SetLedgerStore(ledger.New(sqlDB))
-	verb.SetChangelogStore(changelog.New(sqlDB))
+	clStore := changelog.New(sqlDB)
+	verb.SetChangelogStore(clStore)
+	server.SetChangelogStore(clStore)
 
 	// Reviewer registry — load every markdown definition embedded
 	// under config/reviewers/, then wire either the production

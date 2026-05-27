@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="#" class="nav-item disabled">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/changelog" class="nav-item {{if eq .ActiveNav "changelog"}}active{{end}}" data-nav="changelog">CHANGELOG</a>
+    <a href="/settings/api-keys" class="nav-item" data-nav="api-keys">API KEYS</a>
+    <a href="#" class="nav-item disabled">CONFIG</a>
+    <a href="#" class="nav-item disabled">HELP</a>
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="changelog">
+  <section class="changelog-intro" data-section="changelog-intro">
+    <h2 class="section-heading">Changelog</h2>
+    <p class="changelog-lede">Release notes for the satellites server and CLI. Entries are written via the <code>changelog_add</code> verb and grouped by service; within a service group, rows sort by <code>effective_date</code> then <code>created_at</code>.</p>
+  </section>
+
+  {{if .Groups}}
+    {{range .Groups}}
+    <section class="changelog-group" data-section="changelog-group" data-service="{{.Service}}">
+      <h2 class="changelog-service" data-field="service">{{.Service}}</h2>
+      <ol class="changelog-entries">
+        {{range .Entries}}
+        <li class="changelog-entry" data-field="entry" data-entry-id="{{.ID}}">
+          <header class="changelog-entry-head">
+            <span class="changelog-version" data-field="version">
+              {{if .VersionFrom}}<span class="changelog-version-from">{{.VersionFrom}}</span> <span class="changelog-version-arrow" aria-hidden="true">→</span> {{end}}<span class="changelog-version-to">{{.VersionTo}}</span>
+            </span>
+            <span class="changelog-date" data-field="effective-date">
+              {{if .EffectiveDate}}{{.EffectiveDate}}{{else}}{{.CreatedAt}}{{end}}
+            </span>
+          </header>
+          <div class="changelog-content" data-field="content">{{.ContentHTML}}</div>
+        </li>
+        {{end}}
+      </ol>
+    </section>
+    {{end}}
+  {{else}}
+    <section class="panel" data-section="empty">
+      <p class="empty">No changelog entries yet — write one with <code>satellites exec changelog_add</code>.</p>
+    </section>
+  {{end}}
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

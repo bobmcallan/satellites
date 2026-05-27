@@ -58,6 +58,10 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleAuthorizationServer)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", auth.HandleProtectedResource)
 
+	// Public read-only page — render the changelog table without a
+	// session gate (matches /login as the other unauthenticated surface).
+	mux.HandleFunc("/changelog", changelogHandler(cfg))
+
 	// OAuth Authorization Server endpoints (RFC 6749 + 7591 DCR + 7636
 	// PKCE). Public — DCR + authorize + token are unauthenticated by
 	// design; auth happens inside the flow (PKCE on the code exchange,
