@@ -1,6 +1,12 @@
-// `satellites documents upload` — walk .satellites/documents/ from the
+// `satellites document upload` — walk .satellites/documents/ from the
 // current working directory and dispatch each markdown file as a
 // document_upsert call.
+//
+// The same `document` parent also carries `list` and `get` (see
+// cmd_skill.go / cmd_principle.go for the symmetric sibling commands)
+// — thin shells over the document_list / document_get MCP verbs with
+// type:"document" filtering. No new MCP verbs; all three nouns share
+// the substrate's existing document_* surface.
 //
 // Layout (the only shape this command understands):
 //
@@ -58,11 +64,26 @@ func init() {
 		dryRun    bool
 	)
 	docs := &cobra.Command{
-		Use:   "documents",
-		Short: "File-based document substrate operations",
+		Use:   "document",
+		Short: "Substrate document operations (list / get / upload)",
 	}
 	docs.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	docs.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")
+
+	docs.AddCommand(newSubstrateListCmd(substrateNounConfig{
+		Use:        "list",
+		Short:      "List documents (document_list type:\"document\")",
+		FilterType: "document",
+		ConfigArg:  &configArg,
+		UserArg:    &userArg,
+	}))
+	docs.AddCommand(newSubstrateGetCmd(substrateNounConfig{
+		Use:        "get",
+		Short:      "Print a document body (document_get name=<name>)",
+		FilterType: "document",
+		ConfigArg:  &configArg,
+		UserArg:    &userArg,
+	}))
 
 	upload := &cobra.Command{
 		Use:   "upload",

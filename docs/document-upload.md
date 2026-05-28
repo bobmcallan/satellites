@@ -2,7 +2,7 @@
 
 Operator-authored documents live in the consumer repo under
 `.satellites/documents/` and reach the substrate via the
-`satellites documents upload` CLI command. The tree is version-
+`satellites document upload` CLI command. The tree is version-
 controlled (the `.gitignore` excepts it from the broader `.satellites/`
 ignore rule) so principle bodies and free-form documents stay in git
 alongside the code they govern.
@@ -75,8 +75,8 @@ Examples:
 ## Pushing
 
 ```
-satellites documents upload --dry-run   # list planned dispatches
-satellites documents upload             # apply each file
+satellites document upload --dry-run   # list planned dispatches
+satellites document upload             # apply each file
 ```
 
 Idempotent. A re-push of unchanged files produces zero new
@@ -101,7 +101,7 @@ on transport failure, permission denial, or a malformed file.
 
 | Use this | When |
 | --- | --- |
-| `satellites documents upload` | Bulk apply / sync from the repo. Principles, runbooks, project conventions — anything that should live next to the code. |
+| `satellites document upload` | Bulk apply / sync from the repo. Principles, runbooks, project conventions — anything that should live next to the code. |
 | `document_upsert` verb directly | One-off edits from the portal, scripts, or other tools that don't have repo-resident files. |
 
 Both write to the same substrate row when keyed identically.
