@@ -48,6 +48,10 @@ go.work.sum
 # File-based documents at .satellites/documents/ are version-controlled
 # (operator-authored principles + free-form docs; see docs/document-upload.md).
 !.satellites/documents/
+# File-based principles at .satellites/principles/ are version-controlled.
+# Each .md is uploaded via document_upsert; the local file is the
+# authoring + git-tracked copy of the substrate document.
+!.satellites/principles/
 
 # Operator-supplied config — may contain OAuth client secrets. The
 # `*.example` templates stay in git; the live files do not.
