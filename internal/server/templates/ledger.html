@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="/ledger" class="nav-item {{if eq .ActiveNav "ledger"}}active{{end}}" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/changelog" class="nav-item" data-nav="changelog">CHANGELOG</a>
+    <a href="#" class="nav-item disabled">HELP</a>
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="ledger">
+  <section class="changelog-intro" data-section="ledger-intro">
+    <h2 class="section-heading">Ledger</h2>
+    <p class="changelog-lede">Audit trail of evidence rows. Filters are URL-shareable; the default window is the last 24 hours. Set any combination of project, workspace, session, story, run, kind, or a body substring to narrow the table.</p>
+  </section>
+
+  <section class="panel" data-section="ledger-filter">
+    <form method="get" action="/ledger" data-form="ledger-filter" class="ledger-filter-form">
+      <div class="ledger-filter-row">
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">project_id</span>
+          <input type="text" name="project_id" value="{{.Filter.ProjectID}}" autocomplete="off" data-field="project_id">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">workspace_id</span>
+          <input type="text" name="workspace_id" value="{{.Filter.WorkspaceID}}" autocomplete="off" data-field="workspace_id">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">session_id</span>
+          <input type="text" name="session_id" value="{{.Filter.SessionID}}" autocomplete="off" data-field="session_id">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">story_id</span>
+          <input type="text" name="story_id" value="{{.Filter.StoryID}}" autocomplete="off" data-field="story_id">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">run_id</span>
+          <input type="text" name="run_id" value="{{.Filter.RunID}}" autocomplete="off" data-field="run_id">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">kind</span>
+          <input type="text" name="kind" value="{{.Filter.Kind}}" autocomplete="off" data-field="kind" placeholder="e.g. log:warn">
+        </label>
+      </div>
+      <div class="ledger-filter-row">
+        <label class="ledger-filter-cell ledger-filter-cell-wide">
+          <span class="ledger-filter-label">body contains</span>
+          <input type="text" name="body_contains" value="{{.Filter.BodyContains}}" autocomplete="off" data-field="body_contains" placeholder="case-insensitive substring">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">from</span>
+          <input type="datetime-local" name="created_after" value="{{.Filter.CreatedAfter}}" data-field="created_after">
+        </label>
+        <label class="ledger-filter-cell">
+          <span class="ledger-filter-label">to</span>
+          <input type="datetime-local" name="created_before" value="{{.Filter.CreatedBefore}}" data-field="created_before">
+        </label>
+        <div class="ledger-filter-actions">
+          <button type="submit" class="btn-primary" data-action="apply-filter">Apply</button>
+          <a href="/ledger" class="btn-secondary" data-action="clear-filter">Clear</a>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  {{if .ErrorMsg}}
+  <section class="panel panel-error" data-section="ledger-error">
+    <p class="empty" data-field="error-message">{{.ErrorMsg}}</p>
+  </section>
+  {{else if .Empty}}
+  <section class="panel" data-section="empty">
+    <p class="empty">No ledger entries match the current filters. Widen the window or clear filters to see more.</p>
+  </section>
+  {{else}}
+  <section class="panel" data-section="ledger-table">
+    <table class="ledger-table" data-table="ledger">
+      <thead>
+        <tr>
+          <th class="ledger-col-time">timestamp</th>
+          <th class="ledger-col-level">level</th>
+          <th class="ledger-col-kind">kind</th>
+          <th class="ledger-col-source">source</th>
+          <th class="ledger-col-actor">actor</th>
+          <th class="ledger-col-body">body</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Entries}}
+        <tr class="ledger-row" data-row="ledger-entry" data-entry-id="{{.ID}}" x-data="{ open: false }">
+          <td class="ledger-col-time" data-field="timestamp">{{.Timestamp}}</td>
+          <td class="ledger-col-level" data-field="level">{{if .Level}}<span class="ledger-level ledger-level-{{.Level}}">{{.Level}}</span>{{end}}</td>
+          <td class="ledger-col-kind" data-field="kind">{{.Kind}}</td>
+          <td class="ledger-col-source" data-field="source">{{.Source}}</td>
+          <td class="ledger-col-actor" data-field="actor">{{.Actor}}</td>
+          <td class="ledger-col-body" data-field="body">
+            {{if .HasExpand}}
+            <button type="button" class="ledger-body-toggle" data-action="toggle" @click="open = !open" :aria-expanded="open">
+              <span class="ledger-body-trunc">{{.BodyTrunc}}</span>
+            </button>
+            {{else}}
+            <span class="ledger-body-trunc">{{.BodyTrunc}}</span>
+            {{end}}
+          </td>
+        </tr>
+        {{if .HasExpand}}
+        <tr class="ledger-row-expand" x-show="open" data-row="ledger-entry-expand">
+          <td colspan="6">
+            <dl class="ledger-detail">
+              <dt>body</dt>
+              <dd><pre data-field="body-full">{{.BodyFull}}</pre></dd>
+              {{if .PayloadJSON}}
+              <dt>payload</dt>
+              <dd><pre data-field="payload">{{.PayloadJSON}}</pre></dd>
+              {{end}}
+              {{if .RefsJSON}}
+              <dt>refs</dt>
+              <dd><pre data-field="refs">{{.RefsJSON}}</pre></dd>
+              {{end}}
+              <dt>ids</dt>
+              <dd>
+                <ul class="ledger-id-list">
+                  {{if .RunID}}<li><span class="ledger-id-label">run</span> <code>{{.RunID}}</code></li>{{end}}
+                  {{if .StoryID}}<li><span class="ledger-id-label">story</span> <code>{{.StoryID}}</code></li>{{end}}
+                  {{if .SessionID}}<li><span class="ledger-id-label">session</span> <code>{{.SessionID}}</code></li>{{end}}
+                  {{if .ProjectID}}<li><span class="ledger-id-label">project</span> <code>{{.ProjectID}}</code></li>{{end}}
+                  {{if .WorkspaceID}}<li><span class="ledger-id-label">workspace</span> <code>{{.WorkspaceID}}</code></li>{{end}}
+                </ul>
+              </dd>
+            </dl>
+          </td>
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  {{if .HasNext}}
+  <nav class="panel-paginator" aria-label="Ledger pagination" data-field="ledger-paginator">
+    <a class="panel-paginator-link next" href="{{.NextURL}}" data-action="load-more">Load more</a>
+  </nav>
+  {{end}}
+  {{end}}
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

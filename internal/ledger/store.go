@@ -42,21 +42,25 @@ type AppendInput struct {
 	Refs        json.RawMessage
 }
 
-// ListFilter parameterises List with any subset of correlation ids
-// plus an optional kind. Empty fields are not constrained — a filter
-// with all fields empty would return every row, so callers must set at
-// least one selectable field. The Limit / Cursor pair paginates oldest
-// to newest; Cursor is the created_at|id of the last row from the
-// previous page.
+// ListFilter parameterises List with any subset of correlation ids,
+// an optional kind, an optional body substring, and an optional
+// created_at window. Empty fields are not constrained — a filter
+// with all fields empty would return every row, so callers must set
+// at least one selectable field. The Limit / Cursor pair paginates
+// oldest-to-newest; Cursor is the created_at|id of the last row from
+// the previous page.
 type ListFilter struct {
-	StoryID     string
-	ProjectID   string
-	WorkspaceID string
-	SessionID   string
-	RunID       string
-	Kind        string
-	Limit       int
-	Cursor      string
+	StoryID       string
+	ProjectID     string
+	WorkspaceID   string
+	SessionID     string
+	RunID         string
+	Kind          string
+	BodyContains  string    // case-insensitive substring match on body
+	CreatedAfter  time.Time // zero = no lower bound
+	CreatedBefore time.Time // zero = no upper bound
+	Limit         int
+	Cursor        string
 }
 
 // ListResult carries the rows + the next cursor (empty when the page
@@ -201,7 +205,9 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		strings.TrimSpace(f.WorkspaceID) == "" &&
 		strings.TrimSpace(f.SessionID) == "" &&
 		strings.TrimSpace(f.RunID) == "" &&
-		strings.TrimSpace(f.Kind) == "" {
+		strings.TrimSpace(f.Kind) == "" &&
+		strings.TrimSpace(f.BodyContains) == "" &&
+		f.CreatedAfter.IsZero() && f.CreatedBefore.IsZero() {
 		return ListResult{}, fmt.Errorf("ledger: at least one filter field required")
 	}
 	limit := f.Limit
@@ -229,6 +235,22 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	addCond("session_id", f.SessionID)
 	addCond("run_id", f.RunID)
 	addCond("kind", f.Kind)
+
+	if s := strings.TrimSpace(f.BodyContains); s != "" {
+		conds = append(conds, fmt.Sprintf("body ILIKE $%d", placeholder))
+		args = append(args, "%"+s+"%")
+		placeholder++
+	}
+	if !f.CreatedAfter.IsZero() {
+		conds = append(conds, fmt.Sprintf("created_at >= $%d", placeholder))
+		args = append(args, f.CreatedAfter.UTC())
+		placeholder++
+	}
+	if !f.CreatedBefore.IsZero() {
+		conds = append(conds, fmt.Sprintf("created_at <= $%d", placeholder))
+		args = append(args, f.CreatedBefore.UTC())
+		placeholder++
+	}
 
 	if strings.TrimSpace(f.Cursor) != "" {
 		// Cursor decodes as RFC3339Nano|id; rows past it are the next

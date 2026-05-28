@@ -45,19 +45,24 @@ type LedgerAppendRequest struct {
 	Refs        json.RawMessage `json:"refs,omitempty"`
 }
 
-// LedgerListRequest filters by any subset of correlation ids + kind.
-// At least one of these must be set so the verb never executes an
-// unfiltered scan over the table. Limit caps the page (server caps
-// at 2000); Cursor paginates oldest-to-newest.
+// LedgerListRequest filters by any subset of correlation ids, kind,
+// body substring, and a created_at window. At least one of these
+// must be set so the verb never executes an unfiltered scan over the
+// table. Limit caps the page (server caps at 2000); Cursor paginates
+// oldest-to-newest. CreatedAfter / CreatedBefore are RFC3339
+// timestamps; the portal /ledger page defaults to a 24-hour window.
 type LedgerListRequest struct {
-	StoryID     string `json:"story_id,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
-	RunID       string `json:"run_id,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
-	Cursor      string `json:"cursor,omitempty"`
+	StoryID       string `json:"story_id,omitempty"`
+	ProjectID     string `json:"project_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	RunID         string `json:"run_id,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	BodyContains  string `json:"body_contains,omitempty"`
+	CreatedAfter  string `json:"created_after,omitempty"`  // RFC3339
+	CreatedBefore string `json:"created_before,omitempty"` // RFC3339
+	Limit         int    `json:"limit,omitempty"`
+	Cursor        string `json:"cursor,omitempty"`
 }
 
 // LedgerListResponse carries the matched rows plus the next cursor
@@ -131,16 +136,32 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 			return nil, fmt.Errorf("ledger_list: bad request: %w", err)
 		}
 	}
-	res, err := ledgerStore.List(ctx, ledger.ListFilter{
-		StoryID:     req.StoryID,
-		ProjectID:   req.ProjectID,
-		WorkspaceID: req.WorkspaceID,
-		SessionID:   req.SessionID,
-		RunID:       req.RunID,
-		Kind:        req.Kind,
-		Limit:       req.Limit,
-		Cursor:      req.Cursor,
-	})
+	f := ledger.ListFilter{
+		StoryID:      req.StoryID,
+		ProjectID:    req.ProjectID,
+		WorkspaceID:  req.WorkspaceID,
+		SessionID:    req.SessionID,
+		RunID:        req.RunID,
+		Kind:         req.Kind,
+		BodyContains: req.BodyContains,
+		Limit:        req.Limit,
+		Cursor:       req.Cursor,
+	}
+	if s := strings.TrimSpace(req.CreatedAfter); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, fmt.Errorf("ledger_list: created_after: %w", err)
+		}
+		f.CreatedAfter = t
+	}
+	if s := strings.TrimSpace(req.CreatedBefore); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, fmt.Errorf("ledger_list: created_before: %w", err)
+		}
+		f.CreatedBefore = t
+	}
+	res, err := ledgerStore.List(ctx, f)
 	if err != nil {
 		return nil, err
 	}

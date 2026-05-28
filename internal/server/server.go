@@ -80,6 +80,7 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/projects", projectsHandler(cfg))
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
+	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 
 	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
 	// correlationMiddleware lifts X-Satellites-* headers onto request
