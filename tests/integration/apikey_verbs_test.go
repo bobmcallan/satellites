@@ -100,6 +100,9 @@ func TestAPIKeyVerbs_EndToEnd(t *testing.T) {
 		if minted.CreatedAt.IsZero() {
 			t.Fatalf("created_at unset")
 		}
+		if minted.Role != string(auth.APIKeyRoleExecutor) {
+			t.Fatalf("default role = %q, want %q", minted.Role, auth.APIKeyRoleExecutor)
+		}
 	})
 
 	t.Run("the minted key validates as the owner", func(t *testing.T) {

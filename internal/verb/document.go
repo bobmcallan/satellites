@@ -640,6 +640,11 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if d.Type != document.TypeStory {
 		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
 	}
+	if req.Status != nil {
+		if err := requireReviewerRole(ctx, "document_upsert"); err != nil {
+			return nil, err
+		}
+	}
 
 	var beforeEnv StoryEnvelope
 	beforeEnv = NewStoryEnvelope(d, "")

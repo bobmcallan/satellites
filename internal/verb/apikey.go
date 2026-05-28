@@ -36,11 +36,16 @@ import (
 // scope-enforcement is a separate workstream. Callers that supply
 // scopes get a round-tripped key today; tightening lands when the
 // substrate grows the column.
+//
+// Role defaults to `executor`. Minting `reviewer` via this verb
+// requires the caller to hold the admin user role; the server-internal
+// short-lived path goes through auth.Store.IssueReviewerKey instead.
 type APIKeyCreateRequest struct {
 	WorkspaceID string   `json:"workspace_id,omitempty"`
 	ProjectID   string   `json:"project_id,omitempty"`
 	AgentName   string   `json:"agent_name,omitempty"`
 	Scopes      []string `json:"scopes,omitempty"`
+	Role        string   `json:"role,omitempty"`
 }
 
 // APIKeyCreateResponse mirrors the shape declared in story
@@ -51,6 +56,7 @@ type APIKeyCreateResponse struct {
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	ProjectID   string    `json:"project_id,omitempty"`
 	AgentName   string    `json:"agent_name,omitempty"`
+	Role        string    `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -66,11 +72,13 @@ type APIKeyListRequest struct {
 // APIKeyRow is the redacted shape returned by apikey_list — never
 // includes the raw key (only visible at mint time).
 type APIKeyRow struct {
-	KeyID       string    `json:"key_id"`
-	WorkspaceID string    `json:"workspace_id,omitempty"`
-	ProjectID   string    `json:"project_id,omitempty"`
-	AgentName   string    `json:"agent_name,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	KeyID       string     `json:"key_id"`
+	WorkspaceID string     `json:"workspace_id,omitempty"`
+	ProjectID   string     `json:"project_id,omitempty"`
+	AgentName   string     `json:"agent_name,omitempty"`
+	Role        string     `json:"role"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
 // APIKeyListResponse wraps the list result.
@@ -150,9 +158,25 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		return nil, err
 	}
 
+	role, err := normalizeAPIKeyRole(req.Role, caller)
+	if err != nil {
+		return nil, err
+	}
+
 	agentName := strings.TrimSpace(req.AgentName)
-	keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())
-	rawKey, k, err := authStore.IssueAPIKey(ctx, keyID, caller.ID, projectID, agentName)
+	var rawKey string
+	var k *auth.APIKey
+	switch role {
+	case auth.APIKeyRoleReviewer:
+		rawKey, k, err = authStore.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
+			UserID:    caller.ID,
+			ProjectID: projectID,
+			AgentName: agentName,
+		})
+	default:
+		keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())
+		rawKey, k, err = authStore.IssueAPIKey(ctx, keyID, caller.ID, projectID, agentName)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("apikey_create: issue: %w", err)
 	}
@@ -163,8 +187,26 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		WorkspaceID: workspaceID,
 		ProjectID:   k.ProjectID,
 		AgentName:   k.AgentName,
+		Role:        string(k.Role),
 		CreatedAt:   k.CreatedAt,
 	})
+}
+
+// normalizeAPIKeyRole resolves the requested role and enforces the
+// admin-gate for reviewer minting. Empty input defaults to executor —
+// the bootstrap path and pre-role callers continue to work unchanged.
+func normalizeAPIKeyRole(requested string, caller *auth.User) (auth.APIKeyRole, error) {
+	switch strings.ToLower(strings.TrimSpace(requested)) {
+	case "", string(auth.APIKeyRoleExecutor):
+		return auth.APIKeyRoleExecutor, nil
+	case string(auth.APIKeyRoleReviewer):
+		if caller == nil || caller.Role != auth.RoleAdmin {
+			return "", fmt.Errorf("apikey_create: forbidden — minting reviewer role requires admin")
+		}
+		return auth.APIKeyRoleReviewer, nil
+	default:
+		return "", fmt.Errorf("apikey_create: unknown role %q (want executor|reviewer)", requested)
+	}
 }
 
 func invokeAPIKeyList(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -203,7 +245,9 @@ func invokeAPIKeyList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 			KeyID:     k.ID,
 			ProjectID: k.ProjectID,
 			AgentName: k.AgentName,
+			Role:      string(k.Role),
 			CreatedAt: k.CreatedAt,
+			ExpiresAt: k.ExpiresAt,
 		}
 		if workspaceFilter != "" || k.ProjectID != "" {
 			ws, err := workspaceIDForProject(ctx, k.ProjectID)

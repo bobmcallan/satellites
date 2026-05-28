@@ -25,11 +25,13 @@ import (
 // layer emits. Operators can append entries of any kind via
 // ledger_append; these are the names the substrate itself uses.
 const (
-	KindStoryCreated   = "story_created"
-	KindStoryUpdated   = "story_updated"
-	KindReviewFinding  = "review_finding"
-	KindSummaryUpdated = "summary_updated"
-	KindComment        = "comment"
+	KindStoryCreated       = "story_created"
+	KindStoryUpdated       = "story_updated"
+	KindReviewFinding      = "review_finding"
+	KindSummaryUpdated     = "summary_updated"
+	KindComment            = "comment"
+	KindReviewerKeyMinted  = "reviewer_key_minted"
+	KindReviewerKeyRevoked = "reviewer_key_revoked"
 )
 
 // Entry is one row of a story's ledger.

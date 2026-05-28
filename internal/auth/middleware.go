@@ -11,6 +11,7 @@ import (
 )
 
 type ctxKey struct{}
+type apiKeyRoleCtxKey struct{}
 
 // FromContext returns the authenticated user attached to the request
 // context, or nil if unauthenticated.
@@ -25,6 +26,24 @@ func FromContext(ctx context.Context) *User {
 // server-side verbs in-process during dev).
 func WithUser(ctx context.Context, u *User) context.Context {
 	return context.WithValue(ctx, ctxKey{}, u)
+}
+
+// WithAPIKeyRole stamps the api-key role onto ctx. Middleware sets
+// this on the api-key auth path so the verb layer can gate
+// status/ledger writes on executor-vs-reviewer without re-querying.
+// JWT and CLI-local paths leave the role unset; verbs treat absence
+// as "not behind an api-key gate" (humans + internal calls pass).
+func WithAPIKeyRole(ctx context.Context, role APIKeyRole) context.Context {
+	return context.WithValue(ctx, apiKeyRoleCtxKey{}, role)
+}
+
+// APIKeyRoleFromContext returns the api-key role attached to ctx, or
+// the zero value when none is set. Verbs distinguish three states:
+// empty (not api-key-authed — bypass), executor (gate trips), reviewer
+// (gate passes).
+func APIKeyRoleFromContext(ctx context.Context) APIKeyRole {
+	r, _ := ctx.Value(apiKeyRoleCtxKey{}).(APIKeyRole)
+	return r
 }
 
 // SetJWTSecret installs the OAuth access-token signing secret on the
@@ -84,7 +103,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		}
 
 		// api-key path.
-		u, err := s.ValidateKey(r.Context(), token)
+		u, role, err := s.ValidateKeyWithRole(r.Context(), token)
 		if err != nil {
 			if errors.Is(err, ErrInvalidKey) {
 				setWWWAuthenticate(w, r)
@@ -96,7 +115,9 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		r = r.WithContext(WithUser(r.Context(), u))
+		ctx := WithUser(r.Context(), u)
+		ctx = WithAPIKeyRole(ctx, role)
+		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	})
 }

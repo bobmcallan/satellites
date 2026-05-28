@@ -56,6 +56,9 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if ledgerStore == nil {
 		return nil, fmt.Errorf("ledger_append: store not configured")
 	}
+	if err := requireReviewerRole(ctx, "ledger_append"); err != nil {
+		return nil, err
+	}
 	var req LedgerAppendRequest
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &req); err != nil {

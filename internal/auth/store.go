@@ -27,6 +27,19 @@ const (
 	RoleAdmin Role = "admin"
 )
 
+// APIKeyRole enumerates the per-key role surface added by sty_25d5b21e.
+// Executor keys can edit story bodies; reviewer keys are the only ones
+// permitted to patch story status or append ledger entries. The split
+// is structural so the review subprocess can mint a short-lived
+// reviewer key, do its work, and revoke — without ever handing the
+// executor the ability to forge a transition.
+type APIKeyRole string
+
+const (
+	APIKeyRoleExecutor APIKeyRole = "executor"
+	APIKeyRoleReviewer APIKeyRole = "reviewer"
+)
+
 // User is a satellites operator.
 type User struct {
 	ID          string
@@ -37,13 +50,20 @@ type User struct {
 }
 
 // APIKey is a credential authenticating HTTP/MCP requests.
+//
+// Role is `executor` (default) or `reviewer`. ExpiresAt is set only
+// for short-lived reviewer keys minted by the review subprocess;
+// ValidateKey filters out rows past their expiry so revocation is
+// implicit when the TTL elapses.
 type APIKey struct {
 	ID        string
 	UserID    string
 	ProjectID string
 	AgentName string
+	Role      APIKeyRole
 	KeyHash   string
 	CreatedAt time.Time
+	ExpiresAt *time.Time
 	RevokedAt *time.Time
 }
 
@@ -173,7 +193,7 @@ func (s *Store) UpsertOAuthUser(ctx context.Context, provider, sub, email, displ
 // ordered newest-first. Used by the /settings/api-keys UI.
 func (s *Store) ListAPIKeysForUser(ctx context.Context, userID string) ([]APIKey, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-        SELECT id, user_id, COALESCE(project_id,''), agent_name, key_hash, created_at, revoked_at
+        SELECT id, user_id, COALESCE(project_id,''), agent_name, role, key_hash, created_at, expires_at, revoked_at
           FROM api_keys
          WHERE user_id = $1 AND revoked_at IS NULL
          ORDER BY created_at DESC
@@ -185,9 +205,11 @@ func (s *Store) ListAPIKeysForUser(ctx context.Context, userID string) ([]APIKey
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.UserID, &k.ProjectID, &k.AgentName, &k.KeyHash, &k.CreatedAt, &k.RevokedAt); err != nil {
+		var role string
+		if err := rows.Scan(&k.ID, &k.UserID, &k.ProjectID, &k.AgentName, &role, &k.KeyHash, &k.CreatedAt, &k.ExpiresAt, &k.RevokedAt); err != nil {
 			return nil, fmt.Errorf("auth: scan key: %w", err)
 		}
+		k.Role = APIKeyRole(role)
 		out = append(out, k)
 	}
 	return out, rows.Err()
@@ -222,21 +244,62 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (*User, error) {
 	return &u, nil
 }
 
-// IssueAPIKey mints a fresh random api-key for (user, project, agent).
-// Returns the raw key (only visible at issue time) and the row.
+// IssueAPIKey mints an `executor`-role api-key (the only role
+// available to operators via the apikey_create verb). Reviewer keys
+// go through IssueReviewerKey, which is server-internal.
 func (s *Store) IssueAPIKey(ctx context.Context, id, userID, projectID, agentName string) (string, *APIKey, error) {
 	rawKey, err := generateRawKey()
 	if err != nil {
 		return "", nil, err
 	}
-	return s.IssueAPIKeyWithRaw(ctx, id, userID, projectID, agentName, rawKey)
+	return s.issueWithRaw(ctx, id, userID, projectID, agentName, rawKey, APIKeyRoleExecutor, nil)
 }
 
-// IssueAPIKeyWithRaw inserts an api-key with a caller-supplied raw
-// value. Used by DevSeed to install predictable keys. Idempotent on
-// the key_hash unique index — a re-insert with the same raw key
-// returns the existing row.
+// IssueAPIKeyWithRaw inserts an executor-role api-key with a
+// caller-supplied raw value. Used by DevSeed to install predictable
+// keys. Idempotent on the key_hash unique index — a re-insert with
+// the same raw key returns the existing row.
 func (s *Store) IssueAPIKeyWithRaw(ctx context.Context, id, userID, projectID, agentName, rawKey string) (string, *APIKey, error) {
+	return s.issueWithRaw(ctx, id, userID, projectID, agentName, rawKey, APIKeyRoleExecutor, nil)
+}
+
+// IssueReviewerKeyInput is the server-internal mint surface for the
+// short-lived reviewer key the review subprocess wields. TTL is
+// caller-supplied so the orchestrator can pick the value from
+// server config; zero defaults to 5 minutes per the story.
+type IssueReviewerKeyInput struct {
+	UserID    string
+	ProjectID string
+	AgentName string
+	TTL       time.Duration
+}
+
+// IssueReviewerKey mints a `reviewer`-role key with an expiry set
+// from TTL. The verb-layer apikey_create cannot mint this role
+// (admin-gated); this is the path the review subprocess uses
+// server-internally. Mint/revoke audit-trail belongs to the caller
+// (the verb layer appends to ledger so auth stays narrow).
+func (s *Store) IssueReviewerKey(ctx context.Context, in IssueReviewerKeyInput) (string, *APIKey, error) {
+	if strings.TrimSpace(in.UserID) == "" {
+		return "", nil, fmt.Errorf("auth: reviewer key: user_id required")
+	}
+	ttl := in.TTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	rawKey, err := generateRawKey()
+	if err != nil {
+		return "", nil, err
+	}
+	id := fmt.Sprintf("apk_rev_%s", randomKeyIDSuffixAuth())
+	expires := time.Now().UTC().Add(ttl)
+	return s.issueWithRaw(ctx, id, in.UserID, in.ProjectID, in.AgentName, rawKey, APIKeyRoleReviewer, &expires)
+}
+
+// issueWithRaw is the single insert path for both executor and
+// reviewer keys. expiresAt is nil for executor keys; reviewer keys
+// always carry a value.
+func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentName, rawKey string, role APIKeyRole, expiresAt *time.Time) (string, *APIKey, error) {
 	hash := HashKey(rawKey)
 
 	var projectArg any
@@ -245,41 +308,65 @@ func (s *Store) IssueAPIKeyWithRaw(ctx context.Context, id, userID, projectID, a
 	}
 
 	if _, err := s.DB.ExecContext(ctx, `
-        INSERT INTO api_keys (id, user_id, project_id, agent_name, key_hash)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (key_hash) DO NOTHING
-    `, id, userID, projectArg, agentName, hash); err != nil {
+    `, id, userID, projectArg, agentName, string(role), hash, expiresAt); err != nil {
 		return "", nil, fmt.Errorf("auth: insert apikey: %w", err)
 	}
 
 	var k APIKey
+	var roleStr string
 	if err := s.DB.QueryRowContext(ctx, `
-        SELECT id, user_id, COALESCE(project_id,''), agent_name, key_hash, created_at, revoked_at
+        SELECT id, user_id, COALESCE(project_id,''), agent_name, role, key_hash, created_at, expires_at, revoked_at
           FROM api_keys WHERE key_hash = $1
-    `, hash).Scan(&k.ID, &k.UserID, &k.ProjectID, &k.AgentName, &k.KeyHash, &k.CreatedAt, &k.RevokedAt); err != nil {
+    `, hash).Scan(&k.ID, &k.UserID, &k.ProjectID, &k.AgentName, &roleStr, &k.KeyHash, &k.CreatedAt, &k.ExpiresAt, &k.RevokedAt); err != nil {
 		return "", nil, err
 	}
+	k.Role = APIKeyRole(roleStr)
 	return rawKey, &k, nil
 }
 
+func randomKeyIDSuffixAuth() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // ValidateKey looks up the user for a given raw api-key. Returns
-// ErrInvalidKey when the key is unknown or revoked.
+// ErrInvalidKey when the key is unknown, revoked, or expired.
+//
+// The role the key was minted under is not returned here — callers
+// that need to gate on role (verb-layer enforcement) use
+// ValidateKeyWithRole, which returns both. Keeping the plain shape
+// stable means existing call sites continue to compile.
 func (s *Store) ValidateKey(ctx context.Context, rawKey string) (*User, error) {
+	u, _, err := s.ValidateKeyWithRole(ctx, rawKey)
+	return u, err
+}
+
+// ValidateKeyWithRole is the role-aware counterpart to ValidateKey.
+// Used by the HTTP middleware so the api-key's role can be stamped
+// onto the request context for the verb layer.
+func (s *Store) ValidateKeyWithRole(ctx context.Context, rawKey string) (*User, APIKeyRole, error) {
 	hash := HashKey(rawKey)
 	var u User
+	var role string
 	err := s.DB.QueryRowContext(ctx, `
-        SELECT u.id, u.email, u.display_name, u.role, u.created_at
+        SELECT u.id, u.email, u.display_name, u.role, u.created_at, k.role
           FROM api_keys k
           JOIN users u ON u.id = k.user_id
-         WHERE k.key_hash = $1 AND k.revoked_at IS NULL
-    `, hash).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt)
+         WHERE k.key_hash = $1
+           AND k.revoked_at IS NULL
+           AND (k.expires_at IS NULL OR k.expires_at > now())
+    `, hash).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt, &role)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidKey
+		return nil, "", ErrInvalidKey
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &u, nil
+	return &u, APIKeyRole(role), nil
 }
 
 // RevokeKey sets revoked_at on the api-key matching the given id.
