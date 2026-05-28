@@ -2,8 +2,27 @@
 name: satellites_client_install
 scope: system
 tags: [kind:install-schema, v2]
+---
+# satellites · install schema
+
+The fenced `yaml` block below is the machine-readable contract the
+agent acts on. Server-side rendering fills every `\{\{name\}\}` with
+the caller-or-platform value before the body is returned. Two fields
+stay empty by design and are filled by named update steps in the
+load-context:
+
+- `default_config.project_id` — caller-resolved in load-context
+  Step 4 (`project_match`).
+- `default_config.auth.token` — filled by the `auth_bootstrap` flow.
+
+The CLI is read-only against `target_config_path`. The agent is the
+sole writer of that file (load-context Step 3).
+
+## Schema
+
+```yaml
 target_install_path: ./.satellites/satellites
-target_config_path: ./.satellites/satellites.toml
+target_config_path:  ./.satellites/satellites.toml
 default_config:
   server_url: "{{server_url}}"
   project_id: ""
@@ -21,23 +40,11 @@ install:
   cli_version:  "{{cli_version}}"
   download_url: https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}
   sha256_url:   https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}.sha256
----
-# satellites · install schema
-
-`default_config` is the literal TOML you — the agent — write to
-`target_config_path`. After server-side rendering, every key has a
-usable default. Two fields stay empty by design and are filled by
-named update steps in the load-context:
-
-- `project_id` — caller-resolved in load-context Step 4 (`project_match`).
-- `[auth].token` — filled by the `auth_bootstrap` flow.
-
-The CLI is read-only against `target_config_path`. The agent is the
-sole writer of that file (load-context Step 3).
+```
 
 ## Fields
 
-| Frontmatter key                  | Meaning                                                                                                            |
+| Schema key                       | Meaning                                                                                                            |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `target_install_path`            | Where to write the CLI binary (relative to the consumer project root).                                             |
 | `target_config_path`             | Where to write `satellites.toml`.                                                                                  |
@@ -52,7 +59,7 @@ sole writer of that file (load-context Step 3).
 | `auth_bootstrap.verb`            | Substrate verb dispatched under `kind=mcp_mint` — `apikey_create`. See the load-context bootstrap step.            |
 | `auth_bootstrap.env_hint`        | Env-var name carrying the bearer when callers prefer to inject it via environment rather than the TOML.            |
 | `install.cli_version`            | The CLI release this schema points at. Server-rendered from `{{cli_version}}`.                                     |
-| `install.download_url`           | URL to fetch the CLI binary from. Server-rendered.                                                                 |
+| `install.download_url`           | URL to fetch the CLI binary from. Server-rendered with `{{cli_version}}`, `{{os}}`, `{{arch}}`.                    |
 | `install.sha256_url`             | Matching sha256 manifest URL. Server-rendered.                                                                     |
 
 ## Variable substitution

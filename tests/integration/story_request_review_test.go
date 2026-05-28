@@ -380,7 +380,7 @@ story_types:
 
 func assertKind(t *testing.T, store *ledger.Store, storyID, kind string, want int) {
 	t.Helper()
-	entries, err := store.List(context.Background(), storyID, kind)
+	entries, err := store.ListByStory(context.Background(), storyID, kind)
 	if err != nil {
 		t.Fatalf("ledger list %s: %v", kind, err)
 	}

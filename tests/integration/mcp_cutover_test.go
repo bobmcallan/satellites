@@ -11,6 +11,7 @@ import (
 
 	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -67,6 +68,7 @@ func TestMCPCutover(t *testing.T) {
 			"document_get", "document_list", "document_count", "document_upsert", "document_delete",
 			"project_match", "project_create", "project_list", "project_get", "project_update",
 			"apikey_create", "apikey_list", "apikey_revoke",
+			"changelog_add", "changelog_list", "changelog_update", "changelog_delete",
 		}
 		if len(tools) != len(want) {
 			t.Fatalf("expected %d tools, got %d: %v", len(want), len(tools), tools)
@@ -112,6 +114,53 @@ func TestMCPCutover(t *testing.T) {
 		}
 		if len(got.UnresolvedVars) != 0 {
 			t.Fatalf("unresolved variables in install schema render: %+v", got.UnresolvedVars)
+		}
+	})
+
+	// Regression guard for sty_8da63e77: the production boot path
+	// (cmd/satellites-server/main.go) seeds documents with frontmatter
+	// stripped — only the body bytes after `---` reach the store. If
+	// the install schema lives in frontmatter, the agent reads a body
+	// with no machine-readable schema and the bootstrap silently falls
+	// back to host-repo grep. Mirror that strip here and assert the
+	// schema is still recoverable from the body alone.
+	t.Run("schema survives the production frontmatter-strip path", func(t *testing.T) {
+		raw := documents.ClientInstallMarkdown()
+		fm, body, err := frontmatter.Parse(raw)
+		if err != nil {
+			t.Fatalf("frontmatter parse: %v", err)
+		}
+		if fm.Name != "satellites_client_install" || fm.Scope != "system" {
+			t.Fatalf("frontmatter identity wrong: name=%q scope=%q", fm.Name, fm.Scope)
+		}
+		// Re-seed with body only (production behaviour) so the next
+		// dispatch reads the same row a freshly-booted server would.
+		if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(body), "system:seed", time.Now()); err != nil {
+			t.Fatalf("seed body-only: %v", err)
+		}
+		dispatched, err := verb.Dispatch(context.Background(), "document_get", json.RawMessage(
+			`{"name":"satellites_client_install","scope":"system","os":"linux","arch":"amd64","current_version":""}`,
+		))
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		var got verb.DocumentGetResponse
+		if err := json.Unmarshal(dispatched, &got); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"target_install_path: ./.satellites/satellites",
+			"target_config_path:  ./.satellites/satellites.toml",
+			"satellites-v0.0.21-linux-amd64",
+			"satellites-v0.0.21-linux-amd64.sha256",
+			"verb: apikey_create",
+		} {
+			if !strings.Contains(got.RenderedBody, want) {
+				t.Fatalf("rendered body missing %q after frontmatter strip:\n%s", want, got.RenderedBody)
+			}
+		}
+		if len(got.UnresolvedVars) != 0 {
+			t.Fatalf("unresolved variables after strip: %+v", got.UnresolvedVars)
 		}
 	})
 }

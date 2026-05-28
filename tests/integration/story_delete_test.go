@@ -142,7 +142,7 @@ func TestStoryDelete(t *testing.T) {
 		_ = json.Unmarshal(raw, &sResp)
 		s := sResp.Document
 
-		before, err := ledStore.List(ctx, s.ID, "")
+		before, err := ledStore.ListByStory(ctx, s.ID, "")
 		if err != nil || len(before) == 0 {
 			t.Fatalf("pre-condition: ledger list: %v / %d", err, len(before))
 		}
@@ -153,7 +153,7 @@ func TestStoryDelete(t *testing.T) {
 			t.Fatalf("delete: %v", err)
 		}
 
-		after, err := ledStore.List(ctx, s.ID, "")
+		after, err := ledStore.ListByStory(ctx, s.ID, "")
 		if err != nil {
 			t.Fatalf("post-delete list: %v", err)
 		}
