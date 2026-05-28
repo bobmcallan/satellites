@@ -62,6 +62,10 @@ func Build(cfg Config) http.Handler {
 	// session gate (matches /login as the other unauthenticated surface).
 	mux.HandleFunc("/changelog", changelogHandler(cfg))
 
+	// Public role-model documentation. Static — no store, no session
+	// gate; same unauthenticated surface as /changelog.
+	mux.HandleFunc("/help", helpHandler(cfg))
+
 	// OAuth Authorization Server endpoints (RFC 6749 + 7591 DCR + 7636
 	// PKCE). Public — DCR + authorize + token are unauthenticated by
 	// design; auth happens inside the flow (PKCE on the code exchange,

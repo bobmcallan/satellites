@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="/ledger" class="nav-item {{if eq .ActiveNav "ledger"}}active{{end}}" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/changelog" class="nav-item {{if eq .ActiveNav "changelog"}}active{{end}}" data-nav="changelog">CHANGELOG</a>
+    <a href="/help" class="nav-item {{if eq .ActiveNav "help"}}active{{end}}" data-nav="help">HELP</a>
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="help">
+  <section class="changelog-intro" data-section="help-intro">
+    <h2 class="section-heading">Roles</h2>
+    <p class="changelog-lede">Three roles act on a story. Each has a fixed boundary the server enforces at the verb layer — not by convention, and not something an agent can talk its way around.</p>
+  </section>
+
+  <section class="panel" data-section="role" data-role="executor">
+    <h2 class="changelog-service" data-field="role-name">Executor</h2>
+    <p>The agent doing the work. It holds an executor api-key. It can create stories and edit story bodies. It <strong>cannot</strong> change a story's status or write the ledger.</p>
+    <p>When it judges its work ready, it calls <code>story_request_review</code>. It does not mark its own work complete — it signals ready, and the gate decides.</p>
+  </section>
+
+  <section class="panel" data-section="role" data-role="reviewer">
+    <h2 class="changelog-service" data-field="role-name">Reviewer</h2>
+    <p>The gate. The only role that can change a story's status and append the ledger.</p>
+    <p>A reviewer key is minted for a single review, used to run the gate skill, then revoked. The agent never holds a reviewer key, so it can never approve its own work.</p>
+  </section>
+
+  <section class="panel" data-section="role" data-role="operator">
+    <h2 class="changelog-service" data-field="role-name">Operator</h2>
+    <p>The human. Acting through the CLI or the signed-in portal, the operator has full access.</p>
+    <p>The role gate applies only to api-key callers, so operator actions pass through it.</p>
+  </section>
+
+  <section class="changelog-intro" data-section="gate-intro">
+    <h2 class="section-heading">The status gate</h2>
+    <p class="changelog-lede">A story advances only when a reviewer accepts it. Status never moves because an agent decided it was done.</p>
+  </section>
+
+  <section class="panel" data-section="gate">
+    <ul>
+      <li>The executor edits the body and calls <code>story_request_review</code>.</li>
+      <li>The verb mints a short-lived reviewer key and runs the gate skill named by the workflow for the current status.</li>
+      <li>On <strong>accept</strong>, the status flips to the next state and the ledger records it. On <strong>reject</strong>, the status stays put and the rejection notes land in the ledger.</li>
+      <li>The reviewer key is revoked when the review ends.</li>
+    </ul>
+    <p>This is why a stalled or over-confident agent cannot declare success: it has no key that can move the status.</p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

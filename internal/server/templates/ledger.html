@@ -16,7 +16,7 @@
     <a href="/ledger" class="nav-item {{if eq .ActiveNav "ledger"}}active{{end}}" data-nav="ledger">LEDGER</a>
     <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
     <a href="/changelog" class="nav-item" data-nav="changelog">CHANGELOG</a>
-    <a href="#" class="nav-item disabled">HELP</a>
+    <a href="/help" class="nav-item {{if eq .ActiveNav "help"}}active{{end}}" data-nav="help">HELP</a>
     {{template "user_menu" .}}
   </nav>
 </header>

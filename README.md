@@ -89,6 +89,16 @@ State between executors and reviewers passes through the story markdown. There i
 
 Only reviewers can change story status. That is the gate, and it is structural.
 
+Three roles act on a story, and the server enforces the boundary at the verb layer:
+
+| Role | Can do | Cannot do |
+| --- | --- | --- |
+| **Executor** (the agent) | Create stories, edit story bodies, call `story_request_review` | Change a story's status; write the ledger |
+| **Reviewer** | Change status; append the ledger | Run as the executor — its key is minted per review and revoked after |
+| **Operator** (human, CLI or portal) | Full access | — |
+
+The executor holds a body-only api-key. To advance a story it calls `story_request_review`, which mints a short-lived reviewer key, runs the gate skill, flips the status on accept, and revokes the key. The agent never holds a reviewer key, so it cannot approve its own work. The operator acts through the CLI or the signed-in portal; the role gate applies only to api-key callers, so operator actions pass.
+
 A reviewer is an interface returning `accept | reject` with notes, against a contract authored by the operator. Reviewer implementations:
 
 - `agent` — an LLM judging against the contract
