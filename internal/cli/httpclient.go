@@ -6,11 +6,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 )
+
+// correlationEnvHeaders lists the env-var → HTTP-header pairs the CLI
+// transport stamps onto every outbound request when the env var is
+// set. The `satellites story run` driver (sty_7af47a91) sets these on
+// itself and on the spawned claude subprocess so every verb call —
+// from inside this CLI process or from the dispatched agent — carries
+// the same run / session / story / project / workspace correlation
+// the satellites-server middleware (sty_0006f5f5) lifts onto request
+// context. The arbor LedgerHandler then tags every log row written
+// inside that request with these ids, so the portal `/ledger` page
+// can isolate one run end-to-end.
+//
+// Header names mirror the constants in internal/correlation; kept
+// here as literal strings to honour the CLI layering rule (no
+// internal/correlation import from cli/).
+var correlationEnvHeaders = [...]struct {
+	Env, Header string
+}{
+	{"SATELLITES_RUN_ID", "X-Satellites-Run-ID"},
+	{"SATELLITES_SESSION_ID", "X-Satellites-Session-ID"},
+	{"SATELLITES_STORY_ID", "X-Satellites-Story-ID"},
+	{"SATELLITES_PROJECT_ID", "X-Satellites-Project-ID"},
+	{"SATELLITES_WORKSPACE_ID", "X-Satellites-Workspace-ID"},
+}
 
 // httpDispatch sends a verb call to a remote satellites-server over
 // POST /api/v1/exec/<name>. The api-key in cfg.Auth.Token authenticates
@@ -42,6 +67,11 @@ func httpDispatch(cfg cliconfig.Config, name string, req json.RawMessage) (json.
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+cfg.Auth.Token)
 	httpReq.Header.Set("Content-Type", "application/json")
+	for _, p := range correlationEnvHeaders {
+		if v := strings.TrimSpace(os.Getenv(p.Env)); v != "" {
+			httpReq.Header.Set(p.Header, v)
+		}
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(httpReq)

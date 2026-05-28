@@ -168,24 +168,27 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 	return json.Marshal(LedgerListResponse{Entries: res.Entries, NextCursor: res.NextCursor})
 }
 
-// requireLedgerAppendRole gates ledger_append. The reviewer role keeps
-// its full append rights (any kind); the runner role may only append
-// log-kind rows (the arbor LedgerHandler path emits log:info, log:warn,
-// etc.); other roles (executor) are refused. Unauthenticated callers
-// (CLI in-process, JWT portal users with no api-key context) pass —
-// they're gated by a separate membership check upstream.
+// requireLedgerAppendRole gates ledger_append. Reviewer keeps its
+// full append rights across every kind. Runner and executor keys may
+// only append log-kind rows — the operator-observability path (the
+// `satellites story run` driver, sty_7af47a91) writes `log:info` /
+// `log:warn` events from the spawned `claude -p` stream; other kinds
+// (status transitions, review findings) stay reviewer-only.
+// Unauthenticated callers (CLI in-process, JWT portal users with no
+// api-key context) pass — they're gated by a separate membership
+// check upstream.
 func requireLedgerAppendRole(ctx context.Context, kind string) error {
 	role := auth.APIKeyRoleFromContext(ctx)
 	switch role {
 	case "", auth.APIKeyRoleReviewer:
 		return nil
-	case auth.APIKeyRoleRunner:
+	case auth.APIKeyRoleRunner, auth.APIKeyRoleExecutor:
 		if strings.HasPrefix(kind, ledger.LogKindPrefix) {
 			return nil
 		}
-		return fmt.Errorf("ledger_append: %w: runner-role api-key may only append log-kind rows (kind=%s)", ErrForbidden, kind)
+		return fmt.Errorf("ledger_append: %w: %s-role api-key may only append log-kind rows (kind=%s)", ErrForbidden, role, kind)
 	}
-	return fmt.Errorf("ledger_append: %w: requires reviewer-role or runner-role api-key (got %s)", ErrForbidden, role)
+	return fmt.Errorf("ledger_append: %w: requires reviewer / runner / executor api-key (got %s)", ErrForbidden, role)
 }
 
 // actorFromContext returns the authenticated user id when present
