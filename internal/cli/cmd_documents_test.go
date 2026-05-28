@@ -95,3 +95,57 @@ func TestPlanDocumentsUpload_ScopeMissingIDs(t *testing.T) {
 		t.Fatalf("expected workspace_id-missing error, got %v", err)
 	}
 }
+
+func TestPlanUpload_SkillDefaultsToSkillType(t *testing.T) {
+	stagingRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stagingRoot, "my-skill.md"),
+		[]byte("---\nscope: workspace\nworkspace_id: wksp_one\n---\n# body\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	targets, err := planUpload(stagingRoot, "skill")
+	if err != nil {
+		t.Fatalf("planUpload: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected one target, got %d", len(targets))
+	}
+	if targets[0].Type != "skill" {
+		t.Errorf("Type = %q, want skill", targets[0].Type)
+	}
+}
+
+func TestPlanUpload_FrontmatterTypeOverridesDefault(t *testing.T) {
+	stagingRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stagingRoot, "doc.md"),
+		[]byte("---\nscope: workspace\nworkspace_id: wksp_one\ntype: document\n---\n# body\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	targets, err := planUpload(stagingRoot, "skill")
+	if err != nil {
+		t.Fatalf("planUpload: %v", err)
+	}
+	if targets[0].Type != "document" {
+		t.Errorf("frontmatter type override ignored: %q", targets[0].Type)
+	}
+}
+
+func TestMarshalUpsertRequest_TypePassthrough(t *testing.T) {
+	target := documentTarget{
+		Scope:       "workspace",
+		WorkspaceID: "wksp_one",
+		Name:        "my-skill",
+		Type:        "skill",
+		Body:        "# body",
+		Tags:        []string{"kind:test"},
+	}
+	raw, err := marshalUpsertRequest(target)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"skill"`) {
+		t.Errorf("payload missing type:\"skill\": %s", raw)
+	}
+	if !strings.Contains(string(raw), `"workspace_id":"wksp_one"`) {
+		t.Errorf("payload missing workspace_id: %s", raw)
+	}
+}

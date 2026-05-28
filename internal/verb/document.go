@@ -512,6 +512,7 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	}
 	doc, v, err := documentStore.Upsert(ctx, document.UpsertInput{
 		Key:       key,
+		Type:      req.Type,
 		Body:      req.Body,
 		CreatedBy: callerUserID(ctx),
 	}, time.Now().UTC())

@@ -52,6 +52,10 @@ go.work.sum
 # Each .md is uploaded via document_upsert; the local file is the
 # authoring + git-tracked copy of the substrate document.
 !.satellites/principles/
+# File-based skills at .satellites/skills/ are version-controlled.
+# Each .md is uploaded as a type:"skill" document; the agent then
+# materialises substrate-side skills into .claude/skills/<name>/SKILL.md.
+!.satellites/skills/
 
 # Operator-supplied config — may contain OAuth client secrets. The
 # `*.example` templates stay in git; the live files do not.
