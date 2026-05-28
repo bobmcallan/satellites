@@ -106,6 +106,14 @@ func main() {
 	}
 	verb.SetReviewerRegistry(reviewer.NewRegistry(reviewerDefs, reviewerClient))
 
+	// story_request_review verb runs gate skills via `claude -p`. The
+	// dispatcher is wired here so the verb has a transport on boot;
+	// individual test setups inject a stub via verb.SetGateDispatcher.
+	verb.SetGateDispatcher(verb.ClaudeCLIGateDispatcher{
+		DefaultTimeout: 5 * time.Minute,
+	})
+	arbor.Info("gate dispatcher wired (claude -p)")
+
 	// Document substrate + system-seed registry: wire stores then
 	// reconcile each embedded artifact. ReconcileSystemSeed is
 	// idempotent — a no-op when the system_seeds.embedded_hash matches

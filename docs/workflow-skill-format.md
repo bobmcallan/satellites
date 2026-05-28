@@ -74,9 +74,32 @@ makes the rendered version harder to read than the file itself.
 
 ## Resolution
 
-The `request_review` verb (sty_b8c5c23f) reads the project config to
-map the story's type to a workflow-skill path, then calls
-`workflow.Parse` on the file's contents. The parsed state machine is
-the source of truth for the transition that follows — the verb
-gates on `FindTransition(from, to)` before dispatching the named
-reviewer skill.
+The `story_request_review` verb (sty_b8c5c23f) drives every status
+transition:
+
+1. Read the story by id; derive `story_type` from the `category` field.
+2. Read the project-scoped `project-config` document; look up the
+   `workflow_skill` path for the story type.
+3. Read the workflow-skill file from disk and parse it through
+   `internal/workflow`.
+4. Pick the transition from `current_status`:
+   - **Declarative** (default): exactly one outgoing edge with a
+     non-empty `reviewer_skill`. Multiple gated edges error out — use
+     `dynamic: true` to disambiguate.
+   - **Dynamic** (`dynamic: true` on any outgoing edge): the workflow
+     skill itself is dispatched and returns `next_status` in its JSON
+     output. The returned status must reference a declared outgoing
+     edge.
+5. Mint a short-lived reviewer api-key (see sty_25d5b21e) scoped to
+   the story; the executor calling the verb never sees this key.
+6. Dispatch the gate skill via the configured `GateDispatcher`
+   (`claude -p --skill <name>` in production). Story body + recent
+   ledger arrive on stdin; the reviewer key is exported as
+   `SATELLITES_REVIEWER_API_KEY`.
+7. Expect one JSON object back: `{decision: accept|reject,
+   notes, next_status?}`. Anything else is a dispatcher-level error.
+8. On `accept`: patch the story's status under reviewer-role context
+   and append `review_accept` + `status_transition` ledger rows. On
+   `reject`: append `review_reject` only — status unchanged.
+9. Revoke the reviewer key (always — `defer`-driven so a panic in the
+   dispatch still cleans up).
