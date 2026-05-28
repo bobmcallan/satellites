@@ -81,37 +81,34 @@
       <thead>
         <tr>
           <th class="ledger-col-time">timestamp</th>
-          <th class="ledger-col-level">level</th>
           <th class="ledger-col-kind">kind</th>
           <th class="ledger-col-source">source</th>
           <th class="ledger-col-actor">actor</th>
-          <th class="ledger-col-body">body</th>
         </tr>
       </thead>
       <tbody>
         {{range .Entries}}
-        <tr class="ledger-row" data-row="ledger-entry" data-entry-id="{{.ID}}" x-data="{ open: false }">
+        <tr class="ledger-row {{if .HasExpand}}is-expandable{{end}}"
+            data-row="ledger-entry"
+            data-entry-id="{{.ID}}"
+            x-data="{ open: false }"
+            @click="open = !open"
+            :aria-expanded="open">
           <td class="ledger-col-time" data-field="timestamp">{{.Timestamp}}</td>
-          <td class="ledger-col-level" data-field="level">{{if .Level}}<span class="ledger-level ledger-level-{{.Level}}">{{.Level}}</span>{{end}}</td>
-          <td class="ledger-col-kind" data-field="kind">{{.Kind}}</td>
+          <td class="ledger-col-kind" data-field="kind">
+            <span class="ledger-kind {{if .Level}}ledger-kind-{{.Level}}{{end}}">{{.Kind}}</span>
+          </td>
           <td class="ledger-col-source" data-field="source">{{.Source}}</td>
           <td class="ledger-col-actor" data-field="actor">{{.Actor}}</td>
-          <td class="ledger-col-body" data-field="body">
-            {{if .HasExpand}}
-            <button type="button" class="ledger-body-toggle" data-action="toggle" @click="open = !open" :aria-expanded="open">
-              <span class="ledger-body-trunc">{{.BodyTrunc}}</span>
-            </button>
-            {{else}}
-            <span class="ledger-body-trunc">{{.BodyTrunc}}</span>
-            {{end}}
-          </td>
         </tr>
         {{if .HasExpand}}
         <tr class="ledger-row-expand" x-show="open" data-row="ledger-entry-expand">
-          <td colspan="6">
+          <td colspan="4">
             <dl class="ledger-detail">
+              {{if .BodyFull}}
               <dt>body</dt>
               <dd><pre class="ledger-pre" data-field="body-full">{{.BodyFull}}</pre></dd>
+              {{end}}
               {{if .PayloadJSON}}
               <dt>payload</dt>
               <dd><pre class="ledger-pre ledger-pre-json" data-field="payload">{{.PayloadJSON}}</pre></dd>

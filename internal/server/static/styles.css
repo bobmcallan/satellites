@@ -1105,36 +1105,17 @@ button.status-button[disabled] {
   vertical-align: top;
 }
 .ledger-col-time { white-space: nowrap; color: #aaa; font-family: ui-monospace, monospace; }
-.ledger-col-level { white-space: nowrap; }
-.ledger-col-kind { white-space: nowrap; color: #ccc; }
+.ledger-col-kind { white-space: nowrap; }
 .ledger-col-source { color: #aaa; font-family: ui-monospace, monospace; }
 .ledger-col-actor { color: #888; }
-.ledger-col-body { max-width: 32rem; }
-.ledger-level {
-  display: inline-block;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0.05rem 0.45rem;
-  border: 1px solid #333;
-  border-radius: 3px;
-  color: #aaa;
-}
-.ledger-level-info  { border-color: #2a4a6a; color: #6aa7d8; }
-.ledger-level-warn  { border-color: #6a5a2a; color: #e0b85e; }
-.ledger-level-error { border-color: #6a2a2a; color: #f87171; }
-.ledger-level-debug { border-color: #444; color: #888; }
-.ledger-body-toggle {
-  background: transparent;
-  border: none;
-  color: #e0e0e0;
-  cursor: pointer;
-  text-align: left;
-  padding: 0;
-  font: inherit;
-}
-.ledger-body-toggle:hover { color: #4ade80; }
-.ledger-body-trunc { display: inline; }
+.ledger-kind { color: #ccc; }
+.ledger-kind-info  { color: #6aa7d8; }
+.ledger-kind-warn  { color: #e0b85e; }
+.ledger-kind-error { color: #f87171; }
+.ledger-kind-debug { color: #888; }
+.ledger-row.is-expandable { cursor: pointer; }
+.ledger-row.is-expandable:hover { background: #0f0f0f; }
+.ledger-row.is-expandable[aria-expanded="true"] { background: #0f0f0f; }
 .ledger-row-expand td { background: #0a0a0a; padding: 0.75rem 0.6rem; }
 .ledger-detail {
   display: grid;
