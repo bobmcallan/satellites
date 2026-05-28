@@ -52,17 +52,17 @@ type LedgerAppendRequest struct {
 // oldest-to-newest. CreatedAfter / CreatedBefore are RFC3339
 // timestamps; the portal /ledger page defaults to a 24-hour window.
 type LedgerListRequest struct {
-	StoryID       string `json:"story_id,omitempty"`
-	ProjectID     string `json:"project_id,omitempty"`
-	WorkspaceID   string `json:"workspace_id,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	RunID         string `json:"run_id,omitempty"`
-	Kind          string `json:"kind,omitempty"`
-	BodyContains  string `json:"body_contains,omitempty"`
-	CreatedAfter  string `json:"created_after,omitempty"`  // RFC3339
-	CreatedBefore string `json:"created_before,omitempty"` // RFC3339
-	Limit         int    `json:"limit,omitempty"`
-	Cursor        string `json:"cursor,omitempty"`
+	StoryID         string   `json:"story_id,omitempty"`
+	ProjectID       string   `json:"project_id,omitempty"`
+	WorkspaceID     string   `json:"workspace_id,omitempty"`
+	SessionID       string   `json:"session_id,omitempty"`
+	RunID           string   `json:"run_id,omitempty"`
+	Kind            string   `json:"kind,omitempty"`
+	BodyContainsAny []string `json:"body_contains_any,omitempty"` // OR'd ILIKE terms on body
+	CreatedAfter    string   `json:"created_after,omitempty"`     // RFC3339
+	CreatedBefore   string   `json:"created_before,omitempty"`    // RFC3339
+	Limit           int      `json:"limit,omitempty"`
+	Cursor          string   `json:"cursor,omitempty"`
 }
 
 // LedgerListResponse carries the matched rows plus the next cursor
@@ -137,15 +137,15 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 		}
 	}
 	f := ledger.ListFilter{
-		StoryID:      req.StoryID,
-		ProjectID:    req.ProjectID,
-		WorkspaceID:  req.WorkspaceID,
-		SessionID:    req.SessionID,
-		RunID:        req.RunID,
-		Kind:         req.Kind,
-		BodyContains: req.BodyContains,
-		Limit:        req.Limit,
-		Cursor:       req.Cursor,
+		StoryID:         req.StoryID,
+		ProjectID:       req.ProjectID,
+		WorkspaceID:     req.WorkspaceID,
+		SessionID:       req.SessionID,
+		RunID:           req.RunID,
+		Kind:            req.Kind,
+		BodyContainsAny: req.BodyContainsAny,
+		Limit:           req.Limit,
+		Cursor:          req.Cursor,
 	}
 	if s := strings.TrimSpace(req.CreatedAfter); s != "" {
 		t, err := time.Parse(time.RFC3339, s)

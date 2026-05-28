@@ -1,9 +1,8 @@
 // Portal /ledger page (sty_becb7019). Renders evidence ledger rows
-// filtered by any subset of project_id / workspace_id / session_id /
-// story_id / run_id / kind / body_contains and a created_at window
-// (default last 24h). Filters are mirrored to query params so the URL
-// is shareable; pagination uses the existing ledger_list cursor with a
-// load-more button.
+// filtered by a single search box (key:value tokens + free-text body
+// terms) plus a created_at window (default last 24h). The URL carries
+// the parsed filter so deep links are shareable; pagination uses the
+// existing ledger_list cursor with a load-more button.
 //
 // Transport layering: this file does NOT import internal/ledger.
 // pr_mcp_cli_shared_path enforces that transports go through
@@ -35,35 +34,30 @@ const (
 	ledgerLogKindPrefix     = "log:"
 )
 
-// ledgerListInput is the parsed-query form of the ledger filter,
+// ledgerListInput is the parsed-search form of the ledger filter,
 // expressed in the verb's wire shape so dispatchLedgerList can pass
 // it straight through.
 type ledgerListInput struct {
-	ProjectID     string
-	WorkspaceID   string
-	SessionID     string
-	StoryID       string
-	RunID         string
-	Kind          string
-	BodyContains  string
-	CreatedAfter  time.Time
-	CreatedBefore time.Time
-	Cursor        string
+	ProjectID       string
+	WorkspaceID     string
+	SessionID       string
+	StoryID         string
+	RunID           string
+	Kind            string
+	BodyContainsAny []string
+	CreatedAfter    time.Time
+	CreatedBefore   time.Time
+	Cursor          string
 }
 
 func (in ledgerListInput) isEmpty() bool {
 	return in.ProjectID == "" && in.WorkspaceID == "" && in.SessionID == "" &&
-		in.StoryID == "" && in.RunID == "" && in.Kind == "" && in.BodyContains == ""
+		in.StoryID == "" && in.RunID == "" && in.Kind == "" &&
+		len(in.BodyContainsAny) == 0
 }
 
 type ledgerFilterView struct {
-	ProjectID     string
-	WorkspaceID   string
-	SessionID     string
-	StoryID       string
-	RunID         string
-	Kind          string
-	BodyContains  string
+	Search        string // raw search-box value, echoed back into the input
 	CreatedAfter  string // value to put back into <input type="datetime-local">
 	CreatedBefore string
 }
@@ -72,8 +66,8 @@ type ledgerEntryView struct {
 	ID          string
 	Timestamp   string
 	Kind        string
-	Level       string // derived: log:info → "info", "story_created" → ""
-	Source      string // first non-empty of run / story / session id, with a label
+	Level       string
+	Source      string
 	RunID       string
 	StoryID     string
 	SessionID   string
@@ -118,18 +112,32 @@ func ledgerHandler(cfg Config) http.HandlerFunc {
 		ctx := withSessionUser(r.Context(), cfg, userID)
 
 		q := r.URL.Query()
-		filter, vView := parseLedgerFilter(q)
+		searchRaw := q.Get("q")
+		filter := parseLedgerSearch(searchRaw)
 		filter.Cursor = q.Get("cursor")
+
+		filterView := ledgerFilterView{Search: searchRaw}
+		if s := strings.TrimSpace(q.Get("created_after")); s != "" {
+			if t, ok := parseFlexibleTime(s); ok {
+				filter.CreatedAfter = t
+				filterView.CreatedAfter = t.Format(ledgerCreatedFormatHTML)
+			}
+		}
+		if s := strings.TrimSpace(q.Get("created_before")); s != "" {
+			if t, ok := parseFlexibleTime(s); ok {
+				filter.CreatedBefore = t
+				filterView.CreatedBefore = t.Format(ledgerCreatedFormatHTML)
+			}
+		}
 
 		data := ledgerPageData{
 			Title:       "ledger · satellites",
-			Filter:      vView,
+			Filter:      filterView,
 			ActiveNav:   "ledger",
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
 			Version:     versionString(),
 		}
-		// User chip — best-effort, mirrors other pages.
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
 				data.UserEmail = u.Email
@@ -138,8 +146,9 @@ func ledgerHandler(cfg Config) http.HandlerFunc {
 			}
 		}
 
-		// If the operator hasn't named any filter (and no time window was
-		// provided), default to the last 24h so the table is bounded.
+		// Default the time window to last 24h when the operator has
+		// supplied no filters at all — otherwise the table is bounded by
+		// whatever they typed.
 		if filter.isEmpty() && filter.CreatedAfter.IsZero() && filter.CreatedBefore.IsZero() {
 			filter.CreatedAfter = time.Now().Add(-ledgerDefaultWindowHrs * time.Hour).UTC()
 			data.Filter.CreatedAfter = filter.CreatedAfter.Format(ledgerCreatedFormatHTML)
@@ -165,41 +174,41 @@ func ledgerHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// parseLedgerFilter pulls the structured filter out of the query
-// string. The form-view duplicates the filter for the template (which
-// renders string values back into the input fields).
-func parseLedgerFilter(q url.Values) (ledgerListInput, ledgerFilterView) {
-	in := ledgerListInput{
-		ProjectID:    strings.TrimSpace(q.Get("project_id")),
-		WorkspaceID:  strings.TrimSpace(q.Get("workspace_id")),
-		SessionID:    strings.TrimSpace(q.Get("session_id")),
-		StoryID:      strings.TrimSpace(q.Get("story_id")),
-		RunID:        strings.TrimSpace(q.Get("run_id")),
-		Kind:         strings.TrimSpace(q.Get("kind")),
-		BodyContains: strings.TrimSpace(q.Get("body_contains")),
-	}
-	v := ledgerFilterView{
-		ProjectID:    in.ProjectID,
-		WorkspaceID:  in.WorkspaceID,
-		SessionID:    in.SessionID,
-		StoryID:      in.StoryID,
-		RunID:        in.RunID,
-		Kind:         in.Kind,
-		BodyContains: in.BodyContains,
-	}
-	if s := strings.TrimSpace(q.Get("created_after")); s != "" {
-		if t, ok := parseFlexibleTime(s); ok {
-			in.CreatedAfter = t
-			v.CreatedAfter = t.Format(ledgerCreatedFormatHTML)
+// ledgerSearchKeys is the set of `key:value` tokens the search input
+// recognises as structured filters. Tokens whose key is unknown fall
+// through to the free-text body-search bucket so a typo doesn't
+// silently match nothing.
+var ledgerSearchKeys = map[string]func(in *ledgerListInput, v string){
+	"project_id":   func(in *ledgerListInput, v string) { in.ProjectID = v },
+	"workspace_id": func(in *ledgerListInput, v string) { in.WorkspaceID = v },
+	"session_id":   func(in *ledgerListInput, v string) { in.SessionID = v },
+	"story_id":     func(in *ledgerListInput, v string) { in.StoryID = v },
+	"run_id":       func(in *ledgerListInput, v string) { in.RunID = v },
+	"kind":         func(in *ledgerListInput, v string) { in.Kind = v },
+}
+
+// parseLedgerSearch splits the search-box value into structured
+// filters and a free-text body-search bucket.
+//
+// Tokens are whitespace-separated. A token of shape `<key>:<value>`
+// where key is in ledgerSearchKeys becomes the corresponding filter.
+// Any other token (including unknown-key forms) joins the body-search
+// list — the store ORs those together so `Principle initialisation`
+// matches rows whose body contains either word.
+func parseLedgerSearch(q string) ledgerListInput {
+	in := ledgerListInput{}
+	for _, tok := range strings.Fields(q) {
+		if idx := strings.Index(tok, ":"); idx > 0 {
+			k := strings.ToLower(tok[:idx])
+			v := tok[idx+1:]
+			if setter, ok := ledgerSearchKeys[k]; ok {
+				setter(&in, v)
+				continue
+			}
 		}
+		in.BodyContainsAny = append(in.BodyContainsAny, tok)
 	}
-	if s := strings.TrimSpace(q.Get("created_before")); s != "" {
-		if t, ok := parseFlexibleTime(s); ok {
-			in.CreatedBefore = t
-			v.CreatedBefore = t.Format(ledgerCreatedFormatHTML)
-		}
-	}
-	return in, v
+	return in
 }
 
 // parseFlexibleTime accepts either an HTML <input type="datetime-local">
@@ -216,20 +225,17 @@ func parseFlexibleTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// dispatchLedgerList routes the typed filter through the verb layer
-// so the same code-path the MCP/HTTP transports use is exercised on
-// the portal page.
 func dispatchLedgerList(ctx context.Context, in ledgerListInput) (verb.LedgerListResponse, error) {
 	req := verb.LedgerListRequest{
-		ProjectID:    in.ProjectID,
-		WorkspaceID:  in.WorkspaceID,
-		SessionID:    in.SessionID,
-		StoryID:      in.StoryID,
-		RunID:        in.RunID,
-		Kind:         in.Kind,
-		BodyContains: in.BodyContains,
-		Limit:        ledgerPageSize,
-		Cursor:       in.Cursor,
+		ProjectID:       in.ProjectID,
+		WorkspaceID:     in.WorkspaceID,
+		SessionID:       in.SessionID,
+		StoryID:         in.StoryID,
+		RunID:           in.RunID,
+		Kind:            in.Kind,
+		BodyContainsAny: in.BodyContainsAny,
+		Limit:           ledgerPageSize,
+		Cursor:          in.Cursor,
 	}
 	if !in.CreatedAfter.IsZero() {
 		req.CreatedAfter = in.CreatedAfter.UTC().Format(time.RFC3339)
@@ -255,14 +261,7 @@ func dispatchLedgerList(ctx context.Context, in ledgerListInput) (verb.LedgerLis
 // renderLedgerEntries shapes verb-response rows for the template.
 // Long bodies are truncated for the table; the full body and the
 // JSON-pretty payload/refs ride along for the row's expand panel.
-//
-// The input is verb.LedgerListResponse.Entries — the element type is
-// ledger.Entry but pr_mcp_cli_shared_path keeps the internal/ledger
-// import out of this package, so we range over the slice without
-// naming the element type.
 func renderLedgerEntries(entries any) []ledgerEntryView {
-	// Marshal-roundtrip the entries into a transport-shaped struct local
-	// to this package so we never name internal/ledger types directly.
 	out := []ledgerEntryView{}
 	b, err := json.Marshal(entries)
 	if err != nil {
@@ -359,14 +358,9 @@ func prettyJSON(raw []byte) (string, bool) {
 	return s, true
 }
 
-// buildLedgerURL preserves every filter param on the current URL and
-// substitutes the cursor — used by the "Load more" link.
 func buildLedgerURL(q url.Values, cursor string) string {
 	v := url.Values{}
-	for _, k := range []string{
-		"project_id", "workspace_id", "session_id", "story_id",
-		"run_id", "kind", "body_contains", "created_after", "created_before",
-	} {
+	for _, k := range []string{"q", "created_after", "created_before"} {
 		if s := strings.TrimSpace(q.Get(k)); s != "" {
 			v.Set(k, s)
 		}

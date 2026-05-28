@@ -1025,3 +1025,166 @@ button.status-button[disabled] {
 .changelog-content ul, .changelog-content ol { padding-left: 1.4rem; }
 .changelog-content a { color: #4ade80; }
 .changelog-content a:hover { color: #fff; }
+
+/* Ledger page (sty_becb7019). Single search-box filter + datetime
+   window + table with expandable JSON-formatted detail rows. */
+.ledger-filter-form { display: flex; flex-direction: column; gap: 0.6rem; }
+.ledger-search-wrap { position: relative; display: block; }
+.ledger-search { padding-right: 2.4rem; }
+.ledger-search-clear {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.ledger-search-clear:hover { color: #e0e0e0; }
+.ledger-search-hint {
+  margin: 0;
+  color: #888;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+.ledger-search-hint code {
+  background: #0a0a0a;
+  border: 1px solid #222;
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
+  margin: 0 0.25rem;
+  color: #aaa;
+  font-size: 0.78rem;
+}
+.ledger-time-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.ledger-time-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ledger-filter-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #777;
+}
+.ledger-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.ledger-table th {
+  text-align: left;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #777;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #222;
+}
+.ledger-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid #1a1a1a;
+  vertical-align: top;
+}
+.ledger-col-time { white-space: nowrap; color: #aaa; font-family: ui-monospace, monospace; }
+.ledger-col-level { white-space: nowrap; }
+.ledger-col-kind { white-space: nowrap; color: #ccc; }
+.ledger-col-source { color: #aaa; font-family: ui-monospace, monospace; }
+.ledger-col-actor { color: #888; }
+.ledger-col-body { max-width: 32rem; }
+.ledger-level {
+  display: inline-block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid #333;
+  border-radius: 3px;
+  color: #aaa;
+}
+.ledger-level-info  { border-color: #2a4a6a; color: #6aa7d8; }
+.ledger-level-warn  { border-color: #6a5a2a; color: #e0b85e; }
+.ledger-level-error { border-color: #6a2a2a; color: #f87171; }
+.ledger-level-debug { border-color: #444; color: #888; }
+.ledger-body-toggle {
+  background: transparent;
+  border: none;
+  color: #e0e0e0;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  font: inherit;
+}
+.ledger-body-toggle:hover { color: #4ade80; }
+.ledger-body-trunc { display: inline; }
+.ledger-row-expand td { background: #0a0a0a; padding: 0.75rem 0.6rem; }
+.ledger-detail {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 0.4rem 0.75rem;
+  margin: 0;
+}
+.ledger-detail dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #777;
+}
+.ledger-detail dd { margin: 0; }
+.ledger-pre {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: #050505;
+  border: 1px solid #1f1f1f;
+  border-radius: 3px;
+  color: #ddd;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.ledger-pre-json { color: #cde6c8; }
+.ledger-id-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.ledger-id-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+}
+.ledger-id-label {
+  color: #777;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.ledger-id-list code { color: #ddd; font-family: ui-monospace, monospace; }

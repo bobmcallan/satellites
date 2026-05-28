@@ -7,65 +7,54 @@ import (
 	"time"
 )
 
-func TestParseLedgerFilter_AllFields(t *testing.T) {
-	q := url.Values{}
-	q.Set("project_id", "proj_1")
-	q.Set("workspace_id", "wksp_1")
-	q.Set("session_id", "sess_1")
-	q.Set("story_id", "sty_1")
-	q.Set("run_id", "run_1")
-	q.Set("kind", "log:warn")
-	q.Set("body_contains", "boom")
-	q.Set("created_after", "2026-05-28T10:00")
-	q.Set("created_before", "2026-05-29T10:00")
-
-	in, v := parseLedgerFilter(q)
-
-	if in.ProjectID != "proj_1" || in.WorkspaceID != "wksp_1" || in.SessionID != "sess_1" ||
-		in.StoryID != "sty_1" || in.RunID != "run_1" || in.Kind != "log:warn" {
-		t.Fatalf("id/kind fields: %+v", in)
+func TestParseLedgerSearch_KeyValueTokens(t *testing.T) {
+	in := parseLedgerSearch("project_id:proj_1 run_id:run_a kind:log:warn")
+	if in.ProjectID != "proj_1" || in.RunID != "run_a" {
+		t.Fatalf("ids: %+v", in)
 	}
-	if in.BodyContains != "boom" {
-		t.Fatalf("body_contains: %q", in.BodyContains)
+	if in.Kind != "log:warn" {
+		t.Fatalf("kind preserves embedded colons: %q", in.Kind)
 	}
-	if in.CreatedAfter.IsZero() || in.CreatedBefore.IsZero() {
-		t.Fatalf("time bounds: after=%v before=%v", in.CreatedAfter, in.CreatedBefore)
-	}
-	if v.ProjectID != "proj_1" || v.CreatedAfter != "2026-05-28T10:00" {
-		t.Fatalf("view round-trip: %+v", v)
+	if len(in.BodyContainsAny) != 0 {
+		t.Fatalf("no free text expected, got %v", in.BodyContainsAny)
 	}
 }
 
-func TestParseLedgerFilter_AcceptsRFC3339TimeValues(t *testing.T) {
-	q := url.Values{}
-	q.Set("created_after", "2026-05-28T10:00:00Z")
-	in, _ := parseLedgerFilter(q)
-	if in.CreatedAfter.IsZero() {
-		t.Fatal("RFC3339 should parse")
+func TestParseLedgerSearch_FreeTextOrSemantics(t *testing.T) {
+	in := parseLedgerSearch("Principle initialisation project_id:proj_fc7d72d8")
+	if in.ProjectID != "proj_fc7d72d8" {
+		t.Errorf("project_id: %q", in.ProjectID)
+	}
+	if !slicesHave(in.BodyContainsAny, "Principle", "initialisation") {
+		t.Errorf("free text → BodyContainsAny: got %v", in.BodyContainsAny)
 	}
 }
 
-func TestParseLedgerFilter_IgnoresMalformedTimes(t *testing.T) {
-	q := url.Values{}
-	q.Set("created_after", "not-a-time")
-	in, v := parseLedgerFilter(q)
-	if !in.CreatedAfter.IsZero() {
-		t.Fatal("malformed time should not set CreatedAfter")
-	}
-	if v.CreatedAfter != "" {
-		t.Fatalf("view CreatedAfter should be empty, got %q", v.CreatedAfter)
+func TestParseLedgerSearch_UnknownKeyFallsThroughToBody(t *testing.T) {
+	in := parseLedgerSearch("unknownkey:value")
+	if !slicesHave(in.BodyContainsAny, "unknownkey:value") {
+		t.Fatalf("unknown key:value is body-search: got %v", in.BodyContainsAny)
 	}
 }
 
-func TestLedgerListInput_IsEmpty(t *testing.T) {
-	if !(ledgerListInput{}).isEmpty() {
-		t.Fatal("zero input should be empty")
+func TestParseLedgerSearch_Empty(t *testing.T) {
+	if !parseLedgerSearch("   ").isEmpty() {
+		t.Fatal("blank search is empty")
 	}
-	if (ledgerListInput{ProjectID: "p"}).isEmpty() {
-		t.Fatal("with project should not be empty")
+	if !parseLedgerSearch("").isEmpty() {
+		t.Fatal("empty search is empty")
 	}
-	if (ledgerListInput{BodyContains: "x"}).isEmpty() {
-		t.Fatal("with body_contains should not be empty")
+}
+
+func TestParseFlexibleTime_RFC3339AndShortForm(t *testing.T) {
+	if _, ok := parseFlexibleTime("2026-05-28T10:00:00Z"); !ok {
+		t.Error("RFC3339 should parse")
+	}
+	if _, ok := parseFlexibleTime("2026-05-28T10:00"); !ok {
+		t.Error("HTML datetime-local should parse")
+	}
+	if _, ok := parseFlexibleTime("not a time"); ok {
+		t.Error("garbage should not parse")
 	}
 }
 
@@ -139,17 +128,17 @@ func TestPrettyJSON_SkipsEmptyDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildLedgerURL_PreservesFiltersAndSetsCursor(t *testing.T) {
+func TestBuildLedgerURL_PreservesSearchAndTimesAndSetsCursor(t *testing.T) {
 	q := url.Values{}
-	q.Set("project_id", "proj_1")
-	q.Set("body_contains", "boom")
+	q.Set("q", "Principle project_id:proj_fc7d72d8")
+	q.Set("created_after", "2026-05-28T10:00")
 	q.Set("cursor", "old-cursor") // should be overwritten
 	got := buildLedgerURL(q, "next-cursor")
-	if !strings.Contains(got, "project_id=proj_1") {
-		t.Errorf("project_id preserved: %q", got)
+	if !strings.Contains(got, "q=") {
+		t.Errorf("q preserved: %q", got)
 	}
-	if !strings.Contains(got, "body_contains=boom") {
-		t.Errorf("body_contains preserved: %q", got)
+	if !strings.Contains(got, "created_after=") {
+		t.Errorf("created_after preserved: %q", got)
 	}
 	if !strings.Contains(got, "cursor=next-cursor") {
 		t.Errorf("cursor set to next: %q", got)
@@ -157,4 +146,20 @@ func TestBuildLedgerURL_PreservesFiltersAndSetsCursor(t *testing.T) {
 	if strings.Contains(got, "old-cursor") {
 		t.Errorf("old cursor should be replaced: %q", got)
 	}
+}
+
+func slicesHave(haystack []string, needles ...string) bool {
+	for _, n := range needles {
+		found := false
+		for _, h := range haystack {
+			if h == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

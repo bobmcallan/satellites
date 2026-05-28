@@ -24,6 +24,20 @@ type Store struct {
 // New returns a Store bound to the given database/sql handle.
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
+// trimNonEmpty returns the non-empty trimmed strings from in. Used by
+// the ListFilter body-search assembly to ignore stray empty entries
+// from URL-parsed input.
+func trimNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // AppendInput is the typed shape of one ledger insert. Kind is the
 // only required field. Every correlation id (StoryID, ProjectID,
 // WorkspaceID, SessionID, RunID) is optional; the arbor LedgerHandler
@@ -43,24 +57,25 @@ type AppendInput struct {
 }
 
 // ListFilter parameterises List with any subset of correlation ids,
-// an optional kind, an optional body substring, and an optional
-// created_at window. Empty fields are not constrained — a filter
-// with all fields empty would return every row, so callers must set
-// at least one selectable field. The Limit / Cursor pair paginates
-// oldest-to-newest; Cursor is the created_at|id of the last row from
-// the previous page.
+// an optional kind, an optional list of body-substring search terms
+// (OR-combined when more than one), and an optional created_at
+// window. Empty fields are not constrained — a filter with every
+// field empty would return every row, so callers must set at least
+// one selectable field. The Limit / Cursor pair paginates oldest-to-
+// newest; Cursor is the created_at|id of the last row from the
+// previous page.
 type ListFilter struct {
-	StoryID       string
-	ProjectID     string
-	WorkspaceID   string
-	SessionID     string
-	RunID         string
-	Kind          string
-	BodyContains  string    // case-insensitive substring match on body
-	CreatedAfter  time.Time // zero = no lower bound
-	CreatedBefore time.Time // zero = no upper bound
-	Limit         int
-	Cursor        string
+	StoryID         string
+	ProjectID       string
+	WorkspaceID     string
+	SessionID       string
+	RunID           string
+	Kind            string
+	BodyContainsAny []string  // OR semantics — body matches any term
+	CreatedAfter    time.Time // zero = no lower bound
+	CreatedBefore   time.Time // zero = no upper bound
+	Limit           int
+	Cursor          string
 }
 
 // ListResult carries the rows + the next cursor (empty when the page
@@ -206,7 +221,7 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		strings.TrimSpace(f.SessionID) == "" &&
 		strings.TrimSpace(f.RunID) == "" &&
 		strings.TrimSpace(f.Kind) == "" &&
-		strings.TrimSpace(f.BodyContains) == "" &&
+		len(trimNonEmpty(f.BodyContainsAny)) == 0 &&
 		f.CreatedAfter.IsZero() && f.CreatedBefore.IsZero() {
 		return ListResult{}, fmt.Errorf("ledger: at least one filter field required")
 	}
@@ -236,10 +251,14 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	addCond("run_id", f.RunID)
 	addCond("kind", f.Kind)
 
-	if s := strings.TrimSpace(f.BodyContains); s != "" {
-		conds = append(conds, fmt.Sprintf("body ILIKE $%d", placeholder))
-		args = append(args, "%"+s+"%")
-		placeholder++
+	if terms := trimNonEmpty(f.BodyContainsAny); len(terms) > 0 {
+		parts := make([]string, 0, len(terms))
+		for _, term := range terms {
+			parts = append(parts, fmt.Sprintf("body ILIKE $%d", placeholder))
+			args = append(args, "%"+term+"%")
+			placeholder++
+		}
+		conds = append(conds, "("+strings.Join(parts, " OR ")+")")
 	}
 	if !f.CreatedAfter.IsZero() {
 		conds = append(conds, fmt.Sprintf("created_at >= $%d", placeholder))

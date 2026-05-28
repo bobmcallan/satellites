@@ -24,53 +24,44 @@
 <main data-page="ledger">
   <section class="changelog-intro" data-section="ledger-intro">
     <h2 class="section-heading">Ledger</h2>
-    <p class="changelog-lede">Audit trail of evidence rows. Filters are URL-shareable; the default window is the last 24 hours. Set any combination of project, workspace, session, story, run, kind, or a body substring to narrow the table.</p>
+    <p class="changelog-lede">Audit trail of evidence rows. Filters are URL-shareable; default window is the last 24 hours.</p>
   </section>
 
   <section class="panel" data-section="ledger-filter">
-    <form method="get" action="/ledger" data-form="ledger-filter" class="ledger-filter-form">
-      <div class="ledger-filter-row">
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">project_id</span>
-          <input type="text" name="project_id" value="{{.Filter.ProjectID}}" autocomplete="off" data-field="project_id">
-        </label>
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">workspace_id</span>
-          <input type="text" name="workspace_id" value="{{.Filter.WorkspaceID}}" autocomplete="off" data-field="workspace_id">
-        </label>
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">session_id</span>
-          <input type="text" name="session_id" value="{{.Filter.SessionID}}" autocomplete="off" data-field="session_id">
-        </label>
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">story_id</span>
-          <input type="text" name="story_id" value="{{.Filter.StoryID}}" autocomplete="off" data-field="story_id">
-        </label>
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">run_id</span>
-          <input type="text" name="run_id" value="{{.Filter.RunID}}" autocomplete="off" data-field="run_id">
-        </label>
-        <label class="ledger-filter-cell">
-          <span class="ledger-filter-label">kind</span>
-          <input type="text" name="kind" value="{{.Filter.Kind}}" autocomplete="off" data-field="kind" placeholder="e.g. log:warn">
-        </label>
+    <form method="get" action="/ledger" data-form="ledger-filter" class="ledger-filter-form" x-data="{ q: {{.Filter.Search | printf "%q"}} }">
+      <div class="ledger-search-wrap">
+        <input type="text"
+               name="q"
+               class="panel-search ledger-search"
+               placeholder="search — free text matches body; key:value tokens filter (project_id, workspace_id, session_id, story_id, run_id, kind)"
+               x-model="q"
+               data-field="ledger-search"
+               autocomplete="off">
+        <button type="button"
+                class="ledger-search-clear"
+                x-show="q.length > 0"
+                @click="q = ''"
+                data-action="clear-search"
+                aria-label="Clear search">&times;</button>
       </div>
-      <div class="ledger-filter-row">
-        <label class="ledger-filter-cell ledger-filter-cell-wide">
-          <span class="ledger-filter-label">body contains</span>
-          <input type="text" name="body_contains" value="{{.Filter.BodyContains}}" autocomplete="off" data-field="body_contains" placeholder="case-insensitive substring">
-        </label>
-        <label class="ledger-filter-cell">
+      <p class="ledger-search-hint" data-field="ledger-search-hint">
+        examples:
+        <code>project_id:proj_fc7d72d8</code>
+        <code>run_id:run_abc kind:log:warn</code>
+        <code>Principle initialisation project_id:proj_fc7d72d8</code>
+      </p>
+      <div class="ledger-time-row">
+        <label class="ledger-time-cell">
           <span class="ledger-filter-label">from</span>
           <input type="datetime-local" name="created_after" value="{{.Filter.CreatedAfter}}" data-field="created_after">
         </label>
-        <label class="ledger-filter-cell">
+        <label class="ledger-time-cell">
           <span class="ledger-filter-label">to</span>
           <input type="datetime-local" name="created_before" value="{{.Filter.CreatedBefore}}" data-field="created_before">
         </label>
         <div class="ledger-filter-actions">
-          <button type="submit" class="btn-primary" data-action="apply-filter">Apply</button>
-          <a href="/ledger" class="btn-secondary" data-action="clear-filter">Clear</a>
+          <button type="submit" class="btn primary" data-action="apply-filter">apply</button>
+          <button type="button" class="btn secondary" data-action="clear-filter" @click="window.location='/ledger'">clear</button>
         </div>
       </div>
     </form>
@@ -82,7 +73,7 @@
   </section>
   {{else if .Empty}}
   <section class="panel" data-section="empty">
-    <p class="empty">No ledger entries match the current filters. Widen the window or clear filters to see more.</p>
+    <p class="empty">No ledger entries match the current filters. Widen the window or clear the search to see more.</p>
   </section>
   {{else}}
   <section class="panel" data-section="ledger-table">
@@ -120,14 +111,14 @@
           <td colspan="6">
             <dl class="ledger-detail">
               <dt>body</dt>
-              <dd><pre data-field="body-full">{{.BodyFull}}</pre></dd>
+              <dd><pre class="ledger-pre" data-field="body-full">{{.BodyFull}}</pre></dd>
               {{if .PayloadJSON}}
               <dt>payload</dt>
-              <dd><pre data-field="payload">{{.PayloadJSON}}</pre></dd>
+              <dd><pre class="ledger-pre ledger-pre-json" data-field="payload">{{.PayloadJSON}}</pre></dd>
               {{end}}
               {{if .RefsJSON}}
               <dt>refs</dt>
-              <dd><pre data-field="refs">{{.RefsJSON}}</pre></dd>
+              <dd><pre class="ledger-pre ledger-pre-json" data-field="refs">{{.RefsJSON}}</pre></dd>
               {{end}}
               <dt>ids</dt>
               <dd>
@@ -150,7 +141,7 @@
 
   {{if .HasNext}}
   <nav class="panel-paginator" aria-label="Ledger pagination" data-field="ledger-paginator">
-    <a class="panel-paginator-link next" href="{{.NextURL}}" data-action="load-more">Load more</a>
+    <a class="panel-paginator-link next" href="{{.NextURL}}" data-action="load-more">load more</a>
   </nav>
   {{end}}
   {{end}}
