@@ -1,5 +1,6 @@
 ---
 name: satellites_mcp_reference_documents
+scope: system
 tags: [kind:mcp-reference]
 ---
 # satellites · reference: documents and stories

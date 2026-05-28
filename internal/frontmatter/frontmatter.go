@@ -16,9 +16,19 @@ import (
 // reads from .md artifacts. Fields not declared here are silently
 // ignored on parse — the loader stays forward-compatible with files
 // that grow new keys for downstream tools.
+//
+// Scope / WorkspaceID / ProjectID carry the identity that was
+// previously inferred from directory path segments. Files in
+// config/documents/ and .satellites/documents/ declare them
+// explicitly; the classifier and reconciler read them from this
+// struct, not from the filesystem layout.
 type Frontmatter struct {
-	Tags []string `yaml:"tags"`
-	Name string   `yaml:"name"`
+	Tags        []string `yaml:"tags"`
+	Name        string   `yaml:"name"`
+	Type        string   `yaml:"type"`
+	Scope       string   `yaml:"scope"`
+	WorkspaceID string   `yaml:"workspace_id"`
+	ProjectID   string   `yaml:"project_id"`
 }
 
 // frontmatterDelim is the literal `---` line that opens and closes a

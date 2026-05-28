@@ -5,7 +5,7 @@ system, workspace, project — and each scope has its own delivery path:
 
 | Scope     | Source of truth                                    | Lands in DB via                         |
 | --------- | -------------------------------------------------- | --------------------------------------- |
-| system    | `config/seed/system/artifacts/*.md` (embedded)     | `satellites-server` boot reconciler     |
+| system    | `config/documents/*.md` (embedded)                 | `satellites-server` boot reconciler     |
 | workspace | `.satellites/seeds/<workspace_id>/workspace.md`    | `satellites seed push`                  |
 | project   | `.satellites/seeds/<workspace_id>/<project_id>/project.md` | `satellites seed push`          |
 

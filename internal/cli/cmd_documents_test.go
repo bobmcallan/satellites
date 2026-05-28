@@ -5,32 +5,31 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
 func TestPlanDocumentsUpload(t *testing.T) {
 	root := t.TempDir()
 	docsRoot := filepath.Join(root, "documents")
+	if err := os.MkdirAll(docsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
 
-	mustWrite := func(rel, content string) {
+	mustWrite := func(name, content string) {
 		t.Helper()
-		p := filepath.Join(docsRoot, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
+		p := filepath.Join(docsRoot, name)
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 	}
 
-	mustWrite("workspace/wksp_one/ws-rule.md", "---\ntags: [principles:workspace]\n---\n# WS body\n")
-	mustWrite("project/wksp_one/proj_one/feature-rule.md", "---\ntags: [principles:project]\nname: overridden-name\n---\n# PJ body\n")
-	mustWrite("project/wksp_one/proj_one/no-frontmatter.md", "# raw body, no frontmatter\n")
-	// Files at the wrong depth should be silently skipped.
-	mustWrite("loose.md", "skip me")
-	mustWrite("project/orphan.md", "skip me too")
+	mustWrite("ws-rule.md",
+		"---\nscope: workspace\nworkspace_id: wksp_one\ntags: [principles:workspace]\n---\n# WS body\n")
+	mustWrite("feature-rule.md",
+		"---\nscope: project\nworkspace_id: wksp_one\nproject_id: proj_one\nname: overridden-name\ntags: [principles:project]\n---\n# PJ body\n")
 	// Non-md files should be ignored.
-	mustWrite("workspace/wksp_one/notes.txt", "ignore")
+	mustWrite("notes.txt", "ignore")
 
 	targets, err := planDocumentsUpload(docsRoot)
 	if err != nil {
@@ -43,7 +42,6 @@ func TestPlanDocumentsUpload(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"project/wksp_one/proj_one/no-frontmatter",
 		"project/wksp_one/proj_one/overridden-name",
 		"workspace/wksp_one/ws-rule",
 	}
@@ -52,7 +50,6 @@ func TestPlanDocumentsUpload(t *testing.T) {
 		t.Fatalf("targets mismatch:\n got  %v\n want %v", got, want)
 	}
 
-	// Spot-check the tags carried through frontmatter:
 	tagsBy := map[string][]string{}
 	for _, t := range targets {
 		tagsBy[uploadLabel(t)] = t.Tags
@@ -63,9 +60,6 @@ func TestPlanDocumentsUpload(t *testing.T) {
 	if tags := tagsBy["project/wksp_one/proj_one/overridden-name"]; !reflect.DeepEqual(tags, []string{"principles:project"}) {
 		t.Errorf("project tags = %v want [principles:project]", tags)
 	}
-	if tags := tagsBy["project/wksp_one/proj_one/no-frontmatter"]; tags != nil {
-		t.Errorf("no-frontmatter should yield nil tags, got %v", tags)
-	}
 }
 
 func TestPlanDocumentsUpload_MissingRoot(t *testing.T) {
@@ -75,5 +69,29 @@ func TestPlanDocumentsUpload_MissingRoot(t *testing.T) {
 	}
 	if len(targets) != 0 {
 		t.Fatalf("expected zero targets, got %d", len(targets))
+	}
+}
+
+func TestPlanDocumentsUpload_MissingScope(t *testing.T) {
+	docsRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(docsRoot, "no-scope.md"),
+		[]byte("---\ntags: [foo]\n---\n# body\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, err := planDocumentsUpload(docsRoot)
+	if err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Fatalf("expected scope-missing error, got %v", err)
+	}
+}
+
+func TestPlanDocumentsUpload_ScopeMissingIDs(t *testing.T) {
+	docsRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(docsRoot, "no-ws.md"),
+		[]byte("---\nscope: workspace\n---\n# body\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, err := planDocumentsUpload(docsRoot)
+	if err == nil || !strings.Contains(err.Error(), "workspace_id") {
+		t.Fatalf("expected workspace_id-missing error, got %v", err)
 	}
 }

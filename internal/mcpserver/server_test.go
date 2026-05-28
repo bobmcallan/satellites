@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bobmcallan/satellites/config/seed"
+	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
@@ -177,7 +177,7 @@ func TestParity_VerbVsRegistry(t *testing.T) {
 // leaves a fresh session unable to find principles or reference
 // material.
 func TestOrientationMentionsPrinciples(t *testing.T) {
-	body := string(seed.MCPLoadContextMarkdown())
+	body := string(documents.MCPLoadContextMarkdown())
 	for _, want := range []string{
 		"principles:global",
 		"principles:workspace",

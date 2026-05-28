@@ -1,5 +1,6 @@
 ---
 name: satellites_client_install
+scope: system
 tags: [kind:install-schema, v2]
 target_install_path: ./.satellites/satellites
 target_config_path: ./.satellites/satellites.toml

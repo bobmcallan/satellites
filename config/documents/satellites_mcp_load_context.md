@@ -1,5 +1,6 @@
 ---
 name: satellites_mcp_load_context
+scope: system
 tags: [kind:mcp-startup, v2]
 ---
 # satellites · bootstrap

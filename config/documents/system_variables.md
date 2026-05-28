@@ -1,5 +1,6 @@
 ---
 name: system_variables
+scope: system
 tags: [kind:variable-taxonomy, v1]
 ---
 # system variables

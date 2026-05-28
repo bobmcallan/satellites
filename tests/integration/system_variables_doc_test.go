@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bobmcallan/satellites/config/seed"
+	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/variable"
@@ -73,7 +73,7 @@ func TestSystemVariablesDoc_DogfoodFlow(t *testing.T) {
 
 	// Seed the system_variables doc (boot does this too; test owns its env).
 	// Must run after auth truncates so the seed row survives.
-	if err := document.SeedSystem(context.Background(), docStore, "system_variables", string(seed.SystemVariablesMarkdown()), "system:seed", time.Now()); err != nil {
+	if err := document.SeedSystem(context.Background(), docStore, "system_variables", string(documents.SystemVariablesMarkdown()), "system:seed", time.Now()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	admin, err := authStore.GetUserByEmail(context.Background(), auth.DevAdminEmail)

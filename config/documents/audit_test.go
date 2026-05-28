@@ -1,4 +1,4 @@
-package seed
+package documents
 
 import (
 	"os"
@@ -10,12 +10,12 @@ import (
 
 // TestSeedArtifactsAuditClean enforces the block-level static rules from
 // the satellites-audit-agent-prose skill against every markdown
-// artifact under system/artifacts/. CI runs this via `go test ./...`
-// so verbose drift in agent-facing prose surfaces at PR time rather
+// artifact in this directory. CI runs this via `go test ./...` so
+// verbose drift in agent-facing prose surfaces at PR time rather
 // than after the binary ships. The reviewer-gated equivalent is the
 // substrate-primitive defense; this test is the belt-and-braces line.
 func TestSeedArtifactsAuditClean(t *testing.T) {
-	const artifactsDir = "system/artifacts"
+	const artifactsDir = "."
 	entries, err := os.ReadDir(artifactsDir)
 	if err != nil {
 		t.Fatalf("read %s: %v", artifactsDir, err)
@@ -72,7 +72,7 @@ func TestSeedArtifactsAuditClean(t *testing.T) {
 // the same regression at the artifact source.
 func TestMCPStartupArtifactsUnderLineBudget(t *testing.T) {
 	const (
-		artifactsDir = "system/artifacts"
+		artifactsDir = "."
 		startupTag   = "kind:mcp-startup"
 		lineBudget   = 150
 	)

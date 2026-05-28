@@ -4,8 +4,13 @@
 //
 // Layout (the only shape this command understands):
 //
-//   .satellites/documents/workspace/<workspace_id>/<name>.md
-//   .satellites/documents/project/<workspace_id>/<project_id>/<name>.md
+//   .satellites/documents/<name>.md
+//
+// Identity (scope, workspace_id, project_id, name, tags) lives in each
+// file's YAML frontmatter. The classifier does not derive scope from
+// directory layout — missing `scope:` is a hard error. Scope drives
+// the required-id set: `workspace` requires `workspace_id`; `project`
+// requires both `workspace_id` and `project_id`.
 //
 // Idempotency is delegated to the substrate: the same body bytes
 // produce zero new document_versions rows on a re-push. Tags merge via
@@ -97,11 +102,11 @@ func init() {
 	register(docs)
 }
 
-// planDocumentsUpload walks rootDir and returns the ordered list of
-// upserts. Workspace files are emitted before project files so a
-// workspace-scope document lands before any project doc inside it.
-// Unknown shapes are skipped silently — adding new layouts later
-// shouldn't break existing uploads.
+// planDocumentsUpload walks rootDir (flat — no nested subdirectories)
+// and returns the ordered list of upserts. Files are ordered:
+// workspace-scope first, then project-scope, then by path within each
+// group — so a workspace-scope document lands before any project doc
+// that might inherit it.
 func planDocumentsUpload(rootDir string) ([]documentTarget, error) {
 	info, err := os.Stat(rootDir)
 	if err != nil {
@@ -120,22 +125,19 @@ func planDocumentsUpload(rootDir string) ([]documentTarget, error) {
 			return walkErr
 		}
 		if d.IsDir() {
-			return nil
+			// Skip nested directories — the flat layout is the contract.
+			// Only the rootDir itself is walked.
+			if p == rootDir {
+				return nil
+			}
+			return fs.SkipDir
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			return nil
 		}
-		rel, relErr := filepath.Rel(rootDir, p)
-		if relErr != nil {
-			return relErr
-		}
-		parts := strings.Split(filepath.ToSlash(rel), "/")
-		target, ok, classifyErr := classifyDocumentPath(p, parts)
+		target, classifyErr := classifyDocumentFile(p, d.Name())
 		if classifyErr != nil {
 			return classifyErr
-		}
-		if !ok {
-			return nil // unknown shape — skip silently
 		}
 		switch target.Scope {
 		case "workspace":
@@ -153,42 +155,43 @@ func planDocumentsUpload(rootDir string) ([]documentTarget, error) {
 	return append(workspaces, projects...), nil
 }
 
-// classifyDocumentPath inspects the path components under
-// documentsRoot, infers scope + ids, reads the file, parses frontmatter,
-// and returns a populated target. The boolean reports whether the path
-// matched a known shape; unknown paths return (zero, false, nil).
-func classifyDocumentPath(absPath string, parts []string) (documentTarget, bool, error) {
-	switch {
-	case len(parts) == 3 && parts[0] == "workspace":
-		body, fm, err := readFileWithFrontmatter(absPath)
-		if err != nil {
-			return documentTarget{}, false, err
-		}
-		return documentTarget{
-			Path:        absPath,
-			Scope:       "workspace",
-			WorkspaceID: parts[1],
-			Name:        resolveName(parts[2], fm.Name),
-			Tags:        fm.Tags,
-			Body:        body,
-		}, true, nil
-	case len(parts) == 4 && parts[0] == "project":
-		body, fm, err := readFileWithFrontmatter(absPath)
-		if err != nil {
-			return documentTarget{}, false, err
-		}
-		return documentTarget{
-			Path:        absPath,
-			Scope:       "project",
-			WorkspaceID: parts[1],
-			ProjectID:   parts[2],
-			Name:        resolveName(parts[3], fm.Name),
-			Tags:        fm.Tags,
-			Body:        body,
-		}, true, nil
-	default:
-		return documentTarget{}, false, nil
+// classifyDocumentFile reads filePath, parses frontmatter, and returns
+// a populated target. Scope is required — files without `scope:` in
+// frontmatter are rejected so a misauthored file fails loudly rather
+// than uploading to the wrong destination. workspace_id is required
+// for both `workspace` and `project` scopes; project_id additionally
+// for `project`.
+func classifyDocumentFile(filePath, filename string) (documentTarget, error) {
+	body, fm, err := readFileWithFrontmatter(filePath)
+	if err != nil {
+		return documentTarget{}, err
 	}
+	scope := strings.TrimSpace(fm.Scope)
+	if scope == "" {
+		return documentTarget{}, fmt.Errorf("%s: frontmatter must declare scope (workspace or project)", filePath)
+	}
+	t := documentTarget{
+		Path:        filePath,
+		Scope:       scope,
+		WorkspaceID: fm.WorkspaceID,
+		ProjectID:   fm.ProjectID,
+		Name:        resolveName(filename, fm.Name),
+		Tags:        fm.Tags,
+		Body:        body,
+	}
+	switch scope {
+	case "workspace":
+		if t.WorkspaceID == "" {
+			return documentTarget{}, fmt.Errorf("%s: scope=workspace requires workspace_id in frontmatter", filePath)
+		}
+	case "project":
+		if t.WorkspaceID == "" || t.ProjectID == "" {
+			return documentTarget{}, fmt.Errorf("%s: scope=project requires both workspace_id and project_id in frontmatter", filePath)
+		}
+	default:
+		return documentTarget{}, fmt.Errorf("%s: unsupported scope %q (allowed: workspace, project)", filePath, scope)
+	}
+	return t, nil
 }
 
 // readFileWithFrontmatter loads the file at p and splits frontmatter

@@ -1,5 +1,6 @@
 ---
 name: satellites_mcp_reference_dispatch
+scope: system
 tags: [kind:mcp-reference]
 ---
 # satellites · reference: CLI dispatch

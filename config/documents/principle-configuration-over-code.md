@@ -1,4 +1,6 @@
 ---
+name: principle-configuration-over-code
+scope: system
 tags: [principles:global]
 ---
 # Configuration over code
@@ -12,8 +14,8 @@ operators can author and edit.
 ## What this rules in
 
 - Agent-facing prose ships as markdown artifacts under
-  `config/seed/system/artifacts/` or as substrate documents — never as
-  string constants in Go.
+  `config/documents/` or as substrate documents — never as string
+  constants in Go.
 - Workflow phases, reviewer mappings, and per-story rules live in
   configuration documents the operator reads and edits — never as hard-
   coded switch statements.

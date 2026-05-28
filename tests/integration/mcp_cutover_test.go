@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bobmcallan/satellites/config/seed"
+	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -33,7 +33,7 @@ func TestMCPCutover(t *testing.T) {
 		verb.SetSystemVariableResolver(nil, nil)
 	})
 
-	if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(seed.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
+	if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(documents.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestMCPCutover(t *testing.T) {
 	})
 
 	t.Run("orientation instructions reference the bootstrap verbs", func(t *testing.T) {
-		body := string(seed.MCPLoadContextMarkdown())
+		body := string(documents.MCPLoadContextMarkdown())
 		for _, want := range []string{"document_get", "project_match"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("load context missing %q", want)

@@ -4,14 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"io/fs"
 	"net/http"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/config/reviewers"
-	"github.com/bobmcallan/satellites/config/seed"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/changelog"
@@ -115,41 +117,63 @@ func main() {
 	arbor.Info("gate dispatcher wired (claude -p)")
 
 	// Document substrate + system-seed registry: wire stores then
-	// reconcile each embedded artifact. ReconcileSystemSeed is
-	// idempotent — a no-op when the system_seeds.embedded_hash matches
-	// the embed.FS body hash. A binary release that changes one
-	// artifact rewrites exactly that system_seeds row and appends one
-	// document_versions row.
+	// reconcile every artifact embedded under config/documents/. Each
+	// file declares its identity (`scope`, `name`, optional tags) in
+	// frontmatter; the reconciler dispatches by scope rather than by
+	// directory layout. ReconcileSystemSeed is idempotent — a no-op
+	// when the system_seeds.embedded_hash matches the embed.FS body
+	// hash. A binary release that changes one artifact rewrites
+	// exactly that system_seeds row and appends one document_versions
+	// row.
 	docStore := document.New(sqlDB)
 	verb.SetDocumentStore(docStore)
 	sysSeedStore := document.NewSystemSeedStore(sqlDB)
 	verb.SetSystemSeedStore(sysSeedStore)
-	for _, sd := range []struct {
-		name string
-		body []byte
-	}{
-		{"satellites_client_install", seed.ClientInstallMarkdown()},
-		{"satellites_mcp_load_context", seed.MCPLoadContextMarkdown()},
-		{"satellites_mcp_reference_dispatch", seed.MCPReferenceDispatchMarkdown()},
-		{"satellites_mcp_reference_documents", seed.MCPReferenceDocumentsMarkdown()},
-		{"system_variables", seed.SystemVariablesMarkdown()},
-		{"principle-configuration-over-code", seed.PrincipleConfigurationOverCodeMarkdown()},
-	} {
-		fm, body, err := frontmatter.Parse(sd.body)
-		if err != nil {
-			arbor.Fatal("parse system seed frontmatter", "name", sd.name, "err", err)
+
+	docEntries, err := fs.ReadDir(documents.FS, ".")
+	if err != nil {
+		arbor.Fatal("read config/documents", "err", err)
+	}
+	docFilenames := make([]string, 0, len(docEntries))
+	for _, e := range docEntries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
 		}
-		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, sd.name, string(body), fm.Tags, "system:seed", time.Now().UTC())
+		docFilenames = append(docFilenames, e.Name())
+	}
+	sort.Strings(docFilenames)
+	for _, filename := range docFilenames {
+		raw, err := fs.ReadFile(documents.FS, filename)
 		if err != nil {
-			arbor.Fatal("reconcile system seed", "name", sd.name, "err", err)
+			arbor.Fatal("read embedded document", "file", filename, "err", err)
+		}
+		fm, body, err := frontmatter.Parse(raw)
+		if err != nil {
+			arbor.Fatal("parse document frontmatter", "file", filename, "err", err)
+		}
+		name := fm.Name
+		if name == "" {
+			name = strings.TrimSuffix(filename, ".md")
+		}
+		scope := fm.Scope
+		if scope == "" {
+			scope = "system"
+		}
+		if scope != "system" {
+			arbor.Fatal("config/documents currently only supports scope=system",
+				"file", filename, "scope", scope)
+		}
+		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, name, string(body), fm.Tags, "system:seed", time.Now().UTC())
+		if err != nil {
+			arbor.Fatal("reconcile system seed", "name", name, "err", err)
 		}
 		switch {
 		case res.Created:
-			arbor.Info("system seed installed", "name", sd.name)
+			arbor.Info("system seed installed", "name", name)
 		case res.Changed:
-			arbor.Info("system seed updated (drift)", "name", sd.name)
+			arbor.Info("system seed updated (drift)", "name", name)
 		default:
-			arbor.Info("system seed unchanged", "name", sd.name)
+			arbor.Info("system seed unchanged", "name", name)
 		}
 	}
 	arbor.Info("system seeds reconciled")

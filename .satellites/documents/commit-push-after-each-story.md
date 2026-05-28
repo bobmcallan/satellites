@@ -1,4 +1,8 @@
 ---
+name: commit-push-after-each-story
+scope: project
+workspace_id: wksp_6f048cd8
+project_id: proj_fc7d72d8
 tags: [principles:project]
 ---
 # Run /commit-push after each story

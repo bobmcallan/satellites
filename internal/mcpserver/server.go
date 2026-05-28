@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/bobmcallan/satellites/config/seed"
+	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -142,10 +142,10 @@ func stripNullable(node any) {
 // orientationInstructions is returned in the MCP `initialize` response
 // so clients (Claude, Warp, Codex, …) read it as session-bootstrap
 // context. Sourced from the embedded markdown artifact
-// `config/seed/system/artifacts/satellites_mcp_load_context.md` —
+// `config/documents/satellites_mcp_load_context.md` —
 // configuration-over-code: agent-facing prose lives in markdown, this
 // file just loads it.
-var orientationInstructions = string(seed.MCPLoadContextMarkdown())
+var orientationInstructions = string(documents.MCPLoadContextMarkdown())
 
 // exposedVerbs are the verbs the MCP HTTP transport advertises and
 // dispatches. The surface is intentionally narrow:
