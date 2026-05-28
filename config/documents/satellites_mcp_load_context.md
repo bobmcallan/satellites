@@ -33,17 +33,10 @@ Read each body. Re-deliver on every read verb that names a matching scope — re
 
 ## 4. Sync Claude Code skills
 
-Run `satellites skill list` once per scope that applies — system; workspace with `--scope workspace --workspace <wksp_id>`; project with `--scope project --workspace <wksp_id> --project <proj_id>`. For each returned row:
-
-- Read `.claude/skills/<name>/SKILL.md`. Missing file, missing `version:` in frontmatter, or `version` below the substrate `latest_version` → outdated.
-- For each outdated row, call `satellites skill get <name>` (same scope flags) and write the body to `.claude/skills/<name>/SKILL.md` with frontmatter `name`, `description`, and `version` set to the synced `latest_version`.
-- Pull-only. Never delete a local skill file — operators own `.claude/skills/`, and a local skill with no substrate counterpart is left alone.
-
-This step covers Claude Code skills only — substrate rows with `type:"skill"`. Workflow specs (`feature-workflow.md` and siblings) are `type:"document"` rows read by the server's workflow-skill spec parser; they are not Claude Code skills and must not be written into `.claude/skills/`. `skill list` returns `type:"skill"` rows only, so the source enforces the line; the naming distinction prevents the category error if a reader hand-grafts a workflow spec into the skills tree.
-
-Skip this step and skills drift between sessions. Reviewer behaviour then varies by whichever client ran last — the failure mode this contract exists to prevent.
+Mandatory on session start. Run `satellites skill list` per applicable scope and reconcile each row into `.claude/skills/<name>/SKILL.md` per the contract in `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}` — version comparison, frontmatter shape, workflow-spec exclusion, pull-only.
 
 ## 5. Fetch reference docs on demand
 
 - `document_get {name:"satellites_mcp_reference_dispatch", scope:"system"}` — CLI dispatch surface, typed subcommands, story actions.
 - `document_get {name:"satellites_mcp_reference_documents", scope:"system"}` — upsert modes, list filter shape, MCP-only client surface.
+- `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}` — Claude Code skill reconciliation contract (referenced by step 4).

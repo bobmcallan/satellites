@@ -20,14 +20,14 @@ import (
 )
 
 // DefaultInstructionsBudgetBytes caps the size of the assembled MCP
-// `initialize.instructions` payload. The default tracks the observed
-// host reminder cap (~2 KB in Claude Code as of 2026-05) with safety
-// headroom for principle ride-along. Operators tune via the
-// mcp_instructions_budget_bytes system variable; cmd/satellites-server
-// reads that value at boot and calls SetInstructionsBudget. Budget
-// breach logs a WARN but never panics — a degraded session is still
-// preferable to a crashed server.
-const DefaultInstructionsBudgetBytes = 1500
+// `initialize.instructions` payload. The default mirrors the observed
+// host reminder cap — Claude Code truncates server instructions at
+// ~2 KB (2048 bytes) client-side as of 2026-05 — with 48 bytes of
+// headroom. Operators tune via the mcp_instructions_budget_bytes
+// system variable; cmd/satellites-server reads that value at boot and
+// calls SetInstructionsBudget. Budget breach logs a WARN but never
+// panics — a degraded session is still preferable to a crashed server.
+const DefaultInstructionsBudgetBytes = 2000
 
 // instructionsBudgetBytes is the live cap consulted by
 // buildOrientationInstructions. cmd/satellites-server overrides via
