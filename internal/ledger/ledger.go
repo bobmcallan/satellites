@@ -34,16 +34,31 @@ const (
 	KindReviewerKeyRevoked = "reviewer_key_revoked"
 )
 
-// Entry is one row of a story's ledger.
+// LogKindPrefix is the marker on rows the arbor LedgerHandler emits.
+// Anything starting with this prefix is a log event (e.g. log:info,
+// log:warn) and may be appended by a runner-role key. Reviewer keys
+// keep their existing append rights across all kinds.
+const LogKindPrefix = "log:"
+
+// Entry is one row of the evidence ledger. All correlation ids are
+// optional — a row may be scoped to any subset of {story, project,
+// workspace, session, run}. Story-only callers (legacy verb-emitted
+// entries) leave the other ids blank; the operator-observability path
+// (sty_0006f5f5) populates project/workspace/session/run from the
+// arbor LogHandler's context.
 type Entry struct {
-	ID        string          `json:"id"`
-	StoryID   string          `json:"story_id"`
-	Kind      string          `json:"kind"`
-	Actor     string          `json:"actor,omitempty"`
-	Body      string          `json:"body,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	Refs      json.RawMessage `json:"refs,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID          string          `json:"id"`
+	StoryID     string          `json:"story_id,omitempty"`
+	ProjectID   string          `json:"project_id,omitempty"`
+	WorkspaceID string          `json:"workspace_id,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
+	RunID       string          `json:"run_id,omitempty"`
+	Kind        string          `json:"kind"`
+	Actor       string          `json:"actor,omitempty"`
+	Body        string          `json:"body,omitempty"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+	Refs        json.RawMessage `json:"refs,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
 
 // NewID returns a fresh ledger-entry id in the `evt_<8hex>` form.

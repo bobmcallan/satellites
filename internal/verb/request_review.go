@@ -398,7 +398,7 @@ func loadProjectConfig(ctx context.Context, workspaceID, projectID string) (proj
 }
 
 func recentLedger(ctx context.Context, storyID string) ([]ledger.Entry, error) {
-	entries, err := ledgerStore.List(ctx, storyID, "")
+	entries, err := ledgerStore.ListByStory(ctx, storyID, "")
 	if err != nil {
 		return nil, err
 	}

@@ -88,7 +88,7 @@ func regenerateSummary(ctx context.Context, storyID string) {
 		return
 	}
 	s := NewStoryEnvelope(d, body)
-	entries, err := ledgerStore.List(ctx, storyID, "")
+	entries, err := ledgerStore.ListByStory(ctx, storyID, "")
 	if err != nil {
 		arbor.Warn("summary regen: list ledger failed", "story_id", storyID, "err", err)
 		return

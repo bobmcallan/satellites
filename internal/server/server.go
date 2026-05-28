@@ -82,13 +82,18 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 
 	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
+	// correlationMiddleware lifts X-Satellites-* headers onto request
+	// context so arbor's LedgerHandler can tag log events with the
+	// caller's run/session/story/project/workspace ids. It wraps the
+	// auth middleware so the ids are visible even on unauthenticated
+	// requests (auth failures should still ledger if the run was named).
 	mcp := mcpserver.HTTPHandler(mcpserver.New())
-	mux.Handle("/mcp", cfg.Store.Middleware(mcp))
-	mux.Handle("/mcp/", cfg.Store.Middleware(mcp))
+	mux.Handle("/mcp", correlationMiddleware(cfg.Store.Middleware(mcp)))
+	mux.Handle("/mcp/", correlationMiddleware(cfg.Store.Middleware(mcp)))
 
 	// CLI ↔ server transport. Same auth pipeline as /mcp; same verbs.
 	// POST /api/v1/exec/<verb_name> with the verb's JSON request body.
-	mux.Handle("/api/v1/exec/", cfg.Store.Middleware(execHandler()))
+	mux.Handle("/api/v1/exec/", correlationMiddleware(cfg.Store.Middleware(execHandler())))
 
 	return mux
 }

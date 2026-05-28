@@ -74,7 +74,7 @@ func TestLedgerVerbs(t *testing.T) {
 		}
 		s := resp.Document
 
-		entries, err := ledStore.List(ctx, s.ID, "")
+		entries, err := ledStore.ListByStory(ctx, s.ID, "")
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -120,7 +120,7 @@ func TestLedgerVerbs(t *testing.T) {
 			t.Fatalf("update: %v", err)
 		}
 
-		entries, err := ledStore.List(ctx, s.ID, ledger.KindStoryUpdated)
+		entries, err := ledStore.ListByStory(ctx, s.ID, ledger.KindStoryUpdated)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -230,7 +230,7 @@ func TestLedgerVerbs(t *testing.T) {
 		_ = json.Unmarshal(raw, &resp)
 		s := resp.Document
 
-		entries, err := ledStore.List(ctx, s.ID, "")
+		entries, err := ledStore.ListByStory(ctx, s.ID, "")
 		if err != nil || len(entries) == 0 {
 			t.Fatalf("setup: list: %v / %d", err, len(entries))
 		}

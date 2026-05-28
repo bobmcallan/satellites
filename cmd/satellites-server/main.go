@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -83,7 +84,9 @@ func main() {
 	verb.SetWorkspaceStore(wsStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
-	verb.SetLedgerStore(ledger.New(sqlDB))
+	ledgerStore := ledger.New(sqlDB)
+	verb.SetLedgerStore(ledgerStore)
+
 	clStore := changelog.New(sqlDB)
 	verb.SetChangelogStore(clStore)
 	server.SetChangelogStore(clStore)
@@ -208,6 +211,7 @@ func main() {
 		"stories.page_size":             "50",
 		"changelog.page_size":           "20",
 		"mcp_instructions_budget_bytes": "1500",
+		"ledger_buffer_size":            "4096",
 	} {
 		created, err := variableStore.SeedSystem(context.Background(), name, defaultValue, time.Now().UTC())
 		if err != nil {
@@ -233,6 +237,41 @@ func main() {
 				"value", v.Value, "default", mcpserver.DefaultInstructionsBudgetBytes, "err", perr)
 		}
 	}
+
+	// Operator-observability ledger handler (sty_0006f5f5). Replaces the
+	// default arbor logger with a tee that fans every log record out to
+	// both stderr (existing behaviour) and the LedgerHandler. The handler
+	// persists records whose context carries correlation ids (set by the
+	// HTTP correlationMiddleware) as evidence ledger rows so the portal
+	// /ledger page (sty_becb7019) can surface them.
+	level := arbor.ParseLevel(cfg.Log.Level)
+	bufferSize := 4096
+	if v, err := variableStore.Get(context.Background(), variable.Key{Scope: variable.ScopeSystem, Name: "ledger_buffer_size"}); err == nil {
+		if n, perr := strconv.Atoi(v.Value); perr == nil && n > 0 {
+			bufferSize = n
+		} else {
+			arbor.Warn("ledger_buffer_size unparseable; using default",
+				"value", v.Value, "default", bufferSize, "err", perr)
+		}
+	}
+	ledgerHandler := ledger.NewHandler(ledgerStore, ledger.HandlerOptions{
+		MinLevel:   level,
+		BufferSize: bufferSize,
+	})
+	arbor.SetHandlers(level,
+		arbor.NewStderrHandler(level, cfg.Log.JSON, nil),
+		ledgerHandler,
+	)
+	arbor.Info("ledger handler wired", "buffer_size", bufferSize)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ledgerHandler.Close(ctx); err != nil {
+			// Use stderr directly; arbor itself is shutting down so we
+			// can't route this through it.
+			fmt.Fprintf(os.Stderr, "ledger handler close: %v\n", err)
+		}
+	}()
 
 	// System-variables resolver: the computed values document_get
 	// substitutes into {{name}} placeholders. Read-only by contract;

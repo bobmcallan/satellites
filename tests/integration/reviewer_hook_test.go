@@ -92,7 +92,7 @@ func TestReviewerHook(t *testing.T) {
 		}
 		var resp verb.DocumentUpsertResponse
 		_ = json.Unmarshal(raw, &resp)
-		entries, err := ledStore.List(ctx, resp.Document.ID, ledger.KindReviewFinding)
+		entries, err := ledStore.ListByStory(ctx, resp.Document.ID, ledger.KindReviewFinding)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -129,7 +129,7 @@ func TestReviewerHook(t *testing.T) {
 		_ = json.Unmarshal(raw, &resp)
 		s := resp.Document
 
-		entries, err := ledStore.List(ctx, s.ID, ledger.KindReviewFinding)
+		entries, err := ledStore.ListByStory(ctx, s.ID, ledger.KindReviewFinding)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -144,7 +144,7 @@ func TestReviewerHook(t *testing.T) {
 		if _, err := verb.Dispatch(ctx, "document_upsert", updReq); err != nil {
 			t.Fatalf("update: %v", err)
 		}
-		entries, _ = ledStore.List(ctx, s.ID, ledger.KindReviewFinding)
+		entries, _ = ledStore.ListByStory(ctx, s.ID, ledger.KindReviewFinding)
 		if len(entries) != 4 {
 			t.Fatalf("expected 4 findings after update, got %d", len(entries))
 		}

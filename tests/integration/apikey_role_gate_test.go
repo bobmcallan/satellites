@@ -285,7 +285,7 @@ func TestAPIKeyRoleGate(t *testing.T) {
 			t.Fatalf("mint returned incomplete shape: %+v", minted)
 		}
 
-		entries, err := ledStore.List(ctx, storyID, ledger.KindReviewerKeyMinted)
+		entries, err := ledStore.ListByStory(ctx, storyID, ledger.KindReviewerKeyMinted)
 		if err != nil {
 			t.Fatalf("list mint entries: %v", err)
 		}
@@ -296,7 +296,7 @@ func TestAPIKeyRoleGate(t *testing.T) {
 		if err := verb.RevokeReviewerKeyForStory(ctx, storyID, minted.KeyID, admin.ID); err != nil {
 			t.Fatalf("revoke: %v", err)
 		}
-		entries, err = ledStore.List(ctx, storyID, ledger.KindReviewerKeyRevoked)
+		entries, err = ledStore.ListByStory(ctx, storyID, ledger.KindReviewerKeyRevoked)
 		if err != nil {
 			t.Fatalf("list revoke entries: %v", err)
 		}

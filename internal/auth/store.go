@@ -38,6 +38,12 @@ type APIKeyRole string
 const (
 	APIKeyRoleExecutor APIKeyRole = "executor"
 	APIKeyRoleReviewer APIKeyRole = "reviewer"
+	// APIKeyRoleRunner is a third role minted for the `satellites story
+	// run` driver (sty_7af47a91). A runner key may append log-kind
+	// ledger rows so the driver's captured `claude -p` output can land
+	// in the substrate ledger without the broader reviewer permissions
+	// (status patching, review_finding kinds, etc.).
+	APIKeyRoleRunner APIKeyRole = "runner"
 )
 
 // User is a satellites operator.
