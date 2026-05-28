@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/config/documents"
-	"github.com/bobmcallan/satellites/config/reviewers"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/changelog"
@@ -89,28 +88,12 @@ func main() {
 	verb.SetChangelogStore(clStore)
 	server.SetChangelogStore(clStore)
 
-	// Reviewer registry — load every markdown definition embedded
-	// under config/reviewers/, then wire either the production
-	// Anthropic client (when ANTHROPIC_API_KEY is set) or no client
-	// at all. Without a client, dispatch is a no-op so the
-	// substrate boots cleanly in environments without LLM creds.
-	reviewerDefs, err := reviewer.Load(reviewers.FS)
-	if err != nil {
-		arbor.Fatal("reviewer load", "err", err)
-	}
-	var reviewerClient reviewer.Client
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		reviewerClient = reviewer.NewAnthropicClient(key)
-		arbor.Info("reviewer client wired (anthropic)", "defs", len(reviewerDefs))
-	} else {
-		arbor.Info("reviewer client absent — ANTHROPIC_API_KEY unset, reviews are no-ops",
-			"defs", len(reviewerDefs))
-	}
-	verb.SetReviewerRegistry(reviewer.NewRegistry(reviewerDefs, reviewerClient))
-
 	// story_request_review verb runs gate skills via `claude -p`. The
 	// dispatcher is wired here so the verb has a transport on boot;
 	// individual test setups inject a stub via verb.SetGateDispatcher.
+	// Reviewer registry is wired AFTER the system-seed reconciler runs
+	// (further down) so the documents store holds the latest skill
+	// bodies before LoadFromStore reads them.
 	verb.SetGateDispatcher(verb.ClaudeCLIGateDispatcher{
 		DefaultTimeout: 5 * time.Minute,
 	})
@@ -167,7 +150,18 @@ func main() {
 		if docType == "" {
 			docType = document.TypeDocument
 		}
-		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, string(body), fm.Tags, "system:seed", time.Now().UTC())
+		// Skills preserve their frontmatter in the stored body so the
+		// document mirror is byte-identical to the SKILL.md a client
+		// would materialise into .claude/skills/<name>/SKILL.md.
+		// Documents strip frontmatter (substrate keys are not part of
+		// the rendered body for templated docs).
+		var storedBody string
+		if docType == document.TypeSkill {
+			storedBody = string(raw)
+		} else {
+			storedBody = string(body)
+		}
+		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, storedBody, fm.Tags, "system:seed", time.Now().UTC())
 		if err != nil {
 			arbor.Fatal("reconcile system seed", "name", name, "err", err)
 		}
@@ -181,6 +175,26 @@ func main() {
 		}
 	}
 	arbor.Info("system seeds reconciled")
+
+	// Reviewer registry — load every type:"skill" row tagged
+	// `kind:reviewer` from the documents store (the reconciler seeded
+	// these from config/documents/ above), then wire either the
+	// production Anthropic client (when ANTHROPIC_API_KEY is set) or
+	// no client at all. Without a client, dispatch is a no-op so the
+	// substrate boots cleanly in environments without LLM creds.
+	reviewerDefs, err := reviewer.LoadFromStore(context.Background(), docStore)
+	if err != nil {
+		arbor.Fatal("reviewer load from store", "err", err)
+	}
+	var reviewerClient reviewer.Client
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		reviewerClient = reviewer.NewAnthropicClient(key)
+		arbor.Info("reviewer client wired (anthropic)", "defs", len(reviewerDefs))
+	} else {
+		arbor.Info("reviewer client absent — ANTHROPIC_API_KEY unset, reviews are no-ops",
+			"defs", len(reviewerDefs))
+	}
+	verb.SetReviewerRegistry(reviewer.NewRegistry(reviewerDefs, reviewerClient))
 
 	variableStore := variable.New(sqlDB)
 	verb.SetVariableStore(variableStore)

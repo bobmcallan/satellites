@@ -32,7 +32,7 @@ func (f *fakeSummaryClient) Complete(_ context.Context, _ string, _ int, prompt 
 
 // TestStorySummary covers sty_77524ed8:
 //   - AC#1: migration adds summary + summary_updated_at (verified by scan)
-//   - AC#2: config/reviewers/story_summary.md loads as a Definition
+//   - AC#2: story_summary skill loads as a Definition from the documents store
 //   - AC#3: story_get returns summary
 //   - AC#4: ledger_append triggers regen
 //   - AC#5: story_summary_regenerate verb works

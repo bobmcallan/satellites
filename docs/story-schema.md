@@ -60,7 +60,7 @@ The verb layer enforces:
 
 Everything else (well-formed AC, context links, epic membership tags,
 clear purpose paragraph) is **convention** and lives in the reviewer
-agent's markdown rubric (`config/reviewers/story_reviewer.md`), not in
+agent's markdown rubric (`config/documents/story_reviewer.md`, a type:"skill" row), not in
 Go source.
 
 ## Deletion semantics

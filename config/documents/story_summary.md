@@ -1,5 +1,8 @@
 ---
 name: story_summary
+scope: system
+type: skill
+tags: [kind:reviewer]
 enabled: true
 model: claude-sonnet-4-6
 max_tokens: 512

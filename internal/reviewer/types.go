@@ -6,9 +6,11 @@
 // schema. NO reviewer prose lives in Go source — this package is
 // load-render-call-parse orchestration only.
 //
-// Adding a new reviewer is one new file under config/reviewers/.
+// Adding a new reviewer is one new file under config/documents/
+// with `type: skill` and `tags: [kind:reviewer]` in frontmatter.
 // Tuning an existing reviewer is editing that file + rebuilding
-// the binary (the files are embedded at compile time).
+// the binary; alternatively, an operator with substrate write
+// access can edit the skill row via document_upsert.
 package reviewer
 
 import (
