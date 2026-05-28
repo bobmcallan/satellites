@@ -1,8 +1,14 @@
 :root {
-  /* Shared control height for every button + form input. Define once
-     here; .btn and every input class below pin to this value so the
-     SAVE / DELETE / ADD-KV row on /settings/system-kv lines up with
-     the input it sits beside on every page. */
+  /* Shared control height for every form control. Defined once here;
+     the element-level rule below applies it to every <input>,
+     <select>, <textarea>, and `.btn` button so authors don't have to
+     remember a class name.
+
+     Contract: do NOT override `height` on individual selectors. If a
+     control needs a different look, introduce a variant class on top
+     of the shared rule — never a height override. Decorative buttons
+     (modal-close, avatar, chip-remove, tag-chip) are chrome, not form
+     controls, and keep their bespoke styling. */
   --control-height: 2.4rem;
 }
 
@@ -27,6 +33,30 @@ code { background: transparent; padding: 0; }
 table { border-collapse: collapse; }
 th { font-weight: 700; text-align: left; }
 [x-cloak] { display: none !important; }
+
+/* Shared form-control style — see contract in `:root` above. Every
+   text-like input, every select, and every textarea inherits the
+   system height + base chrome from this rule. Class blocks below add
+   only variant treatment (width, min-width, background accent). */
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="reset"]):not([type="button"]):not([type="file"]),
+select,
+textarea {
+  background: #0a0a0a;
+  border: 1px solid #333;
+  color: inherit;
+  height: var(--control-height);
+  padding: 0 0.7rem;
+  border-radius: 3px;
+  font: inherit;
+  box-sizing: border-box;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="reset"]):not([type="button"]):not([type="file"]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #4ade80;
+}
+textarea { height: auto; min-height: var(--control-height); padding: 0.5rem 0.7rem; }
 
 .topbar {
   display: flex;
@@ -126,18 +156,12 @@ main {
 
 /* System KV admin page (sty_5d03c1a0) — table rows with inline edit. */
 .kv-edit-form, .kv-delete-form { margin: 0; display: inline-flex; gap: 0.4rem; align-items: center; }
+/* Variant treatment only — height, padding, border, radius, font, and
+   focus all inherit from the shared element-level rule at the top. */
 .kv-input {
   background: #050505;
-  border: 1px solid #333;
-  color: #e0e0e0;
-  height: var(--control-height);
-  padding: 0 0.7rem;
-  font: inherit;
-  border-radius: 3px;
   min-width: 18rem;
-  box-sizing: border-box;
 }
-.kv-input:focus { outline: none; border-color: #4ade80; }
 .kv-name code { color: #e0e0e0; font-size: 0.85rem; }
 .kv-value code { color: #c8c8c8; font-size: 0.8rem; }
 
@@ -274,15 +298,11 @@ main {
   font-size: 0.75rem;
   letter-spacing: 0.15em;
 }
-.form-stack input, .login-form input {
-  background: #0a0a0a;
-  border: 1px solid #333;
-  height: var(--control-height);
-  padding: 0 0.8rem;
-  border-radius: 3px;
-  box-sizing: border-box;
-}
-.form-stack input:focus, .login-form input:focus { outline: none; border-color: #4ade80; }
+/* Form-stack and login-form inputs inherit height + chrome from the
+   shared element-level rule. Padding override here only because the
+   stacked layout looks marginally better with a touch more horizontal
+   padding than the table-row inputs. */
+.form-stack input, .login-form input { padding: 0 0.8rem; }
 .form-actions {
   display: flex;
   justify-content: flex-end;
@@ -471,20 +491,13 @@ main {
 
 /* V4-style story panel — search input, chip strip, expandable rows. */
 .panel-stories { display: block; }
+/* Story-panel search input. Height + chrome inherit from the shared
+   element-level rule; only width + margin are variant. */
 .panel-search {
   display: block;
   width: 100%;
-  box-sizing: border-box;
-  height: var(--control-height);
-  padding: 0 0.7rem;
   margin: 0 0 0.5rem;
-  background: #0a0a0a;
-  border: 1px solid #333;
-  border-radius: 3px;
-  color: inherit;
-  font: inherit;
 }
-.panel-search:focus { outline: none; border-color: #4ade80; }
 
 .panel-filter-chips {
   display: flex;
@@ -635,7 +648,8 @@ button.status-button {
   background: #0a0a0a;
   color: #e0e0e0;
   border: 1px solid #333;
-  padding: 0.35rem 0.7rem;
+  height: var(--control-height);
+  padding: 0 0.8rem;
   font: inherit;
   font-size: 0.75rem;
   line-height: 1;
@@ -692,16 +706,10 @@ button.status-button[disabled] {
   align-items: center;
   gap: 0.4rem;
 }
-.story-bulk-target {
-  background: #050505;
-  color: #e0e0e0;
-  border: 1px solid #333;
-  border-radius: 3px;
-  padding: 0.25rem 0.4rem;
-  font: inherit;
-  font-size: 0.78rem;
-}
-.story-bulk-bar .btn { padding: 0.35rem 0.8rem; font-size: 0.75rem; }
+/* Bulk-bar select — only background is variant; height and chrome
+   come from the shared element-level rule so it lines up with the
+   `apply to selection` button to its right. */
+.story-bulk-target { background: #050505; }
 .story-bulk-result {
   color: #d0d0d0;
   font-variant-numeric: tabular-nums;
