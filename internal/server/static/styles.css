@@ -112,6 +112,15 @@ main {
 @media (min-width: 1920px) { main { max-width: 1600px; } }
 @media (min-width: 2560px) { main { max-width: 1920px; } }
 
+/* Content-heavy pages opt out of the readability cap on `main` so the
+   panel and its body fill the viewport (minus the clamp padding).
+   Release notes and audit logs are reference material — narrow
+   measure makes them harder to scan, not easier. */
+main[data-page="changelog"],
+main[data-page="ledger"] {
+  max-width: none;
+}
+
 .panel {
   background: #111;
   border: 1px solid #222;
