@@ -227,8 +227,8 @@ func init() {
 	})
 	Register(&Verb{
 		Name: "document_list",
-		Description: "List documents and/or stories with structured filters and cursor pagination. " +
-			"Pass type:'story' to list stories, type:'document' for documents, omit to list both.",
+		Description: "List substrate rows with structured filters and cursor pagination. " +
+			"Pass type:'story' / 'document' / 'skill' to restrict; omit to list every type.",
 		Invoke: invokeDocumentList,
 	})
 	Register(&Verb{

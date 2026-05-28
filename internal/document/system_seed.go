@@ -125,8 +125,8 @@ type ReconcileResult struct {
 }
 
 // ReconcileSystemSeed brings (system_seeds[name], documents[system/name])
-// into agreement with the supplied body + tags. Idempotent: when the
-// stored embedded_hash matches the hash of (body, tags), zero writes
+// into agreement with the supplied body + tags + type. Idempotent: when
+// the stored embedded_hash matches the hash of (body, tags), zero writes
 // occur and Changed is false.
 //
 // Boot calls this once per embedded artifact. A binary release that
@@ -134,8 +134,20 @@ type ReconcileResult struct {
 // appends one document_versions row and, when tags shifted, patches
 // the documents.tags array; unchanged artifacts trigger no writes.
 //
-// Pass nil/empty tags for legacy artifacts that have no frontmatter.
+// docType is the documents.type discriminator the mirrored row carries
+// on first insert. Empty defaults to TypeDocument. Pass TypeSkill for
+// embedded skill artifacts. Pass nil/empty tags for artifacts that
+// have no frontmatter.
 func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store, name, body string, tags []string, createdBy string, now time.Time) (ReconcileResult, error) {
+	return ReconcileSystemSeedTyped(ctx, sys, docs, TypeDocument, name, body, tags, createdBy, now)
+}
+
+// ReconcileSystemSeedTyped is the type-aware variant of
+// ReconcileSystemSeed. See SeedSystemTyped for the docType contract.
+func ReconcileSystemSeedTyped(ctx context.Context, sys *SystemSeedStore, docs *Store, docType, name, body string, tags []string, createdBy string, now time.Time) (ReconcileResult, error) {
+	if docType == "" {
+		docType = TypeDocument
+	}
 	hash := HashBodyAndTags(body, tags)
 	existing, err := sys.Get(ctx, name)
 	switch {
@@ -148,7 +160,7 @@ func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store,
 	if _, err := sys.upsert(ctx, name, body, hash, now); err != nil {
 		return ReconcileResult{}, err
 	}
-	if err := SeedSystem(ctx, docs, name, body, createdBy, now); err != nil {
+	if err := SeedSystemTyped(ctx, docs, docType, name, body, createdBy, now); err != nil {
 		return ReconcileResult{}, fmt.Errorf("system_seed: mirror to documents: %w", err)
 	}
 	// Apply tags after the document row exists. SetDocumentTags is a

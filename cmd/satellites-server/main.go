@@ -163,7 +163,11 @@ func main() {
 			arbor.Fatal("config/documents currently only supports scope=system",
 				"file", filename, "scope", scope)
 		}
-		res, err := document.ReconcileSystemSeed(context.Background(), sysSeedStore, docStore, name, string(body), fm.Tags, "system:seed", time.Now().UTC())
+		docType := fm.Type
+		if docType == "" {
+			docType = document.TypeDocument
+		}
+		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, string(body), fm.Tags, "system:seed", time.Now().UTC())
 		if err != nil {
 			arbor.Fatal("reconcile system seed", "name", name, "err", err)
 		}

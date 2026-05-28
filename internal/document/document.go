@@ -53,6 +53,13 @@ var ErrNotFound = errors.New("document: not found")
 // triple does not satisfy the scope-coherence rules.
 var ErrScopeMismatch = errors.New("document: scope coherence violation")
 
+// ErrTypeMismatch is returned when an upsert names a type that
+// disagrees with an existing row at the same (scope, workspace_id,
+// project_id, name). Document and skill share a namespace so the key
+// resolves to at most one row; the caller may not silently flip its
+// type via upsert.
+var ErrTypeMismatch = errors.New("document: type mismatch on existing key")
+
 // Document is the latest-pointer row on documents. The struct unifies
 // "document" (free-form authored substrate) and "story" (unit-of-work)
 // behind a single shape, distinguished by Type. Story-only metadata
@@ -84,6 +91,7 @@ const (
 	TypeDocument = "document"
 	TypeStory    = "story"
 	TypeTask     = "task"
+	TypeSkill    = "skill"
 )
 
 // Version is an immutable row from document_versions.

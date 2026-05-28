@@ -23,8 +23,15 @@ func New(db *sql.DB) *Store { return &Store{DB: db} }
 // UpsertInput is the write payload for Upsert. ViaInternalSeed=true is
 // the only path that may write at scope=system; everything else gets
 // ErrScopeReadonly. Verbs always pass false.
+//
+// Type names the documents.type discriminator the row should carry on
+// first insert. Empty defaults to TypeDocument. Documents and skills
+// share the (scope, name) namespace, so an upsert against an existing
+// row whose stored type disagrees with this value returns
+// ErrTypeMismatch.
 type UpsertInput struct {
 	Key             Key
+	Type            string
 	Body            string
 	CreatedBy       string
 	ViaInternalSeed bool
@@ -66,6 +73,13 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	if in.Key.Scope == ScopeSystem && !in.ViaInternalSeed {
 		return Document{}, Version{}, ErrScopeReadonly
 	}
+	docType := in.Type
+	if docType == "" {
+		docType = TypeDocument
+	}
+	if docType != TypeDocument && docType != TypeSkill {
+		return Document{}, Version{}, fmt.Errorf("document: upsert: unsupported type %q (allowed: document, skill)", docType)
+	}
 	now = now.UTC()
 
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -74,9 +88,13 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	}
 	defer tx.Rollback() //nolint:errcheck // commit path handles success
 
-	doc, err := lockOrInsertDocument(ctx, tx, in.Key, now)
+	doc, err := lockOrInsertDocument(ctx, tx, in.Key, docType, now)
 	if err != nil {
 		return Document{}, Version{}, err
+	}
+	if doc.Type != docType {
+		return Document{}, Version{}, fmt.Errorf("%w: existing row at (scope=%s, name=%s) is type=%s, upsert requested type=%s",
+			ErrTypeMismatch, in.Key.Scope, in.Key.Name, doc.Type, docType)
 	}
 
 	// Body-equality short-circuit. When the latest version is active and
@@ -784,8 +802,12 @@ func appendVersion(ctx context.Context, tx *sql.Tx, doc Document, body, by strin
 	}, nil
 }
 
-// lockOrInsertDocument resolves the documents row for an upsert (type='document').
-func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, now time.Time) (Document, error) {
+// lockOrInsertDocument resolves the documents row for an upsert. The
+// row's type is set on first insert from docType (document or skill);
+// subsequent calls return the existing row regardless of its type so
+// the caller can detect type mismatches and reject them at the Upsert
+// boundary.
+func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, docType string, now time.Time) (Document, error) {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
 		string(key.Scope), key.WorkspaceID+"\x1f"+key.ProjectID+"\x1f"+key.Name,
@@ -808,8 +830,8 @@ func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, now time.Tim
             (id, scope, workspace_id, project_id, name, latest_version,
              type, tags, status, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, 0,
-                'document', '{}', 'active', $6, $6)
-    `, id, string(key.Scope), wsArg, pjArg, key.Name, now); err != nil {
+                $7, '{}', 'active', $6, $6)
+    `, id, string(key.Scope), wsArg, pjArg, key.Name, now, docType); err != nil {
 		return Document{}, fmt.Errorf("document: insert: %w", err)
 	}
 	return lockDocumentByKey(ctx, tx, key)
@@ -830,7 +852,7 @@ func lockDocumentByKey(ctx context.Context, tx *sql.Tx, key Key) (Document, erro
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id   IS NOT DISTINCT FROM $3
           AND name = $4
-          AND type = 'document'
+          AND type IN ('document','skill')
         FOR UPDATE
     `, string(key.Scope), wsArg, pjArg, key.Name)
 	return scanDocumentFull(row)
@@ -850,7 +872,7 @@ func (s *Store) lookupDocument(ctx context.Context, key Key) (Document, error) {
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id   IS NOT DISTINCT FROM $3
           AND name = $4
-          AND type = 'document'
+          AND type IN ('document','skill')
     `, string(key.Scope), wsArg, pjArg, key.Name)
 	return scanDocumentFull(row)
 }

@@ -17,6 +17,15 @@ import (
 // upgrade that changes a markdown source materialises as a new version
 // row, and an unchanged binary is a no-op.
 func SeedSystem(ctx context.Context, s *Store, name, body, createdBy string, now time.Time) error {
+	return SeedSystemTyped(ctx, s, TypeDocument, name, body, createdBy, now)
+}
+
+// SeedSystemTyped is the type-aware variant of SeedSystem. docType is
+// the documents.type discriminator the row should carry on first
+// insert; allowed values are TypeDocument and TypeSkill. Subsequent
+// calls against an existing row whose stored type disagrees with
+// docType return ErrTypeMismatch from the underlying Upsert.
+func SeedSystemTyped(ctx context.Context, s *Store, docType, name, body, createdBy string, now time.Time) error {
 	key := Key{Scope: ScopeSystem, Name: name}
 	res, err := s.Get(ctx, key, GetOptions{})
 	if err == nil && len(res.Versions) == 1 && res.Versions[0].Body == body {
@@ -27,6 +36,7 @@ func SeedSystem(ctx context.Context, s *Store, name, body, createdBy string, now
 	}
 	_, _, err = s.Upsert(ctx, UpsertInput{
 		Key:             key,
+		Type:            docType,
 		Body:            body,
 		CreatedBy:       createdBy,
 		ViaInternalSeed: true,
