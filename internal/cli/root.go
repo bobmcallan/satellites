@@ -24,9 +24,11 @@ func NewRootCmd() *cobra.Command {
 Warp, Codex, Gemini CLI) and governs the authored process for
 agent-driven work. See https://github.com/bobmcallan/satellites for
 docs.`,
+		Version:       versionLine(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
 	for _, c := range registered {
 		root.AddCommand(c)
 	}
