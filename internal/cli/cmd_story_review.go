@@ -1,7 +1,7 @@
 // `satellites story review <story-id>` — the client-side reviewer gate
 // (sty_ffec5dab). The gate is intrinsically client-side: it reads the
-// workflow skill from the local worktree and runs `claude -p --skill`
-// against the tree under review. The substrate (story, project-config,
+// workflow skill from the local worktree and runs `claude -p
+// --append-system-prompt <gate-body>` against the tree under review. The substrate (story, project-config,
 // ledger, status) stays server-side and is reached through the existing
 // document_get / document_upsert / ledger_* verbs — no new server verb.
 //
@@ -46,7 +46,7 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 
 It resolves the story and project-config via server verbs, reads the
 workflow skill from the LOCAL worktree, picks the gated transition, and
-runs the gate as ` + "`claude -p --skill <gate>`" + ` against the worktree.
+runs the gate as ` + "`claude -p --append-system-prompt <gate-body>`" + ` against the worktree.
 On accept it advances the story status via document_upsert and records
 review_accept + status_transition ledger rows; on reject it records the
 rejection notes. The gate runs where the worktree and claude live — the

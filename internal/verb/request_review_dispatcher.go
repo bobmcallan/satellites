@@ -16,9 +16,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ledger"
 )
 
@@ -71,9 +73,12 @@ var gateDispatcher GateDispatcher
 // "gate dispatcher not configured"); tests pass a stub between cases.
 func SetGateDispatcher(d GateDispatcher) { gateDispatcher = d }
 
-// ClaudeCLIGateDispatcher invokes `claude -p --skill <name>` as a
-// subprocess in WorktreeRoot. The story body + recent ledger arrive on
-// stdin; the reviewer key arrives in env as SATELLITES_REVIEWER_API_KEY
+// ClaudeCLIGateDispatcher invokes `claude -p --append-system-prompt
+// <gate-body>` as a subprocess in WorktreeRoot. The gate skill's body is
+// read from the worktree (.claude/skills/<name>/SKILL.md) and delivered
+// as the appended system prompt — the claude CLI has no `--skill` flag
+// (sty_1312d692). The story body + recent ledger arrive on stdin as the
+// prompt; the reviewer key arrives in env as SATELLITES_REVIEWER_API_KEY
 // so the skill can authenticate back through the verbs.
 //
 // The skill is expected to print one JSON object: `{decision, notes,
@@ -124,7 +129,12 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		return GateOutput{}, fmt.Errorf("gate dispatch: marshal payload: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, binary, "-p", "--skill", in.SkillName)
+	systemPrompt, err := resolveGateSkillBody(in.WorktreeRoot, in.SkillName)
+	if err != nil {
+		return GateOutput{}, err
+	}
+
+	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt)...)
 	cmd.Stdin = strings.NewReader(string(payload))
 	if in.WorktreeRoot != "" {
 		cmd.Dir = in.WorktreeRoot
@@ -149,6 +159,39 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		return GateOutput{}, fmt.Errorf("gate dispatch: subprocess: %w", err)
 	}
 	return ParseGateOutput(out)
+}
+
+// gateClaudeArgs builds the claude argv for a gate run. The gate skill
+// body is delivered as an appended system prompt (`--append-system-prompt`,
+// a real claude flag); the story payload arrives on stdin as the prompt.
+// The earlier `--skill <name>` form was invalid — the claude CLI has no
+// such flag, so every gate run died at dispatch (sty_1312d692). Kept as a
+// standalone function so a test can pin the argv and catch a future
+// invalid flag before a live run.
+func gateClaudeArgs(systemPrompt string) []string {
+	return []string{"-p", "--append-system-prompt", systemPrompt}
+}
+
+// resolveGateSkillBody reads the gate skill's SKILL.md from the worktree
+// (.claude/skills/<name>/SKILL.md) and returns its body with frontmatter
+// stripped — the rubric the gate runs under, delivered as the system
+// prompt. A missing skill is a dispatch error: the gate cannot run a
+// skill that is not materialised in the tree under review.
+func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
+	root := worktreeRoot
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	path := filepath.Join(root, ".claude", "skills", skillName, "SKILL.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
+	}
+	_, body, err := frontmatter.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("gate dispatch: parse gate skill %q: %w", skillName, err)
+	}
+	return string(body), nil
 }
 
 // ParseGateOutput is lenient on whitespace + leading prose but strict on

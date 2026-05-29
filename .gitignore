@@ -53,3 +53,6 @@ go.work.sum
 # `*.example` templates stay in git; the live files do not.
 /scripts/satellites-server.toml
 /satellites.toml
+
+# Operator-local backup of .claude/skills (created during a manual move). Never committed.
+.claude_bak/
