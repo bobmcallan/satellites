@@ -241,6 +241,30 @@ func TestDocumentStore(t *testing.T) {
 		}
 	})
 
+	t.Run("skill rows accept document-level tags (sty_598369dd)", func(t *testing.T) {
+		testbootstrap.Reset(t, env)
+		wsID, pjID := seedWorkspaceAndProject(t)
+		key := document.Key{Scope: document.ScopeProject, WorkspaceID: wsID, ProjectID: pjID, Name: "gate-skill"}
+		doc, _, err := store.Upsert(ctx, document.UpsertInput{
+			Key: key, Type: document.TypeSkill, Body: "skill body", CreatedBy: "tester",
+		}, time.Now())
+		if err != nil {
+			t.Fatalf("skill upsert: %v", err)
+		}
+		// Before sty_598369dd this rejected with "expected document".
+		tagged, err := store.SetDocumentTags(ctx, doc.ID, []string{"kind:gate"}, time.Now())
+		if err != nil {
+			t.Fatalf("SetDocumentTags on skill row: %v", err)
+		}
+		if len(tagged.Tags) != 1 || tagged.Tags[0] != "kind:gate" {
+			t.Fatalf("tags not persisted on skill: %+v", tagged.Tags)
+		}
+		// Idempotent re-apply of the same tag set is a no-op, not an error.
+		if _, err := store.SetDocumentTags(ctx, doc.ID, []string{"kind:gate"}, time.Now()); err != nil {
+			t.Fatalf("re-apply tags: %v", err)
+		}
+	})
+
 	t.Run("scope-coherence rejected by store before DB", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 		_, _, err := store.Upsert(ctx, document.UpsertInput{

@@ -1,6 +1,7 @@
 ---
 name: plan-review
 type: skill
+tags: [kind:gate]
 description: Gate skill for the backlog → ready transition. Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
 ---
 

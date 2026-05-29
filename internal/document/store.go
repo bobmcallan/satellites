@@ -343,11 +343,13 @@ func (s *Store) LatestVersionStatus(ctx context.Context, id string) (Status, err
 	return status, nil
 }
 
-// SetDocumentTags replaces the tags array on a type='document' row.
-// Stories carry tags through UpdateStory; this is the equivalent path
-// for free-form documents (notably the principle-tag flow). Reject on
-// non-document rows so the story update path stays the only writer of
-// tags on stories.
+// SetDocumentTags replaces the tags array on a free-form documents-table
+// row — type 'document' or 'skill'. Both are first-class rows in the
+// documents table that carry their tags directly in the documents.tags
+// column (the principle-tag flow and the gate-skill `kind:gate` flow,
+// respectively). Stories and tasks route tag changes through their own
+// update paths, so reject those here to keep a single writer of their
+// tags.
 func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, now time.Time) (Document, error) {
 	now = now.UTC()
 	if tags == nil {
@@ -363,8 +365,8 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	if err != nil {
 		return Document{}, err
 	}
-	if doc.Type != TypeDocument {
-		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document", id, doc.Type)
+	if !tagsSettableForType(doc.Type) {
+		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document or skill", id, doc.Type)
 	}
 	// Tag-equality short-circuit. Re-applying the same tag set is a
 	// no-op (no UPDATE, no updated_at bump) — keeps `satellites
@@ -387,6 +389,14 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	doc.Tags = append([]string(nil), tags...)
 	doc.UpdatedAt = now
 	return doc, nil
+}
+
+// tagsSettableForType reports whether a documents-table row of this type
+// carries its tags via SetDocumentTags. 'document' and 'skill' are
+// free-form rows with a tags column; 'story' and 'task' route tag
+// changes through their own update paths and must not be written here.
+func tagsSettableForType(t string) bool {
+	return t == TypeDocument || t == TypeSkill
 }
 
 // stringSlicesEqualUnordered compares two string slices ignoring order

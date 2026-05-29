@@ -42,3 +42,24 @@ func TestKey_Validate(t *testing.T) {
 		})
 	}
 }
+
+// TestTagsSettableForType pins which row types SetDocumentTags will
+// write. document and skill carry document-level tags directly; story
+// and task route through their own update paths. Before sty_598369dd
+// only `document` was accepted, so the skill case here would have
+// failed — guarding against a regression to that guard.
+func TestTagsSettableForType(t *testing.T) {
+	cases := map[string]bool{
+		TypeDocument: true,
+		TypeSkill:    true,
+		TypeStory:    false,
+		TypeTask:     false,
+		"":           false,
+		"other":      false,
+	}
+	for typ, want := range cases {
+		if got := tagsSettableForType(typ); got != want {
+			t.Errorf("tagsSettableForType(%q) = %v, want %v", typ, got, want)
+		}
+	}
+}
