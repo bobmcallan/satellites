@@ -223,6 +223,16 @@ func parseWorkflowFrontmatter(raw []byte) (workflowFrontmatter, error) {
 	return wfm, nil
 }
 
+// ExtractYAMLBlock pulls the first ```yaml fenced block out of a
+// markdown body. Exposed so other readers of fenced-YAML documents
+// (e.g. the project-config loader in internal/verb) share the exact
+// fence-extraction rule instead of re-implementing it — fixing the
+// fence-vs-raw parse bug once, in one place. Returns an error when no
+// line-anchored ```yaml fence is present.
+func ExtractYAMLBlock(body []byte) ([]byte, error) {
+	return extractYAMLBlock(body)
+}
+
 // extractYAMLBlock pulls the first ```yaml fenced block out of the
 // body. The opening fence must start a line — inline mentions of
 // ```yaml in prose don't trigger extraction. Anything outside the

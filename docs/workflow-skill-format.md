@@ -1,7 +1,7 @@
 # Workflow skill format
 
 A workflow skill is a markdown file that declares the state machine
-satellites uses to drive a story type from `backlog` to `completed`.
+satellites uses to drive a story type from `backlog` to `done`.
 The file is checked into the consumer project under
 `.claude/skills/<name>.md`; the project config maps each `story_type`
 to one skill file.

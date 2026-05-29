@@ -175,6 +175,64 @@ func TestDefaultSkillReader_RejectsParentEscape(t *testing.T) {
 	}
 }
 
+// TestParseProjectConfig_FencedBody is the regression test for gap #1:
+// the project-config body is YAML inside a markdown ```yaml fence, and
+// feeding the whole body straight to yaml.Unmarshal dies on the fence
+// ("found character that cannot start any token"). parseProjectConfig
+// must extract the fenced block first.
+func TestParseProjectConfig_FencedBody(t *testing.T) {
+	body := "# project-config (satellites)\n" +
+		"#\n" +
+		"# Project-scoped configuration. Body is YAML inside a markdown fence.\n" +
+		"\n" +
+		"```yaml\n" +
+		"story_types:\n" +
+		"  feature:\n" +
+		"    workflow_skill: .claude/skills/feature-workflow.md\n" +
+		"  fix:\n" +
+		"    workflow_skill: .claude/skills/fix-workflow.md\n" +
+		"reviewer_overrides: {}\n" +
+		"```\n" +
+		"\n" +
+		"## Notes\n\nFree-form prose after the block must be ignored.\n"
+
+	cfg, err := parseProjectConfig(body)
+	if err != nil {
+		t.Fatalf("parseProjectConfig(fenced body): %v", err)
+	}
+	if got := cfg.StoryTypes["feature"].WorkflowSkill; got != ".claude/skills/feature-workflow.md" {
+		t.Fatalf("feature workflow_skill = %q", got)
+	}
+	if got := cfg.StoryTypes["fix"].WorkflowSkill; got != ".claude/skills/fix-workflow.md" {
+		t.Fatalf("fix workflow_skill = %q", got)
+	}
+}
+
+// TestParseProjectConfig_RawBody confirms a fence-less body (raw YAML)
+// still parses, so the fence extraction is additive, not a hard
+// requirement that would break legacy configs.
+func TestParseProjectConfig_RawBody(t *testing.T) {
+	body := "story_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow.md\n"
+	cfg, err := parseProjectConfig(body)
+	if err != nil {
+		t.Fatalf("parseProjectConfig(raw body): %v", err)
+	}
+	if got := cfg.StoryTypes["feature"].WorkflowSkill; got != ".claude/skills/feature-workflow.md" {
+		t.Fatalf("feature workflow_skill = %q", got)
+	}
+}
+
+// TestParseProjectConfig_EmptyStoryTypes guards the empty-config error
+// path — a fenced block with no story_types is an operator mistake the
+// verb must reject loudly rather than silently dispatch nothing.
+func TestParseProjectConfig_EmptyStoryTypes(t *testing.T) {
+	body := "```yaml\nreviewer_overrides: {}\n```\n"
+	_, err := parseProjectConfig(body)
+	if err == nil || !strings.Contains(err.Error(), "empty story_types") {
+		t.Fatalf("expected empty story_types error, got %v", err)
+	}
+}
+
 func mustParseWF(t *testing.T, raw string) *workflow.Workflow {
 	t.Helper()
 	wf, err := workflow.Parse([]byte(raw))

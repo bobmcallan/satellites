@@ -23,8 +23,8 @@ func TestParse_ShippedExampleFile(t *testing.T) {
 	if wf.Name != "feature-workflow" {
 		t.Fatalf("name = %q, want feature-workflow", wf.Name)
 	}
-	if _, ok := wf.FindTransition("in-progress", "completed"); !ok {
-		t.Fatalf("expected in-progress→completed in example file")
+	if _, ok := wf.FindTransition("in_progress", "done"); !ok {
+		t.Fatalf("expected in_progress→done in example file")
 	}
 }
 

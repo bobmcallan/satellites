@@ -387,8 +387,22 @@ func loadProjectConfig(ctx context.Context, workspaceID, projectID string) (proj
 	if len(res.Versions) == 0 {
 		return projectConfig{}, fmt.Errorf("story_request_review: project-config has no active version")
 	}
+	return parseProjectConfig(res.Versions[0].Body)
+}
+
+// parseProjectConfig turns a project-config document body into the typed
+// config. The body is YAML inside a markdown ```yaml fence (so humans can
+// annotate around it), so we extract the fenced block before unmarshalling
+// — the same fence-vs-raw class of bug the workflow loader already handles
+// (sty_8da63e77). A body with no fence is treated as raw YAML so legacy
+// fence-less configs still parse.
+func parseProjectConfig(body string) (projectConfig, error) {
+	raw := []byte(body)
+	if block, err := workflow.ExtractYAMLBlock(raw); err == nil {
+		raw = block
+	}
 	var cfg projectConfig
-	if err := yaml.Unmarshal([]byte(res.Versions[0].Body), &cfg); err != nil {
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return projectConfig{}, fmt.Errorf("story_request_review: parse project-config yaml: %w", err)
 	}
 	if len(cfg.StoryTypes) == 0 {
