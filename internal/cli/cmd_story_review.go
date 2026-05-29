@@ -81,6 +81,11 @@ type reviewOpts struct {
 	WorktreeRoot string
 	Stdout       io.Writer
 	Stderr       io.Writer
+	// ReviewerKey is the minted reviewer-role api-key the spine writes
+	// (review_*, status_transition) and the status patch authenticate
+	// with. Empty until mintReviewerKey runs; the reads above stay on the
+	// operator's stored (executor) key (sty_e16f0553).
+	ReviewerKey string
 }
 
 // reviewStory is the minimal projection the reviewer needs from a
@@ -146,7 +151,20 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		recent = recent[len(recent)-5:]
 	}
 
-	// 6. Spine: the gate was requested.
+	// 6. Mint a short-lived reviewer key for the spine writes + status
+	// patch. The operator's stored key is executor-role and the server
+	// refuses review_*/status_transition rows and status patches from it;
+	// reviewer minting is admin-gated (apikey_create), so an autonomous
+	// non-admin executor cannot self-accept (sty_e16f0553). Fail before
+	// the costly gate dispatch if the caller lacks reviewer authority.
+	reviewerKey, reviewerKeyID, err := mintReviewerKey(ctx, opts, story)
+	if err != nil {
+		return fmt.Errorf("mint reviewer key for gate run (reviewer minting requires an admin user): %w", err)
+	}
+	opts.ReviewerKey = reviewerKey
+	defer revokeReviewerKey(ctx, opts, reviewerKeyID)
+
+	// 6b. Spine: the gate was requested.
 	reviewAppendLedger(ctx, opts, story, "review_requested",
 		fmt.Sprintf("gate %s: %s → %s", gateSkill, story.Status, transition.To),
 		map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
@@ -162,6 +180,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		Dynamic:      isDynamic,
 		RecentLedger: recent,
 		WorktreeRoot: opts.WorktreeRoot,
+		ReviewerKey:  opts.ReviewerKey,
 	})
 	if err != nil {
 		return fmt.Errorf("gate dispatch: %w", err)
@@ -193,7 +212,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	if err != nil {
 		return err
 	}
-	if _, err := dispatchVerb(ctx, "document_upsert", patchReq, opts.ConfigPath, opts.UserArg); err != nil {
+	if _, err := dispatchVerbAs(ctx, "document_upsert", patchReq, opts.ConfigPath, opts.UserArg, opts.ReviewerKey); err != nil {
 		return fmt.Errorf("patch status → %s: %w", newStatus, err)
 	}
 	reviewAppendLedger(ctx, opts, story, verb.KindReviewAccept, gateOut.Notes,
@@ -286,7 +305,48 @@ func reviewAppendLedger(ctx context.Context, opts reviewOpts, story reviewStory,
 	if err != nil {
 		return
 	}
-	if _, err := dispatchVerb(ctx, "ledger_append", req, opts.ConfigPath, opts.UserArg); err != nil {
+	if _, err := dispatchVerbAs(ctx, "ledger_append", req, opts.ConfigPath, opts.UserArg, opts.ReviewerKey); err != nil {
 		fmt.Fprintf(opts.Stderr, "ledger append %s failed: %v\n", kind, err)
+	}
+}
+
+// mintReviewerKey mints a short-lived reviewer-role api-key for this gate
+// run via apikey_create (under the operator's stored key). The verb
+// admin-gates reviewer minting, so this fails for a non-admin caller —
+// keeping the gate's authority real: an autonomous executor cannot mint
+// a reviewer key and self-accept (sty_e16f0553).
+func mintReviewerKey(ctx context.Context, opts reviewOpts, story reviewStory) (string, string, error) {
+	req, err := json.Marshal(verb.APIKeyCreateRequest{Role: "reviewer", ProjectID: story.ProjectID})
+	if err != nil {
+		return "", "", err
+	}
+	raw, err := dispatchVerb(ctx, "apikey_create", req, opts.ConfigPath, opts.UserArg)
+	if err != nil {
+		return "", "", err
+	}
+	var resp verb.APIKeyCreateResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", "", fmt.Errorf("decode apikey_create: %w", err)
+	}
+	if strings.TrimSpace(resp.APIKey) == "" {
+		return "", "", fmt.Errorf("apikey_create returned an empty key")
+	}
+	return resp.APIKey, resp.KeyID, nil
+}
+
+// revokeReviewerKey best-effort revokes the minted reviewer key once the
+// gate run is done, so the elevated credential does not outlive the
+// review. A revoke failure is logged, not fatal — the key is short-lived
+// regardless (IssueReviewerKey).
+func revokeReviewerKey(ctx context.Context, opts reviewOpts, keyID string) {
+	if strings.TrimSpace(keyID) == "" {
+		return
+	}
+	req, err := json.Marshal(verb.APIKeyRevokeRequest{KeyID: keyID})
+	if err != nil {
+		return
+	}
+	if _, err := dispatchVerb(ctx, "apikey_revoke", req, opts.ConfigPath, opts.UserArg); err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: revoke reviewer key %s failed: %v\n", keyID, err)
 	}
 }

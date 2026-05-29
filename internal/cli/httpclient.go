@@ -45,11 +45,21 @@ var correlationEnvHeaders = [...]struct {
 // file is absent or incomplete, cmd_exec.go falls back to
 // verb.Dispatch (the in-process registry).
 func httpDispatch(cfg cliconfig.Config, name string, req json.RawMessage) (json.RawMessage, error) {
+	return httpDispatchWithToken(cfg, name, req, cfg.Auth.Token)
+}
+
+// httpDispatchWithToken is httpDispatch with an explicit bearer token,
+// overriding cfg.Auth.Token. The reviewer gate uses this to send its
+// spine writes (review_*, status_transition) and the status patch under
+// a minted reviewer key while the operator's stored key stays executor
+// (sty_e16f0553). The server URL + correlation headers come from cfg as
+// usual; only the Authorization bearer differs.
+func httpDispatchWithToken(cfg cliconfig.Config, name string, req json.RawMessage, token string) (json.RawMessage, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/")
 	if baseURL == "" {
 		return nil, fmt.Errorf("cli: server_url missing in config")
 	}
-	if cfg.Auth.Token == "" {
+	if token == "" {
 		return nil, fmt.Errorf("cli: auth.token missing in config")
 	}
 	if strings.ContainsAny(name, "/?#") {
@@ -65,7 +75,7 @@ func httpDispatch(cfg cliconfig.Config, name string, req json.RawMessage) (json.
 	if err != nil {
 		return nil, fmt.Errorf("cli: build request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+cfg.Auth.Token)
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Content-Type", "application/json")
 	for _, p := range correlationEnvHeaders {
 		if v := strings.TrimSpace(os.Getenv(p.Env)); v != "" {
