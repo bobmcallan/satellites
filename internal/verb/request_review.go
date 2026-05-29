@@ -56,12 +56,17 @@ type StoryRequestReviewResponse struct {
 	NewStatus string `json:"new_status,omitempty"`
 }
 
-// projectConfig mirrors the YAML body shape documented in
-// docs/document-types-v5.md §2.
-type projectConfig struct {
-	StoryTypes map[string]struct {
-		WorkflowSkill string `yaml:"workflow_skill"`
-	} `yaml:"story_types"`
+// ProjectConfig mirrors the YAML body shape documented in
+// docs/document-types-v5.md §2. Exported so the client-side reviewer
+// command (satellites story review) parses project-config bodies
+// through the same owner rather than reimplementing the shape.
+type ProjectConfig struct {
+	StoryTypes map[string]StoryTypeConfig `yaml:"story_types"`
+}
+
+// StoryTypeConfig is one story_type → workflow-skill mapping.
+type StoryTypeConfig struct {
+	WorkflowSkill string `yaml:"workflow_skill"`
 }
 
 // workflowSkillReader resolves a workflow-skill path (as stored in
@@ -261,28 +266,11 @@ func invokeStoryRequestReview(ctx context.Context, raw json.RawMessage) (json.Ra
 // dynamic, transition.ReviewerSkill otherwise), and whether the run is
 // dynamic.
 func pickTransition(wf *workflow.Workflow, currentStatus string) (workflow.Transition, string, bool, error) {
-	outgoing := wf.TransitionsFrom(currentStatus)
-	if len(outgoing) == 0 {
-		return workflow.Transition{}, "", false, fmt.Errorf("story_request_review: no outgoing transitions from status %q", currentStatus)
+	t, gateSkill, isDynamic, err := wf.PickTransition(currentStatus)
+	if err != nil {
+		return workflow.Transition{}, "", false, fmt.Errorf("story_request_review: %w", err)
 	}
-	for _, t := range outgoing {
-		if t.Dynamic {
-			return t, wf.Name, true, nil
-		}
-	}
-	var gated []workflow.Transition
-	for _, t := range outgoing {
-		if strings.TrimSpace(t.ReviewerSkill) != "" {
-			gated = append(gated, t)
-		}
-	}
-	if len(gated) == 0 {
-		return workflow.Transition{}, "", false, fmt.Errorf("story_request_review: no gated transition from status %q (every outgoing edge has empty reviewer_skill — use the body-only patch path)", currentStatus)
-	}
-	if len(gated) > 1 {
-		return workflow.Transition{}, "", false, fmt.Errorf("story_request_review: multiple gated transitions from status %q — workflow must mark the choice as dynamic", currentStatus)
-	}
-	return gated[0], gated[0].ReviewerSkill, false, nil
+	return t, gateSkill, isDynamic, nil
 }
 
 // applyGateDecision writes the ledger row and (on accept) flips the
@@ -374,7 +362,7 @@ func writeStatusTransitionLedger(ctx context.Context, storyID, fromStatus, toSta
 	return nil
 }
 
-func loadProjectConfig(ctx context.Context, workspaceID, projectID string) (projectConfig, error) {
+func loadProjectConfig(ctx context.Context, workspaceID, projectID string) (ProjectConfig, error) {
 	res, err := documentStore.Get(ctx, document.Key{
 		Scope:       document.ScopeProject,
 		WorkspaceID: workspaceID,
@@ -382,31 +370,32 @@ func loadProjectConfig(ctx context.Context, workspaceID, projectID string) (proj
 		Name:        "project-config",
 	}, document.GetOptions{})
 	if err != nil {
-		return projectConfig{}, fmt.Errorf("story_request_review: load project-config: %w", err)
+		return ProjectConfig{}, fmt.Errorf("story_request_review: load project-config: %w", err)
 	}
 	if len(res.Versions) == 0 {
-		return projectConfig{}, fmt.Errorf("story_request_review: project-config has no active version")
+		return ProjectConfig{}, fmt.Errorf("story_request_review: project-config has no active version")
 	}
-	return parseProjectConfig(res.Versions[0].Body)
+	return ParseProjectConfig(res.Versions[0].Body)
 }
 
-// parseProjectConfig turns a project-config document body into the typed
+// ParseProjectConfig turns a project-config document body into the typed
 // config. The body is YAML inside a markdown ```yaml fence (so humans can
 // annotate around it), so we extract the fenced block before unmarshalling
 // — the same fence-vs-raw class of bug the workflow loader already handles
 // (sty_8da63e77). A body with no fence is treated as raw YAML so legacy
-// fence-less configs still parse.
-func parseProjectConfig(body string) (projectConfig, error) {
+// fence-less configs still parse. Exported so the client-side reviewer
+// command parses project-config through this one owner.
+func ParseProjectConfig(body string) (ProjectConfig, error) {
 	raw := []byte(body)
 	if block, err := workflow.ExtractYAMLBlock(raw); err == nil {
 		raw = block
 	}
-	var cfg projectConfig
+	var cfg ProjectConfig
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return projectConfig{}, fmt.Errorf("story_request_review: parse project-config yaml: %w", err)
+		return ProjectConfig{}, fmt.Errorf("parse project-config yaml: %w", err)
 	}
 	if len(cfg.StoryTypes) == 0 {
-		return projectConfig{}, fmt.Errorf("story_request_review: project-config has empty story_types block")
+		return ProjectConfig{}, fmt.Errorf("project-config has empty story_types block")
 	}
 	return cfg, nil
 }

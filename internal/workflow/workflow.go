@@ -182,6 +182,44 @@ func (w *Workflow) TransitionsFrom(state string) []Transition {
 	return out
 }
 
+// PickTransition resolves the single transition a reviewer gate should
+// run from currentStatus, and the gate skill that guards it:
+//
+//   - Any outgoing edge marked dynamic → the workflow itself is the gate
+//     (gateSkill = workflow name, isDynamic = true).
+//   - Otherwise the single outgoing edge with a non-empty reviewer_skill
+//     is the gated edge. Zero gated edges (every outgoing edge is an
+//     ungated self-transition) or more than one are errors — the caller
+//     uses the body-only patch path or the workflow must mark the choice
+//     dynamic, respectively.
+//
+// This is the one authoritative transition-resolution rule; both the
+// server verb and the client-side reviewer command call it.
+func (w *Workflow) PickTransition(currentStatus string) (Transition, string, bool, error) {
+	outgoing := w.TransitionsFrom(currentStatus)
+	if len(outgoing) == 0 {
+		return Transition{}, "", false, fmt.Errorf("no outgoing transitions from status %q", currentStatus)
+	}
+	for _, t := range outgoing {
+		if t.Dynamic {
+			return t, w.Name, true, nil
+		}
+	}
+	var gated []Transition
+	for _, t := range outgoing {
+		if strings.TrimSpace(t.ReviewerSkill) != "" {
+			gated = append(gated, t)
+		}
+	}
+	if len(gated) == 0 {
+		return Transition{}, "", false, fmt.Errorf("no gated transition from status %q (every outgoing edge has empty reviewer_skill — use the body-only patch path)", currentStatus)
+	}
+	if len(gated) > 1 {
+		return Transition{}, "", false, fmt.Errorf("multiple gated transitions from status %q — workflow must mark the choice as dynamic", currentStatus)
+	}
+	return gated[0], gated[0].ReviewerSkill, false, nil
+}
+
 // FindTransition returns the edge from→to or false if undeclared.
 // request_review uses this to decide whether the requested transition
 // is even legal before invoking the reviewer skill.

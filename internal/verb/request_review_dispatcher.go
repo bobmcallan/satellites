@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -128,7 +129,15 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	if in.WorktreeRoot != "" {
 		cmd.Dir = in.WorktreeRoot
 	}
-	cmd.Env = append(cmd.Env, fmt.Sprintf("SATELLITES_REVIEWER_API_KEY=%s", in.ReviewerKey))
+	// Inherit the caller's environment — claude needs PATH/HOME and the
+	// operator's auth to run at all. The reviewer key, when minted, is
+	// layered on top so the subprocess authenticates back as the
+	// reviewer; an empty key leaves the inherited operator auth in place
+	// (the client-side gate path mints no key).
+	cmd.Env = os.Environ()
+	if strings.TrimSpace(in.ReviewerKey) != "" {
+		cmd.Env = append(cmd.Env, "SATELLITES_REVIEWER_API_KEY="+in.ReviewerKey)
+	}
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -139,14 +148,15 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		}
 		return GateOutput{}, fmt.Errorf("gate dispatch: subprocess: %w", err)
 	}
-	return parseGateOutput(out)
+	return ParseGateOutput(out)
 }
 
-// parseGateOutput is lenient on whitespace + leading prose but strict on
+// ParseGateOutput is lenient on whitespace + leading prose but strict on
 // shape — a missing `decision` or one outside {accept, reject} is a
 // dispatcher-level error. Mirrors the existing reviewer/runner.go
-// parseOutput tolerance.
-func parseGateOutput(raw []byte) (GateOutput, error) {
+// parseOutput tolerance. Exported so the client-side reviewer command
+// parses gate output through the same owner.
+func ParseGateOutput(raw []byte) (GateOutput, error) {
 	s := strings.TrimSpace(string(raw))
 	if strings.HasPrefix(s, "```") {
 		if nl := strings.IndexByte(s, '\n'); nl >= 0 {

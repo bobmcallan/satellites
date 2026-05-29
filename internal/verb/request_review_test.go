@@ -115,7 +115,7 @@ transitions:
 }
 
 func TestParseGateOutput_AcceptPlain(t *testing.T) {
-	out, err := parseGateOutput([]byte(`{"decision":"accept","notes":"ok"}`))
+	out, err := ParseGateOutput([]byte(`{"decision":"accept","notes":"ok"}`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestParseGateOutput_AcceptPlain(t *testing.T) {
 }
 
 func TestParseGateOutput_WrappedFence(t *testing.T) {
-	out, err := parseGateOutput([]byte("```json\n{\"decision\":\"reject\",\"notes\":\"nope\"}\n```\n"))
+	out, err := ParseGateOutput([]byte("```json\n{\"decision\":\"reject\",\"notes\":\"nope\"}\n```\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestParseGateOutput_WrappedFence(t *testing.T) {
 }
 
 func TestParseGateOutput_PreambleAndJSON(t *testing.T) {
-	out, err := parseGateOutput([]byte("Some preamble.\n\n{\"decision\":\"accept\",\"next_status\":\"complex\"}"))
+	out, err := ParseGateOutput([]byte("Some preamble.\n\n{\"decision\":\"accept\",\"next_status\":\"complex\"}"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -148,14 +148,14 @@ func TestParseGateOutput_PreambleAndJSON(t *testing.T) {
 }
 
 func TestParseGateOutput_InvalidDecision(t *testing.T) {
-	_, err := parseGateOutput([]byte(`{"decision":"maybe"}`))
+	_, err := ParseGateOutput([]byte(`{"decision":"maybe"}`))
 	if err == nil || !strings.Contains(err.Error(), "invalid decision") {
 		t.Fatalf("expected invalid-decision error, got %v", err)
 	}
 }
 
 func TestParseGateOutput_Malformed(t *testing.T) {
-	_, err := parseGateOutput([]byte(`not json at all`))
+	_, err := ParseGateOutput([]byte(`not json at all`))
 	if err == nil || !strings.Contains(err.Error(), "parse output") {
 		t.Fatalf("expected parse error, got %v", err)
 	}
@@ -196,9 +196,9 @@ func TestParseProjectConfig_FencedBody(t *testing.T) {
 		"\n" +
 		"## Notes\n\nFree-form prose after the block must be ignored.\n"
 
-	cfg, err := parseProjectConfig(body)
+	cfg, err := ParseProjectConfig(body)
 	if err != nil {
-		t.Fatalf("parseProjectConfig(fenced body): %v", err)
+		t.Fatalf("ParseProjectConfig(fenced body): %v", err)
 	}
 	if got := cfg.StoryTypes["feature"].WorkflowSkill; got != ".claude/skills/feature-workflow.md" {
 		t.Fatalf("feature workflow_skill = %q", got)
@@ -213,9 +213,9 @@ func TestParseProjectConfig_FencedBody(t *testing.T) {
 // requirement that would break legacy configs.
 func TestParseProjectConfig_RawBody(t *testing.T) {
 	body := "story_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow.md\n"
-	cfg, err := parseProjectConfig(body)
+	cfg, err := ParseProjectConfig(body)
 	if err != nil {
-		t.Fatalf("parseProjectConfig(raw body): %v", err)
+		t.Fatalf("ParseProjectConfig(raw body): %v", err)
 	}
 	if got := cfg.StoryTypes["feature"].WorkflowSkill; got != ".claude/skills/feature-workflow.md" {
 		t.Fatalf("feature workflow_skill = %q", got)
@@ -227,7 +227,7 @@ func TestParseProjectConfig_RawBody(t *testing.T) {
 // verb must reject loudly rather than silently dispatch nothing.
 func TestParseProjectConfig_EmptyStoryTypes(t *testing.T) {
 	body := "```yaml\nreviewer_overrides: {}\n```\n"
-	_, err := parseProjectConfig(body)
+	_, err := ParseProjectConfig(body)
 	if err == nil || !strings.Contains(err.Error(), "empty story_types") {
 		t.Fatalf("expected empty story_types error, got %v", err)
 	}
