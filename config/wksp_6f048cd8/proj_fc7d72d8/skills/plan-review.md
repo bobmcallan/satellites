@@ -1,8 +1,5 @@
 ---
 name: plan-review
-scope: project
-workspace_id: wksp_6f048cd8
-project_id: proj_fc7d72d8
 type: skill
 description: Gate skill for the backlog → ready transition. Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
 ---

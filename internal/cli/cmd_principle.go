@@ -33,11 +33,9 @@ func init() {
 		UserArg:         &userArg,
 	}))
 	principle.AddCommand(newUploadCmd(uploadConfig{
-		StagingRoot: ".satellites/principles",
-		DefaultType: "document",
-		ConfigArg:   &configArg,
-		UserArg:     &userArg,
-		EmptyMsg:    "no principles found under .satellites/principles/ — nothing to upload",
+		Kind:      "principles",
+		ConfigArg: &configArg,
+		UserArg:   &userArg,
 	}))
 	register(principle)
 }

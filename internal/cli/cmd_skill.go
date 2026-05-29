@@ -37,11 +37,9 @@ func init() {
 		UserArg:    &userArg,
 	}))
 	skill.AddCommand(newUploadCmd(uploadConfig{
-		StagingRoot: ".satellites/skills",
-		DefaultType: "skill",
-		ConfigArg:   &configArg,
-		UserArg:     &userArg,
-		EmptyMsg:    "no skills found under .satellites/skills/ — nothing to upload",
+		Kind:      "skills",
+		ConfigArg: &configArg,
+		UserArg:   &userArg,
 	}))
 	register(skill)
 }

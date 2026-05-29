@@ -1,8 +1,9 @@
-// `satellites document upload` — walk .satellites/documents/ from the
-// current working directory and dispatch each markdown file as a
+// `satellites document upload` — walk the committed substrate source
+// tree under config/ and dispatch each markdown file as a
 // document_upsert call. Sibling commands `satellites skill upload`
 // and `satellites principle upload` (in cmd_skill.go / cmd_principle.go)
-// reuse the same plan + dispatch path against parallel staging dirs.
+// reuse the same plan + dispatch path, each filtering to its own kind
+// directory.
 //
 // The same `document` parent also carries `list` and `get` — thin
 // shells over the document_list / document_get MCP verbs with
@@ -10,16 +11,19 @@
 // verbs; all three nouns share the substrate's existing document_*
 // surface.
 //
-// Layout (the only shape these commands understand):
+// Source layout (the only shape these commands understand):
 //
-//   .satellites/{documents,skills,principles}/<name>.md
+//   config/<workspace_id>/<kind>/<name>.md              → workspace scope
+//   config/<workspace_id>/<project_id>/<kind>/<name>.md → project scope
 //
-// Identity (scope, workspace_id, project_id, name, type, tags) lives
-// in each file's YAML frontmatter. The classifier does not derive
-// scope from directory layout — missing `scope:` is a hard error.
-// Scope drives the required-id set: `workspace` requires
-// `workspace_id`; `project` requires both `workspace_id` and
-// `project_id`. type defaults per-command (document / skill).
+// where <kind> is one of {documents, skills, principles}. The path
+// carries the identity: scope, workspace_id, and project_id are derived
+// from the directory segments, NOT from frontmatter. Frontmatter still
+// supplies the optional name override, type override, and tags.
+//
+// config/documents/ is reserved for system seeds — it is embedded in
+// the server binary and reconciled at boot (see config/documents/embed.go),
+// never CLI-uploaded. The walker skips that subtree.
 //
 // Role-gating happens server-side in verb.authorizeWrite: the caller
 // must be a member of the target workspace to write at workspace or
@@ -48,10 +52,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// documentsRoot is the conventional location, relative to CWD. Hard-
-// coded for the same reason `satellites seed push` hard-codes
-// .satellites/seeds — the convention IS the contract.
-const documentsRoot = ".satellites/documents"
+// configRoot is the committed substrate source tree, relative to CWD.
+// Hard-coded for the same reason `satellites seed push` hard-codes its
+// root — the convention IS the contract.
+const configRoot = "config"
+
+// systemSeedDir is the one child of config/ that is NOT a CLI upload
+// target: it holds the system seeds embedded in the server binary and
+// reconciled at boot. The walker skips it.
+const systemSeedDir = "documents"
+
+// kindDirs are the per-scope source subdirectories. Each maps to the
+// default upsert type applied when a file omits `type:` in frontmatter.
+var kindDirs = map[string]string{
+	"documents":  "document",
+	"skills":     "skill",
+	"principles": "document",
+}
 
 // documentTarget describes one .md file scheduled for a dispatch.
 type documentTarget struct {
@@ -60,7 +77,7 @@ type documentTarget struct {
 	WorkspaceID string
 	ProjectID   string   // empty for workspace scope
 	Name        string   // resolved name (frontmatter override OR filename stem)
-	Type        string   // "document" | "skill" — frontmatter value, defaulted per-command
+	Type        string   // "document" | "skill" — frontmatter value, defaulted per-kind
 	Tags        []string // optional, from frontmatter
 	Body        string
 }
@@ -92,41 +109,37 @@ func init() {
 		UserArg:    &userArg,
 	}))
 	docs.AddCommand(newUploadCmd(uploadConfig{
-		StagingRoot: documentsRoot,
-		DefaultType: "document",
-		ConfigArg:   &configArg,
-		UserArg:     &userArg,
-		EmptyMsg:    "no documents found under .satellites/documents/ — nothing to upload",
+		Kind:      "documents",
+		ConfigArg: &configArg,
+		UserArg:   &userArg,
 	}))
 	register(docs)
 }
 
 // uploadConfig describes one noun's upload command shape.
 type uploadConfig struct {
-	StagingRoot string  // e.g. ".satellites/skills"
-	DefaultType string  // "document" | "skill" — applied when frontmatter omits `type:`
-	ConfigArg   *string // shared --config flag
-	UserArg     *string // shared --user flag
-	EmptyMsg    string  // message when the staging dir is empty
+	Kind      string  // "documents" | "skills" | "principles" — the kind dir this command uploads
+	ConfigArg *string // shared --config flag
+	UserArg   *string // shared --user flag
 }
 
-// newUploadCmd builds an `upload` cobra command bound to a staging dir
-// + default type. Used by `document upload`, `skill upload`, and
-// `principle upload` to keep the three commands byte-identical except
-// for their staging dir and default type.
+// newUploadCmd builds an `upload` cobra command bound to a kind dir.
+// Used by `document upload`, `skill upload`, and `principle upload` to
+// keep the three commands byte-identical except for the kind directory
+// they walk under config/.
 func newUploadCmd(cfg uploadConfig) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "upload",
-		Short: fmt.Sprintf("Walk %s and upsert each file via document_upsert", cfg.StagingRoot),
+		Short: fmt.Sprintf("Walk config/**/%s and upsert each file via document_upsert", cfg.Kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			targets, err := planUpload(cfg.StagingRoot, cfg.DefaultType)
+			targets, err := planUpload(configRoot, cfg.Kind)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if len(targets) == 0 {
-				fmt.Fprintln(out, cfg.EmptyMsg)
+				fmt.Fprintf(out, "no %s found under config/**/%s/ — nothing to upload\n", cfg.Kind, cfg.Kind)
 				return nil
 			}
 			for _, t := range targets {
@@ -153,20 +166,14 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 	return cmd
 }
 
-// planDocumentsUpload is the legacy name for planUpload against the
-// documents staging dir + default type=document. Kept so its unit
-// tests stay readable; the new sibling commands call planUpload
-// directly with their own roots/types.
-func planDocumentsUpload(rootDir string) ([]documentTarget, error) {
-	return planUpload(rootDir, "document")
-}
-
-// planUpload walks rootDir (flat — no nested subdirectories) and
-// returns the ordered list of upserts. Files are ordered:
+// planUpload walks rootDir recursively and returns the ordered list of
+// upserts for the given kind directory. Files whose path does not
+// resolve to the requested kind are skipped; the config/documents
+// system-seed subtree is skipped entirely. Files are ordered:
 // workspace-scope first, then project-scope, then by path within each
 // group — so a workspace-scope document lands before any project doc
 // that might inherit it.
-func planUpload(rootDir, defaultType string) ([]documentTarget, error) {
+func planUpload(rootDir, kind string) ([]documentTarget, error) {
 	info, err := os.Stat(rootDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -184,18 +191,22 @@ func planUpload(rootDir, defaultType string) ([]documentTarget, error) {
 			return walkErr
 		}
 		if d.IsDir() {
-			// Skip nested directories — the flat layout is the contract.
-			if p == rootDir {
-				return nil
+			// Skip the system-seed subtree — those are embedded and
+			// boot-reconciled, never CLI-uploaded.
+			if p == filepath.Join(rootDir, systemSeedDir) {
+				return fs.SkipDir
 			}
-			return fs.SkipDir
+			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			return nil
 		}
-		target, classifyErr := classifyDocumentFile(p, d.Name(), defaultType)
+		target, want, classifyErr := classifyDocumentFile(rootDir, p, kind)
 		if classifyErr != nil {
 			return classifyErr
+		}
+		if !want {
+			return nil
 		}
 		switch target.Scope {
 		case "workspace":
@@ -213,50 +224,61 @@ func planUpload(rootDir, defaultType string) ([]documentTarget, error) {
 	return append(workspaces, projects...), nil
 }
 
-// classifyDocumentFile reads filePath, parses frontmatter, and returns
-// a populated target. Scope is required — files without `scope:` in
-// frontmatter are rejected so a misauthored file fails loudly rather
-// than uploading to the wrong destination. workspace_id is required
-// for both `workspace` and `project` scopes; project_id additionally
-// for `project`. defaultType is the upsert type used when the file
-// omits `type:` in frontmatter (set by each command — document /
-// skill).
-func classifyDocumentFile(filePath, filename, defaultType string) (documentTarget, error) {
+// classifyDocumentFile derives a file's identity from its path under
+// rootDir and parses its frontmatter. It returns want=false (no error)
+// when the file's kind directory does not match the requested kind, so
+// each command picks up only its own kind. Scope, workspace_id, and
+// project_id come from the path segments — never from frontmatter; the
+// path is the single source of identity. The default upsert type is
+// the kind's mapped type, overridable by `type:` in frontmatter.
+//
+// Recognised layouts (segments below rootDir):
+//
+//	<workspace_id>/<kind>/<name>.md              → workspace scope
+//	<workspace_id>/<project_id>/<kind>/<name>.md → project scope
+func classifyDocumentFile(rootDir, filePath, wantKind string) (documentTarget, bool, error) {
+	rel, err := filepath.Rel(rootDir, filePath)
+	if err != nil {
+		return documentTarget{}, false, fmt.Errorf("%s: relativise under %s: %w", filePath, rootDir, err)
+	}
+	segs := strings.Split(filepath.ToSlash(rel), "/")
+
+	var scope, workspaceID, projectID, kindDir, filename string
+	switch len(segs) {
+	case 3: // <wksp>/<kind>/<file>
+		scope, workspaceID, kindDir, filename = "workspace", segs[0], segs[1], segs[2]
+	case 4: // <wksp>/<proj>/<kind>/<file>
+		scope, workspaceID, projectID, kindDir, filename = "project", segs[0], segs[1], segs[2], segs[3]
+	default:
+		return documentTarget{}, false, fmt.Errorf("%s: unexpected source layout — expected config/<wksp>[/<proj>]/<kind>/<name>.md", filePath)
+	}
+
+	defaultType, known := kindDirs[kindDir]
+	if !known {
+		return documentTarget{}, false, fmt.Errorf("%s: unknown kind directory %q (allowed: documents, skills, principles)", filePath, kindDir)
+	}
+	if kindDir != wantKind {
+		return documentTarget{}, false, nil
+	}
+
 	body, fm, err := readFileWithFrontmatter(filePath)
 	if err != nil {
-		return documentTarget{}, err
-	}
-	scope := strings.TrimSpace(fm.Scope)
-	if scope == "" {
-		return documentTarget{}, fmt.Errorf("%s: frontmatter must declare scope (workspace or project)", filePath)
+		return documentTarget{}, false, err
 	}
 	docType := strings.TrimSpace(fm.Type)
 	if docType == "" {
 		docType = defaultType
 	}
-	t := documentTarget{
+	return documentTarget{
 		Path:        filePath,
 		Scope:       scope,
-		WorkspaceID: fm.WorkspaceID,
-		ProjectID:   fm.ProjectID,
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
 		Name:        resolveName(filename, fm.Name),
 		Type:        docType,
 		Tags:        fm.Tags,
 		Body:        body,
-	}
-	switch scope {
-	case "workspace":
-		if t.WorkspaceID == "" {
-			return documentTarget{}, fmt.Errorf("%s: scope=workspace requires workspace_id in frontmatter", filePath)
-		}
-	case "project":
-		if t.WorkspaceID == "" || t.ProjectID == "" {
-			return documentTarget{}, fmt.Errorf("%s: scope=project requires both workspace_id and project_id in frontmatter", filePath)
-		}
-	default:
-		return documentTarget{}, fmt.Errorf("%s: unsupported scope %q (allowed: workspace, project)", filePath, scope)
-	}
-	return t, nil
+	}, true, nil
 }
 
 // readFileWithFrontmatter loads the file at p and splits frontmatter

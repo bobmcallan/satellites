@@ -1,8 +1,5 @@
 ---
 name: reviewer-process
-scope: project
-workspace_id: wksp_6f048cd8
-project_id: proj_fc7d72d8
 type: document
 tags: [principles:project]
 ---

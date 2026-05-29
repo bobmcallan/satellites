@@ -9,36 +9,43 @@ import (
 	"testing"
 )
 
-func TestPlanDocumentsUpload(t *testing.T) {
-	root := t.TempDir()
-	docsRoot := filepath.Join(root, "documents")
-	if err := os.MkdirAll(docsRoot, 0o755); err != nil {
+// writeSource creates rootDir/<relPath> with content, making parents.
+func writeSource(t *testing.T, rootDir, relPath, content string) {
+	t.Helper()
+	p := filepath.Join(rootDir, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-
-	mustWrite := func(name, content string) {
-		t.Helper()
-		p := filepath.Join(docsRoot, name)
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
 	}
+}
 
-	mustWrite("ws-rule.md",
-		"---\nscope: workspace\nworkspace_id: wksp_one\ntags: [principles:workspace]\n---\n# WS body\n")
-	mustWrite("feature-rule.md",
-		"---\nscope: project\nworkspace_id: wksp_one\nproject_id: proj_one\nname: overridden-name\ntags: [principles:project]\n---\n# PJ body\n")
-	// Non-md files should be ignored.
-	mustWrite("notes.txt", "ignore")
+func TestPlanUpload_PathDerivedIdentity(t *testing.T) {
+	root := t.TempDir()
+	// Workspace-scope document: config/<wksp>/documents/<name>.md
+	writeSource(t, root, "wksp_one/documents/ws-rule.md",
+		"---\ntags: [principles:workspace]\n---\n# WS body\n")
+	// Project-scope document with a frontmatter name override.
+	writeSource(t, root, "wksp_one/proj_one/documents/feature-rule.md",
+		"---\nname: overridden-name\ntags: [principles:project]\n---\n# PJ body\n")
+	// System seed subtree must be skipped entirely.
+	writeSource(t, root, "documents/seed.md",
+		"---\nscope: system\n---\n# system seed\n")
+	// Non-md files are ignored.
+	writeSource(t, root, "wksp_one/proj_one/documents/notes.txt", "ignore")
+	// A skill in the same project must not surface for the documents kind.
+	writeSource(t, root, "wksp_one/proj_one/skills/a-skill.md",
+		"---\n---\n# skill body\n")
 
-	targets, err := planDocumentsUpload(docsRoot)
+	targets, err := planUpload(root, "documents")
 	if err != nil {
-		t.Fatalf("planDocumentsUpload: %v", err)
+		t.Fatalf("planUpload: %v", err)
 	}
 
 	got := make([]string, 0, len(targets))
-	for _, t := range targets {
-		got = append(got, uploadLabel(t))
+	for _, tg := range targets {
+		got = append(got, uploadLabel(tg))
 	}
 	sort.Strings(got)
 	want := []string{
@@ -51,8 +58,8 @@ func TestPlanDocumentsUpload(t *testing.T) {
 	}
 
 	tagsBy := map[string][]string{}
-	for _, t := range targets {
-		tagsBy[uploadLabel(t)] = t.Tags
+	for _, tg := range targets {
+		tagsBy[uploadLabel(tg)] = tg.Tags
 	}
 	if tags := tagsBy["workspace/wksp_one/ws-rule"]; !reflect.DeepEqual(tags, []string{"principles:workspace"}) {
 		t.Errorf("workspace tags = %v want [principles:workspace]", tags)
@@ -62,8 +69,8 @@ func TestPlanDocumentsUpload(t *testing.T) {
 	}
 }
 
-func TestPlanDocumentsUpload_MissingRoot(t *testing.T) {
-	targets, err := planDocumentsUpload(filepath.Join(t.TempDir(), "does-not-exist"))
+func TestPlanUpload_MissingRoot(t *testing.T) {
+	targets, err := planUpload(filepath.Join(t.TempDir(), "does-not-exist"), "documents")
 	if err != nil {
 		t.Fatalf("expected nil error for missing root, got %v", err)
 	}
@@ -72,37 +79,16 @@ func TestPlanDocumentsUpload_MissingRoot(t *testing.T) {
 	}
 }
 
-func TestPlanDocumentsUpload_MissingScope(t *testing.T) {
-	docsRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(docsRoot, "no-scope.md"),
-		[]byte("---\ntags: [foo]\n---\n# body\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	_, err := planDocumentsUpload(docsRoot)
-	if err == nil || !strings.Contains(err.Error(), "scope") {
-		t.Fatalf("expected scope-missing error, got %v", err)
-	}
-}
+func TestPlanUpload_SkillKindFiltersAndType(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/my-skill.md",
+		"---\n---\n# body\n")
+	// A documents-kind file in the same project must be excluded when
+	// uploading the skills kind.
+	writeSource(t, root, "wksp_one/proj_one/documents/a-doc.md",
+		"---\n---\n# body\n")
 
-func TestPlanDocumentsUpload_ScopeMissingIDs(t *testing.T) {
-	docsRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(docsRoot, "no-ws.md"),
-		[]byte("---\nscope: workspace\n---\n# body\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	_, err := planDocumentsUpload(docsRoot)
-	if err == nil || !strings.Contains(err.Error(), "workspace_id") {
-		t.Fatalf("expected workspace_id-missing error, got %v", err)
-	}
-}
-
-func TestPlanUpload_SkillDefaultsToSkillType(t *testing.T) {
-	stagingRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stagingRoot, "my-skill.md"),
-		[]byte("---\nscope: workspace\nworkspace_id: wksp_one\n---\n# body\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	targets, err := planUpload(stagingRoot, "skill")
+	targets, err := planUpload(root, "skills")
 	if err != nil {
 		t.Fatalf("planUpload: %v", err)
 	}
@@ -112,20 +98,40 @@ func TestPlanUpload_SkillDefaultsToSkillType(t *testing.T) {
 	if targets[0].Type != "skill" {
 		t.Errorf("Type = %q, want skill", targets[0].Type)
 	}
+	if targets[0].Name != "my-skill" {
+		t.Errorf("Name = %q, want my-skill", targets[0].Name)
+	}
 }
 
 func TestPlanUpload_FrontmatterTypeOverridesDefault(t *testing.T) {
-	stagingRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stagingRoot, "doc.md"),
-		[]byte("---\nscope: workspace\nworkspace_id: wksp_one\ntype: document\n---\n# body\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	targets, err := planUpload(stagingRoot, "skill")
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/doc.md",
+		"---\ntype: document\n---\n# body\n")
+	targets, err := planUpload(root, "skills")
 	if err != nil {
 		t.Fatalf("planUpload: %v", err)
 	}
 	if targets[0].Type != "document" {
 		t.Errorf("frontmatter type override ignored: %q", targets[0].Type)
+	}
+}
+
+func TestPlanUpload_UnknownKindDirIsError(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/widgets/x.md", "---\n---\n# body\n")
+	_, err := planUpload(root, "documents")
+	if err == nil || !strings.Contains(err.Error(), "unknown kind directory") {
+		t.Fatalf("expected unknown-kind error, got %v", err)
+	}
+}
+
+func TestPlanUpload_UnexpectedDepthIsError(t *testing.T) {
+	root := t.TempDir()
+	// Too shallow: config/<wksp>/<file>.md — no kind directory.
+	writeSource(t, root, "wksp_one/loose.md", "---\n---\n# body\n")
+	_, err := planUpload(root, "documents")
+	if err == nil || !strings.Contains(err.Error(), "unexpected source layout") {
+		t.Fatalf("expected layout error, got %v", err)
 	}
 }
 

@@ -1,8 +1,5 @@
 ---
 name: done-review
-scope: project
-workspace_id: wksp_6f048cd8
-project_id: proj_fc7d72d8
 type: skill
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---

@@ -37,22 +37,17 @@ go.work.sum
 /dist/
 
 # Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md).
-# Use `.satellites/*` (glob) not `.satellites/` (directory): a directory
-# exclude blocks every re-include underneath it; the glob form excludes
-# the contents while leaving the directory traversable, so the negation
-# rules below actually take effect.
+# .satellites/ is purely operational: the CLI binary, satellites.toml,
+# logs, and the worktree. It is NOT a source location — the committed
+# substrate sources live under config/<workspace_id>/<project_id>/{documents,
+# skills,principles}/ and are pushed via `satellites {document,skill,principle}
+# upload`. Use `.satellites/*` (glob) not `.satellites/` (directory) so the
+# seed carve-out below still takes effect.
 .satellites/*
-# Version-controlled authoring sources for substrate prose. Each *.md
-# declares its identity in frontmatter and is pushed to the substrate via
-# `satellites {seed,document,skill,principle} upload`. The substrate is
-# the store; these files are the reviewable source — NOT a pull-mirror
-# (nothing materialises substrate rows back into these dirs). Skills are
-# additionally materialised into .claude/skills/<name>/SKILL.md by the
-# session-start skill-sync.
+# Workspace/project seeds remain a committed source pushed via
+# `satellites seed push`. Each *.md declares its identity; the substrate is
+# the store, these files are the reviewable source (not a pull-mirror).
 !.satellites/seeds/
-!.satellites/documents/
-!.satellites/principles/
-!.satellites/skills/
 
 # Operator-supplied config — may contain OAuth client secrets. The
 # `*.example` templates stay in git; the live files do not.
