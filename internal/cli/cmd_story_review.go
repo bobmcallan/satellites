@@ -7,7 +7,11 @@
 //
 // This is the sibling of `story run` (the executor driver). Where `run`
 // spawns claude to DO the work, `review` spawns the gate skill to JUDGE
-// the transition, then advances the status on accept.
+// the transition. The gate skill enacts its own verdict — it patches the
+// status and writes the spine rows under its minted reviewer key
+// (sty_db5cdef0). This command orchestrates (mint key, pick transition,
+// record that the gate was requested) and then reports the status the
+// skill enacted; it does not patch the status itself.
 //
 // Single-source reuse: transition selection is owned by
 // internal/workflow (Workflow.PickTransition); project-config parsing

@@ -10,10 +10,11 @@ warrant a plan gate. States use the canonical story taxonomy from
 `docs/story-schema.md` (`backlog · in_progress · done`), so a status
 the substrate persists is always a state the workflow knows.
 
-One reviewer gate, on completion:
+Two reviewer gates:
 
-- `backlog → in_progress` — the executor starts the fix; no reviewer.
-  This self-transition is driven via `story_update`.
+- `backlog → in_progress` — `plan-review` checks the story has a sound,
+  executable plan before an executor starts the fix. The reviewer
+  enacts the transition on accept.
 - `in_progress → done` — `done-review` verifies the fix against the
   acceptance criteria.
 
@@ -27,6 +28,6 @@ states:
   - in_progress
   - done
 transitions:
-  - {from: backlog,     to: in_progress, reviewer_skill: ""}
+  - {from: backlog,     to: in_progress, reviewer_skill: "plan-review"}
   - {from: in_progress, to: done,        reviewer_skill: "done-review"}
 ```
