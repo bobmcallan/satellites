@@ -173,8 +173,14 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Sprintf("gate %s: %s → %s", gateSkill, story.Status, transition.To),
 		map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
 
-	// 7. Run the gate locally (owned by internal/verb's dispatcher).
-	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: 5 * time.Minute}
+	// 7. Run the gate locally (owned by internal/verb's dispatcher). The
+	// timeout must cover a done-review that actually builds + runs the
+	// change's tests (sty_cba1d47b granted the gate Bash for exactly this):
+	// a Go test run that starts testcontainers/Postgres routinely exceeds
+	// five minutes, and a gate killed mid-verification cannot enact, so the
+	// story silently fails to advance. Fifteen minutes leaves headroom for a
+	// real build+test pass while still bounding a runaway gate.
+	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: 15 * time.Minute}
 	gateOut, err := disp.Dispatch(ctx, verb.GateInput{
 		SkillName:    gateSkill,
 		StoryID:      story.ID,
