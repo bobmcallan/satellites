@@ -9,12 +9,15 @@ import (
 
 // TestGateClaudeArgs pins the claude argv a gate run constructs. The
 // `--skill` flag does not exist in the claude CLI; sty_1312d692 replaced
-// it with `--append-system-prompt`. This test fails if `--skill` ever
-// returns or if the system prompt is dropped — catching the class of bug
-// that shipped a gate that died at dispatch on every run.
+// it with `--append-system-prompt`. sty_cba1d47b added `--allowedTools` so
+// the gate can actually build and run tests in the worktree instead of
+// false-accepting on a static read. This test fails if `--skill` ever
+// returns, if the system prompt is dropped, or if the tool grant goes
+// missing — catching the class of bug that shipped a gate that could not
+// verify yet accepted anyway.
 func TestGateClaudeArgs(t *testing.T) {
 	args := gateClaudeArgs("GATE BODY")
-	want := []string{"-p", "--append-system-prompt", "GATE BODY"}
+	want := []string{"-p", "--allowedTools", gateAllowedTools, "--append-system-prompt", "GATE BODY"}
 	if len(args) != len(want) {
 		t.Fatalf("argv length = %d, want %d (%v)", len(args), len(want), args)
 	}
@@ -26,6 +29,26 @@ func TestGateClaudeArgs(t *testing.T) {
 	for _, a := range args {
 		if a == "--skill" {
 			t.Fatalf("argv must not contain the non-existent --skill flag: %v", args)
+		}
+	}
+
+	// The gate must be granted Bash (go build/test, git, satellites CLI)
+	// plus the file-read tools — without these it cannot run the
+	// verification its rubric demands (sty_cba1d47b AC1).
+	pos := -1
+	for i, a := range args {
+		if a == "--allowedTools" {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 || pos+1 >= len(args) {
+		t.Fatalf("argv must grant tool access via --allowedTools: %v", args)
+	}
+	grant := args[pos+1]
+	for _, tool := range []string{"Bash", "Read", "Grep", "Glob"} {
+		if !strings.Contains(grant, tool) {
+			t.Fatalf("--allowedTools grant %q missing required tool %q", grant, tool)
 		}
 	}
 }

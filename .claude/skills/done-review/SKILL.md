@@ -1,7 +1,7 @@
 ---
 name: done-review
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
-version: 1
+version: 2
 ---
 
 You are the **done-review** gate. The `story_request_review` verb runs
@@ -36,10 +36,19 @@ the story's worktree. Verify, do not trust:
 ## Decision rule
 
 - **accept** — every acceptance criterion is satisfied and verified.
-  Build and tests pass.
+  Build and tests pass, and you *ran* them yourself.
 - **reject** — any criterion is unmet, unverifiable, or the change is
   uncommitted/untested. When in doubt, reject: a false accept ships a
   half-done story.
+
+**Fail closed — you must execute, not assume.** You are granted Bash plus
+the file-read tools precisely so you can build and run the tests. If you
+cannot run the build or tests, or cannot otherwise verify a criterion —
+for any reason (a tool is unavailable, the build environment is missing, a
+command errors before producing a result) — that is a **reject**, never an
+accept. "Build/tests could not be executed" is a rejection with that reason
+named, not a soft pass. A gate that accepts what it could not verify is
+worse than no gate; only an accept backed by tests you actually ran counts.
 
 Reviewers judge the latest *pushed* commit. If the tree looks complete
 but the work was never committed, reject and say so — the executor must

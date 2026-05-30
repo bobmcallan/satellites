@@ -161,15 +161,34 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	return ParseGateOutput(out)
 }
 
+// gateAllowedTools is the tool grant the gate subprocess runs under. A
+// done-review gate must build the worktree and run its tests to honour its
+// rubric ("a criterion that claims a test exists is met only if that test
+// runs and passes"); without a grant the headless `claude -p` run cannot
+// touch Bash and silently false-accepts on a static read (sty_cba1d47b).
+// Bash covers go build/test, git, and the satellites CLI; Read/Grep/Glob
+// let the gate inspect the tree. In `-p` mode a tool absent from this list
+// is denied (not prompted), so this allowlist is also the scope ceiling —
+// the gate can verify but cannot, e.g., Edit the tree under review. The
+// same grant rides along to plan-review, which simply does not use Bash
+// (harmless). Space-separated per the claude CLI's --allowedTools format.
+const gateAllowedTools = "Bash Read Grep Glob"
+
 // gateClaudeArgs builds the claude argv for a gate run. The gate skill
 // body is delivered as an appended system prompt (`--append-system-prompt`,
 // a real claude flag); the story payload arrives on stdin as the prompt.
-// The earlier `--skill <name>` form was invalid — the claude CLI has no
-// such flag, so every gate run died at dispatch (sty_1312d692). Kept as a
-// standalone function so a test can pin the argv and catch a future
-// invalid flag before a live run.
+// `--allowedTools` grants the gate the means to actually run build/tests in
+// the worktree (sty_cba1d47b) — without it the gate cannot verify and
+// false-accepts. The earlier `--skill <name>` form was invalid — the claude
+// CLI has no such flag, so every gate run died at dispatch (sty_1312d692).
+// Kept as a standalone function so a test can pin the argv and catch a
+// future invalid flag — or a dropped tool grant — before a live run.
 func gateClaudeArgs(systemPrompt string) []string {
-	return []string{"-p", "--append-system-prompt", systemPrompt}
+	return []string{
+		"-p",
+		"--allowedTools", gateAllowedTools,
+		"--append-system-prompt", systemPrompt,
+	}
 }
 
 // resolveGateSkillBody reads the gate skill's SKILL.md from the worktree
