@@ -174,6 +174,8 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	gateOut, err := disp.Dispatch(ctx, verb.GateInput{
 		SkillName:    gateSkill,
 		StoryID:      story.ID,
+		ProjectID:    story.ProjectID,
+		WorkspaceID:  story.WorkspaceID,
 		StoryBody:    body,
 		StoryStatus:  story.Status,
 		NextStatus:   transition.To,
@@ -190,38 +192,53 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stdout, "notes: %s\n", gateOut.Notes)
 	}
 
-	// 8. Apply the decision against the substrate (server writes).
-	if gateOut.Decision == verb.GateDecisionReject {
-		reviewAppendLedger(ctx, opts, story, verb.KindReviewReject, gateOut.Notes,
-			map[string]any{"from_status": story.Status, "gate": gateSkill, "notes": gateOut.Notes})
-		return nil
-	}
-
-	newStatus := transition.To
-	if isDynamic {
-		chosen := strings.TrimSpace(gateOut.NextStatus)
-		if chosen == "" {
-			return fmt.Errorf("dynamic gate returned empty next_status")
+	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Under
+	// its minted reviewer key (SATELLITES_REVIEWER_API_KEY, passed in env),
+	// the gate skill writes the review_accept/review_reject + status_transition
+	// spine rows and, on accept, patches the story status toward the
+	// workflow-declared target. The client no longer performs the status
+	// patch or those spine writes — it requests the gate (step 6b) and
+	// reports; enactment is configuration in the skill, not code here.
+	//
+	// Read the status back (operator's own key — a plain read) so the
+	// operator sees whether the skill enacted. This read is observability,
+	// NOT enactment: the client never patches the status itself.
+	observed, _ := reviewObserveStatus(ctx, opts, story.ID)
+	if observed != "" && observed != story.Status {
+		fmt.Fprintf(opts.Stdout, "status: %s → %s\n", story.Status, observed)
+	} else {
+		fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
+		if gateOut.Decision == verb.GateDecisionAccept {
+			// The gate accepted but the status did not advance — the skill
+			// did not enact. Surface it; do not silently paper over it by
+			// patching from the client (that is exactly what this story
+			// moved into the skill).
+			fmt.Fprintf(opts.Stderr,
+				"warn: gate accepted but status is still %q — the reviewer skill did not enact its transition\n",
+				story.Status)
 		}
-		if _, ok := wf.FindTransition(story.Status, chosen); !ok {
-			return fmt.Errorf("dynamic gate returned undeclared transition %s → %s", story.Status, chosen)
-		}
-		newStatus = chosen
 	}
-	patchReq, err := json.Marshal(map[string]any{"id": story.ID, "status": newStatus})
-	if err != nil {
-		return err
-	}
-	if _, err := dispatchVerbAs(ctx, "document_upsert", patchReq, opts.ConfigPath, opts.UserArg, opts.ReviewerKey); err != nil {
-		return fmt.Errorf("patch status → %s: %w", newStatus, err)
-	}
-	reviewAppendLedger(ctx, opts, story, verb.KindReviewAccept, gateOut.Notes,
-		map[string]any{"from_status": story.Status, "to_status": newStatus, "gate": gateSkill, "notes": gateOut.Notes})
-	reviewAppendLedger(ctx, opts, story, verb.KindStatusTransition,
-		fmt.Sprintf("%s → %s", story.Status, newStatus),
-		map[string]any{"from_status": story.Status, "to_status": newStatus})
-	fmt.Fprintf(opts.Stdout, "status: %s → %s\n", story.Status, newStatus)
 	return nil
+}
+
+// reviewObserveStatus re-reads the story's current status for reporting.
+// It uses the operator's stored key (a plain read), never the reviewer
+// key, and never writes — it only lets the client show whether the skill
+// enacted. Errors are non-fatal: an unreadable status just prints nothing.
+func reviewObserveStatus(ctx context.Context, opts reviewOpts, storyID string) (string, error) {
+	req, err := json.Marshal(verb.DocumentGetRequest{ID: storyID})
+	if err != nil {
+		return "", err
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, opts.ConfigPath, opts.UserArg)
+	if err != nil {
+		return "", err
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", err
+	}
+	return resp.Document.Status, nil
 }
 
 func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, error) {

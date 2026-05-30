@@ -28,9 +28,16 @@ import (
 // minimum a gate skill needs to make its call: which skill to dispatch,
 // the story body + recent ledger to feed it on stdin, and the reviewer
 // key the subprocess wields when patching back through verbs.
+//
+// ProjectID/WorkspaceID ride along so a skill that enacts its own
+// transition (sty_db5cdef0) can stamp the spine rows it writes
+// (review_accept/review_reject/status_transition) with the same
+// correlation the client used to, keeping the portal /ledger view intact.
 type GateInput struct {
 	SkillName    string
 	StoryID      string
+	ProjectID    string
+	WorkspaceID  string
 	StoryBody    string
 	StoryStatus  string
 	NextStatus   string
@@ -119,6 +126,8 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 
 	payload, err := json.Marshal(map[string]any{
 		"story_id":      in.StoryID,
+		"project_id":    in.ProjectID,
+		"workspace_id":  in.WorkspaceID,
 		"story_body":    in.StoryBody,
 		"story_status":  in.StoryStatus,
 		"next_status":   in.NextStatus,

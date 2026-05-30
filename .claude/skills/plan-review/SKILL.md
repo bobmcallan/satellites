@@ -1,7 +1,7 @@
 ---
 name: plan-review
 description: Gate skill for the backlog → ready transition. Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
-version: 1
+version: 2
 ---
 
 You are the **plan-review** gate. The `story_request_review` verb runs
@@ -46,10 +46,44 @@ You gate a *plan*, not the work — do not run the build or tests, and do
 not penalise the absence of code. Judge only whether the plan is ready
 to execute.
 
+## Enact your decision
+
+You do not just report a verdict — you **enact** it. You hold the
+reviewer key (`SATELLITES_REVIEWER_API_KEY` is set in your environment),
+so `satellites exec` calls you make authenticate as the reviewer and may
+write the spine rows + patch the status that an executor key cannot. The
+input payload gives you `story_id`, `project_id`, `workspace_id`,
+`story_status` (the current state) and `next_status` (the workflow target
+to advance to on accept).
+
+Run these with Bash before you print your decision.
+
+**On accept** — advance the story, then record the verdict and the
+transition:
+
+```sh
+satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
+satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"plan-review"}}'
+satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
+```
+
+**On reject** — do not patch the status; record only the rejection so the
+executor reads your notes:
+
+```sh
+satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"plan-review"}}'
+```
+
+Only advance to the workflow's `next_status` — never to a state the
+workflow does not declare. If `document_upsert` fails (e.g. the role gate
+rejects the key), your decision did not take effect: print `reject` with
+the failure as the reason rather than claiming an accept that did not
+land.
+
 ## Output
 
-Print exactly one JSON object and nothing else — no prose, no markdown
-fence:
+After enacting, print exactly one JSON object and nothing else — no
+prose, no markdown fence. This is the record of what you did:
 
 ```json
 {"decision": "accept", "notes": "one or two sentences of rationale"}
