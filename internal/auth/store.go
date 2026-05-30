@@ -46,6 +46,14 @@ const (
 	APIKeyRoleRunner APIKeyRole = "runner"
 )
 
+// ReviewerAgentName is the reserved agent slot every reviewer key
+// occupies. Reviewer keys are an ephemeral single-slot-per-(user,project)
+// credential the gate rotates each run; pinning them to one reserved
+// agent_name keeps them in their own row in the api_keys_project_agent
+// unique index, separate from the executor key's real agent name, so a
+// reviewer rotation can never clobber an executor key (sty_e2dea1ec).
+const ReviewerAgentName = "reviewer"
+
 // User is a satellites operator.
 type User struct {
 	ID          string
@@ -297,9 +305,13 @@ func (s *Store) IssueReviewerKey(ctx context.Context, in IssueReviewerKeyInput) 
 	if err != nil {
 		return "", nil, err
 	}
+	agentName := strings.TrimSpace(in.AgentName)
+	if agentName == "" {
+		agentName = ReviewerAgentName
+	}
 	id := fmt.Sprintf("apk_rev_%s", randomKeyIDSuffixAuth())
 	expires := time.Now().UTC().Add(ttl)
-	return s.issueWithRaw(ctx, id, in.UserID, in.ProjectID, in.AgentName, rawKey, APIKeyRoleReviewer, &expires)
+	return s.issueWithRaw(ctx, id, in.UserID, in.ProjectID, agentName, rawKey, APIKeyRoleReviewer, &expires)
 }
 
 // issueWithRaw is the single insert path for both executor and
@@ -313,11 +325,31 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
 		projectArg = projectID
 	}
 
-	if _, err := s.DB.ExecContext(ctx, `
+	// Reviewer keys are an ephemeral single-slot-per-(user,project)
+	// credential the gate rotates on every run. Rotating the slot in place
+	// keeps repeated reviews from colliding with a prior run's row — which
+	// the api_keys_project_agent unique index counts even after the row is
+	// revoked or expired (sty_e2dea1ec). Executor keys keep the
+	// insert-or-noop path so the DevSeed re-insert stays idempotent on the
+	// key_hash index.
+	query := `
         INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (key_hash) DO NOTHING
-    `, id, userID, projectArg, agentName, string(role), hash, expiresAt); err != nil {
+        ON CONFLICT (key_hash) DO NOTHING`
+	if role == APIKeyRoleReviewer {
+		query = `
+        INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (user_id, project_id, agent_name) WHERE project_id IS NOT NULL
+        DO UPDATE SET id         = EXCLUDED.id,
+                      role       = EXCLUDED.role,
+                      key_hash   = EXCLUDED.key_hash,
+                      expires_at = EXCLUDED.expires_at,
+                      revoked_at = NULL,
+                      created_at = now()`
+	}
+	if _, err := s.DB.ExecContext(ctx, query,
+		id, userID, projectArg, agentName, string(role), hash, expiresAt); err != nil {
 		return "", nil, fmt.Errorf("auth: insert apikey: %w", err)
 	}
 
