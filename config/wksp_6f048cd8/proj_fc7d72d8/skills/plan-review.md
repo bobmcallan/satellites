@@ -26,8 +26,8 @@ A single JSON object arrives on stdin:
 ```
 
 `SATELLITES_REVIEWER_API_KEY` is set in the environment. Use it with
-the `satellites` CLI to read related rows (`satellites document get`,
-`satellites ledger list`) when the body alone is not enough.
+the `.satellites/satellites` CLI to read related rows (`.satellites/satellites document get`,
+`.satellites/satellites ledger list`) when the body alone is not enough.
 
 ## What to check
 
@@ -52,7 +52,7 @@ to execute.
 
 You do not just report a verdict — you **enact** it. You hold the
 reviewer key (`SATELLITES_REVIEWER_API_KEY` is set in your environment),
-so `satellites exec` calls you make authenticate as the reviewer and may
+so `.satellites/satellites exec` calls you make authenticate as the reviewer and may
 write the spine rows + patch the status that an executor key cannot. The
 input payload gives you `story_id`, `project_id`, `workspace_id`,
 `story_status` (the current state) and `next_status` (the workflow target
@@ -64,16 +64,16 @@ Run these with Bash before you print your decision.
 transition:
 
 ```sh
-satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
-satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"plan-review"}}'
-satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
+.satellites/satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"plan-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
 ```
 
 **On reject** — do not patch the status; record only the rejection so the
 executor reads your notes:
 
 ```sh
-satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"plan-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"plan-review"}}'
 ```
 
 Only advance to the workflow's `next_status` — never to a state the
