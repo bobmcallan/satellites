@@ -247,10 +247,16 @@ func TestRenderRunPrompt_NamesIDsAndPointsAtVerbs(t *testing.T) {
 	p := renderRunPrompt(storyEnvelope{
 		ID: "sty_abc", ProjectID: "proj_def", WorkspaceID: "wksp_ghi",
 	}, "")
-	for _, want := range []string{"sty_abc", "proj_def", "wksp_ghi", "document_get", "story_request_review"} {
+	for _, want := range []string{"sty_abc", "proj_def", "wksp_ghi", "document_get", "story review sty_abc"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q:\n%s", want, p)
 		}
+	}
+	// The gate is client-side: it reads the workflow skill from the local
+	// worktree, which the server can't see. The prompt must NOT point the
+	// executor at the server-side story_request_review verb (sty_523e727d).
+	if strings.Contains(p, "story_request_review") {
+		t.Errorf("prompt drives the gate via the server-side story_request_review verb, which cannot read the local worktree skill:\n%s", p)
 	}
 }
 

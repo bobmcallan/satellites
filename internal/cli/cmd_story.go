@@ -426,8 +426,9 @@ func renderRunPrompt(s storyEnvelope, extra string) string {
 	b.WriteString("  satellites exec document_get --json '{\"id\":\"" + s.ID + "\"}'   — full story body + acceptance criteria.\n")
 	b.WriteString("  satellites document list --scope project ...                        — sibling docs in the project.\n")
 	b.WriteString("  satellites principle list --scope project ...                       — principles in force.\n\n")
-	b.WriteString("Drive the story through its workflow gate:\n")
-	b.WriteString("  satellites exec story_request_review --json '{\"story_id\":\"" + s.ID + "\"}'\n\n")
+	b.WriteString("Drive the story through its workflow gate (client-side — the gate\n")
+	b.WriteString("reads the workflow skill from THIS worktree, which the server cannot see):\n")
+	b.WriteString("  satellites story review " + s.ID + "\n\n")
 	b.WriteString("Every verb call you make from this subprocess carries the run's\n")
 	b.WriteString("correlation headers; the portal /ledger page will show your trail.\n")
 	if e := strings.TrimSpace(extra); e != "" {
