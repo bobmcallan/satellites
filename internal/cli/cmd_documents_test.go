@@ -116,6 +116,54 @@ func TestPlanUpload_FrontmatterTypeOverridesDefault(t *testing.T) {
 	}
 }
 
+// TestPlanUpload_SkillPreservesFrontmatterDocumentStrips pins sty_4b517016:
+// a type:skill upload must store the artifact with its authored frontmatter
+// intact (so the substrate row is a registerable SKILL.md), while documents
+// strip frontmatter from the stored body. Mirrors the server system-seed
+// rule (storedBody = raw for TypeSkill).
+func TestPlanUpload_SkillPreservesFrontmatterDocumentStrips(t *testing.T) {
+	root := t.TempDir()
+	skillSrc := "---\nname: my-skill\ndescription: does a thing\n---\n# Skill body\n"
+	docSrc := "---\nname: my-doc\ntags: [principles:project]\n---\n# Doc body\n"
+	writeSource(t, root, "wksp_one/proj_one/skills/my-skill.md", skillSrc)
+	writeSource(t, root, "wksp_one/proj_one/documents/my-doc.md", docSrc)
+
+	// Skill: body keeps the authored frontmatter (name + description).
+	skills, err := planUpload(root, "skills")
+	if err != nil {
+		t.Fatalf("planUpload skills: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected one skill target, got %d", len(skills))
+	}
+	sb := skills[0].Body
+	if !strings.Contains(sb, "name: my-skill") || !strings.Contains(sb, "description: does a thing") {
+		t.Errorf("skill body must retain authored frontmatter, got:\n%s", sb)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(sb), "---") {
+		t.Errorf("skill body must start with frontmatter delimiter, got:\n%s", sb)
+	}
+	if !strings.Contains(sb, "# Skill body") {
+		t.Errorf("skill body lost its content, got:\n%s", sb)
+	}
+
+	// Document: frontmatter stripped from the stored body.
+	docs, err := planUpload(root, "documents")
+	if err != nil {
+		t.Fatalf("planUpload documents: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected one document target, got %d", len(docs))
+	}
+	db := docs[0].Body
+	if strings.Contains(db, "name: my-doc") || strings.Contains(db, "principles:project") {
+		t.Errorf("document body must strip frontmatter, got:\n%s", db)
+	}
+	if !strings.Contains(db, "# Doc body") {
+		t.Errorf("document body lost its content, got:\n%s", db)
+	}
+}
+
 func TestPlanUpload_UnknownKindDirIsError(t *testing.T) {
 	root := t.TempDir()
 	writeSource(t, root, "wksp_one/proj_one/widgets/x.md", "---\n---\n# body\n")

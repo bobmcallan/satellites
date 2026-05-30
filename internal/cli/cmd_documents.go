@@ -261,13 +261,26 @@ func classifyDocumentFile(rootDir, filePath, wantKind string) (documentTarget, b
 		return documentTarget{}, false, nil
 	}
 
-	body, fm, err := readFileWithFrontmatter(filePath)
+	raw, body, fm, err := readFileWithFrontmatter(filePath)
 	if err != nil {
 		return documentTarget{}, false, err
 	}
 	docType := strings.TrimSpace(fm.Type)
 	if docType == "" {
 		docType = defaultType
+	}
+	// Skills preserve their frontmatter in the stored body: the substrate
+	// row must be a complete, registerable SKILL.md (name/description) so a
+	// client can materialise .claude/skills/<name>/SKILL.md from it. This
+	// mirrors the server's system-seed path (cmd/satellites-server/main.go:
+	// `storedBody = raw` for TypeSkill). Documents and principles strip
+	// frontmatter — substrate keys are not part of their rendered body
+	// (sty_4b517016). Compared against the "skill" string, not the
+	// document.TypeSkill constant, to honour the CLI layering guard (no
+	// internal/document import from the cli package).
+	storedBody := body
+	if docType == "skill" {
+		storedBody = raw
 	}
 	return documentTarget{
 		Path:        filePath,
@@ -277,22 +290,25 @@ func classifyDocumentFile(rootDir, filePath, wantKind string) (documentTarget, b
 		Name:        resolveName(filename, fm.Name),
 		Type:        docType,
 		Tags:        fm.Tags,
-		Body:        body,
+		Body:        storedBody,
 	}, true, nil
 }
 
 // readFileWithFrontmatter loads the file at p and splits frontmatter
-// from body. Returns the body string and the parsed frontmatter.
-func readFileWithFrontmatter(p string) (string, frontmatter.Frontmatter, error) {
+// from body. Returns the raw file (frontmatter intact), the
+// frontmatter-stripped body, and the parsed frontmatter — the caller
+// picks raw vs stripped per type (skills keep frontmatter, documents
+// strip it).
+func readFileWithFrontmatter(p string) (string, string, frontmatter.Frontmatter, error) {
 	raw, err := os.ReadFile(p)
 	if err != nil {
-		return "", frontmatter.Frontmatter{}, fmt.Errorf("read %s: %w", p, err)
+		return "", "", frontmatter.Frontmatter{}, fmt.Errorf("read %s: %w", p, err)
 	}
 	fm, body, err := frontmatter.Parse(raw)
 	if err != nil {
-		return "", frontmatter.Frontmatter{}, fmt.Errorf("parse %s: %w", p, err)
+		return "", "", frontmatter.Frontmatter{}, fmt.Errorf("parse %s: %w", p, err)
 	}
-	return string(body), fm, nil
+	return string(raw), string(body), fm, nil
 }
 
 // resolveName returns the frontmatter-declared name when present;
