@@ -8,8 +8,9 @@ tags: [principles:project]
 
 A reviewer is a gate on a transition, nothing more. It answers one
 question: may this story move to the next state? It does not write the
-code, fix the story, or advance the status itself — it accepts or
-rejects, and the substrate acts on the verdict.
+code or fix the story — it decides: accept or reject. On accept the
+story advances to the next state and the verdict is recorded; on reject
+the status stays and the notes tell the executor what to fix.
 
 ## The contract
 
@@ -23,6 +24,26 @@ the story body and recent ledger. The gate returns one decision:
 
 A gate names the specific gap on reject. "Looks incomplete" is not a
 review; "AC #3 has no test" is.
+
+## Reviewer authority is a key role
+
+The spine kinds a verdict produces — `review_requested`,
+`review_accept` / `review_reject`, and `status_transition` — are
+reviewer-only. The ledger role gate refuses them from an executor- or
+runner-role key; an executor can write `log:` rows and nothing more. So
+the authority to record a verdict and advance a story is a property of
+the api-key's role, not of who is running.
+
+A gate that runs **client-side** (on the operator machine, where the
+worktree and `claude` live) therefore cannot use the operator's
+executor key to record its decision. For the duration of the run it
+mints a short-lived **reviewer-role** key, routes the spine writes and
+the status patch through that key, and revokes it when the run ends.
+Minting a reviewer key is admin-gated: an autonomous executor cannot
+mint one and self-accept. The decision is made where the code is; the
+authority to enact it stays real.
+
+See [[ledger-spine]].
 
 ## Reviews are configuration
 
