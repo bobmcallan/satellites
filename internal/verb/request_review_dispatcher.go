@@ -194,11 +194,22 @@ func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
 	return string(body), nil
 }
 
-// ParseGateOutput is lenient on whitespace + leading prose but strict on
-// shape — a missing `decision` or one outside {accept, reject} is a
+// ParseGateOutput is lenient on whitespace + surrounding prose but strict
+// on shape — a missing `decision` or one outside {accept, reject} is a
 // dispatcher-level error. Mirrors the existing reviewer/runner.go
 // parseOutput tolerance. Exported so the client-side reviewer command
 // parses gate output through the same owner.
+//
+// The gate is told to emit one bare JSON object, but a `claude -p` run does
+// not reliably comply — it may wrap the decision in paragraphs of reasoning,
+// and that prose can itself contain braces (e.g.
+// `config/.../{skills,documents,principles}/`). Locking onto the first `{`
+// discarded a real verdict the gate had reached (sty_756ad5f3). Instead we
+// scan every balanced `{...}` block in the output and take the **last** one
+// that unmarshals into a valid decision — the decision object the gate is
+// asked to print last — so brace-bearing prose before it is ignored. When
+// no block yields a valid accept/reject we still error: a verdict is never
+// silently dropped, and we never default to accept.
 func ParseGateOutput(raw []byte) (GateOutput, error) {
 	s := strings.TrimSpace(string(raw))
 	if strings.HasPrefix(s, "```") {
@@ -210,19 +221,79 @@ func ParseGateOutput(raw []byte) (GateOutput, error) {
 		}
 		s = strings.TrimSpace(s)
 	}
-	if i := strings.IndexByte(s, '{'); i > 0 {
-		s = s[i:]
+
+	var found *GateOutput
+	var badDecision string // last block that carried a decision outside the set
+	for _, block := range balancedObjects(s) {
+		var out GateOutput
+		if err := json.Unmarshal([]byte(block), &out); err != nil {
+			continue
+		}
+		switch out.Decision {
+		case GateDecisionAccept, GateDecisionReject:
+			d := out
+			found = &d // keep the last valid decision object
+		default:
+			if out.Decision != "" {
+				badDecision = out.Decision
+			}
+		}
 	}
-	var out GateOutput
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return GateOutput{}, fmt.Errorf("gate dispatch: parse output: %w (raw=%q)", err, raw)
+	if found != nil {
+		return *found, nil
 	}
-	switch out.Decision {
-	case GateDecisionAccept, GateDecisionReject:
-	default:
-		return GateOutput{}, fmt.Errorf("gate dispatch: invalid decision %q (want accept|reject)", out.Decision)
+	// A block carried a `decision` field but with an out-of-set value —
+	// report that specifically rather than as "no object at all".
+	if badDecision != "" {
+		return GateOutput{}, fmt.Errorf("gate dispatch: invalid decision %q (want accept|reject)", badDecision)
 	}
-	return out, nil
+	return GateOutput{}, fmt.Errorf("gate dispatch: parse output: no valid decision object (want one {\"decision\":\"accept|reject\"}) (raw=%q)", raw)
+}
+
+// balancedObjects returns every top-level balanced `{...}` substring of s,
+// in order, honouring JSON string quoting so braces inside a string value
+// do not throw off the depth count. An opening `{` that never balances is
+// skipped — surrounding prose with a stray brace yields no candidate rather
+// than swallowing the rest of the output.
+func balancedObjects(s string) []string {
+	var blocks []string
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		depth := 0
+		inStr := false
+		esc := false
+		for j := i; j < len(s); j++ {
+			c := s[j]
+			if inStr {
+				switch {
+				case esc:
+					esc = false
+				case c == '\\':
+					esc = true
+				case c == '"':
+					inStr = false
+				}
+				continue
+			}
+			switch c {
+			case '"':
+				inStr = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					blocks = append(blocks, s[i:j+1])
+					i = j // resume scanning after this block
+					goto next
+				}
+			}
+		}
+	next:
+	}
+	return blocks
 }
 
 // Gate decision discriminators emitted by gate skills and recorded in
