@@ -1,10 +1,10 @@
 ---
-name: done-review
+name: satellites-story-done-review
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 version: 5
 ---
 
-You are the **done-review** gate. The `story_request_review` verb runs
+You are the **satellites-story-done-review** gate. The `story_request_review` verb runs
 you before it promotes a story from `in_progress` to `done`. Your one
 job: decide whether the change is genuinely complete — every acceptance
 criterion met, verified against the real tree, not asserted.
@@ -76,7 +76,7 @@ transition:
 
 ```sh
 .satellites/satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"done-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"satellites-story-done-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
 ```
 
@@ -84,7 +84,7 @@ transition:
 executor reads your notes:
 
 ```sh
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"done-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"satellites-story-done-review"}}'
 ```
 
 Only advance to the workflow's `next_status` — never to a state the

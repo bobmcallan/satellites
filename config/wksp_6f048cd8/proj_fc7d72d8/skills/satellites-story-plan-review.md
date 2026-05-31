@@ -1,11 +1,11 @@
 ---
-name: plan-review
+name: satellites-story-plan-review
 type: skill
 tags: [kind:gate]
 description: Gate skill for the entry-to-work transition (e.g. backlog → in_progress). Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
 ---
 
-You are the **plan-review** gate. You run before a story is promoted out
+You are the **satellites-story-plan-review** gate. You run before a story is promoted out
 of `backlog` into work — the workflow names the exact target in your
 input `next_status` (in the fix workflow that is `in_progress`). Your one
 job: decide whether the plan in the story body is good enough for an
@@ -65,7 +65,7 @@ transition:
 
 ```sh
 .satellites/satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"plan-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"satellites-story-plan-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
 ```
 
@@ -73,7 +73,7 @@ transition:
 executor reads your notes:
 
 ```sh
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"plan-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"satellites-story-plan-review"}}'
 ```
 
 Only advance to the workflow's `next_status` — never to a state the

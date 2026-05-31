@@ -13,14 +13,16 @@ story_types:
   feature:
     workflow_skill: .claude/skills/feature-workflow.md
 
-  # Smaller fixes — plan-review on entry, done-review on completion.
+  # Smaller fixes — satellites-story-plan-review on entry,
+  # satellites-story-done-review on completion.
   fix:
     workflow_skill: .claude/skills/fix-workflow.md
 
   # Refactors, bug-fixes and infrastructure changes ride the same two-gate
-  # fix workflow: plan-review on backlog → in_progress, done-review on
-  # in_progress → done. It is the loop-proven path and gives both a plan
-  # gate and a completion gate, which every change category warrants.
+  # fix workflow: satellites-story-plan-review on backlog → in_progress,
+  # satellites-story-done-review on in_progress → done. It is the
+  # loop-proven path and gives both a plan gate and a completion gate,
+  # which every change category warrants.
   refactor:
     workflow_skill: .claude/skills/fix-workflow.md
   bug:
