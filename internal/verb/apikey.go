@@ -46,6 +46,13 @@ type APIKeyCreateRequest struct {
 	AgentName   string   `json:"agent_name,omitempty"`
 	Scopes      []string `json:"scopes,omitempty"`
 	Role        string   `json:"role,omitempty"`
+	// TTLSeconds, when > 0, sets the lifetime of a minted reviewer key.
+	// The client requests a TTL covering the full gate dispatch (build +
+	// test can run many minutes) so the gate can still write its
+	// post-decision spine rows; absent it, IssueReviewerKey falls back to
+	// its short default and a long gate run loses those writes to a 401
+	// (sty_64c6159f). Ignored for executor-role mints (they never expire).
+	TTLSeconds int `json:"ttl_seconds,omitempty"`
 }
 
 // APIKeyCreateResponse mirrors the shape declared in story
@@ -168,10 +175,15 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	var k *auth.APIKey
 	switch role {
 	case auth.APIKeyRoleReviewer:
+		var ttl time.Duration
+		if req.TTLSeconds > 0 {
+			ttl = time.Duration(req.TTLSeconds) * time.Second
+		}
 		rawKey, k, err = authStore.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
 			UserID:    caller.ID,
 			ProjectID: projectID,
 			AgentName: agentName,
+			TTL:       ttl, // 0 ⇒ IssueReviewerKey's default; the client passes a gate-covering TTL (sty_64c6159f)
 		})
 	default:
 		keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())

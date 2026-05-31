@@ -38,6 +38,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// gateDispatchTimeout caps a single gate `claude -p` run. A done-review
+// builds + runs the change's tests in the worktree (sty_cba1d47b granted
+// it Bash); a Go test run that starts testcontainers/Postgres routinely
+// exceeds five minutes, and a gate killed mid-verification cannot enact,
+// so the story silently fails to advance. Fifteen minutes leaves headroom
+// for a real build+test pass while still bounding a runaway gate.
+const gateDispatchTimeout = 15 * time.Minute
+
+// reviewerKeyTTL is the lifetime of the reviewer key minted for a gate
+// run. It MUST exceed gateDispatchTimeout: the key has to outlive the
+// whole dispatch so the gate can write its post-decision spine rows
+// (review_accept/reject + status_transition) after a long build+test —
+// otherwise those writes 401 on an expired key and the verdict's ledger
+// trail is lost (sty_64c6159f). Derived from the timeout + headroom so
+// the two cannot silently drift apart.
+const reviewerKeyTTL = gateDispatchTimeout + 5*time.Minute
+
 func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 	var (
 		claudeBin    string
@@ -174,13 +191,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
 
 	// 7. Run the gate locally (owned by internal/verb's dispatcher). The
-	// timeout must cover a done-review that actually builds + runs the
-	// change's tests (sty_cba1d47b granted the gate Bash for exactly this):
-	// a Go test run that starts testcontainers/Postgres routinely exceeds
-	// five minutes, and a gate killed mid-verification cannot enact, so the
-	// story silently fails to advance. Fifteen minutes leaves headroom for a
-	// real build+test pass while still bounding a runaway gate.
-	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: 15 * time.Minute}
+	// dispatch timeout (gateDispatchTimeout) must cover a done-review that
+	// actually builds + runs the change's tests; the minted reviewer key's
+	// TTL (reviewerKeyTTL, above) is derived from it so the key outlives the
+	// run and the gate's post-decision spine writes do not 401.
+	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: gateDispatchTimeout}
 	gateOut, err := disp.Dispatch(ctx, verb.GateInput{
 		SkillName:    gateSkill,
 		StoryID:      story.ID,
@@ -343,7 +358,11 @@ func reviewAppendLedger(ctx context.Context, opts reviewOpts, story reviewStory,
 // keeping the gate's authority real: an autonomous executor cannot mint
 // a reviewer key and self-accept (sty_e16f0553).
 func mintReviewerKey(ctx context.Context, opts reviewOpts, story reviewStory) (string, string, error) {
-	req, err := json.Marshal(verb.APIKeyCreateRequest{Role: "reviewer", ProjectID: story.ProjectID})
+	req, err := json.Marshal(verb.APIKeyCreateRequest{
+		Role:       "reviewer",
+		ProjectID:  story.ProjectID,
+		TTLSeconds: int(reviewerKeyTTL / time.Second), // outlive the gate dispatch (sty_64c6159f)
+	})
 	if err != nil {
 		return "", "", err
 	}
