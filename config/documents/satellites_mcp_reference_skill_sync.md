@@ -27,9 +27,13 @@ When the client **materialises** `.claude/skills/<name>/SKILL.md` it injects a s
 
 Injection is client-side at materialise time. Storing the block in the substrate would make a body contain its own hash (circular) and break the upload round-trip, so it stays local. These three keys are sufficient for a client to decide create / update / skip / refuse-overwrite from the local file plus the document row alone; the non-clobber reconcile that uses them is the materialise/deploy path, not this read contract.
 
-## Scope: Claude Code skills only
+## Scope: every `type:"skill"` row — including workflow skills
 
-Substrate rows with `type:"skill"` are the only thing this contract materialises. Workflow specs (`feature-workflow.md` and siblings) are `type:"document"` rows read by the server's workflow-skill spec parser; they are not Claude Code skills and must not be written into `.claude/skills/`. `skill list` returns `type:"skill"` rows only, so the source enforces the line; the naming distinction prevents the category error if a reader hand-grafts a workflow spec into the skills tree.
+Substrate rows with `type:"skill"` are what this contract materialises, and that now **includes workflow skills** (`feature-workflow`, `fix-workflow`, …). A workflow is process, and process in Claude Code is a skill: each is a `type:"skill"` `<name>/SKILL.md` carrying skill frontmatter (`name`, `description`, `version`) for indexing/sync plus the workflow-only `applies_to` and a fenced ```yaml states/transitions block. `skill list` returns them like any other skill, and the reconcile materialises them into `.claude/skills/<name>/SKILL.md`.
+
+One artifact, two readers, no fork: Claude Code indexes the skill by its `description`, and the gate's workflow parser reads only the fenced yaml block (ignoring the prose), so the same SKILL.md serves both. `project-config` points `workflow_skill` at `.claude/skills/<name>/SKILL.md` — the materialised path — so the gate runs the same file the operator authored and synced.
+
+(History: workflow specs were once `type:"document"` flat files excluded from `skill list` and forbidden in `.claude/skills/`. sty_cce5abc0 reversed that — they are first-class skills now.)
 
 ## Failure mode
 

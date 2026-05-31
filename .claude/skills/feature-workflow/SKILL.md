@@ -1,9 +1,8 @@
 ---
 name: feature-workflow
-type: skill
-tags: [kind:workflow]
-applies_to: [feature]
 description: The lifecycle a `feature` story follows — backlog → ready → in_progress → done, every edge reviewer-gated. Invoke when implementing a feature story; it IS the executor's process.
+applies_to: [feature]
+version: 1
 ---
 
 # Feature workflow

@@ -7,6 +7,50 @@ import (
 	"testing"
 )
 
+// TestParse_LiveWorkflowSkills pins sty_cce5abc0 AC1/AC6: the project's
+// live workflow skills are now `type:skill` `<name>/SKILL.md` artifacts
+// carrying skill frontmatter (name/description/version) alongside the
+// workflow-only `applies_to` — and `Parse` still extracts their
+// states/transitions unchanged despite the added frontmatter keys. A
+// regression here means a workflow-as-skill conversion broke the gate's
+// ability to read its own workflow.
+func TestParse_LiveWorkflowSkills(t *testing.T) {
+	cases := []struct {
+		path        string
+		name        string
+		transitions int
+	}{
+		{filepath.Join("..", "..", ".claude", "skills", "feature-workflow", "SKILL.md"), "feature-workflow", 3},
+		{filepath.Join("..", "..", ".claude", "skills", "fix-workflow", "SKILL.md"), "fix-workflow", 2},
+	}
+	for _, c := range cases {
+		raw, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", c.path, err)
+		}
+		wf, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", c.path, err)
+		}
+		if wf.Name != c.name {
+			t.Errorf("%s: name = %q, want %q", c.path, wf.Name, c.name)
+		}
+		if len(wf.AppliesTo) == 0 {
+			t.Errorf("%s: applies_to empty", c.path)
+		}
+		if len(wf.Transitions) != c.transitions {
+			t.Errorf("%s: %d transitions, want %d", c.path, len(wf.Transitions), c.transitions)
+		}
+		// Every transition must name a gate — the loop must never see an
+		// ungated edge it cannot drive (sty_3934ad71).
+		for _, tr := range wf.Transitions {
+			if strings.TrimSpace(tr.ReviewerSkill) == "" {
+				t.Errorf("%s: ungated transition %s→%s (every edge must be reviewer-gated)", c.path, tr.From, tr.To)
+			}
+		}
+	}
+}
+
 // TestParse_ShippedExampleFile verifies the example checked into the
 // repo at examples/skills/feature-workflow.md round-trips through the
 // parser — covers AC#1 against the actual artifact callers see.
