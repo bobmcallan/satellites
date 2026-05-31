@@ -133,11 +133,29 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 		Use:   "upload",
 		Short: fmt.Sprintf("Walk config/**/%s and upsert each file via document_upsert", cfg.Kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+
+			// Validate the whole source tree against the deterministic
+			// inclusion rule (document:project/project-substrate-inclusion)
+			// before any dispatch. Every noun's upload runs this — a mis-typed
+			// file anywhere refuses the push, naming file + rule. Pure read,
+			// so it also runs under --dry-run (sty_50ecb56f).
+			violations, err := validateUpload(configRoot, filepath.Join(".claude", "skills"))
+			if err != nil {
+				return err
+			}
+			if len(violations) > 0 {
+				fmt.Fprintf(out, "validation failed — %d violation(s), nothing uploaded:\n", len(violations))
+				for _, v := range violations {
+					fmt.Fprintf(out, "  ✗ %s\n", v.String())
+				}
+				return fmt.Errorf("upload refused: %d validation violation(s)", len(violations))
+			}
+
 			targets, err := planUpload(configRoot, cfg.Kind)
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
 			if len(targets) == 0 {
 				fmt.Fprintf(out, "no %s found under config/**/%s/ — nothing to upload\n", cfg.Kind, cfg.Kind)
 				return nil
@@ -222,6 +240,138 @@ func planUpload(rootDir, kind string) ([]documentTarget, error) {
 	sort.Slice(workspaces, func(i, j int) bool { return workspaces[i].Path < workspaces[j].Path })
 	sort.Slice(projects, func(i, j int) bool { return projects[i].Path < projects[j].Path })
 	return append(workspaces, projects...), nil
+}
+
+// violation is one inclusion-rule breach the validator found: the
+// offending file (or skill name) and the rule it broke. The String form
+// is what `upload` prints before refusing.
+type violation struct {
+	Path string // source file path, or .claude/skills/<name> for drift
+	Rule string // short rule id (type-mismatch, skill-frontmatter, …)
+	Msg  string // human-readable detail
+}
+
+func (v violation) String() string {
+	return fmt.Sprintf("%s [%s] %s", v.Path, v.Rule, v.Msg)
+}
+
+// validateUpload checks every source under rootDir against the deterministic
+// inclusion rule (document:project/project-substrate-inclusion) and flags
+// drift against the materialised .claude/skills tree. It is a pure read — no
+// dispatch, no writes — so a re-run on the same inputs yields the same
+// verdict, which is what lets `--dry-run` use it as a standalone check
+// (sty_50ecb56f). An empty result means the tree is clean.
+//
+// Checks, all mechanical (no judgement call):
+//   - path layout resolves to config/<wksp>[/<proj>]/<kind>/<name>.md;
+//   - <kind> is a known kind directory;
+//   - frontmatter `type:`, when set, matches the kind dir's mapped type
+//     (a skills/ file may not declare type:document, etc.);
+//   - frontmatter scope/workspace_id/project_id, when set, match the path;
+//   - a skills/ file carries the required `name` + `description` frontmatter;
+//   - drift: a stamped (sync-materialised, hence project-owned) skill in
+//     .claude/skills/ with no config/.../skills/ source. Unstamped local
+//     skills are operator-owned and ignored.
+func validateUpload(rootDir, skillsRoot string) ([]violation, error) {
+	info, err := os.Stat(rootDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("validate: stat %s: %w", rootDir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("validate: %s is not a directory", rootDir)
+	}
+
+	var vs []violation
+	configSkillNames := map[string]bool{}
+
+	walkErr := filepath.WalkDir(rootDir, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() {
+			if p == filepath.Join(rootDir, systemSeedDir) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(rootDir, p)
+		if relErr != nil {
+			return relErr
+		}
+		segs := strings.Split(filepath.ToSlash(rel), "/")
+		var scope, wsID, pjID, kindDir, filename string
+		switch len(segs) {
+		case 3:
+			scope, wsID, kindDir, filename = "workspace", segs[0], segs[1], segs[2]
+		case 4:
+			scope, wsID, pjID, kindDir, filename = "project", segs[0], segs[1], segs[2], segs[3]
+		default:
+			vs = append(vs, violation{p, "layout", "unexpected source layout — expected config/<wksp>[/<proj>]/<kind>/<name>.md"})
+			return nil
+		}
+
+		defaultType, known := kindDirs[kindDir]
+		if !known {
+			vs = append(vs, violation{p, "kind-dir", fmt.Sprintf("unknown kind directory %q (allowed: documents, skills, principles)", kindDir)})
+			return nil
+		}
+
+		_, _, fm, ferr := readFileWithFrontmatter(p)
+		if ferr != nil {
+			vs = append(vs, violation{p, "frontmatter", ferr.Error()})
+			return nil
+		}
+
+		if t := strings.TrimSpace(fm.Type); t != "" && t != defaultType {
+			vs = append(vs, violation{p, "type-mismatch", fmt.Sprintf("frontmatter type:%q under %s/ — expected %q", t, kindDir, defaultType)})
+		}
+		if s := strings.TrimSpace(fm.Scope); s != "" && s != scope {
+			vs = append(vs, violation{p, "scope-mismatch", fmt.Sprintf("frontmatter scope:%q != path scope %q", s, scope)})
+		}
+		if w := strings.TrimSpace(fm.WorkspaceID); w != "" && w != wsID {
+			vs = append(vs, violation{p, "workspace-mismatch", fmt.Sprintf("frontmatter workspace_id:%q != path %q", w, wsID)})
+		}
+		if pj := strings.TrimSpace(fm.ProjectID); pj != "" && pj != pjID {
+			vs = append(vs, violation{p, "project-mismatch", fmt.Sprintf("frontmatter project_id:%q != path %q", pj, pjID)})
+		}
+
+		if kindDir == "skills" {
+			if strings.TrimSpace(fm.Name) == "" {
+				vs = append(vs, violation{p, "skill-frontmatter", "skill missing required frontmatter: name"})
+			}
+			if strings.TrimSpace(fm.Description) == "" {
+				vs = append(vs, violation{p, "skill-frontmatter", "skill missing required frontmatter: description"})
+			}
+			configSkillNames[resolveName(filename, fm.Name)] = true
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	// Drift: a project-owned (stamped) skill on disk with no config source.
+	stamped, serr := readStampedLocalSkills(skillsRoot)
+	if serr != nil {
+		return nil, fmt.Errorf("validate: scan %s: %w", skillsRoot, serr)
+	}
+	for _, l := range stamped {
+		if !configSkillNames[l.Name] {
+			vs = append(vs, violation{
+				filepath.Join(skillsRoot, l.Name),
+				"orphan-skill",
+				"project-owned (stamped) skill in .claude/skills/ with no config/.../skills/ source",
+			})
+		}
+	}
+	return vs, nil
 }
 
 // classifyDocumentFile derives a file's identity from its path under

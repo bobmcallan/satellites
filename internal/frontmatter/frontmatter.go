@@ -25,6 +25,7 @@ import (
 type Frontmatter struct {
 	Tags        []string `yaml:"tags"`
 	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
 	Type        string   `yaml:"type"`
 	Scope       string   `yaml:"scope"`
 	WorkspaceID string   `yaml:"workspace_id"`

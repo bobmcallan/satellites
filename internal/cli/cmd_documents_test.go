@@ -203,3 +203,165 @@ func TestMarshalUpsertRequest_TypePassthrough(t *testing.T) {
 		t.Errorf("payload missing workspace_id: %s", raw)
 	}
 }
+
+// flagged reports whether vs contains a violation whose path ends in
+// pathSuffix and whose rule equals want. Matching by suffix keeps the
+// assertions independent of the temp-dir absolute root.
+func flagged(vs []violation, pathSuffix, want string) bool {
+	for _, v := range vs {
+		if v.Rule == want && strings.HasSuffix(filepath.ToSlash(v.Path), pathSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// countRule counts violations whose path ends in pathSuffix and whose rule
+// equals want.
+func countRule(vs []violation, pathSuffix, want string) int {
+	n := 0
+	for _, v := range vs {
+		if v.Rule == want && strings.HasSuffix(filepath.ToSlash(v.Path), pathSuffix) {
+			n++
+		}
+	}
+	return n
+}
+
+// rulesByPath indexes a violation slice by file path → set of rule ids, used
+// by the idempotency check (which only compares two verdicts for equality).
+func rulesByPath(vs []violation) map[string][]string {
+	m := map[string][]string{}
+	for _, v := range vs {
+		m[filepath.ToSlash(v.Path)] = append(m[filepath.ToSlash(v.Path)], v.Rule)
+	}
+	return m
+}
+
+// TestValidateUpload_CleanTreePasses pins sty_50ecb56f AC1/AC5: a well-formed
+// config tree — a skill with name+description, a document, a principle —
+// yields no violations.
+func TestValidateUpload_CleanTreePasses(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/feature-workflow.md",
+		"---\nname: feature-workflow\ndescription: the feature lifecycle\n---\n# wf\n")
+	writeSource(t, root, "wksp_one/proj_one/skills/satellites-story-done-review.md",
+		"---\nname: satellites-story-done-review\ndescription: done gate\n---\n# gate\n")
+	writeSource(t, root, "wksp_one/proj_one/documents/project-config.md",
+		"---\nname: project-config\n---\n# cfg\n")
+	writeSource(t, root, "wksp_one/proj_one/principles/agent-goals.md",
+		"---\ntags: [principles:project]\n---\n# goals\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "no-claude-skills"))
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if len(vs) != 0 {
+		t.Fatalf("clean tree should pass, got violations: %v", vs)
+	}
+}
+
+// TestValidateUpload_TypeMismatches pins AC2: a skills/ file declaring
+// type:document, and a documents/ file declaring type:skill, are both
+// rejected — naming file + rule.
+func TestValidateUpload_TypeMismatches(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/mislabeled.md",
+		"---\nname: mislabeled\ndescription: d\ntype: document\n---\n# x\n")
+	writeSource(t, root, "wksp_one/proj_one/documents/pretender.md",
+		"---\nname: pretender\ntype: skill\n---\n# x\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "skills/mislabeled.md", "type-mismatch") {
+		t.Errorf("skills/ type:document not flagged: %v", vs)
+	}
+	if !flagged(vs, "documents/pretender.md", "type-mismatch") {
+		t.Errorf("documents/ type:skill not flagged: %v", vs)
+	}
+}
+
+// TestValidateUpload_SkillMissingFrontmatter pins AC2: a skills/ file missing
+// name and description is rejected on both.
+func TestValidateUpload_SkillMissingFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/bare.md", "---\n---\n# body only\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if got := countRule(vs, "skills/bare.md", "skill-frontmatter"); got != 2 {
+		t.Fatalf("expected 2 skill-frontmatter violations (name + description), got %d: %v", got, vs)
+	}
+}
+
+// TestValidateUpload_PathScopeMismatch pins AC2's path-consistency check:
+// frontmatter ids that disagree with the path segments are flagged.
+func TestValidateUpload_PathScopeMismatch(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/documents/d.md",
+		"---\nname: d\nworkspace_id: wksp_OTHER\nproject_id: proj_one\n---\n# x\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "documents/d.md", "workspace-mismatch") {
+		t.Fatalf("workspace_id/path mismatch not flagged: %v", vs)
+	}
+}
+
+// TestValidateUpload_OrphanStampedSkill pins AC3 drift: a stamped (sync-owned)
+// skill in .claude/skills with no config source is flagged, while a stamped
+// skill that DOES have a config source is not.
+func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
+	root := t.TempDir()
+	skillsRoot := t.TempDir()
+
+	// config source exists for "kept" only.
+	writeSource(t, root, "wksp_one/proj_one/skills/kept.md",
+		"---\nname: kept\ndescription: d\n---\n# kept\n")
+
+	// Two stamped local skills: "kept" (has config) and "orphan" (no config).
+	if err := applySyncItem(skillsRoot, syncPlanItem{Name: "kept", Action: actionInstall,
+		Sub: &substrateSkill{Name: "kept", DocumentID: "doc_k", Version: 1, Body: "---\nname: kept\n---\n# k\n"}}); err != nil {
+		t.Fatalf("install kept: %v", err)
+	}
+	if err := applySyncItem(skillsRoot, syncPlanItem{Name: "orphan", Action: actionInstall,
+		Sub: &substrateSkill{Name: "orphan", DocumentID: "doc_o", Version: 1, Body: "---\nname: orphan\n---\n# o\n"}}); err != nil {
+		t.Fatalf("install orphan: %v", err)
+	}
+
+	vs, err := validateUpload(root, skillsRoot)
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "/orphan", "orphan-skill") {
+		t.Errorf("orphan stamped skill not flagged: %v", vs)
+	}
+	if flagged(vs, "/kept", "orphan-skill") {
+		t.Errorf("config-sourced stamped skill wrongly flagged as orphan: %v", vs)
+	}
+}
+
+// TestValidateUpload_Idempotent pins AC4: validateUpload is a pure read — two
+// runs over the same tree return identical verdicts and write nothing.
+func TestValidateUpload_Idempotent(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/bad.md", "---\n---\n# x\n")
+
+	a, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	b, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if !reflect.DeepEqual(rulesByPath(a), rulesByPath(b)) {
+		t.Fatalf("non-idempotent verdict:\n %v\n %v", a, b)
+	}
+}
