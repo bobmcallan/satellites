@@ -33,8 +33,6 @@ Substrate rows with `type:"skill"` are what this contract materialises, and that
 
 One artifact, two readers, no fork: Claude Code indexes the skill by its `description`, and the gate's workflow parser reads only the fenced yaml block (ignoring the prose), so the same SKILL.md serves both. `project-config` points `workflow_skill` at `.claude/skills/<name>/SKILL.md` — the materialised path — so the gate runs the same file the operator authored and synced.
 
-(History: workflow specs were once `type:"document"` flat files excluded from `skill list` and forbidden in `.claude/skills/`. sty_cce5abc0 reversed that — they are first-class skills now.)
-
 ## Failure mode
 
 Skip this step and skills drift between sessions. Reviewer behaviour then varies by whichever client ran last — the failure mode this contract exists to prevent.
