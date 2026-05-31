@@ -528,6 +528,18 @@ func (s *Store) Delete(ctx context.Context, key Key, deletedBy string, viaIntern
 		return Document{}, Version{}, err
 	}
 
+	// Set the row-level status too, not just the version. List/Count
+	// filter on documents.status; without this the tombstone shows only on
+	// the name-addressed get (which checks version status) while list still
+	// returns the row as active — the list/get split that left deleted
+	// gate skills lingering in `skill list` (sty_4148d3fa).
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE documents SET status = $1 WHERE id = $2
+    `, string(StatusDeleted), doc.ID); err != nil {
+		return Document{}, Version{}, fmt.Errorf("document: mark deleted: %w", err)
+	}
+	doc.Status = string(StatusDeleted)
+
 	if err := tx.Commit(); err != nil {
 		return Document{}, Version{}, fmt.Errorf("document: commit: %w", err)
 	}
@@ -667,8 +679,17 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	if len(f.Tags) > 0 {
 		add("tags @> ?", pq.Array(f.Tags))
 	}
-	if f.Status != "" && f.Status != "all" {
+	// Status filter: an explicit status narrows to it; "all" surfaces
+	// everything including soft-deleted rows (admin/debug); the default
+	// (no status given) excludes tombstones, so a deleted row drops out of
+	// list the same way it drops out of a name-addressed get (sty_4148d3fa).
+	switch {
+	case f.Status == "all":
+		// no status predicate — include deleted
+	case f.Status != "":
 		add("status = ?", f.Status)
+	default:
+		add("status != ?", string(StatusDeleted))
 	}
 	if f.NamePrefix != "" {
 		add("name ILIKE ?", f.NamePrefix+"%")
@@ -746,8 +767,15 @@ func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
 	if len(f.Tags) > 0 {
 		add("tags @> ?", pq.Array(f.Tags))
 	}
-	if f.Status != "" && f.Status != "all" {
+	// Mirror List's status filter so a paged count agrees with the page
+	// (deleted excluded by default; "all" includes them) — sty_4148d3fa.
+	switch {
+	case f.Status == "all":
+		// no status predicate — include deleted
+	case f.Status != "":
 		add("status = ?", f.Status)
+	default:
+		add("status != ?", string(StatusDeleted))
 	}
 	if f.NamePrefix != "" {
 		add("name ILIKE ?", f.NamePrefix+"%")

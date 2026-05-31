@@ -287,6 +287,99 @@ func TestDocumentList_ViaMCP(t *testing.T) {
 
 }
 
+// TestDocumentList_ExcludesTombstones is the regression net for
+// sty_4148d3fa: a soft-deleted row must drop out of List by default (so it
+// agrees with the name-addressed get, which returns not-found), still be
+// reachable under status="all", and leave live rows untouched. Delete must
+// also set the row-level documents.status to "deleted".
+func TestDocumentList_ExcludesTombstones(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+
+	docStore := document.New(env.DB)
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	ws, err := wsStore.Create(ctx, "", "tombstone-ws", now)
+	if err != nil {
+		t.Fatalf("ws: %v", err)
+	}
+	pj, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "tombstone-pj"}, now)
+	if err != nil {
+		t.Fatalf("pj: %v", err)
+	}
+
+	// Two project skills: one we delete, one that stays live.
+	mk := func(name string) document.Document {
+		d, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key:       document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: name},
+			Type:      "skill",
+			Body:      "---\nname: " + name + "\n---\nbody\n",
+			CreatedBy: "test",
+		}, now)
+		if err != nil {
+			t.Fatalf("seed skill %q: %v", name, err)
+		}
+		return d
+	}
+	doomed := mk("gone-skill")
+	live := mk("kept-skill")
+
+	delKey := document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: "gone-skill"}
+	delDoc, _, err := docStore.Delete(ctx, delKey, "test", false, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	// AC3: the row-level status reflects the soft-delete.
+	if delDoc.Status != string(document.StatusDeleted) {
+		t.Errorf("after Delete, document.Status = %q, want %q", delDoc.Status, document.StatusDeleted)
+	}
+
+	filter := document.ListFilter{Type: "skill", Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID}
+
+	// AC1/AC2: default list omits the tombstone, keeps the live row.
+	def, err := docStore.List(ctx, filter, document.ListOptions{})
+	if err != nil {
+		t.Fatalf("list default: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, d := range def.Items {
+		ids[d.ID] = true
+	}
+	if ids[doomed.ID] {
+		t.Errorf("default list returned the deleted row %s", doomed.ID)
+	}
+	if !ids[live.ID] {
+		t.Errorf("default list dropped the live row %s", live.ID)
+	}
+
+	// status="all" still surfaces the tombstone.
+	all, err := docStore.List(ctx, document.ListFilter{
+		Type: "skill", Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Status: "all",
+	}, document.ListOptions{})
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	seenDeleted := false
+	for _, d := range all.Items {
+		if d.ID == doomed.ID {
+			seenDeleted = true
+		}
+	}
+	if !seenDeleted {
+		t.Errorf("status=all should include the deleted row %s", doomed.ID)
+	}
+
+	// Count mirrors the default-list exclusion.
+	n, err := docStore.Count(ctx, filter)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("Count default = %d, want 1 (live row only)", n)
+	}
+}
+
 func assertIDs(t *testing.T, got []document.Document, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
