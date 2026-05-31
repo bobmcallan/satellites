@@ -1122,6 +1122,18 @@ button.status-button[disabled] {
 .ledger-kind-warn  { color: #e0b85e; }
 .ledger-kind-error { color: #f87171; }
 .ledger-kind-debug { color: #888; }
+.ledger-kind-summary { color: #9bd48f; }
+/* Per-transition step summary (sty_2517f6b8): the prose renders inline,
+   always visible, beneath its transition row. */
+.ledger-row-summary td { background: #0c100c; padding: 0.5rem 0.6rem 0.7rem; border-bottom: 1px solid #1a1a1a; }
+.ledger-summary-text {
+  color: #cfe6c8;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  border-left: 2px solid #3a5a36;
+  padding-left: 0.6rem;
+}
 .ledger-row.is-expandable { cursor: pointer; }
 .ledger-row.is-expandable:hover { background: #0f0f0f; }
 .ledger-row.is-expandable[aria-expanded="true"] { background: #0f0f0f; }

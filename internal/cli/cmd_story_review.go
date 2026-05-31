@@ -46,14 +46,20 @@ import (
 // for a real build+test pass while still bounding a runaway gate.
 const gateDispatchTimeout = 15 * time.Minute
 
+// summariserTimeout caps the per-transition step summariser run that
+// follows a gate decision (sty_2517f6b8). A summary reads the story + tree
+// and emits prose — no build — so it is far shorter than the gate cap.
+const summariserTimeout = 5 * time.Minute
+
 // reviewerKeyTTL is the lifetime of the reviewer key minted for a gate
-// run. It MUST exceed gateDispatchTimeout: the key has to outlive the
-// whole dispatch so the gate can write its post-decision spine rows
-// (review_accept/reject + status_transition) after a long build+test —
-// otherwise those writes 401 on an expired key and the verdict's ledger
-// trail is lost (sty_64c6159f). Derived from the timeout + headroom so
-// the two cannot silently drift apart.
-const reviewerKeyTTL = gateDispatchTimeout + 5*time.Minute
+// run. It MUST outlive the whole dispatch so the gate can write its
+// post-decision spine rows (review_accept/reject + status_transition) after
+// a long build+test, AND the step summariser that runs after the decision
+// can write its step_summary row under the same key — otherwise those
+// writes 401 on an expired key and the ledger trail is lost (sty_64c6159f,
+// sty_2517f6b8). Derived from both timeouts + headroom so they cannot
+// silently drift apart.
+const reviewerKeyTTL = gateDispatchTimeout + summariserTimeout + 5*time.Minute
 
 func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 	var (
@@ -136,8 +142,9 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return fmt.Errorf("story %s has no category — workflow lookup needs a story type", story.ID)
 	}
 
-	// 2. project-config → workflow skill path for this story type (server read).
-	skillPath, err := reviewWorkflowSkillPath(ctx, opts, story, storyType)
+	// 2. project-config → workflow skill path for this story type, plus the
+	// optional step-summariser skill (server read).
+	skillPath, summariserSkill, err := reviewWorkflowSkillPath(ctx, opts, story, storyType)
 	if err != nil {
 		return err
 	}
@@ -243,6 +250,41 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 				story.Status)
 		}
 	}
+
+	// 9. Per-transition step summary (sty_2517f6b8). When project-config names
+	// a step_summariser_skill, run it and record its prose as a step_summary
+	// ledger row, tied to this transition. Best-effort: the transition has
+	// already happened, so a summariser failure warns but does not fail the
+	// review. Runs under the still-valid reviewer key (reviewerKeyTTL covers
+	// gate + summariser). Inlined (not a helper) so the recent-ledger slice
+	// flows by inference and the CLI never names internal/ledger.
+	if summariserSkill != "" {
+		summariser := verb.ClaudeCLISummariser{
+			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
+			DefaultTimeout: summariserTimeout,
+		}
+		summary, sErr := summariser.Summarise(ctx, verb.SummariserInput{
+			SkillName:    summariserSkill,
+			StoryID:      story.ID,
+			ProjectID:    story.ProjectID,
+			WorkspaceID:  story.WorkspaceID,
+			StoryBody:    body,
+			FromStatus:   story.Status,
+			ToStatus:     transition.To,
+			Decision:     gateOut.Decision,
+			RecentLedger: recent,
+			ReviewerKey:  opts.ReviewerKey,
+			WorktreeRoot: opts.WorktreeRoot,
+		})
+		switch {
+		case sErr != nil:
+			fmt.Fprintf(opts.Stderr, "warn: step summariser %q failed: %v\n", summariserSkill, sErr)
+		case strings.TrimSpace(summary) != "":
+			reviewAppendLedger(ctx, opts, story, "step_summary", summary,
+				map[string]any{"from_status": story.Status, "to_status": transition.To, "gate_skill": gateSkill, "decision": gateOut.Decision})
+			fmt.Fprintf(opts.Stdout, "step summary recorded (%d chars)\n", len(summary))
+		}
+	}
 	return nil
 }
 
@@ -296,7 +338,10 @@ func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, 
 	}, body, nil
 }
 
-func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewStory, storyType string) (string, error) {
+// reviewWorkflowSkillPath returns the workflow-skill path for the story type
+// and the project's optional step-summariser skill name (empty when
+// unconfigured) from a single project-config read.
+func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewStory, storyType string) (string, string, error) {
 	req, err := json.Marshal(verb.DocumentGetRequest{
 		Scope:       "project",
 		Name:        "project-config",
@@ -304,15 +349,15 @@ func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewS
 		ProjectID:   story.ProjectID,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	raw, err := dispatchVerb(ctx, "document_get", req, opts.ConfigPath, opts.UserArg)
 	if err != nil {
-		return "", fmt.Errorf("load project-config: %w", err)
+		return "", "", fmt.Errorf("load project-config: %w", err)
 	}
 	var resp verb.DocumentGetResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", fmt.Errorf("decode project-config: %w", err)
+		return "", "", fmt.Errorf("decode project-config: %w", err)
 	}
 	body := resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
@@ -320,13 +365,13 @@ func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewS
 	}
 	cfg, err := verb.ParseProjectConfig(body)
 	if err != nil {
-		return "", fmt.Errorf("project-config: %w", err)
+		return "", "", fmt.Errorf("project-config: %w", err)
 	}
 	st, ok := cfg.StoryTypes[storyType]
 	if !ok || strings.TrimSpace(st.WorkflowSkill) == "" {
-		return "", fmt.Errorf("project-config has no workflow_skill for story_type=%q", storyType)
+		return "", "", fmt.Errorf("project-config has no workflow_skill for story_type=%q", storyType)
 	}
-	return st.WorkflowSkill, nil
+	return st.WorkflowSkill, strings.TrimSpace(cfg.StepSummariserSkill), nil
 }
 
 func reviewAppendLedger(ctx context.Context, opts reviewOpts, story reviewStory, kind, body string, payload map[string]any) {

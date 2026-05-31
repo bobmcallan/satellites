@@ -32,6 +32,10 @@ const (
 	KindComment            = "comment"
 	KindReviewerKeyMinted  = "reviewer_key_minted"
 	KindReviewerKeyRevoked = "reviewer_key_revoked"
+	// KindStepSummary is the per-transition step summary the loop writes
+	// after a gated transition: the prose a config-named summariser skill
+	// produced, recorded next to the transition it describes (sty_2517f6b8).
+	KindStepSummary = "step_summary"
 )
 
 // LogKindPrefix is the marker on rows the arbor LedgerHandler emits.

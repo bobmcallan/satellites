@@ -101,11 +101,16 @@
           <td class="ledger-col-source" data-field="source">{{.Source}}</td>
           <td class="ledger-col-actor" data-field="actor">{{.Actor}}</td>
         </tr>
+        {{if .IsSummary}}
+        <tr class="ledger-row-summary" data-row="ledger-entry-summary">
+          <td colspan="4"><div class="ledger-summary-text" data-field="step-summary">{{.BodyFull}}</div></td>
+        </tr>
+        {{end}}
         {{if .HasExpand}}
         <tr class="ledger-row-expand" x-show="open" data-row="ledger-entry-expand">
           <td colspan="4">
             <dl class="ledger-detail">
-              {{if .BodyFull}}
+              {{if and .BodyFull (not .IsSummary)}}
               <dt>body</dt>
               <dd><pre class="ledger-pre" data-field="body-full">{{.BodyFull}}</pre></dd>
               {{end}}

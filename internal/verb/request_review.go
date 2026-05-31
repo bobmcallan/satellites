@@ -62,6 +62,11 @@ type StoryRequestReviewResponse struct {
 // through the same owner rather than reimplementing the shape.
 type ProjectConfig struct {
 	StoryTypes map[string]StoryTypeConfig `yaml:"story_types"`
+	// StepSummariserSkill names the skill the loop runs after each gated
+	// transition to produce a human-readable step summary (sty_2517f6b8).
+	// Empty disables summaries — backward-compatible. The name resolves to
+	// .claude/skills/<name>/SKILL.md in the worktree, like a gate skill.
+	StepSummariserSkill string `yaml:"step_summariser_skill"`
 }
 
 // StoryTypeConfig is one story_type → workflow-skill mapping.

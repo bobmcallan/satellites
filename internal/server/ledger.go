@@ -32,6 +32,10 @@ const (
 	ledgerDefaultWindowHrs  = 24
 	ledgerCreatedFormatHTML = "2006-01-02T15:04" // <input type="datetime-local">
 	ledgerLogKindPrefix     = "log:"
+	// ledgerKindStepSummary mirrors ledger.KindStepSummary (sty_2517f6b8).
+	// Named here as a literal to honour the transport-layer ban on importing
+	// internal/ledger.
+	ledgerKindStepSummary = "step_summary"
 )
 
 // ledgerListInput is the parsed-search form of the ledger filter,
@@ -79,6 +83,10 @@ type ledgerEntryView struct {
 	PayloadJSON template.HTML
 	RefsJSON    template.HTML
 	HasExpand   bool
+	// IsSummary marks a step_summary row (sty_2517f6b8): its body is the
+	// per-transition prose, rendered inline (always visible) beneath the
+	// row rather than tucked into the expand panel.
+	IsSummary bool
 }
 
 type ledgerPageData struct {
@@ -297,6 +305,12 @@ func renderLedgerEntries(entries any) []ledgerEntryView {
 			v.Source = "project " + e.ProjectID
 		case e.WorkspaceID != "":
 			v.Source = "workspace " + e.WorkspaceID
+		}
+		if e.Kind == ledgerKindStepSummary {
+			// Per-transition step summary: render the prose inline + give it a
+			// distinct badge. Body shows in the inline row, not the expand.
+			v.IsSummary = true
+			v.Level = "summary"
 		}
 		if pj, ok := prettyJSON(e.Payload); ok {
 			v.PayloadJSON = template.HTML(pj)

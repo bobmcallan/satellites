@@ -34,6 +34,13 @@ story_types:
 # the workflow skill itself; this block only exists for cases where a
 # specific story_type wants a different gate than the workflow's default.
 reviewer_overrides: {}
+
+# Per-transition step summariser (sty_2517f6b8). After each gated
+# transition `satellites story review` runs this skill and records its
+# prose as a step_summary ledger row, surfaced on the portal /ledger page.
+# Empty/absent disables summaries. Names a skill resolved at
+# .claude/skills/<name>/SKILL.md — here the existing story_summary skill.
+step_summariser_skill: story_summary
 ```
 
 ## Notes

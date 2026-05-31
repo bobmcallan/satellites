@@ -75,6 +75,33 @@ func TestRenderLedgerEntries_LevelDerivedFromKindPrefix(t *testing.T) {
 	}
 }
 
+// TestRenderLedgerEntries_StepSummaryInline pins sty_2517f6b8 AC3: a
+// step_summary row is marked IsSummary with a "summary" badge level and
+// keeps its prose in BodyFull, so the template renders it inline (visible)
+// rather than only in the expand panel. A non-summary row stays unmarked.
+func TestRenderLedgerEntries_StepSummaryInline(t *testing.T) {
+	rows := []ledgerEntryJSON{
+		{ID: "evt_s", Kind: "step_summary", Body: "Started feature X; plan accepted.", CreatedAt: time.Now()},
+		{ID: "evt_t", Kind: "status_transition", Body: "ready → in_progress", CreatedAt: time.Now()},
+	}
+	out := renderLedgerEntries(rows)
+	if len(out) != 2 {
+		t.Fatalf("got %d", len(out))
+	}
+	if !out[0].IsSummary {
+		t.Errorf("step_summary row should be IsSummary")
+	}
+	if out[0].Level != "summary" {
+		t.Errorf("step_summary level = %q, want summary", out[0].Level)
+	}
+	if out[0].BodyFull != "Started feature X; plan accepted." {
+		t.Errorf("step_summary body not preserved for inline render: %q", out[0].BodyFull)
+	}
+	if out[1].IsSummary {
+		t.Errorf("status_transition row must not be marked IsSummary")
+	}
+}
+
 func TestRenderLedgerEntries_SourceFirstNonEmpty(t *testing.T) {
 	rows := []ledgerEntryJSON{
 		{ID: "a", Kind: "log:info", RunID: "run_a", StoryID: "sty_a", CreatedAt: time.Now()},

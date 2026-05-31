@@ -208,6 +208,29 @@ func TestParseProjectConfig_FencedBody(t *testing.T) {
 	}
 }
 
+// TestParseProjectConfig_StepSummariserSkill pins sty_2517f6b8 AC2: the
+// optional top-level step_summariser_skill is parsed, and absent it stays
+// empty (summaries disabled, backward-compatible).
+func TestParseProjectConfig_StepSummariserSkill(t *testing.T) {
+	with := "```yaml\nstory_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow/SKILL.md\nstep_summariser_skill: story_summary\n```\n"
+	cfg, err := ParseProjectConfig(with)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig: %v", err)
+	}
+	if cfg.StepSummariserSkill != "story_summary" {
+		t.Fatalf("StepSummariserSkill = %q, want story_summary", cfg.StepSummariserSkill)
+	}
+
+	without := "```yaml\nstory_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow/SKILL.md\n```\n"
+	cfg2, err := ParseProjectConfig(without)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig (no summariser): %v", err)
+	}
+	if cfg2.StepSummariserSkill != "" {
+		t.Fatalf("StepSummariserSkill = %q, want empty when unconfigured", cfg2.StepSummariserSkill)
+	}
+}
+
 // TestParseProjectConfig_RawBody confirms a fence-less body (raw YAML)
 // still parses, so the fence extraction is additive, not a hard
 // requirement that would break legacy configs.
