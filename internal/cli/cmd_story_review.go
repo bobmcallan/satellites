@@ -142,6 +142,14 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return fmt.Errorf("story %s has no category — workflow lookup needs a story type", story.ID)
 	}
 
+	// 1b. Claim the local work area (sty_8e8ec0e7) — flock + lease, atomic.
+	// A second reviewer with a live foreign lease is refused, so two
+	// reviewers cannot double-claim the same transition (AC5). A re-run by
+	// the same operator reclaims its own lease.
+	if err := claimWork(story.ID, workClaimant(resolveCallerUserID(opts.UserArg)), story.Status, reviewerKeyTTL, time.Now()); err != nil {
+		return fmt.Errorf("claim work area for %s: %w", story.ID, err)
+	}
+
 	// 2. project-config → workflow skill path for this story type, plus the
 	// optional step-summariser skill (server read).
 	skillPath, summariserSkill, err := reviewWorkflowSkillPath(ctx, opts, story, storyType)
@@ -166,10 +174,17 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return err
 	}
 
-	// 5. Recent ledger for gate context (server read). Inlined with :=
-	// inference so the CLI never names internal/ledger (layering guard).
+	// 5. Recent ledger for gate context. Hot path (sty_8e8ec0e7): serve from
+	// the local inbox when present — no wire round-trip — and fall back to
+	// ledger_list over the server otherwise. Either source unmarshals into
+	// the same response shape, so the CLI never names internal/ledger
+	// (layering guard); the inbox JSON mirrors the ledger Entry fields.
 	var recentResp verb.LedgerListResponse
-	if llReq, mErr := json.Marshal(verb.LedgerListRequest{StoryID: story.ID}); mErr == nil {
+	recentSource := "ledger_list"
+	if localRaw, ok, _ := localRecentLedgerJSON(story.ID, 5); ok {
+		_ = json.Unmarshal(localRaw, &recentResp)
+		recentSource = "local inbox"
+	} else if llReq, mErr := json.Marshal(verb.LedgerListRequest{StoryID: story.ID}); mErr == nil {
 		if raw, lErr := dispatchVerb(ctx, "ledger_list", llReq, opts.ConfigPath, opts.UserArg); lErr == nil {
 			_ = json.Unmarshal(raw, &recentResp)
 		}
@@ -178,6 +193,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	if len(recent) > 5 {
 		recent = recent[len(recent)-5:]
 	}
+	fmt.Fprintf(opts.Stdout, "recent context: %s (%d rows)\n", recentSource, len(recent))
 
 	// 6. Mint a short-lived reviewer key for the spine writes + status
 	// patch. The operator's stored key is executor-role and the server
@@ -192,10 +208,14 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	opts.ReviewerKey = reviewerKey
 	defer revokeReviewerKey(ctx, opts, reviewerKeyID)
 
-	// 6b. Spine: the gate was requested.
-	reviewAppendLedger(ctx, opts, story, "review_requested",
-		fmt.Sprintf("gate %s: %s → %s", gateSkill, story.Status, transition.To),
-		map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
+	// 6b. Spine: the gate was requested. Stage it to the local inbox
+	// (sty_8e8ec0e7); the batched flush (step 10) writes it durably to the
+	// server with its local_ref. The verdict rows stay the skill's to enact.
+	reqPayload, _ := json.Marshal(map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
+	if _, sErr := inboxAppend(story.ID, "review_requested",
+		fmt.Sprintf("gate %s: %s → %s", gateSkill, story.Status, transition.To), reqPayload, time.Now()); sErr != nil {
+		fmt.Fprintf(opts.Stderr, "warn: stage review_requested to inbox: %v\n", sErr)
+	}
 
 	// 7. Run the gate locally (owned by internal/verb's dispatcher). The
 	// dispatch timeout (gateDispatchTimeout) must cover a done-review that
@@ -280,12 +300,81 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		case sErr != nil:
 			fmt.Fprintf(opts.Stderr, "warn: step summariser %q failed: %v\n", summariserSkill, sErr)
 		case strings.TrimSpace(summary) != "":
-			reviewAppendLedger(ctx, opts, story, "step_summary", summary,
-				map[string]any{"from_status": story.Status, "to_status": transition.To, "gate_skill": gateSkill, "decision": gateOut.Decision})
-			fmt.Fprintf(opts.Stdout, "step summary recorded (%d chars)\n", len(summary))
+			sumPayload, _ := json.Marshal(map[string]any{"from_status": story.Status, "to_status": transition.To, "gate_skill": gateSkill, "decision": gateOut.Decision})
+			if _, aErr := inboxAppend(story.ID, "step_summary", summary, sumPayload, time.Now()); aErr != nil {
+				fmt.Fprintf(opts.Stderr, "warn: stage step_summary to inbox: %v\n", aErr)
+			} else {
+				fmt.Fprintf(opts.Stdout, "step summary recorded (%d chars)\n", len(summary))
+			}
+		}
+	}
+
+	// 10. Batched flush (sty_8e8ec0e7): write the client-owned signals staged
+	// in the inbox this run (seq > last flushed) to the server ledger in a
+	// single pass under the reviewer key, each carrying its local_ref. The
+	// verdict rows are NOT here — the gate skill enacts those (sty_db5cdef0).
+	flushLocalInbox(ctx, opts, story)
+
+	// 11. Reconcile + cleanup (AC6): the server ledger is authority. Once the
+	// story reaches a terminal state (no outgoing transition), the local work
+	// area has served its purpose — remove it. A non-terminal story keeps its
+	// inbox so the next run serves recent context locally.
+	if observed != "" && len(wf.TransitionsFrom(observed)) == 0 {
+		if cErr := cleanupWork(story.ID); cErr != nil {
+			fmt.Fprintf(opts.Stderr, "warn: cleanup work area %s: %v\n", story.ID, cErr)
 		}
 	}
 	return nil
+}
+
+// flushLocalInbox writes the inbox messages staged this run (seq above the
+// last flushed seq recorded in status.json) to the server ledger via the
+// reviewer key, each carrying local_ref:<seq> in its payload, then advances
+// the high-water mark. Idempotent across iterative review runs — a row is
+// flushed once. Best-effort: a flush failure warns; the server ledger remains
+// the authority and a later run re-flushes from the persisted inbox.
+func flushLocalInbox(ctx context.Context, opts reviewOpts, story reviewStory) {
+	st, err := readWorkStatus(story.ID)
+	if err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: read work status %s: %v\n", story.ID, err)
+		return
+	}
+	msgs, err := inboxReadAll(story.ID)
+	if err != nil {
+		fmt.Fprintf(opts.Stderr, "warn: read inbox %s: %v\n", story.ID, err)
+		return
+	}
+	flushed, maxSeq := 0, st.LastSeq
+	for _, m := range msgs {
+		if m.Seq <= st.LastSeq {
+			continue
+		}
+		payload := map[string]any{"local_ref": m.Seq}
+		if len(m.Payload) > 0 {
+			var orig map[string]any
+			if json.Unmarshal(m.Payload, &orig) == nil {
+				for k, v := range orig {
+					payload[k] = v
+				}
+			}
+		}
+		reviewAppendLedger(ctx, opts, story, m.Kind, m.Body, payload)
+		flushed++
+		if m.Seq > maxSeq {
+			maxSeq = m.Seq
+		}
+	}
+	if flushed > 0 {
+		_ = withWorkLock(story.ID, func() error {
+			cur, _ := readWorkStatus(story.ID)
+			cur.StoryID = story.ID
+			if maxSeq > cur.LastSeq {
+				cur.LastSeq = maxSeq
+			}
+			return writeWorkStatus(story.ID, cur)
+		})
+		fmt.Fprintf(opts.Stdout, "flushed %d local inbox row(s) to ledger\n", flushed)
+	}
 }
 
 // reviewObserveStatus re-reads the story's current status for reporting.
