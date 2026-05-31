@@ -36,9 +36,20 @@ You are **not** blocked when:
 
 Append a `## Blocked` section to the story body with: what you tried, the precise reason you cannot continue, and what the operator needs to provide or decide. Then stop. Status stays where it is; the operator picks it up.
 
-### 4. Refresh the client after substrate changes — `satellites-init`
+### 4. Refresh the client after substrate changes — `satellites skill sync`
 
-After a story lands, or after any change to substrate prose (documents, principles, skills), run `satellites-init`. It re-bootstraps the client and pulls the current skills into `.claude/skills/`. Until it runs, the local skill files are stale and the next run executes against old reviewers and workflow — the same stale-source failure mode that skipping `/commit-push` causes for code.
+After a story lands, or after any change to substrate skills (gate or
+workflow skills), run `satellites skill sync`. It pulls the current skills
+from the substrate into `.claude/skills/<name>/SKILL.md`, pull-only and
+reconciled by each materialised skill's identity stamp (it updates or removes
+only what it materialised; an operator-authored skill with no stamp is never
+touched). Until it runs, the local skill files are stale and the next gate
+run executes against old reviewers and workflow — the same stale-source
+failure mode that skipping `/commit-push` causes for code.
+
+(Editing a skill is therefore: edit the `config/<wksp>/<proj>/skills/`
+source → `satellites skill upload` → `satellites skill sync`. The
+`satellites-init` bootstrap wraps this for first-run setup.)
 
 ## Tag conventions
 

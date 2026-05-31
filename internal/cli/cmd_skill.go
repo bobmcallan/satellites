@@ -41,5 +41,6 @@ func init() {
 		ConfigArg: &configArg,
 		UserArg:   &userArg,
 	}))
+	skill.AddCommand(newSkillSyncCmd(&configArg, &userArg))
 	register(skill)
 }
