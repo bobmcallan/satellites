@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,6 +86,54 @@ func TestReconcileSkills_OmitsUnstampedOrphans(t *testing.T) {
 	}
 	if len(plan) != 1 || plan[0].Name != "gate" {
 		t.Fatalf("plan = %+v, want only the stamped gate skill", plan)
+	}
+}
+
+// TestListSubstrateSkills_GetKeyedOnRowIDs pins sty_ab160e22 AC2: each per-row
+// document_get carries the workspace_id/project_id/scope the list row reports,
+// NOT the (empty by default) command flags. document_list skips authorizeRead
+// but document_get enforces it and rejects project/workspace scope without a
+// workspace_id — so a default-flag `skill sync` must recover the id off the
+// row, which document_list already returns.
+func TestListSubstrateSkills_GetKeyedOnRowIDs(t *testing.T) {
+	const listResp = `{"items":[{"id":"doc_1","name":"gate-a","scope":"project","workspace_id":"wksp_X","project_id":"proj_Y","latest_version":3}]}`
+	type getReq struct {
+		Name        string `json:"name"`
+		Scope       string `json:"scope"`
+		WorkspaceID string `json:"workspace_id"`
+		ProjectID   string `json:"project_id"`
+	}
+	var gets []getReq
+	dispatch := func(_ context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		switch name {
+		case "document_list":
+			return json.RawMessage(listResp), nil
+		case "document_get":
+			var g getReq
+			if err := json.Unmarshal(req, &g); err != nil {
+				return nil, err
+			}
+			gets = append(gets, g)
+			return json.RawMessage(`{"raw_body":"---\nname: gate-a\n---\nbody","document":{"id":"doc_1","latest_version":3}}`), nil
+		}
+		return nil, fmt.Errorf("unexpected verb %q", name)
+	}
+
+	// Command-level workspace/project flags are EMPTY — the default-flag
+	// invocation that used to fail on the get. The get must still carry the
+	// row's ids.
+	subs, err := listSubstrateSkills(context.Background(), dispatch, "project", "", "")
+	if err != nil {
+		t.Fatalf("listSubstrateSkills: %v", err)
+	}
+	if len(gets) != 1 {
+		t.Fatalf("expected 1 document_get, got %d", len(gets))
+	}
+	if g := gets[0]; g.WorkspaceID != "wksp_X" || g.ProjectID != "proj_Y" || g.Scope != "project" {
+		t.Fatalf("get not keyed on row ids: %+v (want wksp_X/proj_Y/project)", g)
+	}
+	if len(subs) != 1 || subs[0].DocumentID != "doc_1" || subs[0].Version != 3 {
+		t.Fatalf("subs = %+v, want one row doc_1/v3", subs)
 	}
 }
 

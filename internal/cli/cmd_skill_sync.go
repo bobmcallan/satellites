@@ -277,7 +277,10 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 				skillsRoot = filepath.Join(".claude", "skills")
 			}
 
-			subs, err := listSubstrateSkills(ctx, *configArg, *userArg, scopeArg, wsArg, pjArg)
+			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+				return dispatchVerb(ctx, name, req, *configArg, *userArg)
+			}
+			subs, err := listSubstrateSkills(ctx, dispatch, scopeArg, wsArg, pjArg)
 			if err != nil {
 				return err
 			}
@@ -378,15 +381,35 @@ func readStampedLocalSkills(skillsRoot string) ([]localSkill, error) {
 	return out, nil
 }
 
+// verbDispatch is the seam sync calls the substrate through. The command
+// binds it to dispatchVerb (config-aware HTTP/in-process routing); a test
+// injects a fake to assert the requests sync builds (sty_ab160e22 AC2).
+type verbDispatch func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error)
+
+// firstNonEmpty returns a if it is non-empty, else b — used to prefer the id
+// a list row reports, falling back to the command-level filter value.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // listSubstrateSkills pulls the type:skill rows for the scope and fetches
 // each body via document_get (the body carries authored frontmatter intact,
 // sty_4b517016). Reuses the existing list/get verbs — no new MCP surface.
-func listSubstrateSkills(ctx context.Context, configPath, userID, scope, wsID, pjID string) ([]substrateSkill, error) {
+//
+// document_get enforces authorizeRead, which requires workspace_id for
+// workspace/project scope; document_list does not. So each get is keyed on
+// the scope + ids the row itself reports (falling back to the command-level
+// filter when a row omits one) — a default-flag `skill sync` then resolves
+// the workspace_id document_list never demanded (sty_ab160e22).
+func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string) ([]substrateSkill, error) {
 	listReq, err := json.Marshal(docListRequest{Type: "skill", Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Limit: 200})
 	if err != nil {
 		return nil, err
 	}
-	raw, err := dispatchVerb(ctx, "document_list", listReq, configPath, userID)
+	raw, err := dispatch(ctx, "document_list", listReq)
 	if err != nil {
 		return nil, fmt.Errorf("skill sync: list: %w", err)
 	}
@@ -394,6 +417,9 @@ func listSubstrateSkills(ctx context.Context, configPath, userID, scope, wsID, p
 		Items []struct {
 			ID            string `json:"id"`
 			Name          string `json:"name"`
+			Scope         string `json:"scope"`
+			WorkspaceID   string `json:"workspace_id"`
+			ProjectID     string `json:"project_id"`
 			LatestVersion int    `json:"latest_version"`
 		} `json:"items"`
 	}
@@ -407,11 +433,16 @@ func listSubstrateSkills(ctx context.Context, configPath, userID, scope, wsID, p
 			Scope       string `json:"scope,omitempty"`
 			WorkspaceID string `json:"workspace_id,omitempty"`
 			ProjectID   string `json:"project_id,omitempty"`
-		}{Name: it.Name, Scope: scope, WorkspaceID: wsID, ProjectID: pjID})
+		}{
+			Name:        it.Name,
+			Scope:       firstNonEmpty(it.Scope, scope),
+			WorkspaceID: firstNonEmpty(it.WorkspaceID, wsID),
+			ProjectID:   firstNonEmpty(it.ProjectID, pjID),
+		})
 		if err != nil {
 			return nil, err
 		}
-		gotRaw, err := dispatchVerb(ctx, "document_get", getReq, configPath, userID)
+		gotRaw, err := dispatch(ctx, "document_get", getReq)
 		if err != nil {
 			return nil, fmt.Errorf("skill sync: get %q: %w", it.Name, err)
 		}
