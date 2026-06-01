@@ -620,6 +620,7 @@ type ListFilter struct {
 	Scope       Scope    // "" → no filter
 	WorkspaceID string   // "" → no filter
 	ProjectID   string   // "" → no filter
+	UserID      string   // "" → no filter; set with Scope=user to list a caller's overrides
 	Tags        []string // empty → no filter; non-empty → AND filter via @>
 	Status      string   // "" or "all" → no filter
 	NamePrefix  string   // "" → no filter; non-empty → name ILIKE prefix||'%'
@@ -675,6 +676,9 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	}
 	if f.ProjectID != "" {
 		add("project_id = ?", f.ProjectID)
+	}
+	if f.UserID != "" {
+		add("user_id = ?", f.UserID)
 	}
 	if len(f.Tags) > 0 {
 		add("tags @> ?", pq.Array(f.Tags))
@@ -764,6 +768,9 @@ func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
 	if f.ProjectID != "" {
 		add("project_id = ?", f.ProjectID)
 	}
+	if f.UserID != "" {
+		add("user_id = ?", f.UserID)
+	}
 	if len(f.Tags) > 0 {
 		add("tags @> ?", pq.Array(f.Tags))
 	}
@@ -848,7 +855,7 @@ func appendVersion(ctx context.Context, tx *sql.Tx, doc Document, body, by strin
 func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, docType string, now time.Time) (Document, error) {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
-		string(key.Scope), key.WorkspaceID+"\x1f"+key.ProjectID+"\x1f"+key.Name,
+		string(key.Scope), key.WorkspaceID+"\x1f"+key.ProjectID+"\x1f"+key.UserID+"\x1f"+key.Name,
 	); err != nil {
 		return Document{}, fmt.Errorf("document: advisory lock: %w", err)
 	}
@@ -863,13 +870,14 @@ func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, docType stri
 	id := NewID()
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
+	userArg := nullStr(key.UserID)
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO documents
-            (id, scope, workspace_id, project_id, name, latest_version,
+            (id, scope, workspace_id, project_id, user_id, name, latest_version,
              type, tags, status, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, 0,
+        VALUES ($1, $2, $3, $4, $8, $5, 0,
                 $7, '{}', 'active', $6, $6)
-    `, id, string(key.Scope), wsArg, pjArg, key.Name, now, docType); err != nil {
+    `, id, string(key.Scope), wsArg, pjArg, key.Name, now, docType, userArg); err != nil {
 		return Document{}, fmt.Errorf("document: insert: %w", err)
 	}
 	return lockDocumentByKey(ctx, tx, key)
@@ -884,15 +892,17 @@ func lockExistingDocument(ctx context.Context, tx *sql.Tx, key Key) (Document, e
 func lockDocumentByKey(ctx context.Context, tx *sql.Tx, key Key) (Document, error) {
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
+	userArg := nullStr(key.UserID)
 	row := tx.QueryRowContext(ctx, selectDocumentColumns+`
         FROM documents
         WHERE scope = $1
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id   IS NOT DISTINCT FROM $3
+          AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
           AND type IN ('document','skill')
         FOR UPDATE
-    `, string(key.Scope), wsArg, pjArg, key.Name)
+    `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
 }
 
@@ -904,14 +914,16 @@ func lockDocumentByID(ctx context.Context, tx *sql.Tx, id string) (Document, err
 func (s *Store) lookupDocument(ctx context.Context, key Key) (Document, error) {
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
+	userArg := nullStr(key.UserID)
 	row := s.DB.QueryRowContext(ctx, selectDocumentColumns+`
         FROM documents
         WHERE scope = $1
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id   IS NOT DISTINCT FROM $3
+          AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
           AND type IN ('document','skill')
-    `, string(key.Scope), wsArg, pjArg, key.Name)
+    `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
 }
 
@@ -968,7 +980,7 @@ type rowScanner interface {
 
 const selectDocumentColumns = `SELECT
     id, type, scope,
-    COALESCE(workspace_id,''), COALESCE(project_id,''),
+    COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''),
     name, latest_version,
     tags, status,
     COALESCE(priority,''), COALESCE(category,''),
@@ -984,7 +996,7 @@ func scanDocumentFull(rs rowScanner) (Document, error) {
 		summaryAt sql.NullTime
 	)
 	if err := rs.Scan(&d.ID, &d.Type, &scopeS,
-		&d.WorkspaceID, &d.ProjectID,
+		&d.WorkspaceID, &d.ProjectID, &d.UserID,
 		&d.Name, &d.LatestVersion,
 		&tags, &d.Status,
 		&d.Priority, &d.Category,

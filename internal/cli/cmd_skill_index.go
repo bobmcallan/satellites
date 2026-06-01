@@ -39,7 +39,7 @@ type skillIndexEntry struct {
 // body's frontmatter into a dispatch entry, dropping the body. Deterministic
 // order for stable output + tests.
 func buildSkillIndex(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string) ([]skillIndexEntry, error) {
-	subs, err := listSubstrateSkills(ctx, dispatch, scope, wsID, pjID)
+	subs, err := listSubstrateSkills(ctx, dispatch, scope, wsID, pjID, true /* effective: user overrides win in the index */)
 	if err != nil {
 		return nil, err
 	}

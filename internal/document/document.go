@@ -30,6 +30,12 @@ const (
 	ScopeSystem    Scope = "system"
 	ScopeWorkspace Scope = "workspace"
 	ScopeProject   Scope = "project"
+	// ScopeUser is the highest-precedence override layer (sty_cbeeb452).
+	// A user-scope row is keyed (user_id, name) and shadows the same-named
+	// project/workspace/system row for that caller, so a user can adapt the
+	// process without editing the shared rows. user_id is the caller
+	// identity, never a request-body field.
+	ScopeUser Scope = "user"
 )
 
 // Status is the typed column on document_versions.
@@ -72,6 +78,7 @@ type Document struct {
 	Scope              Scope      `json:"scope"`
 	WorkspaceID        string     `json:"workspace_id,omitempty"`
 	ProjectID          string     `json:"project_id,omitempty"`
+	UserID             string     `json:"user_id,omitempty"`
 	Name               string     `json:"name"`
 	LatestVersion      int        `json:"latest_version"`
 	Tags               []string   `json:"tags"`
@@ -109,7 +116,11 @@ type Key struct {
 	Scope       Scope
 	WorkspaceID string
 	ProjectID   string
-	Name        string
+	// UserID keys a user-scope override row (sty_cbeeb452). Set only for
+	// ScopeUser; empty for every other scope. It carries the caller
+	// identity, never a request-body value.
+	UserID string
+	Name   string
 }
 
 // Validate enforces the scope-coherence rules the DB CHECK constraint
@@ -121,15 +132,19 @@ func (k Key) Validate() error {
 	}
 	switch k.Scope {
 	case ScopeSystem:
-		if k.WorkspaceID != "" || k.ProjectID != "" {
+		if k.WorkspaceID != "" || k.ProjectID != "" || k.UserID != "" {
 			return ErrScopeMismatch
 		}
 	case ScopeWorkspace:
-		if k.WorkspaceID == "" || k.ProjectID != "" {
+		if k.WorkspaceID == "" || k.ProjectID != "" || k.UserID != "" {
 			return ErrScopeMismatch
 		}
 	case ScopeProject:
-		if k.WorkspaceID == "" || k.ProjectID == "" {
+		if k.WorkspaceID == "" || k.ProjectID == "" || k.UserID != "" {
+			return ErrScopeMismatch
+		}
+	case ScopeUser:
+		if k.UserID == "" || k.WorkspaceID != "" || k.ProjectID != "" {
 			return ErrScopeMismatch
 		}
 	default:

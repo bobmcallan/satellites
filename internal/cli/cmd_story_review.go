@@ -462,6 +462,9 @@ func reviewStepSummariserSkill(ctx context.Context, dispatch verbDispatch, story
 		Name:        "project-config",
 		WorkspaceID: story.WorkspaceID,
 		ProjectID:   story.ProjectID,
+		// Resolve through the cascade so a user override of project-config
+		// (e.g. the step summariser) is honoured for that caller (sty_cbeeb452).
+		Inherit: true,
 	})
 	if err != nil {
 		return ""

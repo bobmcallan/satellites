@@ -160,7 +160,7 @@ func TestListSubstrateSkills_GetKeyedOnRowIDs(t *testing.T) {
 	// Command-level workspace/project flags are EMPTY — the default-flag
 	// invocation that used to fail on the get. The get must still carry the
 	// row's ids.
-	subs, err := listSubstrateSkills(context.Background(), dispatch, "project", "", "")
+	subs, err := listSubstrateSkills(context.Background(), dispatch, "project", "", "", false)
 	if err != nil {
 		t.Fatalf("listSubstrateSkills: %v", err)
 	}

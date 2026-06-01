@@ -59,6 +59,7 @@ func TestBuildResolutionChain(t *testing.T) {
 		name       string
 		scope      document.Scope
 		wsID, pjID string
+		userID     string
 		inherit    bool
 		want       []document.Scope
 	}{
@@ -82,10 +83,25 @@ func TestBuildResolutionChain(t *testing.T) {
 			scope: document.ScopeSystem, inherit: true,
 			want: []document.Scope{document.ScopeSystem},
 		},
+		{
+			name:  "project inherit with caller prepends user layer at highest precedence",
+			scope: document.ScopeProject, wsID: "wksp_1", pjID: "proj_1", userID: "usr_1", inherit: true,
+			want: []document.Scope{document.ScopeUser, document.ScopeProject, document.ScopeWorkspace, document.ScopeSystem},
+		},
+		{
+			name:  "no inherit does not prepend user even with a caller",
+			scope: document.ScopeProject, wsID: "wksp_1", pjID: "proj_1", userID: "usr_1", inherit: false,
+			want: []document.Scope{document.ScopeProject},
+		},
+		{
+			name:  "direct user-scope read resolves the single user key",
+			scope: document.ScopeUser, userID: "usr_1", inherit: false,
+			want: []document.Scope{document.ScopeUser},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			chain := buildResolutionChain("doc", tc.scope, tc.wsID, tc.pjID, tc.inherit)
+			chain := buildResolutionChain("doc", tc.scope, tc.wsID, tc.pjID, tc.userID, tc.inherit)
 			if len(chain) != len(tc.want) {
 				t.Fatalf("chain length: got %d want %d (%+v)", len(chain), len(tc.want), chain)
 			}
@@ -95,6 +111,9 @@ func TestBuildResolutionChain(t *testing.T) {
 				}
 				if got.Name != "doc" {
 					t.Fatalf("step %d: name=%q want doc", i, got.Name)
+				}
+				if got.Scope == document.ScopeUser && got.UserID != tc.userID {
+					t.Fatalf("step %d: user key UserID=%q want %q", i, got.UserID, tc.userID)
 				}
 			}
 		})

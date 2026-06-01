@@ -296,7 +296,7 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
 				return dispatchVerb(ctx, name, req, *configArg, *userArg)
 			}
-			subs, err := listSubstrateSkills(ctx, dispatch, scopeArg, wsArg, pjArg)
+			subs, err := listSubstrateSkills(ctx, dispatch, scopeArg, wsArg, pjArg, false /* sync reconciles shared rows, not per-caller overrides */)
 			if err != nil {
 				return err
 			}
@@ -421,8 +421,13 @@ func firstNonEmpty(a, b string) string {
 // the scope + ids the row itself reports (falling back to the command-level
 // filter when a row omits one) — a default-flag `skill sync` then resolves
 // the workspace_id document_list never demanded (sty_ab160e22).
-func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string) ([]substrateSkill, error) {
-	listReq, err := json.Marshal(docListRequest{Type: "skill", Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Limit: 200})
+// listSubstrateSkills lists the substrate skills at a scope and fetches each
+// body. When effective is true the caller's user-scope overrides are overlaid
+// (sty_cbeeb452) — the dynamic skill index passes true so a user's overridden
+// workflow/gate skill wins; sync passes false so it reconciles the shared rows
+// against the operator's stamped local tree, not per-caller overrides.
+func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string, effective bool) ([]substrateSkill, error) {
+	listReq, err := json.Marshal(docListRequest{Type: "skill", Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Limit: 200, Effective: effective})
 	if err != nil {
 		return nil, err
 	}

@@ -175,6 +175,12 @@ type DocumentListRequest struct {
 	NamePrefix  string   `json:"name_prefix,omitempty"`
 	Limit       int      `json:"limit,omitempty"`
 	Cursor      string   `json:"cursor,omitempty"`
+	// Effective overlays the caller's user-scope override rows onto the
+	// requested-scope list, shadowing same-named rows (user wins), so the
+	// result is the post-cascade effective set (sty_cbeeb452). Single merged
+	// page, no cursor — intended for config-resolution reads (skills,
+	// principles, config), which are small sets.
+	Effective bool `json:"effective,omitempty"`
 }
 
 // DocumentListResponse is the paged response from document_list.
@@ -249,6 +255,13 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 			return nil, fmt.Errorf("document_list: %w: %v", ErrBadRequest, err)
 		}
 	}
+	if req.Effective {
+		if userID := callerUserID(ctx); userID != "" {
+			return effectiveList(ctx, req, userID)
+		}
+		// No caller identity — nothing to overlay; fall through to the plain
+		// requested-scope list.
+	}
 	res, err := documentStore.List(ctx, document.ListFilter{
 		Type:        req.Type,
 		Scope:       document.Scope(req.Scope),
@@ -268,6 +281,56 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		res.Items = []document.Document{}
 	}
 	return json.Marshal(DocumentListResponse{Items: res.Items, NextCursor: res.NextCursor})
+}
+
+// effectiveList returns the post-cascade effective set for a caller: the
+// requested-scope rows with same-named rows replaced by the caller's
+// user-scope override (user wins), plus user overrides that have no
+// lower-scope counterpart (sty_cbeeb452). It is a single merged page (no
+// cursor) for config-resolution reads, which are small sets; it never
+// crosses users — the user sublist is keyed to the caller.
+func effectiveList(ctx context.Context, req DocumentListRequest, userID string) (json.RawMessage, error) {
+	const effectiveLimit = 200 // store List caps at 200; config sets are small
+	base, err := documentStore.List(ctx, document.ListFilter{
+		Type:        req.Type,
+		Scope:       document.Scope(req.Scope),
+		WorkspaceID: req.WorkspaceID,
+		ProjectID:   req.ProjectID,
+		Tags:        req.Tags,
+		Status:      req.Status,
+		NamePrefix:  req.NamePrefix,
+	}, document.ListOptions{Limit: effectiveLimit})
+	if err != nil {
+		return nil, err
+	}
+	overrides, err := documentStore.List(ctx, document.ListFilter{
+		Type:       req.Type,
+		Scope:      document.ScopeUser,
+		UserID:     userID,
+		Tags:       req.Tags,
+		Status:     req.Status,
+		NamePrefix: req.NamePrefix,
+	}, document.ListOptions{Limit: effectiveLimit})
+	if err != nil {
+		return nil, err
+	}
+
+	// Overlay: a user override shadows the same-named base row; a brand-new
+	// user row (no base counterpart) is appended.
+	shadowed := make(map[string]int, len(base.Items))
+	out := make([]document.Document, 0, len(base.Items)+len(overrides.Items))
+	for _, d := range base.Items {
+		shadowed[d.Name] = len(out)
+		out = append(out, d)
+	}
+	for _, ov := range overrides.Items {
+		if idx, ok := shadowed[ov.Name]; ok {
+			out[idx] = ov
+			continue
+		}
+		out = append(out, ov)
+	}
+	return json.Marshal(DocumentListResponse{Items: out})
 }
 
 func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -347,7 +410,7 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	// the same values.
 	ctx = WithSystemVarContext(ctx, req.OS, req.Arch, req.CurrentVersion)
 
-	cascade := buildResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, req.Inherit)
+	cascade := buildResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, callerUserID(ctx), req.Inherit)
 	for i, key := range cascade {
 		if err := authorizeRead(ctx, key); err != nil {
 			return nil, err
@@ -366,14 +429,28 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	return nil, fmt.Errorf("document_get: %w", ErrNotFound)
 }
 
-// buildResolutionChain returns the ordered list of Keys to probe. With
-// inherit=false the slice is exactly one key. With inherit=true and a
-// project-scope request, it is [project, workspace, system]. workspace
-// inherit cascades to system; system requests never cascade.
-func buildResolutionChain(name string, scope document.Scope, wsID, pjID string, inherit bool) []document.Key {
-	chain := []document.Key{{Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Name: name}}
+// buildResolutionChain returns the ordered list of Keys to probe; the first
+// match wins, so the slice is ordered highest-precedence first. With
+// inherit=false the slice is exactly one key (the requested scope).
+//
+// With inherit=true the chain is the cascade, highest precedence first:
+// user > project > workspace > system (sty_cbeeb452). The user layer is
+// prepended only when the caller is identified (userID != ""); it is keyed
+// to that caller, so a user resolves only their own overrides. A request for
+// scope=user itself resolves the single user key.
+func buildResolutionChain(name string, scope document.Scope, wsID, pjID, userID string, inherit bool) []document.Key {
+	base := document.Key{Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Name: name}
+	if scope == document.ScopeUser {
+		base.UserID = userID
+	}
+	chain := []document.Key{base}
 	if !inherit {
 		return chain
+	}
+	// Prepend the caller's user override layer at highest precedence for
+	// non-user reads.
+	if userID != "" && scope != document.ScopeUser {
+		chain = append([]document.Key{{Scope: document.ScopeUser, UserID: userID, Name: name}}, chain...)
 	}
 	switch scope {
 	case document.ScopeProject:
@@ -396,6 +473,8 @@ func parseScope(s string) (document.Scope, error) {
 		return document.ScopeWorkspace, nil
 	case "project":
 		return document.ScopeProject, nil
+	case "user":
+		return document.ScopeUser, nil
 	case "":
 		return "", fmt.Errorf("document_get: %w: scope required", ErrBadRequest)
 	default:
@@ -452,6 +531,14 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 	if u == nil {
 		return fmt.Errorf("document_get: %w: bearer required for %s scope", ErrUnauthorized, key.Scope)
 	}
+	// User scope is the caller's own override layer: a caller may read only
+	// rows keyed to their own id, never another user's (sty_cbeeb452).
+	if key.Scope == document.ScopeUser {
+		if key.UserID != u.ID {
+			return fmt.Errorf("document_get: %w: user scope is readable only by its owner", ErrForbidden)
+		}
+		return nil
+	}
 	if workspaceStore == nil {
 		// Workspace store unwired: in-process tests that don't exercise
 		// auth shouldn't fail closed. Server boot always wires it.
@@ -507,6 +594,13 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if scope == document.ScopeUser {
+		// A user override is keyed to the caller, never a request-body field.
+		key.UserID = callerUserID(ctx)
+		if key.UserID == "" {
+			return nil, fmt.Errorf("document_upsert: %w: user scope requires a caller identity", ErrBadRequest)
+		}
+	}
 	if err := authorizeWrite(ctx, key); err != nil {
 		return nil, err
 	}
@@ -750,7 +844,7 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 		}
 		// Document soft-delete by id. Reconstruct the key from the row
 		// so we reuse the existing tombstone-append path.
-		key := document.Key{Scope: d.Scope, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID, Name: d.Name}
+		key := document.Key{Scope: d.Scope, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID, UserID: d.UserID, Name: d.Name}
 		if err := authorizeWrite(ctx, key); err != nil {
 			return nil, err
 		}
@@ -769,6 +863,12 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if scope == document.ScopeUser {
+		key.UserID = callerUserID(ctx)
+		if key.UserID == "" {
+			return nil, fmt.Errorf("document_delete: %w: user scope requires a caller identity", ErrBadRequest)
+		}
+	}
 	if err := authorizeWrite(ctx, key); err != nil {
 		return nil, err
 	}
@@ -794,6 +894,13 @@ func authorizeWrite(ctx context.Context, key document.Key) error {
 	u := auth.FromContext(ctx)
 	if u == nil {
 		return fmt.Errorf("document write: %w: bearer required for %s scope", ErrUnauthorized, key.Scope)
+	}
+	// User scope: a caller writes only their own override rows (sty_cbeeb452).
+	if key.Scope == document.ScopeUser {
+		if key.UserID != u.ID {
+			return fmt.Errorf("document write: %w: user scope is writable only by its owner", ErrForbidden)
+		}
+		return nil
 	}
 	if workspaceStore == nil {
 		return nil

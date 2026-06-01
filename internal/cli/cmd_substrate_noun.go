@@ -71,6 +71,10 @@ type docListRequest struct {
 	ProjectID   string   `json:"project_id,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Limit       int      `json:"limit,omitempty"`
+	// Effective overlays the caller's user-scope overrides onto the listed
+	// set (sty_cbeeb452) — the skill index uses it so a user's overridden
+	// workflow/gate skill resolves for that user.
+	Effective bool `json:"effective,omitempty"`
 }
 
 // newSubstrateListCmd builds a `<noun> list` cobra command.
