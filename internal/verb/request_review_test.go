@@ -231,6 +231,24 @@ func TestParseProjectConfig_StepSummariserSkill(t *testing.T) {
 	}
 }
 
+// TestParseProjectConfig_SlimNoStoryTypes pins sty_815c09e7: workflow dispatch
+// is index-derived, so a slim project-config with no story_types — carrying
+// only the residual step_summariser_skill — parses cleanly (and the
+// step-summariser is still read, not silently dropped).
+func TestParseProjectConfig_SlimNoStoryTypes(t *testing.T) {
+	slim := "```yaml\nstep_summariser_skill: story_summary\n```\n"
+	cfg, err := ParseProjectConfig(slim)
+	if err != nil {
+		t.Fatalf("ParseProjectConfig(slim, no story_types): %v", err)
+	}
+	if len(cfg.StoryTypes) != 0 {
+		t.Fatalf("StoryTypes = %v, want empty", cfg.StoryTypes)
+	}
+	if cfg.StepSummariserSkill != "story_summary" {
+		t.Fatalf("StepSummariserSkill = %q, want story_summary", cfg.StepSummariserSkill)
+	}
+}
+
 // TestParseProjectConfig_RawBody confirms a fence-less body (raw YAML)
 // still parses, so the fence extraction is additive, not a hard
 // requirement that would break legacy configs.
@@ -245,14 +263,18 @@ func TestParseProjectConfig_RawBody(t *testing.T) {
 	}
 }
 
-// TestParseProjectConfig_EmptyStoryTypes guards the empty-config error
-// path — a fenced block with no story_types is an operator mistake the
-// verb must reject loudly rather than silently dispatch nothing.
+// TestParseProjectConfig_EmptyStoryTypes pins the post-sty_815c09e7 contract:
+// workflow dispatch is index-derived, so a config with no story_types is no
+// longer an error — it parses cleanly with an empty StoryTypes map. (A
+// consumer still needing a mapping fails at its own lookup, not at parse.)
 func TestParseProjectConfig_EmptyStoryTypes(t *testing.T) {
 	body := "```yaml\nreviewer_overrides: {}\n```\n"
-	_, err := ParseProjectConfig(body)
-	if err == nil || !strings.Contains(err.Error(), "empty story_types") {
-		t.Fatalf("expected empty story_types error, got %v", err)
+	cfg, err := ParseProjectConfig(body)
+	if err != nil {
+		t.Fatalf("slim config should parse, got error: %v", err)
+	}
+	if len(cfg.StoryTypes) != 0 {
+		t.Fatalf("StoryTypes = %v, want empty", cfg.StoryTypes)
 	}
 }
 

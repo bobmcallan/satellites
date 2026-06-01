@@ -399,9 +399,10 @@ func ParseProjectConfig(body string) (ProjectConfig, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return ProjectConfig{}, fmt.Errorf("parse project-config yaml: %w", err)
 	}
-	if len(cfg.StoryTypes) == 0 {
-		return ProjectConfig{}, fmt.Errorf("project-config has empty story_types block")
-	}
+	// story_types is no longer required: workflow dispatch is index-derived
+	// (sty_815c09e7), so a slim project-config carrying only residual settings
+	// (e.g. step_summariser_skill) and no story_types is valid. A consumer that
+	// still needs a workflow_skill mapping fails at its own lookup, not here.
 	return cfg, nil
 }
 
