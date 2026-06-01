@@ -1,6 +1,8 @@
 ---
 name: satellites-story-start-review
 type: skill
+kind: gate
+when: status==ready
 tags: [kind:gate]
 description: Gate skill for the start-work transition (ready → in_progress). Decides whether a story is genuinely ready for an executor to begin — plan accepted, no open blockers. Emits {decision, notes} JSON.
 ---

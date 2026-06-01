@@ -70,6 +70,16 @@ var kindDirs = map[string]string{
 	"principles": "document",
 }
 
+// validSkillKinds is the dispatch-contract `kind` enum every type:skill
+// source must declare (sty_3359cb48), so the dynamic index can classify a
+// skill from frontmatter alone.
+var validSkillKinds = map[string]bool{
+	"workflow":   true,
+	"function":   true,
+	"gate":       true,
+	"capability": true,
+}
+
 // documentTarget describes one .md file scheduled for a dispatch.
 type documentTarget struct {
 	Path        string // path relative to CWD (printable)
@@ -348,6 +358,17 @@ func validateUpload(rootDir, skillsRoot string) ([]violation, error) {
 			}
 			if strings.TrimSpace(fm.Description) == "" {
 				vs = append(vs, violation{p, "skill-frontmatter", "skill missing required frontmatter: description"})
+			}
+			// Dispatch contract (sty_3359cb48): the dynamic index dispatches
+			// off frontmatter alone, so every skill declares a kind; a
+			// workflow additionally declares the story types it binds.
+			switch k := strings.TrimSpace(fm.Kind); {
+			case k == "":
+				vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|capability)"})
+			case !validSkillKinds[k]:
+				vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|capability", k)})
+			case k == "workflow" && len(fm.AppliesTo) == 0:
+				vs = append(vs, violation{p, "skill-dispatch", "workflow skill missing required frontmatter: applies_to"})
 			}
 			configSkillNames[resolveName(filename, fm.Name)] = true
 		}

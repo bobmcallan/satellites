@@ -1,7 +1,8 @@
-<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":1,"hash":"7336ee8187fe8dda187f6d2b7f0ab353dd3c9ce1582ec6643a652f2def21e2ed"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":2,"hash":"5d6d489420eb6b8cf871b4024ba598c40d3573018bade19f53ccebca9010f672"} satellites-sync:end -->
 ---
 name: satellites-fix-workflow
 type: skill
+kind: workflow
 tags: [kind:workflow]
 applies_to: [fix, refactor, bug, infrastructure]
 description: The lifecycle a `fix`/`refactor`/`bug`/`infrastructure` story follows — backlog → in_progress → done, both edges reviewer-gated. Invoke when implementing such a story; it IS the executor's process.

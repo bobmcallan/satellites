@@ -1,6 +1,8 @@
 ---
 name: satellites-story-done-review
 type: skill
+kind: gate
+when: status==in_progress
 tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---

@@ -1,6 +1,7 @@
 ---
 name: satellites-fix-workflow
 type: skill
+kind: workflow
 tags: [kind:workflow]
 applies_to: [fix, refactor, bug, infrastructure]
 description: The lifecycle a `fix`/`refactor`/`bug`/`infrastructure` story follows — backlog → in_progress → done, both edges reviewer-gated. Invoke when implementing such a story; it IS the executor's process.

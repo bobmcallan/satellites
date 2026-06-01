@@ -30,6 +30,15 @@ type Frontmatter struct {
 	Scope       string   `yaml:"scope"`
 	WorkspaceID string   `yaml:"workspace_id"`
 	ProjectID   string   `yaml:"project_id"`
+
+	// Skill dispatch contract (sty_3359cb48). Carried by type:skill sources
+	// so the dynamic index can dispatch off frontmatter without loading
+	// bodies: Kind classifies the skill, AppliesTo binds it to story types
+	// (the single source, replacing project-config story_types), When is the
+	// status/guard at which it applies.
+	Kind      string   `yaml:"kind"`
+	AppliesTo []string `yaml:"applies_to"`
+	When      string   `yaml:"when"`
 }
 
 // frontmatterDelim is the literal `---` line that opens and closes a

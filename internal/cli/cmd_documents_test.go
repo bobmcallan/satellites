@@ -244,9 +244,9 @@ func rulesByPath(vs []violation) map[string][]string {
 func TestValidateUpload_CleanTreePasses(t *testing.T) {
 	root := t.TempDir()
 	writeSource(t, root, "wksp_one/proj_one/skills/feature-workflow.md",
-		"---\nname: feature-workflow\ndescription: the feature lifecycle\n---\n# wf\n")
+		"---\nname: feature-workflow\ndescription: the feature lifecycle\nkind: workflow\napplies_to: [feature]\n---\n# wf\n")
 	writeSource(t, root, "wksp_one/proj_one/skills/satellites-story-done-review.md",
-		"---\nname: satellites-story-done-review\ndescription: done gate\n---\n# gate\n")
+		"---\nname: satellites-story-done-review\ndescription: done gate\nkind: gate\nwhen: status==in_progress\n---\n# gate\n")
 	writeSource(t, root, "wksp_one/proj_one/documents/project-config.md",
 		"---\nname: project-config\n---\n# cfg\n")
 	writeSource(t, root, "wksp_one/proj_one/principles/agent-goals.md",
@@ -295,6 +295,39 @@ func TestValidateUpload_SkillMissingFrontmatter(t *testing.T) {
 	}
 	if got := countRule(vs, "skills/bare.md", "skill-frontmatter"); got != 2 {
 		t.Fatalf("expected 2 skill-frontmatter violations (name + description), got %d: %v", got, vs)
+	}
+}
+
+// TestValidateUpload_SkillDispatch pins the dispatch-contract checks
+// (sty_3359cb48): a skill missing kind, an invalid kind, and a workflow
+// missing applies_to are each flagged skill-dispatch; a fully-specified skill
+// is clean of that rule.
+func TestValidateUpload_SkillDispatch(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "wksp_one/proj_one/skills/no-kind.md",
+		"---\nname: no-kind\ndescription: d\n---\n# x\n")
+	writeSource(t, root, "wksp_one/proj_one/skills/bad-kind.md",
+		"---\nname: bad-kind\ndescription: d\nkind: widget\n---\n# x\n")
+	writeSource(t, root, "wksp_one/proj_one/skills/wf-no-applies.md",
+		"---\nname: wf-no-applies\ndescription: d\nkind: workflow\n---\n# x\n")
+	writeSource(t, root, "wksp_one/proj_one/skills/ok-gate.md",
+		"---\nname: ok-gate\ndescription: d\nkind: gate\nwhen: status==in_progress\n---\n# x\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "skills/no-kind.md", "skill-dispatch") {
+		t.Errorf("missing kind not flagged: %v", vs)
+	}
+	if !flagged(vs, "skills/bad-kind.md", "skill-dispatch") {
+		t.Errorf("invalid kind not flagged: %v", vs)
+	}
+	if !flagged(vs, "skills/wf-no-applies.md", "skill-dispatch") {
+		t.Errorf("workflow missing applies_to not flagged: %v", vs)
+	}
+	if flagged(vs, "skills/ok-gate.md", "skill-dispatch") {
+		t.Errorf("fully-specified gate should be clean of skill-dispatch: %v", vs)
 	}
 }
 

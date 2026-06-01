@@ -74,9 +74,19 @@ layers, one fact; they do not compete. See [[satellites-skill-naming]],
 ## Per-type frontmatter conventions
 
 - **Skills** keep their frontmatter in the stored body (the row must be
-  a registerable `SKILL.md`): required `name` and `description`; sync
-  adds `version`. A workflow skill additionally carries `applies_to`
-  and the fenced ```yaml states/transitions block.
+  a registerable `SKILL.md`); sync adds `version`. The **dispatch contract**
+  lets the dynamic index pick a skill from frontmatter without loading bodies:
+  - `name` / `description` — identity and the one-line index entry.
+  - `kind` — `workflow` | `function` | `gate` | `capability`. Required.
+  - `applies_to: [<story-type>...]` — the type binding a `workflow` declares;
+    the single source for which workflow a story type uses (it replaces the
+    `project-config` `story_types` mapping).
+  - `when: <status/guard>` — the point a skill applies (e.g.
+    `status==in_progress` for a done gate). Advisory for the index.
+
+  A `workflow` additionally carries the fenced ```yaml states/transitions
+  block. `upload` rejects a skill missing `kind`, or a `workflow` missing
+  `applies_to`, naming file + rule.
 - **Documents and principles** strip frontmatter from the stored body;
   `name` falls back to the filename stem. Principles carry the
   `principles:project` tag.
