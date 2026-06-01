@@ -16,7 +16,7 @@ func TestHelpHandler_RendersRoleModel(t *testing.T) {
 		t.Fatalf("status: got %d want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Executor", "Reviewer", "Operator", "story_request_review", "status gate"} {
+	for _, want := range []string{"Executor", "Reviewer", "Operator", "story review", "status gate"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("help page missing %q", want)
 		}

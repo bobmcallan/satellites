@@ -30,7 +30,7 @@
   <section class="panel" data-section="role" data-role="executor">
     <h2 class="changelog-service" data-field="role-name">Executor</h2>
     <p>The agent doing the work. It holds an executor api-key. It can create stories and edit story bodies. It <strong>cannot</strong> change a story's status or write the ledger.</p>
-    <p>When it judges its work ready, it calls <code>story_request_review</code>. It does not mark its own work complete — it signals ready, and the gate decides.</p>
+    <p>When it judges its work ready, it runs <code>satellites story review</code>. It does not mark its own work complete — it signals ready, and the gate decides.</p>
   </section>
 
   <section class="panel" data-section="role" data-role="reviewer">
@@ -52,7 +52,7 @@
 
   <section class="panel" data-section="gate">
     <ul>
-      <li>The executor edits the body and calls <code>story_request_review</code>.</li>
+      <li>The executor edits the body and runs <code>satellites story review</code>.</li>
       <li>The verb mints a short-lived reviewer key and runs the gate skill named by the workflow for the current status.</li>
       <li>On <strong>accept</strong>, the status flips to the next state and the ledger records it. On <strong>reject</strong>, the status stays put and the rejection notes land in the ledger.</li>
       <li>The reviewer key is revoked when the review ends.</li>
