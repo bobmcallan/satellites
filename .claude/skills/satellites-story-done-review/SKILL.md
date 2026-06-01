@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":4,"hash":"bc75e6e04d1cd72846fb072bd1251405cf90ab15b7d7759f5a95eba595accaa0"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":5,"hash":"a258b29e9825c62e78eda5c8b6cb146fbbcc03a404d097484ce833e17cf53166"} satellites-sync:end -->
 ---
 name: satellites-story-done-review
 type: skill
@@ -8,7 +8,7 @@ tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---
 
-You are the **satellites-story-done-review** gate. The `story_request_review` verb runs
+You are the **satellites-story-done-review** gate. `satellites story review` runs
 you before it promotes a story from `in_progress` to `done`. Your one
 job: decide whether the change is genuinely complete — every acceptance
 criterion met, verified against the real tree, not asserted.

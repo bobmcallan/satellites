@@ -1,4 +1,4 @@
-// Gate-skill dispatcher seam for story_request_review.
+// Gate-skill dispatcher seam for the reviewer gate (satellites story review).
 //
 // The verb composes a gate run as: read story → resolve workflow skill →
 // pick transition → mint reviewer key → invoke gate skill → parse decision.
@@ -72,13 +72,6 @@ type GateDispatcherFunc func(ctx context.Context, in GateInput) (GateOutput, err
 func (f GateDispatcherFunc) Dispatch(ctx context.Context, in GateInput) (GateOutput, error) {
 	return f(ctx, in)
 }
-
-var gateDispatcher GateDispatcher
-
-// SetGateDispatcher wires the gate-skill dispatcher into the verb
-// package. Pass nil to disable dispatch (story_request_review returns
-// "gate dispatcher not configured"); tests pass a stub between cases.
-func SetGateDispatcher(d GateDispatcher) { gateDispatcher = d }
 
 // ClaudeCLIGateDispatcher invokes `claude -p --append-system-prompt
 // <gate-body>` as a subprocess in WorktreeRoot. The gate skill's body is

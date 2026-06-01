@@ -16,7 +16,7 @@ Reviewers may run against the latest pushed commit, not your local working tree.
 
 ### 2. Do not stop unless blocked
 
-Keep driving the story forward — read the workflow skill, do the work, edit the story body, call `story_request_review`. On reject, read the notes and iterate.
+Keep driving the story forward — read the workflow skill, do the work, edit the story body, run `satellites story review <id>` (the reviewer gate). On reject, read the notes and iterate.
 
 You are **blocked** only when:
 

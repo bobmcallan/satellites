@@ -14,9 +14,9 @@ package correlation
 
 import "context"
 
-// HTTPHeader names. The `satellites story run` driver sets the
-// matching env vars on the spawned claude subprocess; satellites-client
-// forwards them as headers on every outgoing HTTP call to
+// HTTPHeader names. A caller that exports the matching env vars (e.g. on
+// a spawned claude subprocess) has satellites-client
+// forward them as headers on every outgoing HTTP call to
 // satellites-server, which this package's middleware lifts onto the
 // request context.
 const (

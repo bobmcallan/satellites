@@ -15,9 +15,9 @@ import (
 
 // correlationEnvHeaders lists the env-var → HTTP-header pairs the CLI
 // transport stamps onto every outbound request when the env var is
-// set. The `satellites story run` driver (sty_7af47a91) sets these on
-// itself and on the spawned claude subprocess so every verb call —
-// from inside this CLI process or from the dispatched agent — carries
+// set. A harness that exports these env vars (on itself and a spawned
+// claude subprocess) has every verb call —
+// from inside this CLI process or from the dispatched agent — carry
 // the same run / session / story / project / workspace correlation
 // the satellites-server middleware (sty_0006f5f5) lifts onto request
 // context. The arbor LedgerHandler then tags every log row written

@@ -5,9 +5,10 @@
 // ledger, status) stays server-side and is reached through the existing
 // document_get / document_upsert / ledger_* verbs — no new server verb.
 //
-// This is the sibling of `story run` (the executor driver). Where `run`
-// spawns claude to DO the work, `review` spawns the gate skill to JUDGE
-// the transition. The gate skill enacts its own verdict — it patches the
+// This is the one execution primitive: where the executing agent DOES the
+// work, `review` spawns the gate skill to JUDGE the transition (the former
+// `story run` executor driver was retired in sty_6e1c3641 — the local agent
+// is the executor). The gate skill enacts its own verdict — it patches the
 // status and writes the spine rows under its minted reviewer key
 // (sty_db5cdef0). This command orchestrates (mint key, pick transition,
 // record that the gate was requested) and then reports the status the

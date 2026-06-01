@@ -170,9 +170,9 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 
 // requireLedgerAppendRole gates ledger_append. Reviewer keeps its
 // full append rights across every kind. Runner and executor keys may
-// only append log-kind rows — the operator-observability path (the
-// `satellites story run` driver, sty_7af47a91) writes `log:info` /
-// `log:warn` events from the spawned `claude -p` stream; other kinds
+// only append log-kind rows — an observability harness driving a
+// `claude -p` stream writes `log:info` /
+// `log:warn` events; other kinds
 // (status transitions, review findings) stay reviewer-only.
 // Unauthenticated callers (CLI in-process, JWT portal users with no
 // api-key context) pass — they're gated by a separate membership

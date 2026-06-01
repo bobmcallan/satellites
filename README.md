@@ -93,11 +93,11 @@ Three roles act on a story, and the server enforces the boundary at the verb lay
 
 | Role | Can do | Cannot do |
 | --- | --- | --- |
-| **Executor** (the agent) | Create stories, edit story bodies, call `story_request_review` | Change a story's status; write the ledger |
+| **Executor** (the agent) | Create stories, edit story bodies, run `satellites story review` | Change a story's status; write the ledger |
 | **Reviewer** | Change status; append the ledger | Run as the executor — its key is minted per review and revoked after |
 | **Operator** (human, CLI or portal) | Full access | — |
 
-The executor holds a body-only api-key. To advance a story it calls `story_request_review`, which mints a short-lived reviewer key, runs the gate skill, flips the status on accept, and revokes the key. The agent never holds a reviewer key, so it cannot approve its own work. The operator acts through the CLI or the signed-in portal; the role gate applies only to api-key callers, so operator actions pass.
+The executor holds a body-only api-key. To advance a story it runs `satellites story review`, the client-side gate, which mints a short-lived reviewer key, runs the gate skill, flips the status on accept, and revokes the key. The agent never holds a reviewer key, so it cannot approve its own work. The operator acts through the CLI or the signed-in portal; the role gate applies only to api-key callers, so operator actions pass.
 
 A reviewer is an interface returning `accept | reject` with notes, against a contract authored by the operator. Reviewer implementations:
 

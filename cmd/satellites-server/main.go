@@ -91,16 +91,9 @@ func main() {
 	verb.SetChangelogStore(clStore)
 	server.SetChangelogStore(clStore)
 
-	// story_request_review verb runs gate skills via `claude -p`. The
-	// dispatcher is wired here so the verb has a transport on boot;
-	// individual test setups inject a stub via verb.SetGateDispatcher.
-	// Reviewer registry is wired AFTER the system-seed reconciler runs
-	// (further down) so the documents store holds the latest skill
-	// bodies before LoadFromStore reads them.
-	verb.SetGateDispatcher(verb.ClaudeCLIGateDispatcher{
-		DefaultTimeout: 5 * time.Minute,
-	})
-	arbor.Info("gate dispatcher wired (claude -p)")
+	// The server-side story_request_review driver was retired (sty_6e1c3641):
+	// the reviewer gate runs client-side (satellites story review), spawning
+	// its own claude -p, so the server no longer wires a gate dispatcher.
 
 	// Document substrate + system-seed registry: wire stores then
 	// reconcile every artifact embedded under config/documents/. Each

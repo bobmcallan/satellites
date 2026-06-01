@@ -3,116 +3,9 @@ package verb
 import (
 	"strings"
 	"testing"
-
-	"github.com/bobmcallan/satellites/internal/workflow"
 )
 
-func TestPickTransition_DeclarativeSingleGated(t *testing.T) {
-	wf := mustParseWF(t, `---
-name: feat
-applies_to: [feature]
----
-
-`+"```yaml"+`
-states: [planning, planned]
-transitions:
-  - {from: planning, to: planned, reviewer_skill: "plan-review"}
-`+"```"+`
-`)
-	tr, skill, dynamic, err := pickTransition(wf, "planning")
-	if err != nil {
-		t.Fatalf("pickTransition: %v", err)
-	}
-	if dynamic {
-		t.Fatalf("dynamic = true, want false")
-	}
-	if skill != "plan-review" {
-		t.Fatalf("skill = %q, want plan-review", skill)
-	}
-	if tr.To != "planned" {
-		t.Fatalf("transition.To = %q, want planned", tr.To)
-	}
-}
-
-func TestPickTransition_DynamicWinsOverGated(t *testing.T) {
-	wf := mustParseWF(t, `---
-name: dyn
-applies_to: [feature]
----
-
-`+"```yaml"+`
-states: [triage, simple, complex]
-transitions:
-  - {from: triage, to: simple,  reviewer_skill: "g", dynamic: true}
-  - {from: triage, to: complex, reviewer_skill: "g", dynamic: true}
-`+"```"+`
-`)
-	_, skill, dynamic, err := pickTransition(wf, "triage")
-	if err != nil {
-		t.Fatalf("pickTransition: %v", err)
-	}
-	if !dynamic {
-		t.Fatalf("expected dynamic=true")
-	}
-	if skill != "dyn" {
-		t.Fatalf("dynamic gate skill = %q, want workflow name 'dyn'", skill)
-	}
-}
-
-func TestPickTransition_NoOutgoing(t *testing.T) {
-	wf := mustParseWF(t, `---
-name: feat
-applies_to: [feature]
----
-
-`+"```yaml"+`
-states: [planning, planned]
-transitions:
-  - {from: planning, to: planned, reviewer_skill: "plan-review"}
-`+"```"+`
-`)
-	_, _, _, err := pickTransition(wf, "planned")
-	if err == nil || !strings.Contains(err.Error(), "no outgoing transitions") {
-		t.Fatalf("expected no-outgoing error, got %v", err)
-	}
-}
-
-func TestPickTransition_MultipleGatedMustBeDynamic(t *testing.T) {
-	wf := mustParseWF(t, `---
-name: feat
-applies_to: [feature]
----
-
-`+"```yaml"+`
-states: [a, b, c]
-transitions:
-  - {from: a, to: b, reviewer_skill: "skill1"}
-  - {from: a, to: c, reviewer_skill: "skill2"}
-`+"```"+`
-`)
-	_, _, _, err := pickTransition(wf, "a")
-	if err == nil || !strings.Contains(err.Error(), "multiple gated") {
-		t.Fatalf("expected multiple-gated error, got %v", err)
-	}
-}
-
-func TestPickTransition_NoGatedTransition(t *testing.T) {
-	wf := mustParseWF(t, `---
-name: feat
-applies_to: [feature]
----
-
-`+"```yaml"+`
-states: [a, b]
-transitions:
-  - {from: a, to: b, reviewer_skill: ""}
-`+"```"+`
-`)
-	_, _, _, err := pickTransition(wf, "a")
-	if err == nil || !strings.Contains(err.Error(), "no gated transition") {
-		t.Fatalf("expected no-gated error, got %v", err)
-	}
-}
+// --- gate output parser (request_review_dispatcher.go) ---
 
 func TestParseGateOutput_AcceptPlain(t *testing.T) {
 	out, err := ParseGateOutput([]byte(`{"decision":"accept","notes":"ok"}`))
@@ -161,25 +54,8 @@ func TestParseGateOutput_Malformed(t *testing.T) {
 	}
 }
 
-func TestDefaultSkillReader_RejectsAbsolutePath(t *testing.T) {
-	_, err := defaultSkillReader("/tmp", "/etc/passwd")
-	if err == nil || !strings.Contains(err.Error(), "must be relative") {
-		t.Fatalf("expected absolute-path rejection, got %v", err)
-	}
-}
+// --- project-config parser (projectconfig.go) ---
 
-func TestDefaultSkillReader_RejectsParentEscape(t *testing.T) {
-	_, err := defaultSkillReader("/tmp", "../../etc/passwd")
-	if err == nil || !strings.Contains(err.Error(), "must be relative") {
-		t.Fatalf("expected parent-escape rejection, got %v", err)
-	}
-}
-
-// TestParseProjectConfig_FencedBody is the regression test for gap #1:
-// the project-config body is YAML inside a markdown ```yaml fence, and
-// feeding the whole body straight to yaml.Unmarshal dies on the fence
-// ("found character that cannot start any token"). parseProjectConfig
-// must extract the fenced block first.
 func TestParseProjectConfig_FencedBody(t *testing.T) {
 	body := "# project-config (satellites)\n" +
 		"#\n" +
@@ -208,9 +84,6 @@ func TestParseProjectConfig_FencedBody(t *testing.T) {
 	}
 }
 
-// TestParseProjectConfig_StepSummariserSkill pins sty_2517f6b8 AC2: the
-// optional top-level step_summariser_skill is parsed, and absent it stays
-// empty (summaries disabled, backward-compatible).
 func TestParseProjectConfig_StepSummariserSkill(t *testing.T) {
 	with := "```yaml\nstory_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow/SKILL.md\nstep_summariser_skill: story_summary\n```\n"
 	cfg, err := ParseProjectConfig(with)
@@ -233,8 +106,7 @@ func TestParseProjectConfig_StepSummariserSkill(t *testing.T) {
 
 // TestParseProjectConfig_SlimNoStoryTypes pins sty_815c09e7: workflow dispatch
 // is index-derived, so a slim project-config with no story_types — carrying
-// only the residual step_summariser_skill — parses cleanly (and the
-// step-summariser is still read, not silently dropped).
+// only the residual step_summariser_skill — parses cleanly.
 func TestParseProjectConfig_SlimNoStoryTypes(t *testing.T) {
 	slim := "```yaml\nstep_summariser_skill: story_summary\n```\n"
 	cfg, err := ParseProjectConfig(slim)
@@ -249,9 +121,6 @@ func TestParseProjectConfig_SlimNoStoryTypes(t *testing.T) {
 	}
 }
 
-// TestParseProjectConfig_RawBody confirms a fence-less body (raw YAML)
-// still parses, so the fence extraction is additive, not a hard
-// requirement that would break legacy configs.
 func TestParseProjectConfig_RawBody(t *testing.T) {
 	body := "story_types:\n  feature:\n    workflow_skill: .claude/skills/feature-workflow.md\n"
 	cfg, err := ParseProjectConfig(body)
@@ -263,11 +132,11 @@ func TestParseProjectConfig_RawBody(t *testing.T) {
 	}
 }
 
-// TestParseProjectConfig_EmptyStoryTypes pins the post-sty_815c09e7 contract:
-// workflow dispatch is index-derived, so a config with no story_types is no
-// longer an error — it parses cleanly with an empty StoryTypes map. (A
-// consumer still needing a mapping fails at its own lookup, not at parse.)
-func TestParseProjectConfig_EmptyStoryTypes(t *testing.T) {
+// TestParseProjectConfig_NoStoryTypes pins the post-sty_815c09e7 contract:
+// workflow dispatch is index-derived, so a config with no story_types parses
+// cleanly with an empty StoryTypes map (a consumer needing a mapping fails at
+// its own lookup, not at parse).
+func TestParseProjectConfig_NoStoryTypes(t *testing.T) {
 	body := "```yaml\nreviewer_overrides: {}\n```\n"
 	cfg, err := ParseProjectConfig(body)
 	if err != nil {
@@ -276,13 +145,4 @@ func TestParseProjectConfig_EmptyStoryTypes(t *testing.T) {
 	if len(cfg.StoryTypes) != 0 {
 		t.Fatalf("StoryTypes = %v, want empty", cfg.StoryTypes)
 	}
-}
-
-func mustParseWF(t *testing.T, raw string) *workflow.Workflow {
-	t.Helper()
-	wf, err := workflow.Parse([]byte(raw))
-	if err != nil {
-		t.Fatalf("parse workflow: %v", err)
-	}
-	return wf
 }
