@@ -428,9 +428,34 @@ func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, 
 }
 
 // reviewWorkflowSkillPath returns the workflow-skill path for the story type
-// and the project's optional step-summariser skill name (empty when
-// unconfigured) from a single project-config read.
+// (index-derived) and the project's optional step-summariser skill name.
+//
+// Dispatch is index-derived (sty_815c09e7): the workflow skill is the
+// kind:workflow entry in the dynamic skill index whose applies_to contains the
+// story type — applies_to is the single source, no project-config on the
+// dispatch path. The step-summariser is a post-transition setting (not
+// dispatch); it stays the lone residual project-config read and is optional.
 func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewStory, storyType string) (string, string, error) {
+	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		return dispatchVerb(ctx, name, req, opts.ConfigPath, opts.UserArg)
+	}
+	index, err := buildSkillIndex(ctx, dispatch, "project", story.WorkspaceID, story.ProjectID)
+	if err != nil {
+		return "", "", fmt.Errorf("build skill index: %w", err)
+	}
+	skillPath, err := selectWorkflowSkill(index, storyType)
+	if err != nil {
+		return "", "", err
+	}
+	return skillPath, reviewStepSummariserSkill(ctx, dispatch, story), nil
+}
+
+// reviewStepSummariserSkill returns the project's optional step-summariser
+// skill name (empty when unconfigured). It reads the slimmed project-config
+// document — a non-dispatch, post-transition setting the index does not carry;
+// a missing document or field simply disables per-transition summaries, so it
+// never blocks the gate.
+func reviewStepSummariserSkill(ctx context.Context, dispatch verbDispatch, story reviewStory) string {
 	req, err := json.Marshal(verb.DocumentGetRequest{
 		Scope:       "project",
 		Name:        "project-config",
@@ -438,15 +463,15 @@ func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewS
 		ProjectID:   story.ProjectID,
 	})
 	if err != nil {
-		return "", "", err
+		return ""
 	}
-	raw, err := dispatchVerb(ctx, "document_get", req, opts.ConfigPath, opts.UserArg)
+	raw, err := dispatch(ctx, "document_get", req)
 	if err != nil {
-		return "", "", fmt.Errorf("load project-config: %w", err)
+		return ""
 	}
 	var resp verb.DocumentGetResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", "", fmt.Errorf("decode project-config: %w", err)
+		return ""
 	}
 	body := resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
@@ -454,13 +479,9 @@ func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewS
 	}
 	cfg, err := verb.ParseProjectConfig(body)
 	if err != nil {
-		return "", "", fmt.Errorf("project-config: %w", err)
+		return ""
 	}
-	st, ok := cfg.StoryTypes[storyType]
-	if !ok || strings.TrimSpace(st.WorkflowSkill) == "" {
-		return "", "", fmt.Errorf("project-config has no workflow_skill for story_type=%q", storyType)
-	}
-	return st.WorkflowSkill, strings.TrimSpace(cfg.StepSummariserSkill), nil
+	return strings.TrimSpace(cfg.StepSummariserSkill)
 }
 
 func reviewAppendLedger(ctx context.Context, opts reviewOpts, story reviewStory, kind, body string, payload map[string]any) {

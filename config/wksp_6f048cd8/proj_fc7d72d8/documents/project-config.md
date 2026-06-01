@@ -1,57 +1,28 @@
 # project-config (satellites)
 #
-# Project-scoped configuration for the satellites repo itself.
-# Read by workflow skills, reviewers, and the loop verb on every
-# story_request_review call. Body is YAML inside a markdown fence
-# so humans can also annotate freely outside the block.
+# Residual project-scoped settings that have no natural skill home.
+# Body is YAML inside a markdown fence so humans can annotate outside it.
 #
-# Format documented in docs/document-types-v5.md.
+# NOTE (sty_815c09e7): workflow dispatch is NOT here. Which workflow a story
+# type uses is the dynamic skill index — the kind:workflow skill whose
+# `applies_to` contains the story type (`satellites skill index`). The
+# `story_types` mapping that used to live here is retired; `applies_to` is the
+# single source. The gate's dispatch path never reads this document.
 
 ```yaml
-story_types:
-  # Default — most stories. Plan-reviewed, completion-reviewed.
-  feature:
-    workflow_skill: .claude/skills/satellites-feature-workflow/SKILL.md
-
-  # Smaller fixes — satellites-story-plan-review on entry,
-  # satellites-story-done-review on completion.
-  fix:
-    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
-
-  # Refactors, bug-fixes and infrastructure changes ride the same two-gate
-  # fix workflow: satellites-story-plan-review on backlog → in_progress,
-  # satellites-story-done-review on in_progress → done. It is the
-  # loop-proven path and gives both a plan gate and a completion gate,
-  # which every change category warrants.
-  refactor:
-    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
-  bug:
-    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
-  infrastructure:
-    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
-
-# Per-project reviewer overrides. Rare. Most reviewers are declared by
-# the workflow skill itself; this block only exists for cases where a
-# specific story_type wants a different gate than the workflow's default.
-reviewer_overrides: {}
-
-# Per-transition step summariser (sty_2517f6b8). After each gated
-# transition `satellites story review` runs this skill and records its
-# prose as a step_summary ledger row, surfaced on the portal /ledger page.
-# Empty/absent disables summaries. Names a skill resolved at
-# .claude/skills/<name>/SKILL.md — here the existing story_summary skill.
+# Per-transition step summariser (sty_2517f6b8). After each gated transition
+# `satellites story review` runs this skill and records its prose as a
+# step_summary ledger row, surfaced on the portal /ledger page. This is a
+# post-transition setting, not dispatch. Empty/absent disables summaries.
+# Names a skill resolved at .claude/skills/<name>/SKILL.md.
 step_summariser_skill: story_summary
 ```
 
 ## Notes
 
-Every story category the epic uses (feature, fix, refactor, bug,
-infrastructure) maps to a workflow skill. The loop verb fails loud (not
-fall back) on an unknown story_type, so adding a category here is the way
-to let the loop drive it.
+A `story_type` is bound to its workflow by the workflow skill's `applies_to`
+(see `satellites skill index`), not by an entry here — add a story type by
+authoring (or extending the `applies_to` of) a `kind:workflow` skill.
 
-When adding a new `story_type`, also add a corresponding workflow skill —
-a `type:skill` `<name>/SKILL.md` (sourced flat at
-`config/<wksp>/<proj>/skills/<name>.md`, materialised into
-`.claude/skills/<name>/SKILL.md`) — and point `workflow_skill` at that
-materialised path.
+This document holds only settings the dynamic index cannot express — currently
+just the optional `step_summariser_skill`.
