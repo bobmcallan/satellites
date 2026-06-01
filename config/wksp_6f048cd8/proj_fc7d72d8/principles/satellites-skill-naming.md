@@ -6,22 +6,29 @@ tags: [principles:project]
 
 # Satellites skill naming
 
-## Ownership is the identity stamp; the `satellites-` prefix is advisory
+## Two identities: the stamp (machine) and the `satellites-` prefix (human)
 
-`satellites skill sync` reconciles the local `.claude/skills/` tree against
-the substrate by each materialised skill's **injected identity stamp**
-(`document_id` / `version` / `hash` — see the skill-sync reference contract),
-NOT by name. sync only updates or removes a skill it materialised (one
-carrying the stamp); a skill with no stamp is operator-authored and is never
-touched. Because the stamp keys on `document_id`, a rename or deletion in the
-substrate propagates correctly even for skills that carry no name prefix
-(e.g. the `feature-workflow` / `fix-workflow` workflow skills).
+A materialised substrate skill carries two identities; both assert the same
+fact — the substrate owns this skill — at two layers.
 
-The `satellites-` prefix is retained as a **human-readable owner marker** —
-it tells a reader at a glance that the substrate owns a skill — but it is no
-longer the reconcile key. Most substrate-owned skills carry it; workflow
-skills are the deliberate exception (their name is the story-type they apply
-to).
+- **Machine identity — the injected stamp.** `satellites skill sync` reconciles
+  the local `.claude/skills/` tree by each materialised skill's injected stamp
+  (`document_id` / `version` / `hash` — see the skill-sync reference contract),
+  NOT by name. sync only updates or removes a skill it materialised (one
+  carrying the stamp); a skill with no stamp is operator-authored and is never
+  touched. Because the key is `document_id`, a rename or deletion in the
+  substrate propagates correctly regardless of the local name.
+- **Human identity — the `satellites-` prefix.** Every materialised substrate
+  skill in `.claude/skills/` is named `satellites-<name>`. The prefix is the
+  at-a-glance marker that the substrate owns a skill, telling it apart from an
+  operator-authored skill such as `commit-push`. It is **required on the local
+  name**: a substrate skill that reads as unprefixed locally is a defect, not a
+  permitted exception — workflow skills are named `satellites-<type>-workflow`
+  like every other substrate skill.
+
+The **source** name (`config/<wksp>/<proj>/skills/<name>.md`) need not carry the
+prefix — the local prefix is ensured when the skill is materialised. The stamp
+keys the reconcile; the prefix marks ownership for a human reader.
 
 ## Reviewer gates: `satellites-<object>-<stage>-review`
 

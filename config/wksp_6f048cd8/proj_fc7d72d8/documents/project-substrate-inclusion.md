@@ -47,8 +47,9 @@ same way:
 
 - **Reviewer gate skills** — `satellites-<object>-<stage>-review`
   (e.g. `satellites-story-plan-review`).
-- **Workflow specs** — `<name>-workflow` (e.g. `feature-workflow`,
-  `fix-workflow`). A workflow is process, and process in Claude Code
+- **Workflow specs** — `satellites-<type>-workflow` (e.g.
+  `satellites-feature-workflow`, `satellites-fix-workflow`). A workflow is
+  process, and process in Claude Code
   is a skill. One `SKILL.md` serves two readers: Claude Code indexes
   it by `description`; the gate's workflow parser reads only its fenced
   ```yaml states/transitions block.
@@ -56,13 +57,19 @@ same way:
 Both are skills. There is no "workflows are not skills" carve-out — see
 document:satellites_mcp_reference_skill_sync.
 
-### Ownership is the sync stamp, not the name prefix
+### Ownership: the sync stamp is the key, the `satellites-` prefix is the human marker
 
 `satellites skill sync` materialises a skill with an injected identity
 stamp (`document_id` / `version` / `hash`, story:sty_4b517016). A skill
 in `.claude/skills/` is **project-owned** when it carries that stamp or
 has a `config/.../skills/` source. A skill with neither is
 operator-authored — out of substrate, never touched by sync or upload.
+
+The stamp is the **reconcile key** (machine identity); the `satellites-`
+prefix is the complementary **human identity** — required on the local name
+so a reader tells a substrate skill from an operator one at a glance. Two
+layers, one fact; they do not compete. See [[satellites-skill-naming]],
+[[substrate-taxonomy]], [[reviewer-only-model]].
 
 ## Per-type frontmatter conventions
 
