@@ -20,8 +20,8 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		name        string
 		transitions int
 	}{
-		{filepath.Join("..", "..", ".claude", "skills", "feature-workflow", "SKILL.md"), "feature-workflow", 3},
-		{filepath.Join("..", "..", ".claude", "skills", "fix-workflow", "SKILL.md"), "fix-workflow", 2},
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-feature-workflow", "SKILL.md"), "satellites-feature-workflow", 3},
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-fix-workflow", "SKILL.md"), "satellites-fix-workflow", 2},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)

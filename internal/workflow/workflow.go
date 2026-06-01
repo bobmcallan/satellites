@@ -77,6 +77,11 @@ type workflowFrontmatter struct {
 // Parse reads a workflow-skill file and returns the typed state
 // machine. Strict on shape — every error names exactly what is wrong.
 func Parse(raw []byte) (*Workflow, error) {
+	// Materialised SKILL.md files carry a leading client-injected
+	// sync-identity comment; strip it once so every reader below
+	// (frontmatter.Parse, parseWorkflowFrontmatter, extractYAMLBlock)
+	// sees the authored content.
+	raw = frontmatter.StripSyncStamp(raw)
 	fm, body, err := frontmatter.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("workflow: frontmatter: %w", err)

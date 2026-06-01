@@ -36,6 +36,34 @@ type Frontmatter struct {
 // YAML frontmatter block in markdown files.
 var frontmatterDelim = []byte("---")
 
+// syncStampBegin / syncStampEnd bound the client-injected sync-identity
+// comment that a materialised .claude/skills/<name>/SKILL.md carries
+// ahead of its frontmatter (document_id/version/hash; see
+// internal/cli/cmd_skill_sync.go, which writes it). The block is local
+// bookkeeping, never part of the authored content — so any reader that
+// parses the authored frontmatter or body must see past it.
+var (
+	syncStampBegin = []byte("<!-- satellites-sync:begin")
+	syncStampEnd   = []byte("satellites-sync:end -->")
+)
+
+// StripSyncStamp removes a leading sync-identity comment block if the
+// bytes begin with one, returning the remainder with one following
+// newline consumed. No stamp (or a malformed one with no closing
+// marker) → input returned unchanged. Idempotent: stripping
+// already-clean bytes is a no-op.
+func StripSyncStamp(raw []byte) []byte {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	if !bytes.HasPrefix(trimmed, syncStampBegin) {
+		return raw
+	}
+	endIdx := bytes.Index(trimmed, syncStampEnd)
+	if endIdx < 0 {
+		return raw
+	}
+	return trimLeadingNewline(trimmed[endIdx+len(syncStampEnd):])
+}
+
 // Parse splits a file's bytes into a typed frontmatter
 // struct and the trailing body. Behaviour:
 //
@@ -51,6 +79,7 @@ var frontmatterDelim = []byte("---")
 // Line endings are tolerant of CRLF — the parser splits on '\n' and
 // strips trailing '\r' from each line.
 func Parse(raw []byte) (Frontmatter, []byte, error) {
+	raw = StripSyncStamp(raw)
 	if !bytes.HasPrefix(raw, append(frontmatterDelim, '\n')) && !bytes.HasPrefix(raw, append(frontmatterDelim, '\r', '\n')) {
 		return Frontmatter{}, raw, nil
 	}

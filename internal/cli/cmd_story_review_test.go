@@ -39,7 +39,7 @@ func TestClientResolvesWorkflowFromSkillMdPath(t *testing.T) {
 	const projectConfig = "```yaml\n" +
 		"story_types:\n" +
 		"  feature:\n" +
-		"    workflow_skill: .claude/skills/feature-workflow/SKILL.md\n" +
+		"    workflow_skill: .claude/skills/satellites-feature-workflow/SKILL.md\n" +
 		"```\n"
 
 	cfg, err := verb.ParseProjectConfig(projectConfig)
@@ -50,7 +50,7 @@ func TestClientResolvesWorkflowFromSkillMdPath(t *testing.T) {
 	if !ok {
 		t.Fatal("project-config has no feature story_type")
 	}
-	want := ".claude/skills/feature-workflow/SKILL.md"
+	want := ".claude/skills/satellites-feature-workflow/SKILL.md"
 	if st.WorkflowSkill != want {
 		t.Fatalf("workflow_skill = %q, want the SKILL.md dir path %q", st.WorkflowSkill, want)
 	}
@@ -66,8 +66,8 @@ func TestClientResolvesWorkflowFromSkillMdPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workflow.Parse: %v", err)
 	}
-	if wf.Name != "feature-workflow" {
-		t.Fatalf("parsed workflow name = %q, want feature-workflow", wf.Name)
+	if wf.Name != "satellites-feature-workflow" {
+		t.Fatalf("parsed workflow name = %q, want satellites-feature-workflow", wf.Name)
 	}
 	if _, ok := wf.FindTransition("in_progress", "done"); !ok {
 		t.Fatal("expected in_progress→done transition in the resolved workflow")
