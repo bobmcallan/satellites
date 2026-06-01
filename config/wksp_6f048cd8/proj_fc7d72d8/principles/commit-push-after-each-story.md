@@ -2,12 +2,16 @@
 name: commit-push-after-each-story
 tags: [principles:project]
 ---
-# Run /commit-push after each story
+# Run the commit-push checkpoint after each story
 
-End each story with `/commit-push`. The routine bumps `.version`,
-pushes the release tag, and triggers test → release → deploy. Until
-that chain runs, the change is invisible to reviewers, other agents,
-and the build pipeline.
+End each story by running the **`satellites-commit-push`** skill — the
+process-owned checkpoint. It bumps `.version`, pushes the release tag, and
+triggers test → release → deploy. Until that chain runs, the change is
+invisible to reviewers, other agents, and the build pipeline.
+
+(`satellites-commit-push` is the substrate skill the process names; the
+operator's `/commit-push` slash command is its interactive shadow — same
+routine, run by hand.)
 
 ## Why
 

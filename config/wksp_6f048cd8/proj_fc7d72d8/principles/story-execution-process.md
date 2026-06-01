@@ -8,11 +8,13 @@ How the agent drives a story to `done`. This is the **first process document**; 
 
 ## Per-story rules
 
-### 1. Run `/commit-push` at every natural checkpoint
+### 1. Run the `satellites-commit-push` checkpoint at every natural checkpoint
 
-End of phase, end of meaningful change, before requesting review. The commit-push routine also bumps `.version` and pushes the release tag, so it is the single point where work becomes visible to other agents, reviewers, and the build pipeline.
+End of phase, end of meaningful change, before requesting review. Run the
+**`satellites-commit-push`** skill (the operator's `/commit-push` slash command
+is its interactive shadow — same routine). It bumps `.version` and pushes the release tag, so it is the single point where work becomes visible to other agents, reviewers, and the build pipeline.
 
-Reviewers may run against the latest pushed commit, not your local working tree. Skipping `/commit-push` makes the reviewer judge stale code and is a common cause of false rejections.
+Reviewers may run against the latest pushed commit, not your local working tree. Skipping the commit-push checkpoint makes the reviewer judge stale code and is a common cause of false rejections.
 
 ### 2. Do not stop unless blocked
 
