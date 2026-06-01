@@ -30,10 +30,18 @@ Change the skill, change the process; no release.
 
 ## Status gates what is valid
 
-A story's **status** decides which skill and which transition apply right now.
-The agent does not choose freely: it matches the story's type and status to the
-one skill that applies, and follows it. A transition fires only when the
-reviewer named on it accepts; `done` is the terminal status reached with every
-gate on the path accepted — nothing else is done.
+A story's **status** decides which skill and which transition apply. The agent
+does not choose freely.
+
+To work a story: list the substrate skills (system + workspace + project),
+match the story's `type` and `status` against each skill's `applies_to` /
+`when`, load **only** that matching skill's body, and follow it. The
+status-gated match is authoritative for which transition is valid — do not
+invoke a skill by its description alone and skip the gate. The skill list is
+the index; read it fresh, do not cache.
+
+A transition fires only when the reviewer named on it accepts; `done` is the
+terminal status reached with every gate on the path accepted — nothing else is
+done.
 
 See [[process-as-configuration]], [[reviewer-process]], [[agent-goals]].

@@ -40,7 +40,3 @@ Mandatory on session start. Run `satellites skill list` per applicable scope and
 - `document_get {name:"satellites_mcp_reference_dispatch", scope:"system"}` — CLI dispatch surface, typed subcommands, story actions.
 - `document_get {name:"satellites_mcp_reference_documents", scope:"system"}` — upsert modes, list filter shape, MCP-only client surface.
 - `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}` — Claude Code skill reconciliation contract (referenced by step 4).
-
-## 6. Work a story — list skills, match by status, follow
-
-The agent is the executor; satellites is the reviewer only (see `document_get {name:"reviewer-only-model", scope:"system"}`). To drive a story: `satellites skill list` (system + workspace + project), match the story's `type` + `status` against each skill's `applies_to` / `when`, load **only** that matching skill's body, and follow it. The status-gated match is authoritative for which transition is valid now — do not invoke a skill by description alone and skip the status gate. The skill list is the index: fetch it fresh, do not cache.
