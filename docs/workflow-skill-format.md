@@ -74,15 +74,23 @@ makes the rendered version harder to read than the file itself.
 
 ## Resolution
 
-The `story_request_review` verb (sty_b8c5c23f) drives every status
+The client command `satellites story review <story-id>` (sty_ffec5dab)
+runs the gate on the operator machine. There is no server-side
+`story_request_review` verb and no `satellites story run` executor driver
+— both were retired in sty_6e1c3641; the local agent is the executor, and
+`review` is the one gate primitive. A single review resolves and gates one
 transition:
 
 1. Read the story by id; derive `story_type` from the `category` field.
-2. Read the project-scoped `project-config` document; look up the
-   `workflow_skill` path for the story type.
-3. Read the workflow-skill file from disk and parse it through
+2. Select the workflow skill from the **dynamic skill index**
+   (sty_815c09e7): the `kind:workflow` entry whose `applies_to` contains
+   the story type. This replaced the `project-config` `story_types`
+   lookup — `applies_to` is the single source of the type → workflow
+   binding.
+3. Read the workflow-skill file from the local worktree
+   (`.claude/skills/<name>/SKILL.md`) and parse it through
    `internal/workflow`.
-4. Pick the transition from `current_status`:
+4. Pick the transition from the story's current status:
    - **Declarative** (default): exactly one outgoing edge with a
      non-empty `reviewer_skill`. Multiple gated edges error out — use
      `dynamic: true` to disambiguate.
@@ -90,16 +98,17 @@ transition:
      skill itself is dispatched and returns `next_status` in its JSON
      output. The returned status must reference a declared outgoing
      edge.
-5. Mint a short-lived reviewer api-key (see sty_25d5b21e) scoped to
-   the story; the executor calling the verb never sees this key.
-6. Dispatch the gate skill via the configured `GateDispatcher`
-   (`claude -p --skill <name>` in production). Story body + recent
-   ledger arrive on stdin; the reviewer key is exported as
-   `SATELLITES_REVIEWER_API_KEY`.
+5. Mint a short-lived reviewer-role api-key (admin-gated, sty_e16f0553)
+   scoped to the story; it is exported to the gate subprocess as
+   `SATELLITES_REVIEWER_API_KEY` and revoked when the run ends.
+6. Dispatch the gate skill as `claude -p --allowedTools "Bash Read Grep
+   Glob" --append-system-prompt <gate-body>` against the worktree
+   (sty_cba1d47b). The story body + recent ledger arrive on stdin.
 7. Expect one JSON object back: `{decision: accept|reject,
    notes, next_status?}`. Anything else is a dispatcher-level error.
-8. On `accept`: patch the story's status under reviewer-role context
-   and append `review_accept` + `status_transition` ledger rows. On
-   `reject`: append `review_reject` only — status unchanged.
-9. Revoke the reviewer key (always — `defer`-driven so a panic in the
-   dispatch still cleans up).
+8. The gate skill **self-enacts** its verdict under the reviewer key
+   (sty_db5cdef0): on `accept` it patches the story status toward the
+   workflow-declared target and appends `review_accept` +
+   `status_transition`; on `reject` it appends `review_reject` only —
+   status unchanged. The client orchestrates (mint, pick transition,
+   record `review_requested`, revoke) but never patches status itself.

@@ -34,23 +34,23 @@ A single `type:"document"`, `scope:"project"`, `name:"project-config"` document 
 
 **Why `type:"document"` and not a new `type:"project_config"`?** Because adding a type buys nothing: scope + name is already unique per project, the listing surface already filters by `name_prefix`, and the workflow skill knows what to look for. Inventing a type would multiply code paths without semantic benefit.
 
-**Body shape (current, may evolve):**
+**Body shape (slim, post-sty_815c09e7):**
+
+Story-type → workflow dispatch is **no longer** in this document. It is
+derived from the **dynamic skill index**: the `kind:workflow` skill whose
+`applies_to` frontmatter contains the story type (`satellites skill index`).
+The `story_types` map and `reviewer_overrides` were retired with the
+server-side `story_request_review` verb (sty_6e1c3641). What remains is the
+residual post-transition settings the index cannot express:
 
 ```yaml
 # project-config
 #
-# Maps story types to the workflow skill that gates them, plus per-project
-# reviewer overrides. Read on every story_request_review call.
+# Dispatch (story type → workflow) comes from the dynamic skill index
+# (skill `applies_to`), NOT this document. Only post-transition settings
+# live here.
 
-story_types:
-  feature:
-    workflow_skill: .claude/skills/feature-workflow.md
-  fix:
-    workflow_skill: .claude/skills/fix-workflow.md
-  infra:
-    workflow_skill: .claude/skills/infra-workflow.md
-
-reviewer_overrides: {}   # rarely used; most reviewers come from the workflow skill itself
+step_summariser_skill: story_summary   # optional; per-transition step summary
 ```
 
 **Fetching:**

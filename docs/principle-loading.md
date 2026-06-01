@@ -15,7 +15,7 @@ of:
 | global    | `principles:global`    | MCP `initialize` (the load-context push every session receives)     |
 | workspace | `principles:workspace` | `project_match`, `project_get`, `project_list` — scoped to the workspace in the response |
 | project   | `principles:project`   | same as workspace, scoped to the project; also `document_get` on a story (via the story's project) |
-| story     | `principles:story`     | `document_get` on a story; `story_request_review`                  |
+| story     | `principles:story`     | `document_get` on a story; the client `satellites story review` gate |
 
 There is no `type:"principle"`. A principle is a document plus a tag, so
 all CRUD goes through the existing verbs (`document_upsert`,
@@ -42,7 +42,7 @@ A fresh Claude session is told: *"implement `story_abc123`"*.
 | 2 | `project_match {git_url: <consumer remote>}`  | `{project_id, workspace_id, ...}`        | `principles:workspace` + `principles:project` for the matched IDs    |
 | 3 | `document_get {id: "story_abc123"}`           | story body + sidecar                     | `principles:story` for the story's project                            |
 | 4 | edit story body (`document_upsert` on body)   | row returned without principle sidecar   | none — write paths do not re-deliver                                  |
-| 5 | `story_request_review {story_id}`             | `{decision, notes, new_status}` + sidecar | `principles:story` re-delivered with the verdict                     |
+| 5 | `satellites story review <story_id>` (client gate) | `{decision, notes}`; verdict self-enacted | `principles:story` re-delivered with the verdict                     |
 
 Every call that *crosses* a scope re-delivers the principles for that
 scope, fresh. Memory is not used to carry principles between calls. This
