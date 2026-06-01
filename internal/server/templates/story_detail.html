@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item {{if eq .ActiveNav "projects"}}active{{end}}" data-nav="projects">PROJECTS</a>
+    <a href="/ledger" class="nav-item" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/changelog" class="nav-item" data-nav="changelog">CHANGELOG</a>
+    <a href="/help" class="nav-item" data-nav="help">HELP</a>
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="story-detail">
+  <section class="changelog-intro" data-section="story-intro">
+    <h2 class="section-heading">{{.StoryTitle}}</h2>
+    <p class="changelog-lede">
+      <code data-field="story-id">{{.StoryID}}</code>
+      · type <code data-field="story-type">{{.StoryType}}</code>
+      · status <span class="story-status-pill" data-field="current-status">{{.CurrentStatus}}</span>
+      {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{end}}
+    </p>
+    <p class="changelog-lede">The declared process for this story, overlaid with what actually happened. Live — new gate decisions appear without reload.</p>
+  </section>
+
+  {{if .NoWorkflow}}
+  <section class="panel" data-section="no-workflow">
+    <p class="empty" data-field="no-workflow">No workflow governs story type <code>{{.StoryType}}</code> — nothing to reconcile. A <code>kind:workflow</code> skill whose <code>applies_to</code> contains this type defines the declared process.</p>
+  </section>
+  {{else}}
+  <section class="panel" data-section="process-trace">
+    <table class="ledger-table" data-table="process-trace">
+      <thead>
+        <tr>
+          <th class="qa-col-transition">transition</th>
+          <th class="qa-col-gate">gate</th>
+          <th class="qa-col-actual">actual</th>
+          <th class="qa-col-rejects">rejects</th>
+          <th class="qa-col-when">when</th>
+          <th class="qa-col-notes">notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr class="qa-row qa-row-{{.Status}}" data-row="transition" data-status="{{.Status}}">
+          <td class="qa-col-transition" data-field="transition"><code>{{.From}}</code> → <code>{{.To}}</code></td>
+          <td class="qa-col-gate" data-field="gate">{{.Gate}}</td>
+          <td class="qa-col-actual" data-field="actual">
+            <span class="qa-badge qa-badge-{{.Status}}" aria-label="{{.Status}}">{{.Badge}}</span>
+            <span class="qa-status-label">{{.Status}}</span>
+          </td>
+          <td class="qa-col-rejects" data-field="rejects">{{if .RejectCount}}{{.RejectCount}}{{else}}—{{end}}</td>
+          <td class="qa-col-when" data-field="when">{{.When}}</td>
+          <td class="qa-col-notes" data-field="notes">{{.Verdict}}</td>
+        </tr>
+        {{if .StepSummary}}
+        <tr class="ledger-row-summary" data-row="step-summary">
+          <td colspan="6"><div class="ledger-summary-text" data-field="step-summary">{{.StepSummary}}</div></td>
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+<script>
+// Realtime: subscribe to the story's ledger stream and refresh the trace when a
+// new row (a gate verdict / status transition) lands. Append-only ledger + a
+// one-way stream → a reload is the simplest correct refresh. EventSource
+// auto-reconnects if the server closes the connection.
+(function () {
+  var storyID = {{.StoryID}};
+  if (!window.EventSource || !storyID) return;
+  var es = new EventSource("/api/stories/" + encodeURIComponent(storyID) + "/events");
+  var pending = false;
+  es.addEventListener("ledger", function () {
+    if (pending) return;       // debounce a burst of rows into a single reload
+    pending = true;
+    setTimeout(function () { window.location.reload(); }, 400);
+  });
+})();
+</script>
+
+</body>
+</html>

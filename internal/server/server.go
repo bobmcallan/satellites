@@ -83,6 +83,10 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/settings/system-kv", systemKVHandler(cfg))
 	mux.HandleFunc("/projects", projectsHandler(cfg))
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
+	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
+	// More-specific than /api/stories/ (storyStatusHandler) so the SSE stream
+	// wins for the events sub-path under Go 1.22 pattern precedence.
+	mux.HandleFunc("GET /api/stories/{id}/events", storyEventsHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 

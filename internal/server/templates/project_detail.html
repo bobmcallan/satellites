@@ -187,6 +187,10 @@
                   <h4>acceptance criteria</h4>
                   {{if .AcceptanceCriteria}}<pre class="story-detail-pre">{{.AcceptanceCriteria}}</pre>{{else}}<p class="empty">—</p>{{end}}
                 </section>
+                <section class="story-detail-block" data-field="story-process">
+                  <h4>process</h4>
+                  <a class="story-process-link" href="/stories/{{.ID}}" data-field="story-process-link">view QA process trace →</a>
+                </section>
               </div>
             </td>
           </tr>
