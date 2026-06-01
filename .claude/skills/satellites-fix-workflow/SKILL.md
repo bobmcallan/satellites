@@ -1,16 +1,17 @@
+<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":1,"hash":"7336ee8187fe8dda187f6d2b7f0ab353dd3c9ce1582ec6643a652f2def21e2ed"} satellites-sync:end -->
 ---
-name: feature-workflow
+name: satellites-fix-workflow
 type: skill
 tags: [kind:workflow]
-applies_to: [feature]
-description: The lifecycle a `feature` story follows — backlog → ready → in_progress → done, every edge reviewer-gated. Invoke when implementing a feature story; it IS the executor's process.
+applies_to: [fix, refactor, bug, infrastructure]
+description: The lifecycle a `fix`/`refactor`/`bug`/`infrastructure` story follows — backlog → in_progress → done, both edges reviewer-gated. Invoke when implementing such a story; it IS the executor's process.
 ---
 
-# Feature workflow
+# Fix workflow
 
-This skill is the **process** for a `feature` story. When asked to implement
-one, you read it and follow it: the story is the goal, this workflow is the
-loop you run to reach it.
+This skill is the **process** for a `fix` (and `refactor` / `bug` /
+`infrastructure`) story. When asked to implement one, you read it and follow
+it: the story is the goal, this workflow is the loop you run to reach it.
 
 ## The story is the goal; the plan is the loop
 
@@ -19,9 +20,11 @@ loop you run to reach it.
    Acceptance criteria). The plan is the loop you will run.
 3. Request the entry gate: `.satellites/satellites story review <story-id>`.
    **`satellites-story-plan-review`'s accept IS the approval of your plan** —
-   the go-ahead to start. There is no separate operator sign-off.
+   the go-ahead to start, advancing the story `backlog → in_progress`. There
+   is no separate operator sign-off.
 4. Do the work the plan describes; commit at each checkpoint.
-5. Request review at each subsequent gated transition until `done`.
+5. Request the completion gate; `satellites-story-done-review`'s accept moves
+   the story to `done`.
 
 Plan first, gate-approve the plan, then execute. A rejected plan returns with
 notes; fix and request again. Never hand-patch status — only reviewers
@@ -38,15 +41,13 @@ refresh → then drive the gate.
 
 ## Transitions
 
-Three reviewer gates, one per transition. Every edge is gated: a reviewer
-enacts the move, so the loop never depends on an executor patching status
-(the role gate forbids that — only reviewers advance status).
+Two reviewer gates, one per transition — both reviewer-enacted, so the loop
+never depends on an executor patching status (the role gate forbids that —
+only reviewers advance status).
 
-- `backlog → ready` — `satellites-story-plan-review` must accept the plan
-  before the story is ready to pick up. The executor plans while the story
-  sits in `backlog`.
-- `ready → in_progress` — `satellites-story-start-review` confirms the story
-  is ready to start (plan accepted, no open blockers) and enacts the move.
+- `backlog → in_progress` — `satellites-story-plan-review` checks the story
+  has a sound, executable plan before an executor starts; it enacts the
+  transition on accept.
 - `in_progress → done` — `satellites-story-done-review` verifies the change
   against the acceptance criteria.
 
@@ -57,11 +58,9 @@ block.
 ```yaml
 states:
   - backlog
-  - ready
   - in_progress
   - done
 transitions:
-  - {from: backlog,     to: ready,       reviewer_skill: "satellites-story-plan-review"}
-  - {from: ready,       to: in_progress, reviewer_skill: "satellites-story-start-review"}
+  - {from: backlog,     to: in_progress, reviewer_skill: "satellites-story-plan-review"}
   - {from: in_progress, to: done,        reviewer_skill: "satellites-story-done-review"}
 ```

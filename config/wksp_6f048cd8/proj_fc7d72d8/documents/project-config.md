@@ -11,12 +11,12 @@
 story_types:
   # Default — most stories. Plan-reviewed, completion-reviewed.
   feature:
-    workflow_skill: .claude/skills/feature-workflow/SKILL.md
+    workflow_skill: .claude/skills/satellites-feature-workflow/SKILL.md
 
   # Smaller fixes — satellites-story-plan-review on entry,
   # satellites-story-done-review on completion.
   fix:
-    workflow_skill: .claude/skills/fix-workflow/SKILL.md
+    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
 
   # Refactors, bug-fixes and infrastructure changes ride the same two-gate
   # fix workflow: satellites-story-plan-review on backlog → in_progress,
@@ -24,11 +24,11 @@ story_types:
   # loop-proven path and gives both a plan gate and a completion gate,
   # which every change category warrants.
   refactor:
-    workflow_skill: .claude/skills/fix-workflow/SKILL.md
+    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
   bug:
-    workflow_skill: .claude/skills/fix-workflow/SKILL.md
+    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
   infrastructure:
-    workflow_skill: .claude/skills/fix-workflow/SKILL.md
+    workflow_skill: .claude/skills/satellites-fix-workflow/SKILL.md
 
 # Per-project reviewer overrides. Rare. Most reviewers are declared by
 # the workflow skill itself; this block only exists for cases where a

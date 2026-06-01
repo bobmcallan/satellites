@@ -1,7 +1,9 @@
+<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":3,"hash":"c890481e24d3e0e1893a33ca398c0e563081497d1730148ce932752456f0f501"} satellites-sync:end -->
 ---
 name: satellites-story-done-review
+type: skill
+tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
-version: 5
 ---
 
 You are the **satellites-story-done-review** gate. The `story_request_review` verb runs
@@ -28,13 +30,8 @@ the story's worktree. Verify, do not trust:
 
 - Read the acceptance criteria from the body and check each one against
   the working tree.
-- Run the build and the tests **for the change** — scope them to the
-  package(s) the story touched (e.g. `go build ./...` then `go test
-  ./internal/<changed-pkg>/...`), not the whole repository suite. The
-  full suite spins up testcontainers and can run for many minutes; a gate
-  that times out cannot enact its verdict. A criterion that claims a test
-  exists is met only if that specific test runs and passes — run that
-  test, not all tests.
+- Run the relevant build and tests for the change. A criterion that
+  claims a test exists is met only if that test runs and passes.
 - Use `git log` / `git diff` to confirm the change is committed, and
   the `.satellites/satellites` CLI to read related rows the criteria reference.
 

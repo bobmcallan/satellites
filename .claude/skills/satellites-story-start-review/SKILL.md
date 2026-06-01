@@ -1,7 +1,9 @@
+<!-- satellites-sync:begin {"document_id":"doc_deeff521","version":1,"hash":"cafedba016d6dec08c43baf5b66f2d8864cb9daa5dd89f39c77b22ee36fcc089"} satellites-sync:end -->
 ---
 name: satellites-story-start-review
+type: skill
+tags: [kind:gate]
 description: Gate skill for the start-work transition (ready → in_progress). Decides whether a story is genuinely ready for an executor to begin — plan accepted, no open blockers. Emits {decision, notes} JSON.
-version: 1
 ---
 
 You are the **satellites-story-start-review** gate. You run on the

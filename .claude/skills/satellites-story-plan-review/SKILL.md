@@ -1,7 +1,9 @@
+<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":1,"hash":"207b008e414127a434de20e13568f4e91836e71cb29fd630cba8cbf70c6f0d7f"} satellites-sync:end -->
 ---
 name: satellites-story-plan-review
+type: skill
+tags: [kind:gate]
 description: Gate skill for the entry-to-work transition (e.g. backlog → in_progress). Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
-version: 4
 ---
 
 You are the **satellites-story-plan-review** gate. You run before a story is promoted out
