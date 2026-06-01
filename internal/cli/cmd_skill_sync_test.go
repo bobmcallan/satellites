@@ -75,7 +75,7 @@ func TestReconcileAction(t *testing.T) {
 func TestReconcileSkills_OmitsUnstampedOrphans(t *testing.T) {
 	subs := []substrateSkill{{Name: "gate", DocumentID: "doc_g", Version: 1, Body: "b"}}
 	locals := []localSkill{
-		{Name: "gate", Stamped: true, Stamp: skillStamp{DocumentID: "doc_g", Version: 1, Hash: hashBody("b")}, BodyHash: hashBody("b")},
+		{Name: "satellites-gate", Stamped: true, Stamp: skillStamp{DocumentID: "doc_g", Version: 1, Hash: hashBody("b")}, BodyHash: hashBody("b")},
 		{Name: "my-personal-skill", Stamped: false}, // operator-authored
 	}
 	plan := reconcileSkills(subs, locals)
@@ -84,8 +84,46 @@ func TestReconcileSkills_OmitsUnstampedOrphans(t *testing.T) {
 			t.Fatalf("unstamped operator skill must not appear in the sync plan, got action %v", item.Action)
 		}
 	}
-	if len(plan) != 1 || plan[0].Name != "gate" {
-		t.Fatalf("plan = %+v, want only the stamped gate skill", plan)
+	if len(plan) != 1 || plan[0].Name != "satellites-gate" {
+		t.Fatalf("plan = %+v, want only the stamped satellites-gate skill", plan)
+	}
+}
+
+// TestLocalSkillName pins the prefix-injection helper (AC1): an unprefixed row
+// gains the prefix, an already-prefixed one is unchanged (idempotent).
+func TestLocalSkillName(t *testing.T) {
+	for in, want := range map[string]string{
+		"fix-workflow":            "satellites-fix-workflow",
+		"satellites-fix-workflow": "satellites-fix-workflow",
+		"story_summary":           "satellites-story_summary",
+	} {
+		if got := localSkillName(in); got != want {
+			t.Errorf("localSkillName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestReconcileSkills_InjectsLocalPrefix: an unprefixed substrate row
+// materialises under the satellites- prefixed local name (AC1), and a re-sync
+// of the already-materialised prefixed copy is a no-op skip (AC2 idempotency).
+func TestReconcileSkills_InjectsLocalPrefix(t *testing.T) {
+	subs := []substrateSkill{{Name: "fix-workflow", DocumentID: "doc_fw", Version: 1, Body: "b"}}
+
+	// First sync: no local copy → install under the prefixed name.
+	plan := reconcileSkills(subs, nil)
+	if len(plan) != 1 || plan[0].Name != "satellites-fix-workflow" || plan[0].Action != actionInstall {
+		t.Fatalf("plan = %+v, want install satellites-fix-workflow", plan)
+	}
+
+	// Second sync: the prefixed, stamped, unedited copy is present → skip.
+	locals := []localSkill{{
+		Name: "satellites-fix-workflow", Stamped: true,
+		Stamp:    skillStamp{DocumentID: "doc_fw", Version: 1, Hash: hashBody("b")},
+		BodyHash: hashBody("b"),
+	}}
+	plan = reconcileSkills(subs, locals)
+	if len(plan) != 1 || plan[0].Name != "satellites-fix-workflow" || plan[0].Action != actionSkip {
+		t.Fatalf("re-sync plan = %+v, want skip satellites-fix-workflow", plan)
 	}
 }
 

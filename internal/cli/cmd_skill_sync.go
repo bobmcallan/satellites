@@ -98,6 +98,20 @@ type localSkill struct {
 	Malformed bool   // stamp block present but unparseable
 }
 
+// localSkillName is the name a substrate skill is materialised under in
+// .claude/skills/. Every substrate skill carries the `satellites-` prefix
+// locally — the human-visible owner marker (see satellites-skill-naming) —
+// even when its source/row name omits it, so the source prefix is optional and
+// the local tree is unambiguously substrate-owned. Idempotent: an
+// already-prefixed name is returned unchanged. The reconcile still keys on the
+// injected stamp; this only governs the on-disk directory name.
+func localSkillName(rowName string) string {
+	if strings.HasPrefix(rowName, "satellites-") {
+		return rowName
+	}
+	return "satellites-" + rowName
+}
+
 // hashBody computes the content hash the stamp records — over the authored
 // body with any injected stamp block removed, so re-materialising the same
 // substrate body is a no-op.
@@ -204,7 +218,9 @@ func readLocalSkill(skillsRoot, name string) (*localSkill, error) {
 func reconcileSkills(subs []substrateSkill, locals []localSkill) []syncPlanItem {
 	subByName := map[string]substrateSkill{}
 	for _, s := range subs {
-		subByName[s.Name] = s
+		// Key on the materialised (prefixed) name so a substrate row pairs
+		// with its local copy under .claude/skills/satellites-<name>/.
+		subByName[localSkillName(s.Name)] = s
 	}
 	localByName := map[string]localSkill{}
 	for _, l := range locals {
@@ -289,10 +305,11 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 			// already-materialised (stamped) local skill, so removals are seen.
 			localByName := map[string]localSkill{}
 			for _, s := range subs {
-				if l, err := readLocalSkill(skillsRoot, s.Name); err != nil {
-					return fmt.Errorf("read local skill %q: %w", s.Name, err)
+				ln := localSkillName(s.Name)
+				if l, err := readLocalSkill(skillsRoot, ln); err != nil {
+					return fmt.Errorf("read local skill %q: %w", ln, err)
 				} else if l != nil {
-					localByName[s.Name] = *l
+					localByName[ln] = *l
 				}
 			}
 			stampedLocal, err := readStampedLocalSkills(skillsRoot)
