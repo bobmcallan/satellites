@@ -97,49 +97,89 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 
 		q := r.URL.Query()
 		pageSize := readStoryPageSize(ctx)
-		cursor := q.Get("stories_cursor")
 		page := 1
 		if p := strings.TrimSpace(q.Get("stories_page")); p != "" {
 			if n, err := strconv.Atoi(p); err == nil && n > 0 {
 				page = n
 			}
 		}
-		backStack := readBackStack(q, storyPaginatorKeys)
 
-		stories, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
-		if err != nil {
-			arbor.ErrorCtx(ctx, "project_detail: story_list", "id", projectID, "err", err)
-			http.Error(w, "could not list stories", http.StatusInternalServerError)
-			return
-		}
-
-		// document_count for the total + PageCount. Failure here
-		// degrades the indicator to "page N" without a total, but the
-		// page still renders. Path B from sty_975afe24's body: the
-		// count is project-wide and does NOT reflect the panel's
-		// client-side chip filter — the indicator label spells this
-		// out so operators aren't misled.
-		total := dispatchStoryCount(ctx, projectID)
-
-		paginator := paginatorData{
-			Page:     page,
-			Total:    total,
-			HasPrev:  len(backStack) > 0,
-			HasNext:  nextCursor != "",
-			PageSize: pageSize,
-		}
-		if total > 0 && pageSize > 0 {
-			paginator.PageCount = (total + pageSize - 1) / pageSize
-			if paginator.PageCount < 1 {
-				paginator.PageCount = 1
-			}
-		}
+		// Server-side filter (sty_1bd0098a): when the panel query is on the
+		// URL (stories_q), gather the whole project story set, filter+sort it
+		// here, and offset-paginate the result — so page/total reflect the
+		// filter, prev/next carry it, and matches on any page are reachable.
+		// With no active filter we keep the cheaper cursor pagination.
 		base := "/projects/" + projectID
-		if paginator.HasPrev {
-			paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
-		}
-		if paginator.HasNext {
-			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
+		var (
+			stories   []storyRow
+			paginator paginatorData
+		)
+		if sq := parseStoryQuery(q.Get("stories_q")); !sq.isEmpty() {
+			qparam := strings.TrimSpace(q.Get("stories_q"))
+			all, err := gatherAllStories(ctx, projectID, pageSize)
+			if err != nil {
+				arbor.ErrorCtx(ctx, "project_detail: story_list (filtered)", "id", projectID, "err", err)
+				http.Error(w, "could not list stories", http.StatusInternalServerError)
+				return
+			}
+			filtered := filterStories(all, sq)
+			sortStories(filtered, sq.order)
+			total := len(filtered)
+			start := (page - 1) * pageSize
+			if start > total {
+				start = total
+			}
+			end := start + pageSize
+			if end > total {
+				end = total
+			}
+			stories = filtered[start:end]
+			paginator = paginatorData{
+				Page: page, Total: total, PageSize: pageSize,
+				HasPrev: page > 1, HasNext: end < total,
+			}
+			if pageSize > 0 {
+				paginator.PageCount = (total + pageSize - 1) / pageSize
+				if paginator.PageCount < 1 {
+					paginator.PageCount = 1
+				}
+			}
+			if paginator.HasPrev {
+				paginator.PrevURL = filteredPageURL(base, qparam, page-1)
+			}
+			if paginator.HasNext {
+				paginator.NextURL = filteredPageURL(base, qparam, page+1)
+			}
+		} else {
+			cursor := q.Get("stories_cursor")
+			backStack := readBackStack(q, storyPaginatorKeys)
+			rows, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
+			if err != nil {
+				arbor.ErrorCtx(ctx, "project_detail: story_list", "id", projectID, "err", err)
+				http.Error(w, "could not list stories", http.StatusInternalServerError)
+				return
+			}
+			stories = rows
+			// document_count for the unfiltered total + PageCount. Failure
+			// degrades the indicator to "page N" without a total; the page
+			// still renders.
+			total := dispatchStoryCount(ctx, projectID)
+			paginator = paginatorData{
+				Page: page, Total: total, PageSize: pageSize,
+				HasPrev: len(backStack) > 0, HasNext: nextCursor != "",
+			}
+			if total > 0 && pageSize > 0 {
+				paginator.PageCount = (total + pageSize - 1) / pageSize
+				if paginator.PageCount < 1 {
+					paginator.PageCount = 1
+				}
+			}
+			if paginator.HasPrev {
+				paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
+			}
+			if paginator.HasNext {
+				paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
+			}
 		}
 
 		// Per-story body fetch so the expanded row can render the
@@ -244,6 +284,42 @@ func dispatchStoryList(ctx context.Context, projectID, cursor string, limit int)
 		})
 	}
 	return out, resp.NextCursor, nil
+}
+
+// gatherAllStories pages through document_list (cursor) to collect every
+// story in the project, so the server-side filter (sty_1bd0098a) can reach
+// matches on any page. Bounded by a page cap so a runaway never loops
+// forever; hitting it WARNs that the filter may be incomplete.
+func gatherAllStories(ctx context.Context, projectID string, pageSize int) ([]storyRow, error) {
+	const maxPages = 200 // 200 × pageSize rows is far beyond any real project
+	var all []storyRow
+	cursor := ""
+	for i := 0; i < maxPages; i++ {
+		rows, next, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rows...)
+		if next == "" {
+			return all, nil
+		}
+		cursor = next
+	}
+	arbor.WarnCtx(ctx, "gatherAllStories: hit page cap, filter may be incomplete",
+		"project_id", projectID, "cap_rows", maxPages*pageSize)
+	return all, nil
+}
+
+// filteredPageURL builds a paginator link for the server-side filtered mode:
+// the panel query is carried verbatim as stories_q so prev/next preserve the
+// filter, and stories_page selects the offset page (omitted for page 1).
+func filteredPageURL(base, query string, page int) string {
+	v := url.Values{}
+	v.Set("stories_q", query)
+	if page > 1 {
+		v.Set("stories_page", strconv.Itoa(page))
+	}
+	return base + "?" + v.Encode()
 }
 
 // dispatchStoryCount returns the total story count for the project

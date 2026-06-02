@@ -54,7 +54,7 @@
     const orderFields = { updated: 1, created: 1, priority: 1, status: 1, title: 1, id: 1 };
 
     function parseStoryQuery(q) {
-        const out = { status: [], priority: [], category: [], tags: [], order: '', text: '' };
+        const out = { status: [], priority: [], category: [], tags: [], order: '', text: '', textTokens: [] };
         const free = [];
         const parts = (q || '').trim().split(/\s+/).filter(Boolean);
         for (let i = 0; i < parts.length; i++) {
@@ -88,6 +88,11 @@
             free.push(p.toLowerCase());
         }
         out.text = free.join(' ');
+        // textTokens drives matching with OR (union) semantics — a row
+        // matches when its haystack contains ANY token, so multiple IDs
+        // return all of them (sty_1bd0098a). out.text stays the joined
+        // string for the single search chip's label.
+        out.textTokens = free;
         return out;
     }
 
@@ -381,9 +386,14 @@
                     }
                     if (!tagOk) { return false; }
                 }
-                if (!t.text) { return true; }
+                if (!t.textTokens || t.textTokens.length === 0) { return true; }
+                // Free-text tokens OR: a row matches when its haystack
+                // contains ANY token (sty_1bd0098a). Mirrors the server.
                 const hay = (ds.search || '').toLowerCase();
-                return hay.indexOf(t.text) !== -1;
+                for (let i = 0; i < t.textTokens.length; i++) {
+                    if (t.textTokens[i] && hay.indexOf(t.textTokens[i]) !== -1) { return true; }
+                }
+                return false;
             },
 
             isExpanded(el) {
@@ -444,6 +454,25 @@
                 if (parts.indexOf(token) !== -1) { return; }
                 parts.push(token);
                 this.query = parts.join(' ');
+                this.applyToServer();
+            },
+
+            // applyToServer commits the current query to the SERVER so the
+            // filter/sort applies across every page, not just the rendered
+            // one (sty_1bd0098a). It navigates to ?stories_q=<query>, resetting
+            // to page 1 and dropping the cursor-pagination params — the server
+            // offset-paginates the filtered set. Live typing still previews
+            // instantly via matchesRow/x-show; Enter and chip changes commit.
+            applyToServer() {
+                if (typeof window === 'undefined' || !window.location) { return; }
+                try {
+                    const url = new URL(window.location.href);
+                    const params = new URLSearchParams();
+                    const qv = (this.query || '').trim();
+                    if (qv) { params.set('stories_q', qv); }
+                    const search = params.toString();
+                    window.location.assign(url.pathname + (search ? '?' + search : ''));
+                } catch (e) { /* URL ctor / assign unavailable — best effort */ }
             },
 
             getEffectiveChips() {
@@ -487,9 +516,13 @@
 
             removeChip(key, value) {
                 this.query = removeFromQuery(this.query, key, value);
+                this.applyToServer();
             },
 
-            clearAllFilters() { this.query = ''; },
+            clearAllFilters() {
+                this.query = '';
+                this.applyToServer();
+            },
 
             async applyRowStatus(id, target) {
                 if (!id || !target || this.statusBusy[id]) { return; }

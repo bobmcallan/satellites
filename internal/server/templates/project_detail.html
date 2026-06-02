@@ -48,14 +48,15 @@
     <div class="panel-header">
       <h2>stories</h2>
       <span class="stories-count-indicator" data-field="stories-count-indicator"
-            title="shown on this page / total in project (filter is client-side; total ignores chips)">
+            title="shown on this page / total matching the active filter">
         <span x-text="visibleRowCount + ' / {{.StoryTotal}}'">{{.StoryShown}} / {{.StoryTotal}}</span>
       </span>
     </div>
       <input type="text"
              class="panel-search"
-             placeholder="search (free text + chips: tags:foo priority:high status:open category:feature)"
+             placeholder="search then press Enter (free text + chips: tags:foo priority:high status:open category:feature)"
              x-model="query"
+             @keydown.enter.prevent="applyToServer()"
              data-field="panel-stories-search">
 
       <div class="panel-filter-chips" data-field="panel-stories-chips">
