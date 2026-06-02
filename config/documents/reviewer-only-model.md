@@ -44,4 +44,10 @@ A transition fires only when the reviewer named on it accepts; `done` is the
 terminal status reached with every gate on the path accepted — nothing else is
 done.
 
-See [[process-as-configuration]], [[reviewer-process]], [[agent-goals]].
+## The story is the contract
+
+At planning, instantiate the matched workflow and the plan **into the story
+body**, so the reviewer reads one self-describing artifact. The requirements an
+executor must satisfy and the criteria a reviewer checks are the same thing,
+recorded once — in the story. Plan-review validates the embedded workflow
+against its source skill; later gates follow the workflow the story records.

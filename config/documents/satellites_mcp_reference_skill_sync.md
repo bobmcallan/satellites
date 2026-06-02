@@ -38,9 +38,9 @@ row name. A substrate skill that reads as unprefixed locally is a defect.
 
 ## Scope: every `type:"skill"` row — including workflow skills
 
-Substrate rows with `type:"skill"` are what this contract materialises, and that **includes workflow skills** (`satellites-feature-workflow`, `satellites-fix-workflow`, …). A workflow is process, and process in Claude Code is a skill: each is a `type:"skill"` `<name>/SKILL.md` carrying skill frontmatter (`name`, `description`, `version`) for indexing/sync plus the workflow-only `applies_to` and a fenced ```yaml states/transitions block. `skill list` returns them like any other skill, and the reconcile materialises them into `.claude/skills/<name>/SKILL.md`.
+Substrate rows with `type:"skill"` are what this contract materialises, and that **includes workflow skills** (a project's `<type>-workflow` skills). A workflow is process, and process in Claude Code is a skill: each is a `type:"skill"` `<name>/SKILL.md` carrying skill frontmatter (`name`, `description`, `version`) for indexing/sync plus the workflow-only `applies_to` and a fenced ```yaml states/transitions block. `skill list` returns them like any other skill, and the reconcile materialises them into `.claude/skills/<name>/SKILL.md`.
 
-One artifact, two readers, no fork: Claude Code indexes the skill by its `description`, and the gate's workflow parser reads only the fenced yaml block (ignoring the prose), so the same SKILL.md serves both. `project-config` points `workflow_skill` at `.claude/skills/<name>/SKILL.md` — the materialised path — so the gate runs the same file the operator authored and synced.
+One artifact, two readers, no fork: Claude Code indexes the skill by its `description`, and the gate's workflow parser reads only the fenced yaml block (ignoring the prose), so the same SKILL.md serves both. The gate selects the workflow from the dynamic skill index — the `kind:workflow` skill whose `applies_to` matches the story type — and runs the materialised `.claude/skills/<name>/SKILL.md`, the same file the operator authored and synced.
 
 ## Failure mode
 
