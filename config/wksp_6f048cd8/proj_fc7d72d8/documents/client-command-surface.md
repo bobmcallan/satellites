@@ -21,13 +21,16 @@ verb; first-run is a thin orchestration skill over those verbs. Holds to
 | `satellites auth` | **Identity.** Human-in-the-loop browser login (loopback OAuth2 + PKCE) → an executor api-key in the user-level credential store (`~/.config/satellites/credentials.toml`, 0600, keyed by server_url). The bootstrap JWT is used once and discarded. | DONE — story:sty_c2ecbb86. |
 | `satellites project match` | **Project selection.** Resolve a `project_id` from the repo's git remote; the result is written to the repo's `.satellites/satellites.toml`. | DONE. |
 | `satellites update` | **Binary refresh.** Self-update the global binary in place from the release channel, checksum-verified; no-op when current. | story:sty_3ebf8647. |
-| `satellites deploy` | **Config↔substrate sync.** Validate + upload the repo's `config/` sources, then reconcile `.claude/skills/` against the substrate (install/update/remove by identity stamp, never clobber an edited or operator-authored skill). | story:sty_be65b4dd. |
+| `satellites deploy` | **Substrate → local pull.** Reconcile `.claude/skills/` against the repo's project scope (install/update/remove by identity stamp, never clobber an edited or operator-authored skill). **Pull-only** — it does not push. | story:sty_be65b4dd. |
+| `satellites {document,skill,principle} upload` | **Local → substrate push.** Validate + upsert the repo's `config/` sources to the substrate, project/workspace-bound. A deliberate operator/agent verb, invoked as a prompt — never coupled into a bootstrap or session-start step. | DONE. |
 | **bootstrap skill** | **First-run orchestration only.** Detects what is already done and delegates to the verbs above. Holds none of their logic. | See §2. |
 
 Single-source rule: a dynamic step lives in exactly one verb. `auth` owns
-identity, `update` owns the binary, `deploy` owns config↔substrate,
-`project match` owns project resolution. The bootstrap skill *sequences*
-them; it never re-implements a step.
+identity, `update` owns the binary, `deploy` owns the substrate→local skills
+pull, the `{document,skill,principle} upload` verbs own the local→substrate
+push, `project match` owns project resolution. The bootstrap skill *sequences*
+them; it never re-implements a step. Push and pull are deliberately split:
+bootstrap/session-start only ever *pulls* (a client has no `config/` to push).
 
 ## 2. Bootstrap-as-skill — enumerated branches
 

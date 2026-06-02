@@ -175,9 +175,9 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 
 // uploadKind plans and dispatches the document_upsert calls for one kind
 // directory under config/. It does NOT validate — callers run
-// validateUpload first (newUploadCmd does; `satellites deploy` validates
-// once for all kinds). Single source for the plan+dispatch loop shared by
-// the per-noun `upload` commands and `satellites deploy`.
+// validateUpload first (newUploadCmd does). Single source for the
+// plan+dispatch loop shared by the per-noun `upload` commands. `satellites
+// deploy` is pull-only and no longer calls this (sty_2fa6f087 follow-up).
 func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg string, dryRun bool) error {
 	targets, err := planUpload(configRoot, kind)
 	if err != nil {
