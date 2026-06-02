@@ -633,6 +633,24 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID string) 
 	return nil
 }
 
+// mcpForbidsType reports whether a (non-id) document_upsert of reqType arriving
+// over transport t must be refused — operational content writes
+// (document/skill/principle) are kept off the MCP surface (sty_f302bd8b) so the
+// local agent's review skill can't be bypassed. Story and task writes, and any
+// non-MCP transport, pass. An id-addressed patch is handled by the caller
+// (req.ID != "") before this is consulted.
+func mcpForbidsType(t auth.Transport, reqType string) bool {
+	if t != auth.TransportMCP {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(reqType)) {
+	case string(document.TypeStory), string(document.TypeTask):
+		return false
+	default:
+		return true
+	}
+}
+
 func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	if documentStore == nil {
 		return nil, fmt.Errorf("document_upsert: store not configured")
@@ -642,6 +660,20 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, fmt.Errorf("document_upsert: %w: %v", ErrBadRequest, err)
 		}
+	}
+
+	// MCP keeps operational content writes off its surface (sty_f302bd8b): a
+	// document/skill/principle content upsert must run through the CLI upload
+	// path, which invokes the local agent's content-review skill — a
+	// server-side MCP write would bypass it. Story/task writes and id-addressed
+	// patches pass; the CLI exec path and in-process callers leave the
+	// transport unset and pass.
+	if req.ID == "" && mcpForbidsType(auth.TransportFromContext(ctx), req.Type) {
+		typ := strings.TrimSpace(req.Type)
+		if typ == "" {
+			typ = "document"
+		}
+		return nil, fmt.Errorf("document_upsert: %w: %q content is uploaded with the CLI (`satellites document|skill|principle upload`), not over MCP — MCP is read + setup/init", ErrForbidden, typ)
 	}
 
 	// Mode 1: patch by id. Currently only stories support id-addressed
@@ -659,20 +691,6 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	// a fresh tsk_<id>. parent_id is required and must reference a story.
 	if req.Type == document.TypeTask {
 		return createTask(ctx, req)
-	}
-
-	// MCP keeps operational content writes off its surface (sty_f302bd8b):
-	// a key-addressed document/skill/principle upsert must run through the
-	// CLI upload path, which invokes the local agent's content-review skill —
-	// a server-side MCP write would bypass it. Story/task writes (handled
-	// above) are unaffected; the CLI exec path and in-process callers leave
-	// the transport unset and pass.
-	if auth.TransportFromContext(ctx) == auth.TransportMCP {
-		typ := strings.TrimSpace(req.Type)
-		if typ == "" {
-			typ = "document"
-		}
-		return nil, fmt.Errorf("document_upsert: %w: %q content is uploaded with the CLI (`satellites document|skill|principle upload`), not over MCP — MCP is read + setup/init", ErrForbidden, typ)
 	}
 
 	// Mode 3: key-addressed document upsert (pre-unification behaviour).

@@ -197,77 +197,28 @@ func TestMCPWriteSurface_EndToEnd(t *testing.T) {
 		assertTagsEqual(t, resp.Document.Tags, []string{"keep:me"})
 	})
 
-	// ---- document_upsert / document_delete (free-form documents) ----
-	t.Run("document_upsert_then_get", func(t *testing.T) {
-		_ = call(t, "document_upsert", map[string]any{
-			"type":         "document",
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-			"body":         "first version",
+	// ---- content document/skill upsert is REFUSED over MCP (sty_f302bd8b) ----
+	// MCP is read + setup/init; operational content writes go through the CLI
+	// upload path so the local agent's review skill runs. The story create /
+	// update sub-tests above prove story writes over MCP are unaffected.
+	for _, typ := range []string{"document", "skill"} {
+		typ := typ
+		t.Run("mcp_refuses_"+typ+"_content_upsert", func(t *testing.T) {
+			req := mcp.CallToolRequest{}
+			req.Params.Name = "document_upsert"
+			req.Params.Arguments = map[string]any{
+				"type": typ, "name": "blocked-" + typ, "scope": "project",
+				"workspace_id": ws.ID, "project_id": pj.ID, "body": "x",
+			}
+			res, err := cli.CallTool(ctx, req)
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !res.IsError {
+				t.Errorf("MCP %s content upsert must be refused; got %+v", typ, res.Content)
+			}
 		})
-		body := call(t, "document_get", map[string]any{
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-		})
-		var resp verb.DocumentGetResponse
-		if err := json.Unmarshal([]byte(body), &resp); err != nil {
-			t.Fatalf("decode: %v\n%s", err, body)
-		}
-		if resp.RawBody != "first version" {
-			t.Errorf("body: got %q want %q", resp.RawBody, "first version")
-		}
-	})
-	t.Run("document_upsert_appends_new_version", func(t *testing.T) {
-		_ = call(t, "document_upsert", map[string]any{
-			"type":         "document",
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-			"body":         "second version",
-		})
-		body := call(t, "document_get", map[string]any{
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-			"version":      "all",
-		})
-		var resp verb.DocumentGetResponse
-		if err := json.Unmarshal([]byte(body), &resp); err != nil {
-			t.Fatal(err)
-		}
-		if len(resp.Versions) < 2 {
-			t.Errorf("expected at least 2 versions, got %d", len(resp.Versions))
-		}
-	})
-	t.Run("document_delete_appends_tombstone", func(t *testing.T) {
-		_ = call(t, "document_delete", map[string]any{
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-		})
-		req := mcp.CallToolRequest{}
-		req.Params.Name = "document_get"
-		req.Params.Arguments = map[string]any{
-			"name":         "release-notes",
-			"scope":        "project",
-			"workspace_id": ws.ID,
-			"project_id":   pj.ID,
-		}
-		res, err := cli.CallTool(ctx, req)
-		if err != nil {
-			t.Fatalf("CallTool: %v", err)
-		}
-		if !res.IsError {
-			t.Errorf("document_get after delete should error; got %+v", res.Content)
-		}
-	})
+	}
 
 	// ---- story delete via document_delete (id-addressed) ----
 	t.Run("story_delete_by_id", func(t *testing.T) {

@@ -35,6 +35,30 @@ func TestDocumentUpsert_MCPRefusesContentWrites(t *testing.T) {
 	}
 }
 
+// TestMCPForbidsType pins the guard predicate (sty_f302bd8b AC3/AC6): over the
+// MCP transport, document/skill/principle content writes are refused while
+// story and task writes pass; no MCP transport always passes (CLI exec /
+// in-process).
+func TestMCPForbidsType(t *testing.T) {
+	cases := []struct {
+		transport auth.Transport
+		typ       string
+		want      bool
+	}{
+		{auth.TransportMCP, "document", true},
+		{auth.TransportMCP, "skill", true},
+		{auth.TransportMCP, "story", false}, // story create over MCP still works
+		{auth.TransportMCP, "task", false},
+		{"", "document", false}, // CLI exec / in-process — never forbidden
+		{"", "skill", false},
+	}
+	for _, c := range cases {
+		if got := mcpForbidsType(c.transport, c.typ); got != c.want {
+			t.Errorf("mcpForbidsType(%q, %q) = %v, want %v", c.transport, c.typ, got, c.want)
+		}
+	}
+}
+
 // TestRequireScopeKey pins the project-bound invariant (sty_2fa6f087 AC1/AC5):
 // a project-scoped list needs project_id AND workspace_id; a workspace-scoped
 // list needs workspace_id; system/empty scope are unconstrained.
