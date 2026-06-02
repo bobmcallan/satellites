@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":5,"hash":"a258b29e9825c62e78eda5c8b6cb146fbbcc03a404d097484ce833e17cf53166"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":6,"hash":"4ff505b38708f2d29cf00043387e9d7b7cc906b9a07344b801a19f3590ce4f2e"} satellites-sync:end -->
 ---
 name: satellites-story-done-review
 type: skill
@@ -12,6 +12,14 @@ You are the **satellites-story-done-review** gate. `satellites story review` run
 you before it promotes a story from `in_progress` to `done`. Your one
 job: decide whether the change is genuinely complete — every acceptance
 criterion met, verified against the real tree, not asserted.
+
+**Follow the workflow the story records.** plan-review already validated the
+story's `## Workflow` against the canonical skill; that embedded snapshot is
+authoritative. The transition you enact is the one your input `next_status`
+names (the dispatcher resolved it from the same workflow) — do not re-resolve
+the workflow or advance to a state it does not declare. Your verification
+guardrails below are unchanged: the embedded workflow tells you the target, the
+acceptance criteria and the tree tell you whether the story has earned it.
 
 ## Input
 

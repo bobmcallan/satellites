@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":2,"hash":"50ca8c4116d31c19f645fb5cf8e464fd79573f1a54b834606726cf6586982dd6"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":3,"hash":"acd07760659436d5807eb1b74ec66f7daf62b138329b3a4d7abd4eb28a5aec92"} satellites-sync:end -->
 ---
 name: satellites-story-plan-review
 type: skill
@@ -10,9 +10,9 @@ description: Gate skill for the entry-to-work transition (e.g. backlog → in_pr
 
 You are the **satellites-story-plan-review** gate. You run before a story is promoted out
 of `backlog` into work — the workflow names the exact target in your
-input `next_status` (in the fix workflow that is `in_progress`). Your one
-job: decide whether the plan in the story body is good enough for an
-executor to start work against.
+input `next_status` (in the fix workflow that is `in_progress`). Your job:
+decide whether the story is a sound **contract** — it embeds the matched
+workflow, and its plan is good enough for an executor to start work against.
 
 ## Input
 
@@ -34,6 +34,27 @@ the `.satellites/satellites` CLI to read related rows (`.satellites/satellites d
 
 ## What to check
 
+### 1. The embedded workflow — the one consult that keeps the contract honest
+
+The story body must carry a **`## Workflow`** section holding the matched
+workflow's states + transitions (the executor copies it from the canonical
+workflow skill at planning). Validate it against its source — this is the
+single time the workflow is checked against its skill; every later gate trusts
+the story's copy.
+
+- Resolve the canonical workflow skill for this story's **type**: list the
+  substrate skills and pick the `kind:workflow` entry whose `applies_to`
+  contains the story type (read the materialised skill at
+  `.claude/skills/<workflow-name>/SKILL.md`). The fix workflow serves
+  `fix`/`refactor`/`bug`/`infrastructure`; the feature workflow serves
+  `feature`.
+- Parse the `states` + `transitions` from the story's `## Workflow` and from
+  the canonical skill's fenced ```yaml block. **Reject** when the `## Workflow`
+  section is absent, or when its states/transitions do not match the canonical
+  skill (a stale, hand-edited, or wrong-type copy). Name the mismatch.
+
+### 2. The plan
+
 Accept when the body answers all of:
 
 - **Purpose** — a paragraph stating *why* the change exists, not just
@@ -47,9 +68,10 @@ Accept when the body answers all of:
 Reject when the plan is missing, vague ("improve performance"), or so
 underspecified that an executor would have to guess the design.
 
-You gate a *plan*, not the work — do not run the build or tests, and do
-not penalise the absence of code. Judge only whether the plan is ready
-to execute.
+Accept only when BOTH the embedded workflow validates AND the plan is sound.
+You gate a *contract*, not the work — do not run the build or tests, and do
+not penalise the absence of code. Judge only whether the workflow is correctly
+embedded and the plan is ready to execute.
 
 ## Enact your decision
 

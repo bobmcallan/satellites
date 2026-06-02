@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":2,"hash":"5d6d489420eb6b8cf871b4024ba598c40d3573018bade19f53ccebca9010f672"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":3,"hash":"5a232de5d29126c62568ce5857482e921687ce9622bdd08988e9e05d62a661a9"} satellites-sync:end -->
 ---
 name: satellites-fix-workflow
 type: skill
@@ -14,11 +14,22 @@ This skill is the **process** for a `fix` (and `refactor` / `bug` /
 `infrastructure`) story. When asked to implement one, you read it and follow
 it: the story is the goal, this workflow is the loop you run to reach it.
 
-## The story is the goal; the plan is the loop
+## The story is the contract; the plan is the loop
+
+The story is the one self-describing artifact the reviewer reads. At planning
+you record BOTH the matched workflow and the plan into the story body, so every
+later gate judges against the story alone.
 
 1. Read the story (`document_get`) and its acceptance criteria — the goal.
-2. Write the **plan** into the story body (Purpose / Approach / numbered
-   Acceptance criteria). The plan is the loop you will run.
+2. **Record the contract into the story body** (`document_upsert` on the story
+   id). Two sections:
+   - **`## Workflow`** — copy this skill's states + transitions (the fenced
+     ```yaml block at the foot of this skill) verbatim into the story. This
+     pins the workflow the later gates follow; plan-review validates it against
+     this skill once, and done-review then follows what the story records
+     rather than re-resolving.
+   - **The plan** — Purpose / Approach / numbered Acceptance criteria. The plan
+     is the loop you will run.
 3. Request the entry gate: `.satellites/satellites story review <story-id>`.
    **`satellites-story-plan-review`'s accept IS the approval of your plan** —
    the go-ahead to start, advancing the story `backlog → in_progress`. There
@@ -27,9 +38,9 @@ it: the story is the goal, this workflow is the loop you run to reach it.
 5. Request the completion gate; `satellites-story-done-review`'s accept moves
    the story to `done`.
 
-Plan first, gate-approve the plan, then execute. A rejected plan returns with
-notes; fix and request again. Never hand-patch status — only reviewers
-advance it.
+Record the contract first, gate-approve it, then execute. A rejected plan (or a
+missing/mismatched `## Workflow`) returns with notes; fix and request again.
+Never hand-patch status — only reviewers advance it.
 
 ### Satellites-client changes need the full loop
 

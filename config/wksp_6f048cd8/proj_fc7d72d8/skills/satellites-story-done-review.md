@@ -12,6 +12,14 @@ you before it promotes a story from `in_progress` to `done`. Your one
 job: decide whether the change is genuinely complete — every acceptance
 criterion met, verified against the real tree, not asserted.
 
+**Follow the workflow the story records.** plan-review already validated the
+story's `## Workflow` against the canonical skill; that embedded snapshot is
+authoritative. The transition you enact is the one your input `next_status`
+names (the dispatcher resolved it from the same workflow) — do not re-resolve
+the workflow or advance to a state it does not declare. Your verification
+guardrails below are unchanged: the embedded workflow tells you the target, the
+acceptance criteria and the tree tell you whether the story has earned it.
+
 ## Input
 
 A single JSON object arrives on stdin:

@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_deeff521","version":2,"hash":"8937cf393ac6e52c94d924c27239ee7447fc1c9121f1d5287fdb9f202731dc4c"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_deeff521","version":3,"hash":"20cedfa8ffc6f58f1e6c13b83e9622f4f6813e12697baadfd2dbc7676111a287"} satellites-sync:end -->
 ---
 name: satellites-story-start-review
 type: skill
@@ -37,17 +37,24 @@ A single JSON object arrives on stdin:
 ## What to check
 
 This is a lightweight readiness gate, not a re-review of the plan
-(satellites-story-plan-review already accepted it to reach `ready`). Accept
-when:
+(satellites-story-plan-review already accepted it to reach `ready`).
 
+**Follow the workflow the story records.** plan-review already validated the
+story's `## Workflow` against the canonical skill; that embedded snapshot is
+authoritative now. Read the transition target from your input `next_status`
+(the dispatcher resolved it from the same workflow) — do not re-resolve the
+workflow or invent a different target. Accept when:
+
+- The story still carries a `## Workflow` section — the pinned contract is
+  intact (if it was emptied since plan-review, reject).
 - The story carries no **open blocker** — no `blocked-by:<sty_id>` tag whose
   target story is still un-`done`. Read the named blocker via the CLI; if it
   is not yet `done`, reject.
 - The story still has a plan (Purpose / Approach / Acceptance criteria) — a
   sanity check that the accepted plan was not since emptied.
 
-Reject when a blocker is open or the plan has gone missing. Do **not** run
-the build or tests, and do not re-litigate plan quality — that was
+Reject when the `## Workflow` or plan has gone missing or a blocker is open. Do
+**not** run the build or tests, and do not re-litigate plan quality — that was
 plan-review's job.
 
 ## Enact your decision
