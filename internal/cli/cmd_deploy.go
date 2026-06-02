@@ -1,18 +1,17 @@
-// `satellites deploy` — the substrate↔local reconcile (sty_be65b4dd).
+// `satellites deploy` — pull the substrate's skills into local agreement
+// (sty_be65b4dd).
 //
-// One deterministic verb for the operator-refresh cycle that used to be a
-// prose `satellites-init` routine: push the committed config/ sources up,
-// then pull .claude/skills/ back into agreement. Per
-// document:project/client-command-surface it owns config↔substrate sync.
+// deploy is PULL-ONLY: it reconciles .claude/skills/ against this repo's
+// project scope by identity stamp. The push half (config/ → substrate via
+// document/skill/principle upload) is a separate client verb the agent
+// invokes deliberately as a prompt — it is NOT coupled into deploy, so an
+// agent session that runs deploy never uploads anything (operator decision
+// on the sty_be65b4dd path/push report).
 //
 // Pure composition of already-factored logic — no new MCP verb
-// (document:project/no-new-mcp-verbs):
-//
-//  1. validateUpload — the whole config/ tree against the inclusion rule
-//     (aborts before any dispatch, naming file + rule).
-//  2. uploadKind × {documents, skills, principles} — push.
-//  3. syncSkills (project scope) — reconcile .claude/skills by identity
-//     stamp: install / update / remove / refuse-conflict / never-touch.
+// (document:project/no-new-mcp-verbs): syncSkills (project scope) reconciles
+// .claude/skills by identity stamp — install / update / remove /
+// refuse-conflict / never-touch.
 
 package cli
 
@@ -22,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
@@ -38,12 +36,13 @@ func init() {
 	)
 	cmd := &cobra.Command{
 		Use:   "deploy",
-		Short: "Reconcile substrate ↔ local: validate + upload config/ sources, then sync .claude/skills",
-		Long: `deploy is the substrate↔local reconcile. It validates the whole config/
-source tree (aborting on any violation), uploads documents + skills +
-principles, then reconciles .claude/skills/ against the substrate
-(install/update/remove by identity stamp; never clobbering a locally-edited
-or operator-authored skill). Composes existing verbs — no new MCP surface.`,
+		Short: "Pull the substrate's project skills into .claude/skills (stamp-reconciled, pull-only)",
+		Long: `deploy reconciles .claude/skills/ against this repo's project scope in
+the substrate (install/update/remove by identity stamp; never clobbering a
+locally-edited or operator-authored skill). It is pull-only: pushing config/
+sources up is a separate client verb (document/skill/principle upload) invoked
+deliberately, not coupled into deploy. Composes existing verbs — no new MCP
+surface.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if ctx == nil {
@@ -54,34 +53,13 @@ or operator-authored skill). Composes existing verbs — no new MCP surface.`,
 	}
 	cmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate + print the planned upserts and reconcile actions without writing.")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the reconcile actions without writing files.")
 	register(cmd)
 }
 
 func runDeploy(ctx context.Context, out io.Writer, configArg, userArg string, dryRun bool) error {
-	// 1. Validate the whole source tree once; abort before any dispatch.
-	violations, err := validateUpload(configRoot, filepath.Join(".claude", "skills"))
-	if err != nil {
-		return err
-	}
-	if len(violations) > 0 {
-		fmt.Fprintf(out, "validation failed — %d violation(s), nothing deployed:\n", len(violations))
-		for _, v := range violations {
-			fmt.Fprintf(out, "  ✗ %s\n", v.String())
-		}
-		return fmt.Errorf("deploy refused: %d validation violation(s)", len(violations))
-	}
-
-	// 2. Push: upload every kind (single source: uploadKind).
-	fmt.Fprintln(out, "── push: config/ → substrate ──")
-	for _, kind := range []string{"documents", "skills", "principles"} {
-		if err := uploadKind(ctx, out, kind, configArg, userArg, dryRun); err != nil {
-			return err
-		}
-	}
-
-	// 3. Pull: reconcile .claude/skills against the repo's project (single
-	// source: syncSkills).
+	// Pull: reconcile .claude/skills against the repo's project (single
+	// source: syncSkills). skillsRoot is anchored to the repo dir, not CWD.
 	fmt.Fprintln(out, "── pull: substrate → .claude/skills ──")
 	ws, pj, err := resolveDeployScope(ctx, configArg, userArg)
 	if err != nil {

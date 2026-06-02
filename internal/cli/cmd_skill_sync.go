@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -300,14 +302,61 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 	return cmd
 }
 
+// resolveSkillsRoot decides where substrate skills materialise. Precedence:
+//
+//  1. an explicit --skills-root flag (used verbatim),
+//  2. the config's skills_root (relative → resolved against the repo root),
+//  3. the default <repo>/.claude/skills.
+//
+// The repo root is the directory that HOLDS .satellites/ (derived from the
+// resolved satellites.toml path), NOT the process CWD — so a `deploy` run
+// from inside .satellites/ no longer lands skills in .satellites/.claude/skills
+// (sty_be65b4dd path bug). With no config on disk it falls back to a
+// CWD-relative .claude/skills, preserving the unconfigured-repo behaviour.
+func resolveSkillsRoot(flagRoot, configArg string) (string, error) {
+	if strings.TrimSpace(flagRoot) != "" {
+		return flagRoot, nil
+	}
+	cfg, path, err := cliconfig.Load(configArg)
+	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
+		return "", err
+	}
+	repoRoot := "."
+	if path != "" {
+		// path is <repo>/.satellites/satellites.toml; climb two dirs to <repo>.
+		repoRoot = filepath.Dir(filepath.Dir(path))
+	}
+	if s := strings.TrimSpace(cfg.SkillsRoot); s != "" {
+		if filepath.IsAbs(s) {
+			return s, nil
+		}
+		return filepath.Join(repoRoot, s), nil
+	}
+	return filepath.Join(repoRoot, ".claude", "skills"), nil
+}
+
 // syncSkills is the testable, reusable pull-half: list the substrate
 // skills for a scope, reconcile them against the materialised local
 // `.claude/skills/` tree by identity stamp, and apply (unless dryRun).
 // Single source shared by `skill sync` and `satellites deploy`.
 func syncSkills(ctx context.Context, out io.Writer, scope, ws, pj, configArg, userArg, root string, dryRun bool) error {
-	skillsRoot := root
-	if skillsRoot == "" {
-		skillsRoot = filepath.Join(".claude", "skills")
+	skillsRoot, err := resolveSkillsRoot(root, configArg)
+	if err != nil {
+		return err
+	}
+
+	// A project-scoped sync must be bound to a project — skills are
+	// project-bound and the server now refuses an empty-project list
+	// (sty_2fa6f087). When --project wasn't passed, resolve it (and its
+	// workspace) from local config the way `deploy` does, rather than
+	// dispatching the unbounded request that used to drag in every project's
+	// skills.
+	if scope == "project" && strings.TrimSpace(pj) == "" {
+		rws, rpj, rerr := resolveDeployScope(ctx, configArg, userArg)
+		if rerr != nil {
+			return fmt.Errorf("skill sync: project scope needs a project_id — pass --project or set project_id in .satellites/satellites.toml: %w", rerr)
+		}
+		ws, pj = rws, rpj
 	}
 
 	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {

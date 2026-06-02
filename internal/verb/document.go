@@ -255,6 +255,14 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 			return nil, fmt.Errorf("document_list: %w: %v", ErrBadRequest, err)
 		}
 	}
+	// A scoped list must be bounded to its scope key (project-bound skills,
+	// sty_2fa6f087) and authorized for the caller, before any store read.
+	if err := requireScopeKey(req.Scope, req.WorkspaceID, req.ProjectID); err != nil {
+		return nil, err
+	}
+	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if req.Effective {
 		if userID := callerUserID(ctx); userID != "" {
 			return effectiveList(ctx, req, userID)
@@ -551,6 +559,74 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 	if _, err := workspaceStore.GetRole(ctx, wsID, u.ID); err != nil {
 		if errors.Is(err, workspace.ErrMemberNotFound) {
 			return fmt.Errorf("document_get: %w: user not a member of workspace %s", ErrForbidden, wsID)
+		}
+		return err
+	}
+	return nil
+}
+
+// requireScopeKey enforces that a scoped document_list is bounded to a single
+// scope key, so the result set can never silently widen to every project /
+// workspace. A project-scoped list must carry both project_id and the
+// workspace_id its membership check needs; a workspace-scoped list must carry
+// a workspace_id. Without this an empty id adds no SQL predicate and the store
+// returns every project's rows — the cross-project skill leak (sty_2fa6f087).
+// Unconditional (not gated on authStore) so in-process CLI calls are bounded
+// too.
+func requireScopeKey(scope, wsID, pjID string) error {
+	switch strings.TrimSpace(scope) {
+	case "project":
+		if strings.TrimSpace(pjID) == "" {
+			return fmt.Errorf("document_list: %w: project scope requires project_id", ErrBadRequest)
+		}
+		if strings.TrimSpace(wsID) == "" {
+			return fmt.Errorf("document_list: %w: project scope requires workspace_id", ErrBadRequest)
+		}
+	case "workspace":
+		if strings.TrimSpace(wsID) == "" {
+			return fmt.Errorf("document_list: %w: workspace scope requires workspace_id", ErrBadRequest)
+		}
+	}
+	return nil
+}
+
+// authorizeListScope is the authorization chokepoint for a scoped
+// document_list — the list-side counterpart of authorizeRead. For a
+// non-system scope it requires a bearer and verifies the caller is a member of
+// the workspace the list is bound to. In-process invocations (no authStore
+// wired) skip the check, exactly like authorizeRead.
+//
+// STUB (sty_2fa6f087): a per-PROJECT role gate is not built yet. It needs
+// workspace/project user roles plus the api-key→project binding that
+// auth.Store.ValidateKeyWithRole stores but does not yet surface onto the
+// request context. Until that lands, a workspace member may list any project
+// under that workspace; this function is the single place the project-role
+// check will be added.
+func authorizeListScope(ctx context.Context, scope document.Scope, wsID string) error {
+	if authStore == nil {
+		return nil
+	}
+	if scope == document.ScopeSystem || scope == "" {
+		return nil
+	}
+	u := auth.FromContext(ctx)
+	if u == nil {
+		return fmt.Errorf("document_list: %w: bearer required for %s scope", ErrUnauthorized, scope)
+	}
+	if scope == document.ScopeUser {
+		// User-scope list is the caller's own overlay; effectiveList keys it
+		// to the caller, never crossing users.
+		return nil
+	}
+	if workspaceStore == nil {
+		return nil
+	}
+	if wsID == "" {
+		return fmt.Errorf("document_list: %w: %s scope requires workspace_id", ErrBadRequest, scope)
+	}
+	if _, err := workspaceStore.GetRole(ctx, wsID, u.ID); err != nil {
+		if errors.Is(err, workspace.ErrMemberNotFound) {
+			return fmt.Errorf("document_list: %w: user not a member of workspace %s", ErrForbidden, wsID)
 		}
 		return err
 	}

@@ -9,38 +9,36 @@ import (
 	"testing"
 )
 
-// TestRunDeploy_AbortsOnValidationViolation: deploy validates the whole
-// config/ tree first and refuses (nothing uploaded, no dispatch) when a
-// source breaks the inclusion rule — AC1. A skills/ file declaring
-// type:document is a type-mismatch violation, caught before any server
-// call, so this needs no server.
-func TestRunDeploy_AbortsOnValidationViolation(t *testing.T) {
+// TestRunDeploy_PullOnly_NoPush: deploy is pull-only. It must never emit the
+// push banner nor touch config/ — pushing sources is a separate client verb
+// (operator decision on the sty_be65b4dd push report). With no project_id it
+// stops at scope resolution; the point is that no push happens on the way
+// there and the validate-config tree is never read.
+func TestRunDeploy_PullOnly_NoPush(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg")) // isolate cred store
+	// A config/ tree that WOULD fail validation if deploy still pushed.
 	bad := filepath.Join(dir, "config", "wksp_x", "proj_y", "skills", "bad.md")
 	if err := os.MkdirAll(filepath.Dir(bad), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// type:document under a skills/ dir → type-mismatch.
-	body := "---\nname: bad\ntype: document\n---\nbody\n"
-	if err := os.WriteFile(bad, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte("---\nname: bad\ntype: document\n---\nbody\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
 
 	var out bytes.Buffer
 	err := runDeploy(context.Background(), &out, "", "", false)
-	if err == nil {
-		t.Fatal("expected deploy to refuse on a validation violation")
+	// No project_id configured → deploy stops at scope resolution, NOT at a
+	// validation refusal.
+	if err == nil || !strings.Contains(err.Error(), "project_id") {
+		t.Fatalf("expected a project_id error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "refused") {
-		t.Errorf("error should say deploy refused, got %v", err)
-	}
-	if !strings.Contains(out.String(), "validation failed") {
-		t.Errorf("output should report the validation failure:\n%s", out.String())
-	}
-	// The push banner must not have printed — abort is before any dispatch.
 	if strings.Contains(out.String(), "push:") {
-		t.Errorf("deploy must abort before pushing:\n%s", out.String())
+		t.Errorf("deploy must not push:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "validation failed") {
+		t.Errorf("deploy must not validate config/:\n%s", out.String())
 	}
 }
 

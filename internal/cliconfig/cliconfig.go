@@ -37,6 +37,13 @@ type Config struct {
 	LogPath        string `toml:"log_path"`
 	BranchTemplate string `toml:"branch_template"`
 
+	// SkillsRoot overrides where `skill sync` / `deploy` materialise
+	// substrate skills. Empty means the default — <repo>/.claude/skills,
+	// anchored to the directory holding .satellites/, NOT the process CWD.
+	// A relative value is resolved against that repo root; absolute is used
+	// verbatim.
+	SkillsRoot string `toml:"skills_root"`
+
 	// Token is the executor api-key presented on every server call.
 	// Resolved at Load from the credential store (NOT the TOML), so it
 	// is never a repo-committed secret. Empty until `satellites auth`.

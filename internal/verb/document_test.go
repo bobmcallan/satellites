@@ -7,8 +7,80 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
 )
+
+// TestRequireScopeKey pins the project-bound invariant (sty_2fa6f087 AC1/AC5):
+// a project-scoped list needs project_id AND workspace_id; a workspace-scoped
+// list needs workspace_id; system/empty scope are unconstrained.
+func TestRequireScopeKey(t *testing.T) {
+	cases := []struct {
+		name, scope, ws, pj string
+		wantErr             bool
+	}{
+		{"project no project_id", "project", "wksp_1", "", true},
+		{"project no workspace_id", "project", "", "proj_1", true},
+		{"project both present", "project", "wksp_1", "proj_1", false},
+		{"workspace no workspace_id", "workspace", "", "", true},
+		{"workspace present", "workspace", "wksp_1", "", false},
+		{"system unconstrained", "system", "", "", false},
+		{"empty scope unconstrained", "", "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := requireScopeKey(c.scope, c.ws, c.pj)
+			if c.wantErr && err == nil {
+				t.Fatalf("expected error for scope=%q ws=%q pj=%q", c.scope, c.ws, c.pj)
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if c.wantErr && !errors.Is(err, ErrBadRequest) {
+				t.Errorf("error should wrap ErrBadRequest, got %v", err)
+			}
+		})
+	}
+}
+
+// TestInvokeDocumentList_ProjectScopeRequiresProjectID pins AC1 through the
+// verb: an empty project_id at project scope is refused before the store is
+// ever queried (documentStore is a bare value with no DB — reaching List would
+// panic, so a clean ErrBadRequest proves the guard fires first).
+func TestInvokeDocumentList_ProjectScopeRequiresProjectID(t *testing.T) {
+	prevDoc, prevAuth := documentStore, authStore
+	documentStore, authStore = &document.Store{}, nil
+	defer func() { documentStore, authStore = prevDoc, prevAuth }()
+
+	_, err := Get("document_list").Invoke(context.Background(),
+		json.RawMessage(`{"type":"skill","scope":"project"}`))
+	if err == nil || !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("expected ErrBadRequest for empty project_id, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "project_id") {
+		t.Errorf("error should name project_id, got %v", err)
+	}
+}
+
+// TestAuthorizeListScope_Stub pins AC3: with auth wired, a non-system scope
+// requires a bearer; with auth unwired (in-process CLI) the check is skipped.
+func TestAuthorizeListScope_Stub(t *testing.T) {
+	prev := authStore
+	defer func() { authStore = prev }()
+
+	authStore = &auth.Store{}
+	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1"); err == nil || !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("project scope without a bearer should be ErrUnauthorized, got %v", err)
+	}
+	if err := authorizeListScope(context.Background(), document.ScopeSystem, ""); err != nil {
+		t.Errorf("system scope needs no bearer, got %v", err)
+	}
+
+	authStore = nil
+	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1"); err != nil {
+		t.Errorf("in-process (no authStore) must skip the check, got %v", err)
+	}
+}
 
 func TestDocumentVerbs_Registered(t *testing.T) {
 	for _, name := range []string{"document_get", "document_upsert", "document_delete"} {

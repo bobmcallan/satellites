@@ -9,6 +9,65 @@ import (
 	"testing"
 )
 
+// TestResolveSkillsRoot_AnchorsToRepoNotCWD pins the sty_be65b4dd path fix:
+// the materialisation root is the dir that HOLDS .satellites/, derived from the
+// resolved satellites.toml — NOT the process CWD. The bug landed skills in
+// .satellites/.claude/skills when deploy ran from inside .satellites/; here we
+// chdir into .satellites/ and assert the root still resolves to <repo>/.claude/skills.
+func TestResolveSkillsRoot_AnchorsToRepoNotCWD(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(repo, "xdg")) // isolate cred store
+	satDir := filepath.Join(repo, ".satellites")
+	if err := os.MkdirAll(satDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tomlPath := filepath.Join(satDir, "satellites.toml")
+	if err := os.WriteFile(tomlPath, []byte("server_url = \"https://x.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Run as the buggy invocation did: CWD inside .satellites/.
+	t.Chdir(satDir)
+
+	got, err := resolveSkillsRoot("", "")
+	if err != nil {
+		t.Fatalf("resolveSkillsRoot: %v", err)
+	}
+	want := filepath.Join(repo, ".claude", "skills")
+	if got != want {
+		t.Errorf("skills root = %q, want %q (must anchor to repo, not .satellites/ CWD)", got, want)
+	}
+}
+
+// TestResolveSkillsRoot_ConfigOverrideAndFlag: an explicit --skills-root flag
+// wins outright; otherwise a relative skills_root from the TOML resolves
+// against the repo root.
+func TestResolveSkillsRoot_ConfigOverrideAndFlag(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(repo, "xdg"))
+	satDir := filepath.Join(repo, ".satellites")
+	if err := os.MkdirAll(satDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tomlPath := filepath.Join(satDir, "satellites.toml")
+	if err := os.WriteFile(tomlPath, []byte("server_url = \"https://x.example\"\nskills_root = \"agents/skills\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// TOML relative skills_root → resolved against repo root.
+	got, err := resolveSkillsRoot("", tomlPath)
+	if err != nil {
+		t.Fatalf("resolveSkillsRoot: %v", err)
+	}
+	if want := filepath.Join(repo, "agents", "skills"); got != want {
+		t.Errorf("config-rooted skills root = %q, want %q", got, want)
+	}
+
+	// Explicit flag overrides everything, verbatim.
+	if got, _ := resolveSkillsRoot("/tmp/explicit", tomlPath); got != "/tmp/explicit" {
+		t.Errorf("flag root = %q, want /tmp/explicit", got)
+	}
+}
+
 // TestStampRoundTrip pins the sty_4b517016 stamp contract sync relies on:
 // materialise injects a stamp whose hash is over the authored body only, and
 // splitStamp recovers the stamp + the exact authored body, so a freshly
