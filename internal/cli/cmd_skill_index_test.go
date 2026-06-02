@@ -39,6 +39,64 @@ func TestSelectWorkflowSkill(t *testing.T) {
 	}
 }
 
+// TestBuildEffectiveSkillIndex_Cascade pins sty_050b6653: the index a project
+// resolves against cascades system → project, with the project overriding a
+// same-named system baseline and inheriting the rest. A fresh project (no
+// project skills) thus runs the loop off the system baseline.
+func TestBuildEffectiveSkillIndex_Cascade(t *testing.T) {
+	body := func(s string) json.RawMessage {
+		return json.RawMessage(`{"raw_body":` + strconv.Quote(s) + `,"document":{"id":"x","latest_version":1}}`)
+	}
+	dispatch := func(_ context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		var r struct{ Scope, Name string }
+		_ = json.Unmarshal(req, &r)
+		switch name {
+		case "document_list":
+			switch r.Scope {
+			case "system":
+				return json.RawMessage(`{"items":[` +
+					`{"id":"d1","name":"feature-workflow","scope":"system","latest_version":1},` +
+					`{"id":"d2","name":"satellites-story-done-review","scope":"system","latest_version":1}]}`), nil
+			case "project":
+				return json.RawMessage(`{"items":[` +
+					`{"id":"d3","name":"feature-workflow","scope":"project","workspace_id":"wksp_X","project_id":"proj_Y","latest_version":1}]}`), nil
+			default: // workspace — none
+				return json.RawMessage(`{"items":[]}`), nil
+			}
+		case "document_get":
+			switch {
+			case r.Name == "feature-workflow" && r.Scope == "system":
+				return body("---\nname: feature-workflow\nkind: workflow\napplies_to: [feature]\ndescription: system baseline\n---\nx"), nil
+			case r.Name == "feature-workflow" && r.Scope == "project":
+				return body("---\nname: feature-workflow\nkind: workflow\napplies_to: [feature]\ndescription: project override\n---\nx"), nil
+			case r.Name == "satellites-story-done-review":
+				return body("---\nname: satellites-story-done-review\nkind: gate\ndescription: system gate\n---\nx"), nil
+			}
+			return nil, fmt.Errorf("unexpected get %q/%q", r.Name, r.Scope)
+		}
+		return nil, fmt.Errorf("unexpected verb %q", name)
+	}
+
+	index, err := buildEffectiveSkillIndex(context.Background(), dispatch, "wksp_X", "proj_Y")
+	if err != nil {
+		t.Fatalf("buildEffectiveSkillIndex: %v", err)
+	}
+	got := map[string]string{}
+	for _, e := range index {
+		got[e.Name] = e.Description
+	}
+	if got["feature-workflow"] != "project override" {
+		t.Errorf("feature-workflow should be the PROJECT override, got %q", got["feature-workflow"])
+	}
+	if got["satellites-story-done-review"] != "system gate" {
+		t.Errorf("done-review gate should be INHERITED from system, got %q", got["satellites-story-done-review"])
+	}
+	// The inherited workflow is still selectable for the story type.
+	if _, err := selectWorkflowSkill(index, "feature"); err != nil {
+		t.Errorf("selectWorkflowSkill(feature) over the cascade: %v", err)
+	}
+}
+
 // TestBuildSkillIndex confirms the index projects frontmatter dispatch fields
 // (kind/applies_to) and the materialised local name, with the body excluded.
 func TestBuildSkillIndex(t *testing.T) {

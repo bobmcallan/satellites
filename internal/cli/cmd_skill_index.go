@@ -45,18 +45,75 @@ func buildSkillIndex(ctx context.Context, dispatch verbDispatch, scope, wsID, pj
 	}
 	out := make([]skillIndexEntry, 0, len(subs))
 	for _, s := range subs {
-		fm, _, ferr := frontmatter.Parse([]byte(s.Body))
+		e, ferr := skillToIndexEntry(s)
 		if ferr != nil {
-			return nil, fmt.Errorf("skill index: parse frontmatter for %q: %w", s.Name, ferr)
+			return nil, ferr
 		}
-		out = append(out, skillIndexEntry{
-			Name:        s.Name,
-			Kind:        strings.TrimSpace(fm.Kind),
-			AppliesTo:   fm.AppliesTo,
-			When:        strings.TrimSpace(fm.When),
-			Description: strings.TrimSpace(fm.Description),
-			LocalName:   localSkillName(s.Name),
-		})
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// skillToIndexEntry projects one substrate skill's frontmatter into a dispatch
+// entry (body excluded).
+func skillToIndexEntry(s substrateSkill) (skillIndexEntry, error) {
+	fm, _, ferr := frontmatter.Parse([]byte(s.Body))
+	if ferr != nil {
+		return skillIndexEntry{}, fmt.Errorf("skill index: parse frontmatter for %q: %w", s.Name, ferr)
+	}
+	return skillIndexEntry{
+		Name:        s.Name,
+		Kind:        strings.TrimSpace(fm.Kind),
+		AppliesTo:   fm.AppliesTo,
+		When:        strings.TrimSpace(fm.When),
+		Description: strings.TrimSpace(fm.Description),
+		LocalName:   localSkillName(s.Name),
+	}, nil
+}
+
+// buildEffectiveSkillIndex builds the dispatch index a project actually
+// resolves against: the scope cascade system → workspace → project, merged by
+// name with the higher scope winning (project overrides workspace overrides
+// system). This is what makes a baseline workflow + gate skills seeded at
+// system scope run for a project with zero project-scoped skills, while a
+// project still overrides any baseline by authoring a same-named skill
+// (sty_050b6653). The project layer is resolved effectively so a caller's
+// user-scope override wins at the top (sty_cbeeb452). No new MCP verb — it
+// composes listSubstrateSkills across scopes.
+func buildEffectiveSkillIndex(ctx context.Context, dispatch verbDispatch, wsID, pjID string) ([]skillIndexEntry, error) {
+	byName := map[string]skillIndexEntry{}
+	merge := func(scope, ws, pj string, effective bool) error {
+		subs, err := listSubstrateSkills(ctx, dispatch, scope, ws, pj, effective)
+		if err != nil {
+			return err
+		}
+		for _, s := range subs {
+			e, ferr := skillToIndexEntry(s)
+			if ferr != nil {
+				return ferr
+			}
+			byName[e.Name] = e // later (higher-precedence) scope overrides
+		}
+		return nil
+	}
+	// Lowest precedence first.
+	if err := merge("system", "", "", false); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(wsID) != "" {
+		if err := merge("workspace", wsID, "", false); err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(pjID) != "" {
+		if err := merge("project", wsID, pjID, true); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]skillIndexEntry, 0, len(byName))
+	for _, e := range byName {
+		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

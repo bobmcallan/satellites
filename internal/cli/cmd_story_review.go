@@ -440,7 +440,10 @@ func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewS
 	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
 		return dispatchVerb(ctx, name, req, opts.ConfigPath, opts.UserArg)
 	}
-	index, err := buildSkillIndex(ctx, dispatch, "project", story.WorkspaceID, story.ProjectID)
+	// Resolve across the scope cascade (system → workspace → project) so a
+	// project with no project-scoped workflow/gate skills inherits the system
+	// baseline, while a project override still wins (sty_050b6653).
+	index, err := buildEffectiveSkillIndex(ctx, dispatch, story.WorkspaceID, story.ProjectID)
 	if err != nil {
 		return "", "", fmt.Errorf("build skill index: %w", err)
 	}
