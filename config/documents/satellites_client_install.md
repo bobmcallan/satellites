@@ -83,10 +83,12 @@ cannot be set via the verb) and re-fetch the document. Do not
 invent a value in agent code — a missing variable is a configuration
 gap to fill in the bootstrap process, not a runtime fallback.
 
-## Process baseline
+## Process setup
 
-A freshly-installed project needs no hand-authored workflow or gate
-skills: it inherits the system baseline reviewer process via the scope
-cascade, so `satellites story review` runs out of the box. Read
-`document_get {name:"baseline-reviewer-process", scope:"system"}` for how a
-project inherits the baseline and overrides only what it wants to differ.
+A freshly-installed project defines its own reviewer-gated workflow — the
+platform imposes none. Read `document_get {name:"project-setup",
+scope:"system"}` and follow it: it teaches the fixed structure (reviewer-only
+transitions, the story-as-contract) and walks the agent through defining the
+repo's states, transitions, and per-gate criteria from the admin's
+requirements and the repo's reality, then authoring the project-scoped
+workflow + gate skills. The loop runs once those exist.
