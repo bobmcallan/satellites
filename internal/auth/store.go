@@ -325,18 +325,24 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
 		projectArg = projectID
 	}
 
-	// Reviewer keys are an ephemeral single-slot-per-(user,project)
-	// credential the gate rotates on every run. Rotating the slot in place
-	// keeps repeated reviews from colliding with a prior run's row — which
-	// the api_keys_project_agent unique index counts even after the row is
-	// revoked or expired (sty_e2dea1ec). Executor keys keep the
-	// insert-or-noop path so the DevSeed re-insert stays idempotent on the
-	// key_hash index.
+	// A project-scoped key occupies a single slot per (user, project,
+	// agent_name) tracked by the api_keys_project_agent unique index — which
+	// counts a row even after it is revoked or expired. Re-minting such a key
+	// must ROTATE THE SLOT IN PLACE rather than collide: the prior row's
+	// hash / expiry / revoked_at are overwritten so a fresh token takes the
+	// slot. This covers both the reviewer key the gate rotates every run
+	// (sty_e2dea1ec) AND a project-scoped executor (bootstrap) key re-minted
+	// after a revoke (sty_03d714c2) — the collision vire hit. One row per
+	// slot, no accumulation of dead rows.
+	//
+	// A NULL-project executor key (the DevSeed admin/user keys) is not in that
+	// partial index, so it keeps the insert-or-noop path on key_hash — a
+	// DevSeed re-insert with the same raw key stays idempotent.
 	query := `
         INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (key_hash) DO NOTHING`
-	if role == APIKeyRoleReviewer {
+	if role == APIKeyRoleReviewer || projectID != "" {
 		query = `
         INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
