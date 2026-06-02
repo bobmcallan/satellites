@@ -19,16 +19,31 @@ supplies its own checkpoint skill.
 
 ## Routine
 
-1. **Configure + stage**
+1. **Technical-debt gate — pre-commit, fail closed** ([[satellites-technical-debt-review]],
+   [[broken-windows]]). Before anything else, run the gate:
+
+   ```bash
+   .satellites/satellites techdebt review
+   ```
+
+   It runs build + unit + the integration tier and reconciles the failing checks
+   against the `technical-debt-register`. **Exit 0 (CLEAN)** → proceed. **Exit 1
+   (BLOCKED)** → there is a new red (or an unowned register row); **do not
+   commit**. Fix it, or file a tracking story and add an owned register row
+   (`| <check_id> | <story_id> | <reason> |`), `satellites document upload`, and
+   re-run. A STALE row on a complete run means a window closed — remove it (the
+   register only shrinks). "It was already broken" is not a pass.
+
+2. **Configure + stage**
 
    ```bash
    git config user.name "bobmcallan" && git config core.autocrlf input && git add -A
    ```
 
-2. **Analyse + format** — `git branch --show-current`, `git diff --cached --stat`,
+3. **Analyse + format** — `git branch --show-current`, `git diff --cached --stat`,
    `git log --oneline -5` for style. If `go.mod` exists: `gofmt -s -w . && git add -u`.
 
-3. **Bump `.version` — MANDATORY on every commit.** `.version` is per-binary
+4. **Bump `.version` — MANDATORY on every commit.** `.version` is per-binary
    (`satellites.version` / `satellites-server.version`). Bump the patch of the
    binary(ies) the change touches — **CLI** (`internal/cli`, `cmd/satellites`),
    **server** (`internal/{verb,server,mcpserver,document,…}`,
@@ -37,13 +52,13 @@ supplies its own checkpoint skill.
    timestamp. `git add .version`. Never skip — the release tag derives from
    `satellites.version`.
 
-4. **Commit + push**
+5. **Commit + push**
 
    ```bash
    git commit -m "type(scope): message" && git push
    ```
 
-5. **Watch CI** (`.github/workflows/`: test → release → deploy). `test` runs on
+6. **Watch CI** (`.github/workflows/`: test → release → deploy). `test` runs on
    push; `release` tags `v<satellites.version>` (skips if the tag exists);
    `deploy` runs on `test` success and redeploys the server.
 
