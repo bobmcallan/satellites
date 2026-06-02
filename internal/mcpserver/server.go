@@ -13,6 +13,7 @@ import (
 
 	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/arbor"
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -230,7 +231,11 @@ func New() *mcpserver.MCPServer {
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				resp, err := verb.Dispatch(ctx, dispatched, argsJSON)
+				// Mark the call as MCP-transport so the verb layer can keep
+				// operational content writes off this surface (sty_f302bd8b)
+				// — document/skill/principle upload runs the local agent's
+				// review skill, which an MCP write would bypass.
+				resp, err := verb.Dispatch(auth.WithTransport(ctx, auth.TransportMCP), dispatched, argsJSON)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}

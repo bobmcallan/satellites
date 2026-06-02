@@ -661,6 +661,20 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return createTask(ctx, req)
 	}
 
+	// MCP keeps operational content writes off its surface (sty_f302bd8b):
+	// a key-addressed document/skill/principle upsert must run through the
+	// CLI upload path, which invokes the local agent's content-review skill —
+	// a server-side MCP write would bypass it. Story/task writes (handled
+	// above) are unaffected; the CLI exec path and in-process callers leave
+	// the transport unset and pass.
+	if auth.TransportFromContext(ctx) == auth.TransportMCP {
+		typ := strings.TrimSpace(req.Type)
+		if typ == "" {
+			typ = "document"
+		}
+		return nil, fmt.Errorf("document_upsert: %w: %q content is uploaded with the CLI (`satellites document|skill|principle upload`), not over MCP — MCP is read + setup/init", ErrForbidden, typ)
+	}
+
 	// Mode 3: key-addressed document upsert (pre-unification behaviour).
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("document_upsert: %w: name required", ErrBadRequest)

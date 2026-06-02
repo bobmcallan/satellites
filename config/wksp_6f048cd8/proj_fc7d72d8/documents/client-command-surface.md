@@ -18,10 +18,10 @@ verb; first-run is a thin orchestration skill over those verbs. Holds to
 | Verb | Owns | State |
 | ---- | ---- | ----- |
 | `satellites install` | Place the **global** binary on a machine: download the release artifact, verify its `sha256`, put it on PATH. The `curl \| sh` bootstrap, shape of `claude install`. | *Future* — shape recorded here, not yet implemented. |
-| `satellites auth` | **Identity.** Human-in-the-loop browser login (loopback OAuth2 + PKCE) → an executor api-key in the user-level credential store (`~/.config/satellites/credentials.toml`, 0600, keyed by server_url). The bootstrap JWT is used once and discarded. | DONE — story:sty_c2ecbb86. |
+| `satellites auth` | **Identity.** Human-in-the-loop browser login (loopback OAuth2 + PKCE) → an executor api-key in the user-level credential store (`~/.config/satellites/credentials.toml`, 0600, keyed by server_url). The bootstrap JWT is used once and discarded. | DONE — DONE. |
 | `satellites project match` | **Project selection.** Resolve a `project_id` from the repo's git remote; the result is written to the repo's `.satellites/satellites.toml`. | DONE. |
-| `satellites update` | **Binary refresh.** Self-update the global binary in place from the release channel, checksum-verified; no-op when current. | story:sty_3ebf8647. |
-| `satellites deploy` | **Substrate → local pull.** Reconcile `.claude/skills/` against the repo's project scope (install/update/remove by identity stamp, never clobber an edited or operator-authored skill). **Pull-only** — it does not push. | story:sty_be65b4dd. |
+| `satellites update` | **Binary refresh.** Self-update the global binary in place from the release channel, checksum-verified; no-op when current. | DONE. |
+| `satellites deploy` | **Substrate → local pull.** Reconcile `.claude/skills/` against the repo's project scope (install/update/remove by identity stamp, never clobber an edited or operator-authored skill). **Pull-only** — it does not push. | DONE. |
 | `satellites {document,skill,principle} upload` | **Local → substrate push.** Validate + upsert the repo's `config/` sources to the substrate, project/workspace-bound. A deliberate operator/agent verb, invoked as a prompt — never coupled into a bootstrap or session-start step. | DONE. |
 | **bootstrap skill** | **First-run orchestration only.** Detects what is already done and delegates to the verbs above. Holds none of their logic. | See §2. |
 
@@ -63,8 +63,8 @@ records the target shape so the skill, when written, only orchestrates.
   project a call is about comes from the repo; *who* the caller is comes
   from the per-server credential (credential store); *whether* the caller
   may act is enforced server-side by workspace membership. One credential
-  per server serves every project the user can access — see
-  story:sty_c2ecbb86.
+  per server serves every project the user can access — see the
+  `satellites auth` identity model.
 - **Update target — the global binary, in place.** `satellites update`
   refreshes the on-PATH binary, verified against the published checksum;
   `install` places it, `update` refreshes it. Neither touches a repo's
@@ -72,7 +72,8 @@ records the target shape so the skill, when written, only orchestrates.
 
 ## See also
 
-- story:sty_c2ecbb86 (`satellites auth`), story:sty_3ebf8647 (`satellites update`),
-  story:sty_be65b4dd (`satellites deploy`), story:sty_050b6653 (baseline project process).
+- The verbs above — `satellites auth`, `satellites update`, `satellites deploy` —
+  and the baseline-project-process work.
+- [[project-substrate-inclusion]], [[no-new-mcp-verbs]], [[process-as-configuration]].
 - document:system/satellites_client_install (the install schema the
   bootstrap acts on), [[project-substrate-inclusion]], [[no-new-mcp-verbs]].

@@ -12,6 +12,31 @@ import (
 
 type ctxKey struct{}
 type apiKeyRoleCtxKey struct{}
+type transportCtxKey struct{}
+
+// Transport identifies how a verb call entered the process. It keeps
+// operational content writes (document/skill/principle upsert) off the MCP
+// surface while leaving the CLI exec path and internal calls untouched
+// (sty_f302bd8b): content upload runs the local agent's review skill, which a
+// server-side MCP write would bypass.
+type Transport string
+
+// TransportMCP marks a call that entered via the MCP tool surface.
+const TransportMCP Transport = "mcp"
+
+// WithTransport stamps the entry transport onto ctx. The MCP server sets
+// TransportMCP before dispatching a tool; the HTTP exec handler and
+// in-process callers leave it unset.
+func WithTransport(ctx context.Context, t Transport) context.Context {
+	return context.WithValue(ctx, transportCtxKey{}, t)
+}
+
+// TransportFromContext returns the entry transport, or "" when unset
+// (CLI exec / in-process).
+func TransportFromContext(ctx context.Context) Transport {
+	t, _ := ctx.Value(transportCtxKey{}).(Transport)
+	return t
+}
 
 // FromContext returns the authenticated user attached to the request
 // context, or nil if unauthenticated.

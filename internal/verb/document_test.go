@@ -11,6 +11,30 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
+// TestDocumentUpsert_MCPRefusesContentWrites pins sty_f302bd8b AC3: an
+// operational document/skill content upsert arriving over the MCP transport is
+// refused (ErrForbidden) with a CLI pointer, before any store write — so the
+// per-type review skill can't be bypassed. The guard fires only for the
+// MCP transport; the CLI exec path and in-process callers leave it unset and
+// are exercised by the existing (non-transport) upsert tests.
+func TestDocumentUpsert_MCPRefusesContentWrites(t *testing.T) {
+	prev := documentStore
+	documentStore = &document.Store{} // non-nil; guard returns before any store op
+	defer func() { documentStore = prev }()
+
+	mcp := auth.WithTransport(context.Background(), auth.TransportMCP)
+	for _, typ := range []string{"document", "skill"} {
+		body := json.RawMessage(`{"type":"` + typ + `","scope":"project","name":"x","project_id":"p","workspace_id":"w","body":"hi"}`)
+		_, err := Get("document_upsert").Invoke(mcp, body)
+		if err == nil || !errors.Is(err, ErrForbidden) {
+			t.Errorf("MCP %s upsert should be ErrForbidden, got %v", typ, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "CLI") {
+			t.Errorf("error should point at the CLI, got %v", err)
+		}
+	}
+}
+
 // TestRequireScopeKey pins the project-bound invariant (sty_2fa6f087 AC1/AC5):
 // a project-scoped list needs project_id AND workspace_id; a workspace-scoped
 // list needs workspace_id; system/empty scope are unconstrained.

@@ -139,7 +139,10 @@ type uploadConfig struct {
 // keep the three commands byte-identical except for the kind directory
 // they walk under config/.
 func newUploadCmd(cfg uploadConfig) *cobra.Command {
-	var dryRun bool
+	var (
+		dryRun     bool
+		skipReview bool
+	)
 	cmd := &cobra.Command{
 		Use:   "upload",
 		Short: fmt.Sprintf("Walk config/**/%s and upsert each file via document_upsert", cfg.Kind),
@@ -166,10 +169,11 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 				}
 				return fmt.Errorf("upload refused: %d validation violation(s)", len(violations))
 			}
-			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, dryRun)
+			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, dryRun, skipReview)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned dispatches (scope, type, name) without calling the verbs")
+	cmd.Flags().BoolVar(&skipReview, "skip-review", false, "Skip the strict content review (drift-prone reference check) — use only after running the per-type review skill")
 	return cmd
 }
 
@@ -178,7 +182,7 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 // validateUpload first (newUploadCmd does). Single source for the
 // plan+dispatch loop shared by the per-noun `upload` commands. `satellites
 // deploy` is pull-only and no longer calls this (sty_2fa6f087 follow-up).
-func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg string, dryRun bool) error {
+func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg string, dryRun, skipReview bool) error {
 	targets, err := planUpload(configRoot, kind)
 	if err != nil {
 		return err
@@ -187,11 +191,26 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg str
 		fmt.Fprintf(out, "no %s found under config/**/%s/ — nothing to upload\n", kind, kind)
 		return nil
 	}
+	reviewSkill := reviewSkillForKind(kind)
 	for _, t := range targets {
 		label := uploadLabel(t)
 		if dryRun {
 			fmt.Fprintf(out, "[dry-run] %s → (%s, %s, %s)\n", t.Path, t.Type, t.Scope, t.Name)
 			continue
+		}
+		// Strict content review before dispatch (sty_f302bd8b): block a
+		// durable artifact that hard-codes drift-prone references. The
+		// per-type review skill carries the maintainability critique the
+		// local agent runs; --skip-review overrides after that review.
+		if !skipReview {
+			if findings := reviewContent(t.Body); len(findings) > 0 {
+				fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s); run skill %q for the maintainability critique, or pass --skip-review:\n",
+					t.Path, len(findings), reviewSkill)
+				for _, f := range findings {
+					fmt.Fprintf(out, "  ✗ %s\n", f.String())
+				}
+				return fmt.Errorf("%s: content review blocked %d drift-prone reference(s) (override with --skip-review)", t.Path, len(findings))
+			}
 		}
 		req, marshalErr := marshalUpsertRequest(t)
 		if marshalErr != nil {
