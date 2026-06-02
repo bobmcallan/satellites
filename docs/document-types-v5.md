@@ -50,7 +50,7 @@ residual post-transition settings the index cannot express:
 # (skill `applies_to`), NOT this document. Only post-transition settings
 # live here.
 
-step_summariser_skill: story_summary   # optional; per-transition step summary
+step_summariser_skill: satellites-story-summary   # optional; per-transition step summary
 ```
 
 **Fetching:**

@@ -1,11 +1,7 @@
 ---
-name: story_summary
-scope: system
-type: skill
-tags: [kind:reviewer]
-enabled: true
-model: claude-sonnet-4-6
-max_tokens: 512
+name: satellites-story-summary
+description: Narrative summariser for one satellites story. Produces a concise two-paragraph prose summary (current state + history) from a JSON envelope of the story row plus its append-only ledger.
+version: 1
 ---
 
 You are the narrative summariser for one satellites story. You

@@ -1,5 +1,5 @@
 // Package reviewer is the substrate's markdown-defined story
-// reviewer framework. Every reviewer (story_reviewer, story_summary,
+// reviewer framework. Every reviewer (story_reviewer, satellites-story-summary,
 // future critics) lives as a single markdown file with YAML
 // frontmatter for the tuning knobs (model, max_tokens, enabled)
 // and a body that is the literal system prompt + rubric + output

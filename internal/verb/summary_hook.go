@@ -18,7 +18,7 @@ import (
 // SummaryReviewerName is the registry key for the summary
 // definition. The runtime looks it up by name; the file name on
 // disk is incidental.
-const SummaryReviewerName = "story_summary"
+const SummaryReviewerName = "satellites-story-summary"
 
 var (
 	// summaryDispatch is the indirection seam tests use to assert

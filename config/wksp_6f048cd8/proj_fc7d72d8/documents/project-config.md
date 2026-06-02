@@ -15,7 +15,7 @@
 # step_summary ledger row, surfaced on the portal /ledger page. This is a
 # post-transition setting, not dispatch. Empty/absent disables summaries.
 # Names a skill resolved at .claude/skills/<name>/SKILL.md.
-step_summariser_skill: story_summary
+step_summariser_skill: satellites-story-summary
 ```
 
 ## Notes
