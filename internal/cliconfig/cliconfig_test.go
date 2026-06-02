@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,51 @@ branch_template = "client-{task_id}"
 	}
 	if !cfg.IsConfigured() {
 		t.Error("IsConfigured should be true once a credential is stored")
+	}
+}
+
+func TestStripAuthBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "satellites.toml")
+	body := `# header comment
+server_url = "https://example.com"
+project_id = "proj_x"
+
+[auth]
+# the stale token
+token = "sk_stale_should_be_removed"
+
+[other]
+keep = "yes"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := StripAuthBlock(path)
+	if err != nil {
+		t.Fatalf("StripAuthBlock: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, "[auth]") || strings.Contains(s, "sk_stale_should_be_removed") {
+		t.Errorf("[auth]/token not scrubbed:\n%s", s)
+	}
+	// Non-auth content preserved verbatim.
+	for _, want := range []string{"# header comment", `server_url = "https://example.com"`, `project_id = "proj_x"`, "[other]", `keep = "yes"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("scrub dropped %q:\n%s", want, s)
+		}
+	}
+	// Idempotent: a second scrub is a no-op.
+	if removed2, _ := StripAuthBlock(path); removed2 {
+		t.Error("second StripAuthBlock should be a no-op")
+	}
+	// Missing file is a quiet no-op.
+	if removed3, err := StripAuthBlock(filepath.Join(dir, "nope.toml")); err != nil || removed3 {
+		t.Errorf("missing file: removed=%v err=%v", removed3, err)
 	}
 }
 

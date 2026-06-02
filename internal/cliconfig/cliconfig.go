@@ -85,6 +85,62 @@ func Load(explicitPath string) (Config, string, error) {
 // path. Callers fall back to in-process dispatch in this case.
 var ErrNotFound = errors.New("cliconfig: not found")
 
+// StripAuthBlock removes the top-level `[auth]` table from the TOML at
+// path. The api-key the CLI used to read from `[auth].token` now lives
+// in the credential store (credstore.go), so a leftover `[auth]` block
+// is a stale, ignored secret — `satellites auth` calls this after it
+// stores the credential. Returns whether anything was removed.
+//
+// Line-based on purpose: it preserves the rest of the file verbatim
+// (comments, key order, other tables). A future `dev mode` may
+// deliberately reintroduce a TOML-token path; until then the block is
+// always scrubbed.
+func StripAuthBlock(path string) (bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return false, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("cliconfig: read %s: %w", path, err)
+	}
+
+	lines := strings.Split(string(b), "\n")
+	out := make([]string, 0, len(lines))
+	removed, skipping := false, false
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if skipping {
+			if strings.HasPrefix(t, "[") { // next table ends the [auth] block
+				skipping = false
+			} else {
+				removed = true
+				continue
+			}
+		}
+		if t == "[auth]" {
+			skipping, removed = true, true
+			continue
+		}
+		out = append(out, ln)
+	}
+	if !removed {
+		return false, nil
+	}
+
+	content := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	perm := os.FileMode(0o644)
+	if fi, statErr := os.Stat(path); statErr == nil {
+		perm = fi.Mode().Perm()
+	}
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
+		return false, fmt.Errorf("cliconfig: write %s: %w", path, err)
+	}
+	return true, nil
+}
+
 func resolvePath(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil

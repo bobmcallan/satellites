@@ -80,7 +80,7 @@ with no subcommand is equivalent to 'satellites auth login'.`,
 }
 
 func runAuthLogin(cmd *cobra.Command, configArg, serverArg, projectArg string, noBrowser bool, timeout time.Duration) error {
-	cfg, _, err := cliconfig.Load(configArg)
+	cfg, cfgPath, err := cliconfig.Load(configArg)
 	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
 		return err
 	}
@@ -110,6 +110,15 @@ func runAuthLogin(cmd *cobra.Command, configArg, serverArg, projectArg string, n
 	}
 	path, _ := cliconfig.CredentialsPath()
 	fmt.Fprintf(out, "Authenticated. Stored %s api-key %s for %s\n  → %s\n", cred.Role, cred.KeyID, cred.ServerURL, path)
+
+	// Scrub the now-ignored [auth] token from the project TOML so a stale
+	// secret is not left behind (the CLI resolves the key from the
+	// credential store). Best-effort: a scrub failure does not fail auth.
+	if scrubbed, sErr := cliconfig.StripAuthBlock(cfgPath); sErr != nil {
+		fmt.Fprintf(out, "warn: could not scrub stale [auth] from %s: %v\n", cfgPath, sErr)
+	} else if scrubbed {
+		fmt.Fprintf(out, "Scrubbed stale [auth] token from %s (the api-key is resolved from the credential store).\n", cfgPath)
+	}
 	return nil
 }
 
