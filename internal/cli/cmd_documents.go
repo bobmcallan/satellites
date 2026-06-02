@@ -42,6 +42,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -144,6 +145,10 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 		Short: fmt.Sprintf("Walk config/**/%s and upsert each file via document_upsert", cfg.Kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
 
 			// Validate the whole source tree against the deterministic
 			// inclusion rule (document:project/project-substrate-inclusion)
@@ -161,37 +166,44 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 				}
 				return fmt.Errorf("upload refused: %d validation violation(s)", len(violations))
 			}
-
-			targets, err := planUpload(configRoot, cfg.Kind)
-			if err != nil {
-				return err
-			}
-			if len(targets) == 0 {
-				fmt.Fprintf(out, "no %s found under config/**/%s/ — nothing to upload\n", cfg.Kind, cfg.Kind)
-				return nil
-			}
-			for _, t := range targets {
-				label := uploadLabel(t)
-				if dryRun {
-					fmt.Fprintf(out, "[dry-run] %s → (%s, %s, %s)\n", t.Path, t.Type, t.Scope, t.Name)
-					continue
-				}
-				req, marshalErr := marshalUpsertRequest(t)
-				if marshalErr != nil {
-					return fmt.Errorf("%s: %w", t.Path, marshalErr)
-				}
-				resp, err := dispatchVerb(context.Background(), "document_upsert", req, *cfg.ConfigArg, *cfg.UserArg)
-				if err != nil {
-					return fmt.Errorf("%s: %w", t.Path, err)
-				}
-				summary := summariseUploadResp(resp)
-				fmt.Fprintf(out, "%s → %s (%s)\n", t.Path, label, summary)
-			}
-			return nil
+			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned dispatches (scope, type, name) without calling the verbs")
 	return cmd
+}
+
+// uploadKind plans and dispatches the document_upsert calls for one kind
+// directory under config/. It does NOT validate — callers run
+// validateUpload first (newUploadCmd does; `satellites deploy` validates
+// once for all kinds). Single source for the plan+dispatch loop shared by
+// the per-noun `upload` commands and `satellites deploy`.
+func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg string, dryRun bool) error {
+	targets, err := planUpload(configRoot, kind)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		fmt.Fprintf(out, "no %s found under config/**/%s/ — nothing to upload\n", kind, kind)
+		return nil
+	}
+	for _, t := range targets {
+		label := uploadLabel(t)
+		if dryRun {
+			fmt.Fprintf(out, "[dry-run] %s → (%s, %s, %s)\n", t.Path, t.Type, t.Scope, t.Name)
+			continue
+		}
+		req, marshalErr := marshalUpsertRequest(t)
+		if marshalErr != nil {
+			return fmt.Errorf("%s: %w", t.Path, marshalErr)
+		}
+		resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
+		if err != nil {
+			return fmt.Errorf("%s: %w", t.Path, err)
+		}
+		fmt.Fprintf(out, "%s → %s (%s)\n", t.Path, label, summariseUploadResp(resp))
+	}
+	return nil
 }
 
 // planUpload walks rootDir recursively and returns the ordered list of

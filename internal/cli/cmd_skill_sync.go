@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -288,57 +289,7 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			skillsRoot := root
-			if skillsRoot == "" {
-				skillsRoot = filepath.Join(".claude", "skills")
-			}
-
-			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
-				return dispatchVerb(ctx, name, req, *configArg, *userArg)
-			}
-			subs, err := listSubstrateSkills(ctx, dispatch, scopeArg, wsArg, pjArg, false /* sync reconciles shared rows, not per-caller overrides */)
-			if err != nil {
-				return err
-			}
-
-			// Read the local copy for every substrate name plus every
-			// already-materialised (stamped) local skill, so removals are seen.
-			localByName := map[string]localSkill{}
-			for _, s := range subs {
-				ln := localSkillName(s.Name)
-				if l, err := readLocalSkill(skillsRoot, ln); err != nil {
-					return fmt.Errorf("read local skill %q: %w", ln, err)
-				} else if l != nil {
-					localByName[ln] = *l
-				}
-			}
-			stampedLocal, err := readStampedLocalSkills(skillsRoot)
-			if err != nil {
-				return fmt.Errorf("scan local skills: %w", err)
-			}
-			for _, l := range stampedLocal {
-				if _, seen := localByName[l.Name]; !seen {
-					localByName[l.Name] = l
-				}
-			}
-			locals := make([]localSkill, 0, len(localByName))
-			for _, l := range localByName {
-				locals = append(locals, l)
-			}
-
-			plan := reconcileSkills(subs, locals)
-			out := cmd.OutOrStdout()
-			for _, item := range plan {
-				if dryRun {
-					fmt.Fprintf(out, "[dry-run] %-8s %s\n", item.Action, item.Name)
-					continue
-				}
-				if err := applySyncItem(skillsRoot, item); err != nil {
-					return err
-				}
-				fmt.Fprintf(out, "%-8s %s\n", item.Action, item.Name)
-			}
-			return nil
+			return syncSkills(ctx, cmd.OutOrStdout(), scopeArg, wsArg, pjArg, *configArg, *userArg, root, dryRun)
 		},
 	}
 	cmd.Flags().StringVar(&scopeArg, "scope", "project", "Scope to sync (system / workspace / project)")
@@ -347,6 +298,63 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the reconcile plan without writing files")
 	cmd.Flags().StringVar(&root, "skills-root", "", "Materialisation root (default .claude/skills)")
 	return cmd
+}
+
+// syncSkills is the testable, reusable pull-half: list the substrate
+// skills for a scope, reconcile them against the materialised local
+// `.claude/skills/` tree by identity stamp, and apply (unless dryRun).
+// Single source shared by `skill sync` and `satellites deploy`.
+func syncSkills(ctx context.Context, out io.Writer, scope, ws, pj, configArg, userArg, root string, dryRun bool) error {
+	skillsRoot := root
+	if skillsRoot == "" {
+		skillsRoot = filepath.Join(".claude", "skills")
+	}
+
+	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		return dispatchVerb(ctx, name, req, configArg, userArg)
+	}
+	subs, err := listSubstrateSkills(ctx, dispatch, scope, ws, pj, false /* reconcile shared rows, not per-caller overrides */)
+	if err != nil {
+		return err
+	}
+
+	// Read the local copy for every substrate name plus every
+	// already-materialised (stamped) local skill, so removals are seen.
+	localByName := map[string]localSkill{}
+	for _, s := range subs {
+		ln := localSkillName(s.Name)
+		if l, err := readLocalSkill(skillsRoot, ln); err != nil {
+			return fmt.Errorf("read local skill %q: %w", ln, err)
+		} else if l != nil {
+			localByName[ln] = *l
+		}
+	}
+	stampedLocal, err := readStampedLocalSkills(skillsRoot)
+	if err != nil {
+		return fmt.Errorf("scan local skills: %w", err)
+	}
+	for _, l := range stampedLocal {
+		if _, seen := localByName[l.Name]; !seen {
+			localByName[l.Name] = l
+		}
+	}
+	locals := make([]localSkill, 0, len(localByName))
+	for _, l := range localByName {
+		locals = append(locals, l)
+	}
+
+	plan := reconcileSkills(subs, locals)
+	for _, item := range plan {
+		if dryRun {
+			fmt.Fprintf(out, "[dry-run] %-8s %s\n", item.Action, item.Name)
+			continue
+		}
+		if err := applySyncItem(skillsRoot, item); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%-8s %s\n", item.Action, item.Name)
+	}
+	return nil
 }
 
 // applySyncItem performs the verdict for one plan item. Conflicts, skips,
