@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -89,6 +90,22 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 		Short: cfg.Short,
 		Long:  cfg.Short + "\n\nThin shell over the document_list MCP verb.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			// Default scope: with NO scope/workspace/project flag, list the
+			// caller's EFFECTIVE set — system + the configured project — not an
+			// unscoped all-projects list (which leaks other projects' rows into
+			// a configured repo; sty_de7e2008). An explicit --scope keeps the
+			// single-scope behaviour. Only engages when a project is configured;
+			// an unconfigured caller falls back to the unscoped list.
+			if scopeArg == "" && wsArg == "" && pjArg == "" {
+				if items, ok, err := callerScopedList(ctx, cfg); err != nil {
+					return err
+				} else if ok {
+					renderNounList(cmd.OutOrStdout(), filterByTagPrefix(items, cfg.FilterTagPrefix))
+					return nil
+				}
+			}
+
 			req := docListRequest{
 				Type:        cfg.FilterType,
 				Scope:       scopeArg,
@@ -105,7 +122,7 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := dispatchVerb(context.Background(), "document_list", raw, *cfg.ConfigArg, *cfg.UserArg)
+			resp, err := dispatchVerb(ctx, "document_list", raw, *cfg.ConfigArg, *cfg.UserArg)
 			if err != nil {
 				return err
 			}
@@ -171,6 +188,75 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 	cmd.Flags().StringVar(&wsArg, "workspace", "", "workspace_id (required when scope=workspace or scope=project)")
 	cmd.Flags().StringVar(&pjArg, "project", "", "project_id (required when scope=project)")
 	return cmd
+}
+
+// callerScopedList lists a noun's EFFECTIVE set for a configured caller —
+// system-scope rows plus the configured project's rows — so a default
+// (unflagged) list never surfaces another project's rows (sty_de7e2008). It
+// engages only for the type-filtered nouns (skill / document), not the
+// tag-filtered principle noun, and only when a project is configured. Returns
+// ok=false to signal the caller to fall back to the plain unscoped list rather
+// than fail (an unconfigured or unresolvable caller still gets a listing).
+func callerScopedList(ctx context.Context, cfg substrateNounConfig) ([]nounListItem, bool, error) {
+	if cfg.FilterTagPrefix != "" {
+		return nil, false, nil // principle listing keeps its tag-scoped behaviour
+	}
+	conf, _, err := cliconfig.Load(*cfg.ConfigArg)
+	if err != nil || strings.TrimSpace(conf.ProjectID) == "" {
+		return nil, false, nil // unconfigured — fall back to the unscoped list
+	}
+	projectID := strings.TrimSpace(conf.ProjectID)
+	wsID, err := listResolveWorkspaceID(ctx, cfg, projectID)
+	if err != nil {
+		return nil, false, nil // cannot resolve — fall back rather than fail
+	}
+	list := func(req docListRequest) ([]nounListItem, error) {
+		raw, mErr := json.Marshal(req)
+		if mErr != nil {
+			return nil, mErr
+		}
+		resp, dErr := dispatchVerb(ctx, "document_list", raw, *cfg.ConfigArg, *cfg.UserArg)
+		if dErr != nil {
+			return nil, dErr
+		}
+		var parsed docListView
+		if uErr := json.Unmarshal(resp, &parsed); uErr != nil {
+			return nil, fmt.Errorf("decode response: %w", uErr)
+		}
+		return parsed.Items, nil
+	}
+	sys, err := list(docListRequest{Type: cfg.FilterType, Scope: "system", Limit: 200})
+	if err != nil {
+		return nil, false, err
+	}
+	proj, err := list(docListRequest{Type: cfg.FilterType, Scope: "project", WorkspaceID: wsID, ProjectID: projectID, Limit: 200})
+	if err != nil {
+		return nil, false, err
+	}
+	return append(sys, proj...), true, nil
+}
+
+// listResolveWorkspaceID resolves a project's workspace_id via project_get,
+// decoding only the one field (layering guard: no internal/project import).
+func listResolveWorkspaceID(ctx context.Context, cfg substrateNounConfig, projectID string) (string, error) {
+	raw, err := json.Marshal(map[string]string{"id": projectID})
+	if err != nil {
+		return "", err
+	}
+	resp, err := dispatchVerb(ctx, "project_get", raw, *cfg.ConfigArg, *cfg.UserArg)
+	if err != nil {
+		return "", err
+	}
+	var got struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(resp, &got); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(got.WorkspaceID) == "" {
+		return "", fmt.Errorf("project %s returned no workspace_id", projectID)
+	}
+	return got.WorkspaceID, nil
 }
 
 // filterByTagPrefix narrows a list result to items whose tags contain
