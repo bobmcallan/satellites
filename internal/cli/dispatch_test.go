@@ -9,12 +9,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 )
 
 // dispatchTestServer stands up a stub satellites-server that records the
-// Authorization bearer of each /api/v1/exec call, plus a TOML pointing at
-// it (token "tok-operator"). Returns the config path and a pointer to the
-// last seen bearer.
+// Authorization bearer of each /api/v1/exec call, plus a non-secret TOML
+// pointing at it. The operator's executor token ("tok-operator") lives in
+// an isolated credential store (resolved by server_url at Load), matching
+// the post-`satellites auth` model. Returns the config path and a pointer
+// to the last seen bearer.
 func dispatchTestServer(t *testing.T) (configPath string, lastBearer *string) {
 	t.Helper()
 	var seen string
@@ -26,11 +30,15 @@ func dispatchTestServer(t *testing.T) (configPath string, lastBearer *string) {
 	}))
 	t.Cleanup(srv.Close)
 
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := cliconfig.SaveCredential(cliconfig.Credential{ServerURL: srv.URL, Token: "tok-operator", Role: "executor"}); err != nil {
+		t.Fatalf("save credential: %v", err)
+	}
+
 	dir := t.TempDir()
 	configPath = filepath.Join(dir, "satellites.toml")
 	toml := "server_url = \"" + srv.URL + "\"\n" +
-		"project_id = \"proj_t\"\n" +
-		"[auth]\ntoken = \"tok-operator\"\n"
+		"project_id = \"proj_t\"\n"
 	if err := os.WriteFile(configPath, []byte(toml), 0o600); err != nil {
 		t.Fatalf("write toml: %v", err)
 	}

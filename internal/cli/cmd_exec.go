@@ -46,9 +46,10 @@ func init() {
 		Use:   "exec <verb>",
 		Short: "Dispatch a verb with JSON args (single-execution-path entry)",
 		Long: `exec dispatches a verb. When a satellites-server is configured
-(.satellites/satellites.toml with server_url + auth.token), the verb is
-posted to POST /api/v1/exec/<name> on that server. When no config is
-found, the verb is dispatched in-process against the local registry.`,
+(.satellites/satellites.toml with server_url, plus an api-key in the
+credential store from 'satellites auth'), the verb is posted to POST
+/api/v1/exec/<name> on that server. When no config is found, the verb is
+dispatched in-process against the local registry.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

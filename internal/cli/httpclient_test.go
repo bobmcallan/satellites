@@ -32,7 +32,7 @@ func TestHTTPDispatch_StampsCorrelationHeadersFromEnv(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := cliconfig.Config{ServerURL: srv.URL, Auth: cliconfig.AuthBlock{Token: "tok"}}
+	cfg := cliconfig.Config{ServerURL: srv.URL, Token: "tok"}
 	if _, err := httpDispatch(cfg, "ping", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestHTTPDispatch_NoHeadersWhenEnvUnset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := cliconfig.Config{ServerURL: srv.URL, Auth: cliconfig.AuthBlock{Token: "tok"}}
+	cfg := cliconfig.Config{ServerURL: srv.URL, Token: "tok"}
 	if _, err := httpDispatch(cfg, "ping", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestHTTPDispatch_PartialEnvOnlyStampsPresent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := cliconfig.Config{ServerURL: srv.URL, Auth: cliconfig.AuthBlock{Token: "tok"}}
+	cfg := cliconfig.Config{ServerURL: srv.URL, Token: "tok"}
 	if _, err := httpDispatch(cfg, "ping", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}

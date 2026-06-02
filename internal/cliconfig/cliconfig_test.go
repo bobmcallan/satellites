@@ -9,19 +9,23 @@ import (
 
 func TestLoad_ExplicitPath(t *testing.T) {
 	dir := t.TempDir()
+	// Isolate the credential store under a temp XDG dir.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+
 	path := filepath.Join(dir, "satellites.toml")
 	body := `server_url = "https://example.com"
+project_id = "proj_x"
 repo_path = "."
 worktree_root = "./.satellites/worktree"
 log_path = "./.satellites/logs"
 branch_template = "client-{task_id}"
-
-[auth]
-token = "sk_test_abc123"
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
+	// Before `satellites auth`: non-secret config parses, but no token is
+	// resolved (the TOML carries no secret), so the client is not configured.
 	cfg, got, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -32,11 +36,27 @@ token = "sk_test_abc123"
 	if cfg.ServerURL != "https://example.com" {
 		t.Errorf("server_url = %q", cfg.ServerURL)
 	}
-	if cfg.Auth.Token != "sk_test_abc123" {
-		t.Errorf("auth.token = %q", cfg.Auth.Token)
+	if cfg.Token != "" {
+		t.Errorf("token should be empty before auth, got %q", cfg.Token)
+	}
+	if cfg.IsConfigured() {
+		t.Error("IsConfigured should be false without a stored credential")
+	}
+
+	// After `satellites auth` stores a credential for this server, Load
+	// resolves the token from the credential store.
+	if err := SaveCredential(Credential{ServerURL: "https://example.com", Token: "sk_test_abc123", Role: "executor"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load after auth: %v", err)
+	}
+	if cfg.Token != "sk_test_abc123" {
+		t.Errorf("resolved token = %q", cfg.Token)
 	}
 	if !cfg.IsConfigured() {
-		t.Error("IsConfigured should be true")
+		t.Error("IsConfigured should be true once a credential is stored")
 	}
 }
 
@@ -53,10 +73,9 @@ func TestLoad_Missing(t *testing.T) {
 
 func TestLoad_EnvOverride(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	path := filepath.Join(dir, "alt.toml")
 	body := `server_url = "https://env.example"
-[auth]
-token = "sk_env"
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -82,9 +101,9 @@ func TestIsConfigured(t *testing.T) {
 	}{
 		{"empty", Config{}, false},
 		{"url only", Config{ServerURL: "x"}, false},
-		{"token only", Config{Auth: AuthBlock{Token: "x"}}, false},
-		{"both", Config{ServerURL: "x", Auth: AuthBlock{Token: "y"}}, true},
-		{"whitespace url", Config{ServerURL: "  ", Auth: AuthBlock{Token: "y"}}, false},
+		{"token only", Config{Token: "x"}, false},
+		{"both", Config{ServerURL: "x", Token: "y"}, true},
+		{"whitespace url", Config{ServerURL: "  ", Token: "y"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

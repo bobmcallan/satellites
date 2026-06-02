@@ -1,7 +1,8 @@
 // Package cliconfig loads the satellites CLI's TOML config file
-// (typically ./.satellites/satellites.toml). The schema mirrors the
-// install schema markdown's `default_config` block plus an `[auth]`
-// section carrying the api-key the CLI presents on every server call.
+// (typically ./.satellites/satellites.toml), which holds NON-secret
+// config only. The api-key the CLI presents is resolved separately from
+// the user-level credential store (credstore.go), provisioned by
+// `satellites auth` — it is never stored in the repo-committed TOML.
 //
 // Resolution order for the path:
 //
@@ -24,22 +25,22 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the on-disk shape persisted at .satellites/satellites.toml.
-// Keys mirror the install schema's `default_config` block plus a
-// dedicated [auth] section for the api-key.
+// Config is the on-disk shape persisted at .satellites/satellites.toml,
+// holding NON-secret config only. The api-key is no longer stored here —
+// it lives in the user-level credential store (credstore.go), resolved
+// onto Token at Load time keyed by ServerURL.
 type Config struct {
-	ServerURL      string    `toml:"server_url"`
-	ProjectID      string    `toml:"project_id"`
-	RepoPath       string    `toml:"repo_path"`
-	WorktreeRoot   string    `toml:"worktree_root"`
-	LogPath        string    `toml:"log_path"`
-	BranchTemplate string    `toml:"branch_template"`
-	Auth           AuthBlock `toml:"auth"`
-}
+	ServerURL      string `toml:"server_url"`
+	ProjectID      string `toml:"project_id"`
+	RepoPath       string `toml:"repo_path"`
+	WorktreeRoot   string `toml:"worktree_root"`
+	LogPath        string `toml:"log_path"`
+	BranchTemplate string `toml:"branch_template"`
 
-// AuthBlock carries the api-key the CLI sends on every server call.
-type AuthBlock struct {
-	Token string `toml:"token"`
+	// Token is the executor api-key presented on every server call.
+	// Resolved at Load from the credential store (NOT the TOML), so it
+	// is never a repo-committed secret. Empty until `satellites auth`.
+	Token string `toml:"-"`
 }
 
 // IsConfigured reports whether the config carries enough to talk to a
@@ -47,7 +48,7 @@ type AuthBlock struct {
 // whether to dispatch verbs remotely (HTTP) or fall back to the
 // in-process registry.
 func (c Config) IsConfigured() bool {
-	return strings.TrimSpace(c.ServerURL) != "" && strings.TrimSpace(c.Auth.Token) != ""
+	return strings.TrimSpace(c.ServerURL) != "" && strings.TrimSpace(c.Token) != ""
 }
 
 // Load returns the resolved Config. An empty explicitPath triggers the
@@ -69,6 +70,13 @@ func Load(explicitPath string) (Config, string, error) {
 	var cfg Config
 	if _, err := toml.Decode(string(b), &cfg); err != nil {
 		return Config{}, path, fmt.Errorf("cliconfig: parse %s: %w", path, err)
+	}
+	// Resolve the bearer from the user-level credential store keyed by
+	// server_url (provisioned by `satellites auth`). A missing credential
+	// is not an error — Token stays empty and IsConfigured reports false,
+	// so the caller falls back to in-process dispatch.
+	if cred, err := LoadCredential(cfg.ServerURL); err == nil {
+		cfg.Token = cred.Token
 	}
 	return cfg, path, nil
 }

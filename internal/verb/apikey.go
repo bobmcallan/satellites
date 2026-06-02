@@ -207,6 +207,15 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 // normalizeAPIKeyRole resolves the requested role and enforces the
 // admin-gate for reviewer minting. Empty input defaults to executor —
 // the bootstrap path and pre-role callers continue to work unchanged.
+//
+// NOTE: the gate keys on the caller's USER role (admin), not the api-key
+// role. That is a known hole (an agent under the operator's admin user
+// can mint a reviewer key via an executor key — vire 2026-06-02). Closing
+// it MUST land together with a replacement reviewer-authority path, because
+// `satellites story review` itself mints its reviewer key through this verb
+// under the operator's (executor) key (cmd_story_review.go mintReviewerKey).
+// Tightening here without that replacement breaks the legitimate gate. See
+// story:sty_63d57099 (per-transition reviewer consent).
 func normalizeAPIKeyRole(requested string, caller *auth.User) (auth.APIKeyRole, error) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "", string(auth.APIKeyRoleExecutor):

@@ -38,18 +38,19 @@ var correlationEnvHeaders = [...]struct {
 }
 
 // httpDispatch sends a verb call to a remote satellites-server over
-// POST /api/v1/exec/<name>. The api-key in cfg.Auth.Token authenticates
-// against the server's standard bearer middleware.
+// POST /api/v1/exec/<name>. The api-key in cfg.Token — resolved from the
+// user-level credential store (provisioned by `satellites auth`) —
+// authenticates against the server's standard bearer middleware.
 //
 // Used by cmd_exec.go when cliconfig.IsConfigured(). When the config
 // file is absent or incomplete, cmd_exec.go falls back to
 // verb.Dispatch (the in-process registry).
 func httpDispatch(cfg cliconfig.Config, name string, req json.RawMessage) (json.RawMessage, error) {
-	return httpDispatchWithToken(cfg, name, req, cfg.Auth.Token)
+	return httpDispatchWithToken(cfg, name, req, cfg.Token)
 }
 
 // httpDispatchWithToken is httpDispatch with an explicit bearer token,
-// overriding cfg.Auth.Token. The reviewer gate uses this to send its
+// overriding cfg.Token. The reviewer gate uses this to send its
 // spine writes (review_*, status_transition) and the status patch under
 // a minted reviewer key while the operator's stored key stays executor
 // (sty_e16f0553). The server URL + correlation headers come from cfg as
@@ -60,7 +61,7 @@ func httpDispatchWithToken(cfg cliconfig.Config, name string, req json.RawMessag
 		return nil, fmt.Errorf("cli: server_url missing in config")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("cli: auth.token missing in config")
+		return nil, fmt.Errorf("cli: no api-key — run 'satellites auth' to authenticate")
 	}
 	if strings.ContainsAny(name, "/?#") {
 		return nil, fmt.Errorf("cli: invalid verb name %q", name)
@@ -95,7 +96,7 @@ func httpDispatchWithToken(cfg cliconfig.Config, name string, req json.RawMessag
 		return nil, fmt.Errorf("cli: read response: %w", err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("cli: 401 unauthorized — check auth.token in %s", configHintPath())
+		return nil, fmt.Errorf("cli: 401 unauthorized — run 'satellites auth' to (re)authenticate")
 	}
 	if resp.StatusCode >= 400 {
 		var errEnv struct {
@@ -108,9 +109,3 @@ func httpDispatchWithToken(cfg cliconfig.Config, name string, req json.RawMessag
 	}
 	return json.RawMessage(respBody), nil
 }
-
-// configHintPath is best-effort prose used in error messages — tells
-// the operator where the config that owns the bearer probably lives.
-// Doesn't try to be authoritative; we just want a starting point for
-// the human reading the error.
-func configHintPath() string { return ".satellites/satellites.toml" }

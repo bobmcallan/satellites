@@ -13,10 +13,14 @@ load-context:
 
 - `default_config.project_id` — caller-resolved in load-context
   Step 4 (`project_match`).
-- `default_config.auth.token` — filled by the `auth_bootstrap` flow.
 
-The CLI is read-only against `target_config_path`. The agent is the
-sole writer of that file (load-context Step 3).
+The CLI no longer carries its api-key in `target_config_path` — the
+TOML holds NON-secret config only. A shell-capable client provisions
+its executor api-key by running `satellites auth` (browser login),
+which stores the key in the user-level credential store
+(`$XDG_CONFIG_HOME/satellites/credentials.toml`, mode 0600), keyed by
+`server_url`. An MCP-only client that cannot shell out still mints
+in-band via the `auth_bootstrap.mcp_only` fallback below.
 
 ## Schema
 
@@ -30,12 +34,15 @@ default_config:
   worktree_root: ./.satellites/worktree
   log_path: ./.satellites/logs
   branch_template: client-{task_id}-from-{base_sha}
-  auth:
-    token: ""
 auth_bootstrap:
-  kind: mcp_mint
-  verb: apikey_create
-  env_hint: SATELLITES_TOKEN
+  # Shell-capable clients: run `satellites auth` (browser login). The CLI
+  # stores an executor key in the user-level credential store — never the TOML.
+  kind: auth_login
+  command: satellites auth
+  # MCP-only clients that cannot shell out fall back to minting in-band:
+  mcp_only:
+    kind: mcp_mint
+    verb: apikey_create
 install:
   cli_version:  "{{cli_version}}"
   download_url: https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}
@@ -54,10 +61,9 @@ install:
 | `default_config.worktree_root`   | TOML `worktree_root` — where per-task worktrees materialise.                                                       |
 | `default_config.log_path`        | TOML `log_path` — CLI + per-task log destination.                                                                  |
 | `default_config.branch_template` | TOML `branch_template` — git branch name template. The inner `{task_id}` / `{base_sha}` are CLI-time substitutions, not server-side. |
-| `default_config.auth.token`      | TOML `[auth].token` — the api-key the CLI presents on every server call. Empty until `auth_bootstrap` completes.   |
-| `auth_bootstrap.kind`            | Auth flow to run after install. `mcp_mint` = MCP caller dispatches the named verb on its already-authenticated session to mint a project-scoped api-key; no shell-out required. |
-| `auth_bootstrap.verb`            | Substrate verb dispatched under `kind=mcp_mint` — `apikey_create`. See the load-context bootstrap step.            |
-| `auth_bootstrap.env_hint`        | Env-var name carrying the bearer when callers prefer to inject it via environment rather than the TOML.            |
+| `auth_bootstrap.kind`            | Auth flow to run after install. `auth_login` = run `satellites auth` (browser login); the CLI stores an executor key in the user-level credential store (`$XDG_CONFIG_HOME/satellites/credentials.toml`, 0600). The api-key is NOT written to the TOML. |
+| `auth_bootstrap.command`         | The shell command a shell-capable client runs — `satellites auth`.                                                |
+| `auth_bootstrap.mcp_only`        | Fallback for MCP-only clients that cannot shell out: `kind: mcp_mint` dispatches `apikey_create` on the already-authenticated MCP session to mint a project-scoped key. |
 | `install.cli_version`            | The CLI release this schema points at. Server-rendered from `{{cli_version}}`.                                     |
 | `install.download_url`           | URL to fetch the CLI binary from. Server-rendered with `{{cli_version}}`, `{{os}}`, `{{arch}}`.                    |
 | `install.sha256_url`             | Matching sha256 manifest URL. Server-rendered.                                                                     |
