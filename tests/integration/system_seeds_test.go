@@ -38,7 +38,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get system_seed: %v", err)
 		}
-		if got.Body != body || got.EmbeddedHash != document.HashBody(body) {
+		if got.Body != body || got.EmbeddedHash != document.HashBodyAndTags(body, nil) {
 			t.Fatalf("system_seeds row mismatch: %+v", got)
 		}
 		mirror, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: name}, document.GetOptions{})
@@ -104,7 +104,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get after: %v", err)
 		}
-		if after.EmbeddedHash != document.HashBody(body) {
+		if after.EmbeddedHash != document.HashBodyAndTags(body, nil) {
 			t.Fatalf("hash not restored: %q", after.EmbeddedHash)
 		}
 		if !after.AppliedAt.After(before.AppliedAt) {
@@ -122,6 +122,62 @@ func TestSystemSeedReconcile(t *testing.T) {
 			t.Fatalf("expected one document version (body unchanged), got %d", len(mirror.Versions))
 		}
 	})
+}
+
+// TestPruneSystemSeeds covers sty_a1a74121 AC4: seed two artifacts, drop one
+// from the embed set (the keep map), prune, and assert the dropped one is
+// pruned (registry row gone + mirror tombstoned) while the kept one remains.
+// A second prune is a no-op (idempotent across reboots).
+func TestPruneSystemSeeds(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	docs := document.New(env.DB)
+	sys := document.NewSystemSeedStore(env.DB)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+
+	for _, n := range []string{"alpha", "beta"} {
+		if _, err := document.ReconcileSystemSeed(ctx, sys, docs, n, "body of "+n, nil, "system:seed", now); err != nil {
+			t.Fatalf("seed %s: %v", n, err)
+		}
+	}
+
+	// beta's embed file is "removed": keep only alpha.
+	keep := map[string]bool{"alpha": true}
+	pruned, err := document.PruneSystemSeeds(ctx, sys, docs, keep, "system:prune", now)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != "beta" {
+		t.Fatalf("pruned = %v; want [beta]", pruned)
+	}
+
+	// beta is gone: registry row removed, mirror documents row tombstoned
+	// (default Get excludes tombstones).
+	if _, err := sys.Get(ctx, "beta"); !errors.Is(err, document.ErrNotFound) {
+		t.Fatalf("beta system_seeds row still present: %v", err)
+	}
+	if _, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: "beta"}, document.GetOptions{}); !errors.Is(err, document.ErrNotFound) {
+		t.Fatalf("beta mirror not tombstoned: %v", err)
+	}
+
+	// alpha is untouched.
+	if _, err := sys.Get(ctx, "alpha"); err != nil {
+		t.Fatalf("alpha system_seeds row missing: %v", err)
+	}
+	if _, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: "alpha"}, document.GetOptions{}); err != nil {
+		t.Fatalf("alpha mirror missing: %v", err)
+	}
+
+	// Idempotent: a second prune with the same keep set removes nothing.
+	again, err := document.PruneSystemSeeds(ctx, sys, docs, keep, "system:prune", now)
+	if err != nil {
+		t.Fatalf("second prune: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("second prune removed %v; want none", again)
+	}
 }
 
 // TestSystemSeedStore_GetMissing confirms ErrNotFound semantics — the

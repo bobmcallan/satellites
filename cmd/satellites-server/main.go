@@ -121,6 +121,10 @@ func main() {
 		docFilenames = append(docFilenames, e.Name())
 	}
 	sort.Strings(docFilenames)
+	// keep collects every embedded artifact's resolved name so the prune
+	// pass (after the loop) can remove system_seeds rows whose embed file
+	// was retired — making removal symmetrical with addition (sty_a1a74121).
+	keep := make(map[string]bool, len(docFilenames))
 	for _, filename := range docFilenames {
 		raw, err := fs.ReadFile(documents.FS, filename)
 		if err != nil {
@@ -157,6 +161,7 @@ func main() {
 		} else {
 			storedBody = string(body)
 		}
+		keep[name] = true
 		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, storedBody, fm.Tags, "system:seed", time.Now().UTC())
 		if err != nil {
 			arbor.Fatal("reconcile system seed", "name", name, "err", err)
@@ -170,7 +175,18 @@ func main() {
 			arbor.Info("system seed unchanged", "name", name)
 		}
 	}
-	arbor.Info("system seeds reconciled")
+	// Prune: a system_seeds row whose embed file was removed is retired here,
+	// the mirror of the upsert above — so a removed artifact propagates as a
+	// removed row on the next deploy instead of lingering immortal
+	// (sty_a1a74121). Scoped to system_seeds-tracked names only.
+	pruned, err := document.PruneSystemSeeds(context.Background(), sysSeedStore, docStore, keep, "system:prune", time.Now().UTC())
+	if err != nil {
+		arbor.Fatal("prune retired system seeds", "err", err)
+	}
+	for _, name := range pruned {
+		arbor.Info("system seed pruned (embed removed)", "name", name)
+	}
+	arbor.Info("system seeds reconciled", "pruned", len(pruned))
 
 	// Reviewer registry — load every type:"skill" row tagged
 	// `kind:reviewer` from the documents store (the reconciler seeded

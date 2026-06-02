@@ -94,6 +94,60 @@ func (s *SystemSeedStore) upsert(ctx context.Context, name, body, hash string, n
 	return out, nil
 }
 
+// delete removes a system_seeds registry row by name. Unexported — the
+// boot prune is the only legitimate caller, reached via PruneSystemSeeds.
+// Deleting an absent name is a no-op (idempotent across reboots).
+func (s *SystemSeedStore) delete(ctx context.Context, name string) error {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM system_seeds WHERE name = $1`, name); err != nil {
+		return fmt.Errorf("system_seed: delete %q: %w", name, err)
+	}
+	return nil
+}
+
+// PruneSystemSeeds removes the system rows the seed registry owns whose
+// name is no longer in the embed set. It is the mirror of the boot upsert
+// loop: an embedded artifact that was removed from the binary propagates
+// as a removed row on the next deploy (sty_a1a74121).
+//
+// `keep` is the set of names reconciled this boot (every embedded
+// artifact's resolved name). For each system_seeds row whose name is NOT
+// in keep, the row's mirrored system documents row is soft-deleted
+// (tombstoned, via the internal-seed path that bypasses the system
+// read-only guard) and the registry row is dropped. The prune is scoped
+// strictly to names tracked in system_seeds, so nothing outside the
+// embed-managed set is ever touched.
+//
+// Idempotent: once pruned, the name is absent from system_seeds, so a
+// later boot does not see it again. An already-tombstoned or absent
+// mirror document is tolerated. Returns the pruned names (sorted) for
+// boot logging.
+func PruneSystemSeeds(ctx context.Context, sys *SystemSeedStore, docs *Store, keep map[string]bool, deletedBy string, now time.Time) ([]string, error) {
+	rows, err := sys.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var pruned []string
+	for _, r := range rows {
+		if keep[r.Name] {
+			continue
+		}
+		// Tombstone the mirrored documents row. viaInternalSeed=true is the
+		// boot path that bypasses the system-scope read-only guard the verb
+		// layer enforces. An absent/already-tombstoned mirror is fine — the
+		// goal is the row's absence, which a prior prune may already have
+		// achieved.
+		if _, _, dErr := docs.Delete(ctx, Key{Scope: ScopeSystem, Name: r.Name}, deletedBy, true, now); dErr != nil && !errors.Is(dErr, ErrNotFound) {
+			return pruned, fmt.Errorf("system_seed: prune mirror %q: %w", r.Name, dErr)
+		}
+		if dErr := sys.delete(ctx, r.Name); dErr != nil {
+			return pruned, dErr
+		}
+		pruned = append(pruned, r.Name)
+	}
+	sort.Strings(pruned)
+	return pruned, nil
+}
+
 // HashBody returns the canonical sha256-hex of the seed body bytes.
 // Hex is used (not raw bytes) so the column stays human-comparable in
 // psql diagnostics.
