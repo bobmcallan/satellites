@@ -82,3 +82,11 @@ workspace/project scope; system variables are platform-owned and
 cannot be set via the verb) and re-fetch the document. Do not
 invent a value in agent code — a missing variable is a configuration
 gap to fill in the bootstrap process, not a runtime fallback.
+
+## Process baseline
+
+A freshly-installed project needs no hand-authored workflow or gate
+skills: it inherits the system baseline reviewer process via the scope
+cascade, so `satellites story review` runs out of the box. Read
+`document_get {name:"baseline-reviewer-process", scope:"system"}` for how a
+project inherits the baseline and overrides only what it wants to differ.
