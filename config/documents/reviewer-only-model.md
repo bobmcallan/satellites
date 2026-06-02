@@ -22,6 +22,21 @@ The split is structural, not etiquette: the api-key role gate refuses a status
 transition from an executor key. The agent cannot self-advance; the reviewer
 does not do the work. Neither role can take the other's move.
 
+## Authority is not yours to take
+
+The structural gate is the floor, not the whole rule. The executor drives a
+story to `done` by *requesting* review — never by acquiring the authority to
+advance it. Do not read, reuse, or mint a credential to change a status; do not
+relabel a story to dodge a gate; do not patch a status by any path the role gate
+left open. If a gate will not pass, the work is not done — surface the gap, do
+not route around it.
+
+A control you *could* slip is still a line you do not cross. The reviewer
+boundary holds because the executor will not breach it, not only because a check
+blocks it — the two together are the model. An agent that goes looking for a way
+to advance its own story has understood the goal and chosen the one move it is
+forbidden.
+
 ## Process is skills
 
 The states a story moves through, their order, and which transitions a reviewer
