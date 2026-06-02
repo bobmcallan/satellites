@@ -27,6 +27,23 @@ import (
 // story:<id> have no slug and never match.
 var rottingRefPattern = regexp.MustCompile(`\b[a-z]{2,5}_[0-9a-f]{6,}\b`)
 
+// reviewExemptTag, present in an artifact's frontmatter tags, exempts it from
+// the strict drift-ref check — for artifacts whose PURPOSE is to carry concrete
+// ids (a technical-debt register maps tests to owning story ids) or that
+// document the id pattern itself. Declared in the artifact (config-over-code),
+// not passed per-invocation like --skip-review.
+const reviewExemptTag = "content-review:allow-refs"
+
+// hasReviewExemptTag reports whether the artifact opted out of the drift check.
+func hasReviewExemptTag(tags []string) bool {
+	for _, t := range tags {
+		if t == reviewExemptTag {
+			return true
+		}
+	}
+	return false
+}
+
 // reviewFinding is one strict-check violation.
 type reviewFinding struct {
 	Line int

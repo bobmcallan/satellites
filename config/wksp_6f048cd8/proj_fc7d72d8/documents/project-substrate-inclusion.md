@@ -60,7 +60,7 @@ document:satellites_mcp_reference_skill_sync.
 ### Ownership: the sync stamp is the key, the `satellites-` prefix is the human marker
 
 `satellites skill sync` materialises a skill with an injected identity
-stamp (`document_id` / `version` / `hash`, story:sty_4b517016). A skill
+stamp (`document_id` / `version` / `hash`). A skill
 in `.claude/skills/` is **project-owned** when it carries that stamp or
 has a `config/.../skills/` source. A skill with neither is
 operator-authored — out of substrate, never touched by sync or upload.

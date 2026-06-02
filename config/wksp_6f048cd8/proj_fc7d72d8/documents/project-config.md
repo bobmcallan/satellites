@@ -3,7 +3,7 @@
 # Residual project-scoped settings that have no natural skill home.
 # Body is YAML inside a markdown fence so humans can annotate outside it.
 #
-# NOTE (sty_815c09e7): workflow dispatch is NOT here. Which workflow a story
+# NOTE: workflow dispatch is NOT here. Which workflow a story
 # type uses is the dynamic skill index — the kind:workflow skill whose
 # `applies_to` contains the story type (`satellites skill index`). The
 # `story_types` mapping that used to live here is retired; `applies_to` is the

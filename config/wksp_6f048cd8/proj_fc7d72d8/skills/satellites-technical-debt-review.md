@@ -3,7 +3,7 @@ name: satellites-technical-debt-review
 type: skill
 kind: capability
 when: pre-commit
-tags: [kind:capability]
+tags: [kind:capability, content-review:allow-refs]
 description: The technical-debt pre-commit gate (broken-windows enforcement). Run before every commit — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. The commit-push routine names it; at commit the tree must be clean OR its debt must be a story.
 ---
 

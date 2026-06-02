@@ -1,7 +1,7 @@
 ---
 name: technical-debt-register
 type: document
-tags: [tech-debt-register]
+tags: [tech-debt-register, content-review:allow-refs]
 ---
 
 # Technical-debt register
