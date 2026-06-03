@@ -51,7 +51,7 @@ not name) or an *unowned* register row. Do not commit. Resolve it:
 - **Or file it** — when the failure genuinely cannot be fixed in this change:
   1. Create a tracking story (`document_upsert` type:story) that names the
      failing check and what must be done.
-  2. Add an **owned** row to `config/<wksp>/<proj>/documents/technical-debt-register.md`:
+  2. Add an **owned** row to `.satellites/documents/technical-debt-register.md`:
      `| <check_id> | <story_id> | <reason> |`. Every row MUST name its story —
      an unowned row blocks.
   3. `satellites document upload`, then re-run the gate. The now-registered red

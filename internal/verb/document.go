@@ -709,6 +709,24 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 			return nil, fmt.Errorf("document_upsert: %w: user scope requires a caller identity", ErrBadRequest)
 		}
 	}
+	// Project scope binds to a workspace, but the client no longer authors the
+	// workspace_id — repo-local substrate carries only project_id (resolved
+	// from .satellites/satellites.toml). When omitted, derive it from the
+	// project row, mirroring createStory. Backward-compatible: an explicit
+	// workspace_id (the pre-relocation path-encoded form) is left untouched.
+	if scope == document.ScopeProject && strings.TrimSpace(key.WorkspaceID) == "" {
+		if strings.TrimSpace(key.ProjectID) == "" {
+			return nil, fmt.Errorf("document_upsert: %w: project scope requires project_id", ErrBadRequest)
+		}
+		if projectStore == nil {
+			return nil, fmt.Errorf("document_upsert: project store not configured")
+		}
+		p, err := projectStore.GetByID(ctx, key.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("document_upsert: resolve workspace: %w", err)
+		}
+		key.WorkspaceID = p.WorkspaceID
+	}
 	if err := authorizeWrite(ctx, key); err != nil {
 		return nil, err
 	}

@@ -2,7 +2,7 @@
 // (sty_be65b4dd).
 //
 // deploy is PULL-ONLY: it reconciles .claude/skills/ against this repo's
-// project scope by identity stamp. The push half (config/ → substrate via
+// project scope by identity stamp. The push half (.satellites/ → substrate via
 // document/skill/principle upload) is a separate client verb the agent
 // invokes deliberately as a prompt — it is NOT coupled into deploy, so an
 // agent session that runs deploy never uploads anything (operator decision
@@ -39,7 +39,7 @@ func init() {
 		Short: "Pull the substrate's project skills into .claude/skills (stamp-reconciled, pull-only)",
 		Long: `deploy reconciles .claude/skills/ against this repo's project scope in
 the substrate (install/update/remove by identity stamp; never clobbering a
-locally-edited or operator-authored skill). It is pull-only: pushing config/
+locally-edited or operator-authored skill). It is pull-only: pushing .satellites/
 sources up is a separate client verb (document/skill/principle upload) invoked
 deliberately, not coupled into deploy. Composes existing verbs — no new MCP
 surface.`,

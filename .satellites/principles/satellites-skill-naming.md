@@ -26,7 +26,7 @@ fact — the substrate owns this skill — at two layers.
   permitted exception — workflow skills are named `satellites-<type>-workflow`
   like every other substrate skill.
 
-The **source** name (`config/<wksp>/<proj>/skills/<name>.md`) need not carry the
+The **source** name (`.satellites/skills/<name>.md`) need not carry the
 prefix — the local prefix is ensured when the skill is materialised. The stamp
 keys the reconcile; the prefix marks ownership for a human reader.
 

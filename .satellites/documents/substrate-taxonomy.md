@@ -26,9 +26,9 @@ is never a per-session judgement. This is the *placement test*;
 
 | Kind | Source | Delivered as |
 |---|---|---|
-| Skill | `config/<wksp>/<proj>/skills/<name>.md` (system: `config/documents/`) | `.claude/skills/satellites-<name>/SKILL.md`, synced |
-| Principle | `config/<wksp>/<proj>/principles/<name>.md` (system: `config/documents/`) | rides along on reads via the `principles:*` tag |
-| Document | `config/<wksp>/<proj>/documents/<name>.md` (system: `config/documents/`) | fetched on demand: `document_get name=<name>` |
+| Skill | `.satellites/skills/<name>.md` (system: `config/documents/`) | `.claude/skills/satellites-<name>/SKILL.md`, synced |
+| Principle | `.satellites/principles/<name>.md` (system: `config/documents/`) | rides along on reads via the `principles:*` tag |
+| Document | `.satellites/documents/<name>.md` (system: `config/documents/`) | fetched on demand: `document_get name=<name>` |
 
 Ride-along is a **tag** (`principles:*`), not a kind: a document may carry it to
 ride along, but a document's default is consult-on-demand.

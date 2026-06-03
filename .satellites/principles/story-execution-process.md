@@ -49,7 +49,7 @@ touched). Until it runs, the local skill files are stale and the next gate
 run executes against old reviewers and workflow — the same stale-source
 failure mode that skipping `/commit-push` causes for code.
 
-(Editing a skill is therefore: edit the `config/<wksp>/<proj>/skills/`
+(Editing a skill is therefore: edit the `.satellites/skills/`
 source → `satellites skill upload` → `satellites skill sync`. The
 `satellites-init` bootstrap wraps this for first-run setup.)
 

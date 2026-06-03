@@ -9,6 +9,11 @@ import (
 	"testing"
 )
 
+// testProjectID is the repo project_id the upload path now resolves from
+// satellites.toml (sty_afc0769c). Tests pass it directly to planUpload /
+// validateUpload in place of the retired path-encoded identity.
+const testProjectID = "proj_test"
+
 // writeSource creates rootDir/<relPath> with content, making parents.
 func writeSource(t *testing.T, rootDir, relPath, content string) {
 	t.Helper()
@@ -21,24 +26,21 @@ func writeSource(t *testing.T, rootDir, relPath, content string) {
 	}
 }
 
-func TestPlanUpload_PathDerivedIdentity(t *testing.T) {
+// TestPlanUpload_FlatProjectScope pins sty_afc0769c: the walker reads
+// .satellites/<kind>/<name>.md (flat), every target is project-scoped with
+// the repo project_id, and a frontmatter name override is honoured.
+func TestPlanUpload_FlatProjectScope(t *testing.T) {
 	root := t.TempDir()
-	// Workspace-scope document: config/<wksp>/documents/<name>.md
-	writeSource(t, root, "wksp_one/documents/ws-rule.md",
-		"---\ntags: [principles:workspace]\n---\n# WS body\n")
-	// Project-scope document with a frontmatter name override.
-	writeSource(t, root, "wksp_one/proj_one/documents/feature-rule.md",
+	writeSource(t, root, "documents/feature-rule.md",
 		"---\nname: overridden-name\ntags: [principles:project]\n---\n# PJ body\n")
-	// System seed subtree must be skipped entirely.
-	writeSource(t, root, "documents/seed.md",
-		"---\nscope: system\n---\n# system seed\n")
+	writeSource(t, root, "documents/ledger-spine.md",
+		"---\ntags: [area:substrate]\n---\n# spine\n")
 	// Non-md files are ignored.
-	writeSource(t, root, "wksp_one/proj_one/documents/notes.txt", "ignore")
-	// A skill in the same project must not surface for the documents kind.
-	writeSource(t, root, "wksp_one/proj_one/skills/a-skill.md",
-		"---\n---\n# skill body\n")
+	writeSource(t, root, "documents/notes.txt", "ignore")
+	// A skill in the same tree must not surface for the documents kind.
+	writeSource(t, root, "skills/a-skill.md", "---\n---\n# skill body\n")
 
-	targets, err := planUpload(root, "documents")
+	targets, err := planUpload(root, "documents", testProjectID)
 	if err != nil {
 		t.Fatalf("planUpload: %v", err)
 	}
@@ -49,28 +51,31 @@ func TestPlanUpload_PathDerivedIdentity(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"project/wksp_one/proj_one/overridden-name",
-		"workspace/wksp_one/ws-rule",
+		"project/proj_test/ledger-spine",
+		"project/proj_test/overridden-name",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("targets mismatch:\n got  %v\n want %v", got, want)
 	}
 
+	for _, tg := range targets {
+		if tg.ProjectID != testProjectID {
+			t.Errorf("%s ProjectID = %q, want %q", tg.Name, tg.ProjectID, testProjectID)
+		}
+	}
+
 	tagsBy := map[string][]string{}
 	for _, tg := range targets {
 		tagsBy[uploadLabel(tg)] = tg.Tags
 	}
-	if tags := tagsBy["workspace/wksp_one/ws-rule"]; !reflect.DeepEqual(tags, []string{"principles:workspace"}) {
-		t.Errorf("workspace tags = %v want [principles:workspace]", tags)
-	}
-	if tags := tagsBy["project/wksp_one/proj_one/overridden-name"]; !reflect.DeepEqual(tags, []string{"principles:project"}) {
+	if tags := tagsBy["project/proj_test/overridden-name"]; !reflect.DeepEqual(tags, []string{"principles:project"}) {
 		t.Errorf("project tags = %v want [principles:project]", tags)
 	}
 }
 
 func TestPlanUpload_MissingRoot(t *testing.T) {
-	targets, err := planUpload(filepath.Join(t.TempDir(), "does-not-exist"), "documents")
+	targets, err := planUpload(filepath.Join(t.TempDir(), "does-not-exist"), "documents", testProjectID)
 	if err != nil {
 		t.Fatalf("expected nil error for missing root, got %v", err)
 	}
@@ -81,14 +86,11 @@ func TestPlanUpload_MissingRoot(t *testing.T) {
 
 func TestPlanUpload_SkillKindFiltersAndType(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/my-skill.md",
-		"---\n---\n# body\n")
-	// A documents-kind file in the same project must be excluded when
-	// uploading the skills kind.
-	writeSource(t, root, "wksp_one/proj_one/documents/a-doc.md",
-		"---\n---\n# body\n")
+	writeSource(t, root, "skills/my-skill.md", "---\n---\n# body\n")
+	// A documents-kind file must be excluded when uploading the skills kind.
+	writeSource(t, root, "documents/a-doc.md", "---\n---\n# body\n")
 
-	targets, err := planUpload(root, "skills")
+	targets, err := planUpload(root, "skills", testProjectID)
 	if err != nil {
 		t.Fatalf("planUpload: %v", err)
 	}
@@ -105,9 +107,8 @@ func TestPlanUpload_SkillKindFiltersAndType(t *testing.T) {
 
 func TestPlanUpload_FrontmatterTypeOverridesDefault(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/doc.md",
-		"---\ntype: document\n---\n# body\n")
-	targets, err := planUpload(root, "skills")
+	writeSource(t, root, "skills/doc.md", "---\ntype: document\n---\n# body\n")
+	targets, err := planUpload(root, "skills", testProjectID)
 	if err != nil {
 		t.Fatalf("planUpload: %v", err)
 	}
@@ -125,11 +126,11 @@ func TestPlanUpload_SkillPreservesFrontmatterDocumentStrips(t *testing.T) {
 	root := t.TempDir()
 	skillSrc := "---\nname: my-skill\ndescription: does a thing\n---\n# Skill body\n"
 	docSrc := "---\nname: my-doc\ntags: [principles:project]\n---\n# Doc body\n"
-	writeSource(t, root, "wksp_one/proj_one/skills/my-skill.md", skillSrc)
-	writeSource(t, root, "wksp_one/proj_one/documents/my-doc.md", docSrc)
+	writeSource(t, root, "skills/my-skill.md", skillSrc)
+	writeSource(t, root, "documents/my-doc.md", docSrc)
 
 	// Skill: body keeps the authored frontmatter (name + description).
-	skills, err := planUpload(root, "skills")
+	skills, err := planUpload(root, "skills", testProjectID)
 	if err != nil {
 		t.Fatalf("planUpload skills: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestPlanUpload_SkillPreservesFrontmatterDocumentStrips(t *testing.T) {
 	}
 
 	// Document: frontmatter stripped from the stored body.
-	docs, err := planUpload(root, "documents")
+	docs, err := planUpload(root, "documents", testProjectID)
 	if err != nil {
 		t.Fatalf("planUpload documents: %v", err)
 	}
@@ -164,43 +165,47 @@ func TestPlanUpload_SkillPreservesFrontmatterDocumentStrips(t *testing.T) {
 	}
 }
 
-func TestPlanUpload_UnknownKindDirIsError(t *testing.T) {
+// TestPlanUpload_NestedFileSkipped pins sty_afc0769c AC3: the layout is flat,
+// so a file nested below the kind dir (the retired <wksp>/<proj> shape, or any
+// other subdir) is not dispatched.
+func TestPlanUpload_NestedFileSkipped(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/widgets/x.md", "---\n---\n# body\n")
-	_, err := planUpload(root, "documents")
-	if err == nil || !strings.Contains(err.Error(), "unknown kind directory") {
-		t.Fatalf("expected unknown-kind error, got %v", err)
+	writeSource(t, root, "documents/flat.md", "---\n---\n# ok\n")
+	writeSource(t, root, "documents/wksp_one/proj_one/nested.md", "---\n---\n# nested\n")
+
+	targets, err := planUpload(root, "documents", testProjectID)
+	if err != nil {
+		t.Fatalf("planUpload: %v", err)
+	}
+	if len(targets) != 1 || targets[0].Name != "flat" {
+		t.Fatalf("expected only the flat file, got %d targets: %v", len(targets), targets)
 	}
 }
 
-func TestPlanUpload_UnexpectedDepthIsError(t *testing.T) {
-	root := t.TempDir()
-	// Too shallow: config/<wksp>/<file>.md — no kind directory.
-	writeSource(t, root, "wksp_one/loose.md", "---\n---\n# body\n")
-	_, err := planUpload(root, "documents")
-	if err == nil || !strings.Contains(err.Error(), "unexpected source layout") {
-		t.Fatalf("expected layout error, got %v", err)
-	}
-}
-
-func TestMarshalUpsertRequest_TypePassthrough(t *testing.T) {
+func TestMarshalUpsertRequest_ProjectScopeNoWorkspace(t *testing.T) {
 	target := documentTarget{
-		Scope:       "workspace",
-		WorkspaceID: "wksp_one",
-		Name:        "my-skill",
-		Type:        "skill",
-		Body:        "# body",
-		Tags:        []string{"kind:test"},
+		ProjectID: testProjectID,
+		Name:      "my-skill",
+		Type:      "skill",
+		Body:      "# body",
+		Tags:      []string{"kind:test"},
 	}
 	raw, err := marshalUpsertRequest(target)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(raw), `"type":"skill"`) {
-		t.Errorf("payload missing type:\"skill\": %s", raw)
+	s := string(raw)
+	if !strings.Contains(s, `"type":"skill"`) {
+		t.Errorf("payload missing type:\"skill\": %s", s)
 	}
-	if !strings.Contains(string(raw), `"workspace_id":"wksp_one"`) {
-		t.Errorf("payload missing workspace_id: %s", raw)
+	if !strings.Contains(s, `"scope":"project"`) {
+		t.Errorf("payload missing scope:\"project\": %s", s)
+	}
+	if !strings.Contains(s, `"project_id":"proj_test"`) {
+		t.Errorf("payload missing project_id: %s", s)
+	}
+	if strings.Contains(s, "workspace_id") {
+		t.Errorf("payload must NOT carry workspace_id (server derives it): %s", s)
 	}
 }
 
@@ -239,20 +244,20 @@ func rulesByPath(vs []violation) map[string][]string {
 }
 
 // TestValidateUpload_CleanTreePasses pins sty_50ecb56f AC1/AC5: a well-formed
-// config tree — a skill with name+description, a document, a principle —
-// yields no violations.
+// tree — a skill with name+description, a document, a principle — yields no
+// violations.
 func TestValidateUpload_CleanTreePasses(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/feature-workflow.md",
+	writeSource(t, root, "skills/feature-workflow.md",
 		"---\nname: feature-workflow\ndescription: the feature lifecycle\nkind: workflow\napplies_to: [feature]\n---\n# wf\n")
-	writeSource(t, root, "wksp_one/proj_one/skills/satellites-story-done-review.md",
+	writeSource(t, root, "skills/satellites-story-done-review.md",
 		"---\nname: satellites-story-done-review\ndescription: done gate\nkind: gate\nwhen: status==in_progress\n---\n# gate\n")
-	writeSource(t, root, "wksp_one/proj_one/documents/project-config.md",
-		"---\nname: project-config\n---\n# cfg\n")
-	writeSource(t, root, "wksp_one/proj_one/principles/agent-goals.md",
+	writeSource(t, root, "documents/project-config.md",
+		"---\nname: project-config\nscope: project\n---\n# cfg\n")
+	writeSource(t, root, "principles/agent-goals.md",
 		"---\ntags: [principles:project]\n---\n# goals\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "no-claude-skills"))
+	vs, err := validateUpload(root, filepath.Join(root, "no-claude-skills"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -266,12 +271,12 @@ func TestValidateUpload_CleanTreePasses(t *testing.T) {
 // rejected — naming file + rule.
 func TestValidateUpload_TypeMismatches(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/mislabeled.md",
+	writeSource(t, root, "skills/mislabeled.md",
 		"---\nname: mislabeled\ndescription: d\ntype: document\n---\n# x\n")
-	writeSource(t, root, "wksp_one/proj_one/documents/pretender.md",
+	writeSource(t, root, "documents/pretender.md",
 		"---\nname: pretender\ntype: skill\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -287,9 +292,9 @@ func TestValidateUpload_TypeMismatches(t *testing.T) {
 // name and description is rejected on both.
 func TestValidateUpload_SkillMissingFrontmatter(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/bare.md", "---\n---\n# body only\n")
+	writeSource(t, root, "skills/bare.md", "---\n---\n# body only\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -304,16 +309,16 @@ func TestValidateUpload_SkillMissingFrontmatter(t *testing.T) {
 // is clean of that rule.
 func TestValidateUpload_SkillDispatch(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/no-kind.md",
+	writeSource(t, root, "skills/no-kind.md",
 		"---\nname: no-kind\ndescription: d\n---\n# x\n")
-	writeSource(t, root, "wksp_one/proj_one/skills/bad-kind.md",
+	writeSource(t, root, "skills/bad-kind.md",
 		"---\nname: bad-kind\ndescription: d\nkind: widget\n---\n# x\n")
-	writeSource(t, root, "wksp_one/proj_one/skills/wf-no-applies.md",
+	writeSource(t, root, "skills/wf-no-applies.md",
 		"---\nname: wf-no-applies\ndescription: d\nkind: workflow\n---\n# x\n")
-	writeSource(t, root, "wksp_one/proj_one/skills/ok-gate.md",
+	writeSource(t, root, "skills/ok-gate.md",
 		"---\nname: ok-gate\ndescription: d\nkind: gate\nwhen: status==in_progress\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -331,34 +336,61 @@ func TestValidateUpload_SkillDispatch(t *testing.T) {
 	}
 }
 
-// TestValidateUpload_PathScopeMismatch pins AC2's path-consistency check:
-// frontmatter ids that disagree with the path segments are flagged.
-func TestValidateUpload_PathScopeMismatch(t *testing.T) {
+// TestValidateUpload_UnsupportedIdentity pins sty_afc0769c AC2/AC3: a
+// workspace scope, a workspace_id, and a mismatched project_id in frontmatter
+// are each rejected — the client authors only project scope under the repo's
+// own project_id.
+func TestValidateUpload_UnsupportedIdentity(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/documents/d.md",
-		"---\nname: d\nworkspace_id: wksp_OTHER\nproject_id: proj_one\n---\n# x\n")
+	writeSource(t, root, "documents/ws-scope.md",
+		"---\nname: ws-scope\nscope: workspace\n---\n# x\n")
+	writeSource(t, root, "documents/has-ws.md",
+		"---\nname: has-ws\nworkspace_id: wksp_OTHER\n---\n# x\n")
+	writeSource(t, root, "documents/wrong-proj.md",
+		"---\nname: wrong-proj\nproject_id: proj_OTHER\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"))
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
-	if !flagged(vs, "documents/d.md", "workspace-mismatch") {
-		t.Fatalf("workspace_id/path mismatch not flagged: %v", vs)
+	if !flagged(vs, "documents/ws-scope.md", "scope-unsupported") {
+		t.Errorf("workspace scope not flagged: %v", vs)
+	}
+	if !flagged(vs, "documents/has-ws.md", "workspace-unsupported") {
+		t.Errorf("workspace_id not flagged: %v", vs)
+	}
+	if !flagged(vs, "documents/wrong-proj.md", "project-mismatch") {
+		t.Errorf("mismatched project_id not flagged: %v", vs)
+	}
+}
+
+// TestValidateUpload_NestedLayoutRejected pins sty_afc0769c AC3: a file nested
+// below the kind dir (the retired <wksp>/<proj> shape) is flagged layout.
+func TestValidateUpload_NestedLayoutRejected(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "documents/wksp_one/proj_one/nested.md", "---\n---\n# x\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "nested.md", "layout") {
+		t.Fatalf("nested file not flagged layout: %v", vs)
 	}
 }
 
 // TestValidateUpload_OrphanStampedSkill pins AC3 drift: a stamped (sync-owned)
-// skill in .claude/skills with no config source is flagged, while a stamped
-// skill that DOES have a config source is not.
+// skill in .claude/skills with no source under .satellites/skills/ is flagged,
+// while a stamped skill that DOES have a source is not.
 func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 	root := t.TempDir()
 	skillsRoot := t.TempDir()
 
-	// config source exists for "kept" only.
-	writeSource(t, root, "wksp_one/proj_one/skills/kept.md",
+	// source exists for "kept" only.
+	writeSource(t, root, "skills/kept.md",
 		"---\nname: kept\ndescription: d\n---\n# kept\n")
 
-	// Two stamped local skills: "kept" (has config) and "orphan" (no config).
+	// Two stamped local skills: "kept" (has source) and "orphan" (no source).
 	if err := applySyncItem(skillsRoot, syncPlanItem{Name: "kept", Action: actionInstall,
 		Sub: &substrateSkill{Name: "kept", DocumentID: "doc_k", Version: 1, Body: "---\nname: kept\n---\n# k\n"}}); err != nil {
 		t.Fatalf("install kept: %v", err)
@@ -368,7 +400,7 @@ func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 		t.Fatalf("install orphan: %v", err)
 	}
 
-	vs, err := validateUpload(root, skillsRoot)
+	vs, err := validateUpload(root, skillsRoot, testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -376,7 +408,7 @@ func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 		t.Errorf("orphan stamped skill not flagged: %v", vs)
 	}
 	if flagged(vs, "/kept", "orphan-skill") {
-		t.Errorf("config-sourced stamped skill wrongly flagged as orphan: %v", vs)
+		t.Errorf("source-backed stamped skill wrongly flagged as orphan: %v", vs)
 	}
 }
 
@@ -384,13 +416,13 @@ func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 // runs over the same tree return identical verdicts and write nothing.
 func TestValidateUpload_Idempotent(t *testing.T) {
 	root := t.TempDir()
-	writeSource(t, root, "wksp_one/proj_one/skills/bad.md", "---\n---\n# x\n")
+	writeSource(t, root, "skills/bad.md", "---\n---\n# x\n")
 
-	a, err := validateUpload(root, filepath.Join(root, "none"))
+	a, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	b, err := validateUpload(root, filepath.Join(root, "none"))
+	b, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}

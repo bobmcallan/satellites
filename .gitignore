@@ -37,13 +37,18 @@ go.work.sum
 /dist/
 
 # Satellites colocated state (V5 .satellites/ pattern — see docs/ARCHITECTURE.md).
-# .satellites/ is purely operational: the CLI binary, satellites.toml,
-# logs, and the worktree. It is NOT a source location — the committed
-# substrate sources live under config/<workspace_id>/<project_id>/{documents,
-# skills,principles}/ and are pushed via `satellites {document,skill,principle}
-# upload`. Use `.satellites/*` (glob) not `.satellites/` (directory) so the
-# seed carve-out below still takes effect.
+# .satellites/ is mostly operational: the CLI binary, satellites.toml, logs,
+# and the worktree — none of which are committed. The committed exceptions are
+# the reviewable source trees below. Use `.satellites/*` (glob) not
+# `.satellites/` (directory) so those carve-outs take effect.
 .satellites/*
+# Repo-local substrate sources (sty_afc0769c): project-scoped documents,
+# skills, and principles, pushed via `satellites {document,skill,principle}
+# upload`. Flat layout .satellites/<kind>/<name>.md; project_id comes from
+# satellites.toml. The substrate is the store, these files are the source.
+!.satellites/documents/
+!.satellites/skills/
+!.satellites/principles/
 # Workspace/project seeds remain a committed source pushed via
 # `satellites seed push`. Each *.md declares its identity; the substrate is
 # the store, these files are the reviewable source (not a pull-mirror).

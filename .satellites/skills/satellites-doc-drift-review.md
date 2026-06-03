@@ -44,7 +44,7 @@ proceed.
 **Exit 1 (BLOCKED)** — a command exists in the binary but not in the doc. Do not
 commit. Reconcile it:
 
-1. Add the command to `config/<wksp>/<proj>/documents/client-command-surface.md`
+1. Add the command to `.satellites/documents/client-command-surface.md`
    — name it, say what it owns, give its state.
 2. `satellites document upload`, then re-run the gate.
 

@@ -13,18 +13,19 @@ part of this rule and refuses to push any source that breaks it.
 
 ## Source layout
 
-Project substrate sources are committed under:
+Project substrate sources are committed repo-locally under:
 
 ```
-config/<workspace_id>/<project_id>/{documents,skills,principles}/<name>.md
+.satellites/{documents,skills,principles}/<name>.md
 ```
 
-The path carries the identity: scope, `workspace_id`, and
-`project_id` come from the directory segments, never from frontmatter.
-A workspace-scope source drops the `<project_id>` segment
-(`config/<workspace_id>/<kind>/<name>.md`). `config/documents/` is the
-system-seed tree — embedded in the server binary, boot-reconciled,
-never CLI-uploaded.
+The layout is flat and project-scoped. The owning `project_id` is read
+from `.satellites/satellites.toml` (the repo is bound to exactly one
+project), never from the path or frontmatter; the server derives the
+workspace from that project. There is no workspace/project nesting and
+no workspace-scope source yet. `config/documents/` is a
+separate tree — the system seeds embedded in the server binary,
+boot-reconciled, never CLI-uploaded.
 
 ## Inclusion rule
 
@@ -62,7 +63,7 @@ document:satellites_mcp_reference_skill_sync.
 `satellites skill sync` materialises a skill with an injected identity
 stamp (`document_id` / `version` / `hash`). A skill
 in `.claude/skills/` is **project-owned** when it carries that stamp or
-has a `config/.../skills/` source. A skill with neither is
+has a `.satellites/skills/` source. A skill with neither is
 operator-authored — out of substrate, never touched by sync or upload.
 
 The stamp is the **reconcile key** (machine identity); the `satellites-`
@@ -93,16 +94,19 @@ layers, one fact; they do not compete. See [[satellites-skill-naming]],
 
 ## What upload enforces
 
-`satellites <noun> upload` validates the whole `config/` tree against
-this rule before any dispatch and refuses on violation, naming the file
-and the rule. It runs under `--dry-run` as a pure check. It flags:
+`satellites <noun> upload` validates the whole `.satellites/{documents,
+skills,principles}/` tree against this rule before any dispatch and
+refuses on violation, naming the file and the rule. It runs under
+`--dry-run` as a pure check. It flags:
 
 - a kind-dir / `type:` mismatch;
 - a `skills/` file missing required `name` / `description`;
-- frontmatter scope / `workspace_id` / `project_id` that disagrees with
-  the path;
+- a nested file (the layout is flat — `.satellites/<kind>/<name>.md`);
+- frontmatter that declares an unsupported identity: a non-`project`
+  scope, any `workspace_id`, or a `project_id` that disagrees with the
+  repo's (`.satellites/satellites.toml`);
 - drift: a project-owned (stamped) skill in `.claude/skills/` with no
-  `config/.../skills/` source.
+  `.satellites/skills/` source.
 
 The agent-prose audit (skill:satellites-audit-agent-prose) is a
 separate, advisory pass over agent-facing prose — run it on document
