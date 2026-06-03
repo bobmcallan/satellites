@@ -18,6 +18,8 @@ Two things are invariant and enforced in code — you do not redefine them:
 
 Everything else is yours to define for the project: the states a story moves through, which transitions a reviewer gates, and **what each gate must verify** — expressed in the repo's own terms (its build and test commands, its review checklist, its story shape). Do not import another project's verification steps.
 
+One structural consequence falls out of these invariants, and any gate pair you author must respect it. The completion gate verifies a story against its acceptance criteria and **fails closed** — it rejects on any criterion it cannot confirm met. So every acceptance criterion must be satisfiable at *its own story's* completion. A criterion whose satisfaction depends on a different, not-yet-delivered story is that enabler story's criterion, not this one's; duplicating it into this story's criteria guarantees a false reject the executor cannot honestly clear. Author the plan-stage gate to reject an acceptance-criteria field carrying such a deferred criterion, and the completion gate to fail closed on unmet ones — the two then agree, and an honestly-scoped story passes both. Deferrals belong in prose, never in the criteria a gate checks.
+
 ## Steps
 
 1. **Gather requirements.** Ask the admin what stages a unit of work passes through and what must be true to advance each stage. Read the repo to ground it — its build/test tooling, how changes ship, its review conventions.

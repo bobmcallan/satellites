@@ -67,6 +67,18 @@ Accept when the body answers all of:
 Reject when the plan is missing, vague ("improve performance"), or so
 underspecified that an executor would have to guess the design.
 
+**Each acceptance criterion must be satisfiable at *this* story's own
+completion.** A criterion whose satisfaction depends on another, not-yet-
+delivered story (e.g. "deferred to `sty_XXXX`", or one that an enabler story
+must land first) does not belong in this story's `acceptance_criteria` field —
+it is an acceptance criterion of that **enabler** story. The body prose may
+note the deferral; the AC field holds only what this story's own merge
+delivers. **Reject and name the offending criterion.** The done-gate
+(`satellites-story-done-review`) checks every AC literally and fails closed on
+any unmet one, so a deferred bullet left here guarantees a later false reject
+with no honest way past — catching it now is the only place the trap can be
+stopped before work begins.
+
 Accept only when BOTH the embedded workflow validates AND the plan is sound.
 You gate a *contract*, not the work — do not run the build or tests, and do
 not penalise the absence of code. Judge only whether the workflow is correctly

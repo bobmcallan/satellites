@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":2,"hash":"d580cbedb00cba9bf89e54ceb4056f1e84dc1f7478f9ed75b780afa404a9eca6"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":3,"hash":"1cc20ba5df01fecc35d1f164f73c8488f7ab8d70d88a83c06ed6db842c132796"} satellites-sync:end -->
 ---
 name: satellites-commit-push
 type: skill
@@ -34,6 +34,19 @@ supplies its own checkpoint skill.
    (`| <check_id> | <story_id> | <reason> |`), `satellites document upload`, and
    re-run. A STALE row on a complete run means a window closed — remove it (the
    register only shrinks). "It was already broken" is not a pass.
+
+1b. **Command-surface drift gate — pre-commit, fail closed** when the change
+   touches the CLI ([[satellites-doc-drift-review]], [[broken-windows]]):
+
+   ```bash
+   .satellites/satellites surface check
+   ```
+
+   It fails closed when a live `satellites` command is not named in the
+   `client-command-surface` doc. **Exit 0 (CLEAN)** → proceed. **Exit 1
+   (BLOCKED)** → an added/renamed command is undocumented; reconcile the doc in
+   this same change (`satellites document upload`) and re-run. Skip only when the
+   change does not touch `internal/cli` / `cmd/satellites`.
 
 2. **Configure + stage**
 
