@@ -19,7 +19,7 @@ Complete these before any other tool call.
 
 ## 2. Bootstrap the client
 
-Call `document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`. Install or update the CLI per the returned schema. Write the TOML. Mint the api-key via `apikey_create`. Resolve `project_id` via `project_match` on the consumer git remote.
+`document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`, then per the schema. Shell clients: `satellites install` then `satellites auth` (not an in-band mint); MCP-only: `apikey_create`. Write the TOML; `project_match` the git remote for `project_id`.
 
 ## 3. Load principles
 

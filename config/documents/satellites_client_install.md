@@ -25,7 +25,8 @@ in-band via the `auth_bootstrap.mcp_only` fallback below.
 ## Schema
 
 ```yaml
-target_install_path: ./.satellites/satellites
+target_install_path:        ./.satellites/satellites   # in-repo dev / MCP-fallback path
+target_install_path_global: ~/.local/bin/satellites    # shell clients: the shared binary on PATH (default)
 target_config_path:  ./.satellites/satellites.toml
 default_config:
   server_url: "{{server_url}}"
@@ -44,6 +45,10 @@ auth_bootstrap:
     kind: mcp_mint
     verb: apikey_create
 install:
+  # Shell-capable clients run the installer, which downloads + sha-verifies +
+  # places the binary (--global → target_install_path_global; --local → the
+  # in-repo target_install_path). MCP-only/manual clients use the URLs below.
+  command:      satellites install
   cli_version:  "{{cli_version}}"
   download_url: https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}
   sha256_url:   https://github.com/bobmcallan/satellites/releases/latest/download/satellites-{{cli_version}}-{{os}}-{{arch}}.sha256
@@ -53,7 +58,8 @@ install:
 
 | Schema key                       | Meaning                                                                                                            |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `target_install_path`            | Where to write the CLI binary (relative to the consumer project root).                                             |
+| `target_install_path`            | In-repo binary path (`.satellites/satellites`) — the dev / MCP-fallback location; placed by `satellites install --local`. |
+| `target_install_path_global`     | Shared global binary on PATH (`~/.local/bin/satellites`, the `claude` model) — the default for shell-capable clients; placed by `satellites install`. |
 | `target_config_path`             | Where to write `satellites.toml`.                                                                                  |
 | `default_config.server_url`      | TOML `server_url`. Server-rendered from the `{{server_url}}` system variable.                                      |
 | `default_config.project_id`      | TOML `project_id`. Empty at bootstrap — load-context Step 4 fills it via `project_match`.                          |
@@ -64,6 +70,7 @@ install:
 | `auth_bootstrap.kind`            | Auth flow to run after install. `auth_login` = run `satellites auth` (browser login); the CLI stores an executor key in the user-level credential store (`$XDG_CONFIG_HOME/satellites/credentials.toml`, 0600). The api-key is NOT written to the TOML. |
 | `auth_bootstrap.command`         | The shell command a shell-capable client runs — `satellites auth`.                                                |
 | `auth_bootstrap.mcp_only`        | Fallback for MCP-only clients that cannot shell out: `kind: mcp_mint` dispatches `apikey_create` on the already-authenticated MCP session to mint a project-scoped key. |
+| `install.command`                | The installer a shell-capable client runs — `satellites install` (places + sha-verifies the binary; `--global` default, `--local` for in-repo). |
 | `install.cli_version`            | The CLI release this schema points at. Server-rendered from `{{cli_version}}`.                                     |
 | `install.download_url`           | URL to fetch the CLI binary from. Server-rendered with `{{cli_version}}`, `{{os}}`, `{{arch}}`.                    |
 | `install.sha256_url`             | Matching sha256 manifest URL. Server-rendered.                                                                     |

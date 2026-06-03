@@ -17,7 +17,7 @@ verb; first-run is a thin orchestration skill over those verbs. Holds to
 
 | Verb | Owns | State |
 | ---- | ---- | ----- |
-| `satellites install` | Place the **global** binary on a machine: download the release artifact, verify its `sha256`, put it on PATH. The `curl \| sh` bootstrap, shape of `claude install`. | *Future* — shape recorded here, not yet implemented. |
+| `satellites install` | Place the binary: download the release artifact, verify its `sha256`, put it in place. `--global` (default) → `~/.local/bin/satellites` on PATH; `--local` → the in-repo `.satellites/satellites`; `--version` pins, `--force` overwrites, refuse-clobber otherwise. The `curl \| sh` bootstrap (`scripts/install.sh`), shape of `claude install`. | DONE. |
 | `satellites auth` | **Identity.** Human-in-the-loop browser login (loopback OAuth2 + PKCE) → an executor api-key in the user-level credential store (`~/.config/satellites/credentials.toml`, 0600, keyed by server_url). The bootstrap JWT is used once and discarded. | DONE — DONE. |
 | `satellites project match` | **Project selection.** Resolve a `project_id` from the repo's git remote; the result is written to the repo's `.satellites/satellites.toml`. | DONE. |
 | `satellites update` | **Binary refresh.** Self-update the global binary in place from the release channel, checksum-verified; no-op when current. | DONE. |
