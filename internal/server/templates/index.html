@@ -176,6 +176,13 @@
     </svg>
   </section>
 
+  <section class="panel" data-section="install">
+    <h2>install the client</h2>
+    <p>The <code>satellites</code> CLI is a per-platform release binary, installed the way <code>claude install</code> works — client only, no server. The one-line bootstrap fetches the installer, sha-verifies the platform binary, and places it at <code>~/.local/bin/satellites</code> (on PATH):</p>
+    <pre class="code"><code>curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh</code></pre>
+    <p>Pass <code>--local</code> for the in-repo dev binary, or <code>--version &lt;tag&gt;</code> to pin a release (<code>sh -s -- --local</code>). Once <code>satellites</code> is on PATH, <code>satellites install</code> / <code>satellites update</code> place and refresh the same binary, then <code>satellites auth</code> mints the executor key.</p>
+  </section>
+
   <section class="panel" data-section="server">
     <h2>server</h2>
     <dl class="metadata">

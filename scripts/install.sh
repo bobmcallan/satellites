@@ -1,7 +1,10 @@
 #!/bin/sh
 # satellites bootstrap installer (sty_a62ba0c7) — the `curl | sh` first-touch:
 #
-#   curl -fsSL https://raw.githubusercontent.com/bobmcallan/satellites/main/scripts/install.sh | sh
+#   curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh
+#
+# (Published as a release asset by .github/workflows/release.yml — a stable
+# GitHub download alongside the binaries, the `claude install` model.)
 #
 # It resolves the latest release, fetches + sha-verifies the platform binary to
 # a temp dir (no pre-existing binary needed), then hands off to

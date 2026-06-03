@@ -170,6 +170,12 @@ jobs:
             sha256sum -c "${sum}"
           done
 
+      - name: stage installer bootstrap
+        # Publish scripts/install.sh as a release asset so the curl|sh
+        # bootstrap is a stable GitHub download alongside the binaries
+        # (releases/latest/download/install.sh), the `claude install` model.
+        run: cp scripts/install.sh artifacts/install.sh
+
       - name: tag commit
         env:
           TAG: ${{ needs.derive-tag.outputs.tag }}

@@ -139,6 +139,50 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architectural commitm
 
 ---
 
+## Install the client
+
+The `satellites` CLI is published as a per-platform release binary. The one-line
+bootstrap fetches the installer, sha-verifies the platform binary, and places it:
+
+```sh
+curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh
+```
+
+By default that installs the shared binary to `~/.local/bin/satellites` (on PATH).
+The bootstrap forwards extra args to `satellites install`, so you can pin or relocate:
+
+```sh
+# install the in-repo dev binary at ./.satellites/satellites instead
+curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh -s -- --local
+
+# pin a specific release
+curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh -s -- --version v0.0.121
+```
+
+Once a `satellites` binary is on PATH, `install` and `update` are also subcommands:
+
+```sh
+satellites install            # place the shared binary (~/.local/bin/satellites, on PATH) — the default
+satellites install --local    # place the per-repo dev binary at ./.satellites/satellites
+satellites install --version v0.0.121   # pin a release (omit for latest)
+satellites install --force    # overwrite a binary of a different version
+satellites update             # refresh the binary that's already installed
+```
+
+`install` *places* a binary; `update` *refreshes* the one already there. Both share
+the same release-channel + sha256-verify core. `install` refuses to overwrite a
+binary of a different version without `--force`, a matching version is a no-op, and
+it never touches a repo's `.satellites/` beyond the binary itself — TOML config,
+logs, worktrees, and work state are preserved.
+
+After the binary is in place, authenticate to mint the executor key:
+
+```sh
+satellites auth               # browser login → executor key in the user-level credential store
+```
+
+---
+
 ## Repository layout
 
 ```
