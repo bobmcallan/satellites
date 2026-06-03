@@ -196,6 +196,31 @@ func TestAPIKeyRoleGate(t *testing.T) {
 		}
 	})
 
+	t.Run("create via an api-key caller defaults status to backlog", func(t *testing.T) {
+		// An api-key caller (the agent over MCP/exec) supplying a status at
+		// create has it dropped; the store defaults to the workflow's initial
+		// state. The agent cannot mint a story already at a terminal status
+		// (sty_42d13ae4).
+		st := "done"
+		body, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type:      "story",
+			ProjectID: pj.ID,
+			Name:      "api-key created story",
+			Status:    &st,
+		})
+		raw, err := verb.Dispatch(executorCtx, "document_upsert", body)
+		if err != nil {
+			t.Fatalf("create story as api-key caller: %v", err)
+		}
+		var resp verb.DocumentUpsertResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if resp.Document.Status != "backlog" {
+			t.Fatalf("api-key create status = %q, want backlog (status dropped)", resp.Document.Status)
+		}
+	})
+
 	t.Run("executor can patch story body", func(t *testing.T) {
 		body, _ := json.Marshal(verb.DocumentUpsertRequest{
 			ID:   storyID,
