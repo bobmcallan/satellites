@@ -26,6 +26,12 @@ Everything else is yours to define for the project: the states a story moves thr
 4. **Bind dispatch.** Give each skill the frontmatter the dispatch index reads — `name`, `kind`, `applies_to` (workflows), a `description` that says plainly when to use it.
 5. **Publish.** Author the skills as project-scoped sources and upload them with the CLI (`satellites skill upload`); the content review runs on the way in. The loop then runs on the project's own process.
 
+## Anchor (parent) stories
+
+Some stories carry no executable work — an epic or anchor whose only job is to group children. Do not drive these through a build/test workflow. Define a `parent` story type (the story's `category`) with a degenerate workflow: one state to a terminal state, gated by a close-review skill whose check is the children, not the code.
+
+That gate asserts the **genuine-anchor guard**: accept only when the anchor has at least one child AND every child has reached a terminal status; reject a childless or still-open anchor, naming the gap. The at-least-one-child clause is load-bearing — without it the gate passes vacuously over an empty set, and an executor could relabel any leaf story to the anchor type to win a free close. Closing stays reviewer-enacted like every transition; the anchor never patches its own status.
+
 ## Keep it small
 
 Start with the fewest states and gates that make the work reviewable, and add only when a real need appears. A workflow the admin can read in one screen is the goal.
