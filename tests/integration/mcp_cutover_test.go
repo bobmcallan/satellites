@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,13 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
 )
+
+// installSchemaSpaces collapses runs of spaces so the install-schema
+// assertions match a `key: value` pair regardless of YAML column
+// alignment. sty_a62ba0c7 aligned the schema values (e.g.
+// `target_install_path:` gained padding spaces); the assertions check
+// the logical pair, not its spacing.
+var installSchemaSpaces = regexp.MustCompile(" +")
 
 // TestMCPCutover exercises the S7 dogfood: a fresh agent reading only
 // the MCP orientation instructions plus document_get should be able to
@@ -106,10 +114,11 @@ func TestMCPCutover(t *testing.T) {
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(got.RenderedBody, "satellites-v0.0.21-linux-amd64") {
+		norm := installSchemaSpaces.ReplaceAllString(got.RenderedBody, " ")
+		if !strings.Contains(norm, "satellites-v0.0.21-linux-amd64") {
 			t.Fatalf("install URL missing or wrong version segment: %s", got.RenderedBody)
 		}
-		if !strings.Contains(got.RenderedBody, "target_install_path: ./.satellites/satellites") {
+		if !strings.Contains(norm, "target_install_path: ./.satellites/satellites") {
 			t.Fatalf("target_install_path missing from rendered schema")
 		}
 		if len(got.UnresolvedVars) != 0 {
@@ -148,14 +157,15 @@ func TestMCPCutover(t *testing.T) {
 		if err := json.Unmarshal(dispatched, &got); err != nil {
 			t.Fatal(err)
 		}
+		norm := installSchemaSpaces.ReplaceAllString(got.RenderedBody, " ")
 		for _, want := range []string{
 			"target_install_path: ./.satellites/satellites",
-			"target_config_path:  ./.satellites/satellites.toml",
+			"target_config_path: ./.satellites/satellites.toml",
 			"satellites-v0.0.21-linux-amd64",
 			"satellites-v0.0.21-linux-amd64.sha256",
 			"verb: apikey_create",
 		} {
-			if !strings.Contains(got.RenderedBody, want) {
+			if !strings.Contains(norm, want) {
 				t.Fatalf("rendered body missing %q after frontmatter strip:\n%s", want, got.RenderedBody)
 			}
 		}
