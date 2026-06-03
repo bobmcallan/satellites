@@ -762,12 +762,16 @@ func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessag
 		Title:              req.Name,
 		Body:               req.Body,
 		AcceptanceCriteria: strDeref(req.AcceptanceCriteria),
-		Status:             strDeref(req.Status),
-		Priority:           strDeref(req.Priority),
-		Category:           strDeref(req.Category),
-		ParentID:           strDeref(req.ParentID),
-		Tags:               sliceDeref(req.Tags),
-		CreatedBy:          callerUserID(ctx),
+		// Status on create is honoured only for a non-api-key caller; an api-key
+		// caller's value is dropped and the store defaults to "backlog" (the
+		// workflow's initial state). Status thereafter moves only via the
+		// reviewer gate's status_transition (sty_42d13ae4).
+		Status:    createStatus(ctx, req.Status),
+		Priority:  strDeref(req.Priority),
+		Category:  strDeref(req.Category),
+		ParentID:  strDeref(req.ParentID),
+		Tags:      sliceDeref(req.Tags),
+		CreatedBy: callerUserID(ctx),
 	}
 	d, err := documentStore.CreateStory(ctx, in, time.Now().UTC())
 	if err != nil {
@@ -843,10 +847,16 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if d.Type != document.TypeStory {
 		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
 	}
-	if req.Status != nil {
-		if err := requireReviewerRole(ctx, "document_upsert"); err != nil {
-			return nil, err
-		}
+	// Status on document_upsert is honoured only for a non-api-key caller — the
+	// portal UI's JWT session, or an in-process call. An api-key caller (the
+	// agent over MCP/exec, or the gate's minted reviewer key) gets the field
+	// dropped: a story's status then moves only through the reviewer gate's
+	// status_transition ledger row (see invokeLedgerAppend), so a reviewer-capable
+	// credential cannot `document_upsert {status}` and self-accept, bypassing the
+	// gate (sty_42d13ae4).
+	status := req.Status
+	if !upsertStatusHonoured(ctx) {
+		status = nil
 	}
 
 	var beforeEnv StoryEnvelope
@@ -860,7 +870,7 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 		Title:              ptrIfNonEmpty(req.Name),
 		Body:               ptrIfPresent(req.Body, len(req.Body) > 0),
 		AcceptanceCriteria: req.AcceptanceCriteria,
-		Status:             req.Status,
+		Status:             status, // dropped for api-key callers; status moves via the gate's status_transition (sty_42d13ae4)
 		Priority:           req.Priority,
 		Category:           req.Category,
 		ParentID:           req.ParentID,
@@ -889,6 +899,26 @@ func strDeref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// upsertStatusHonoured reports whether a document_upsert may set a story's
+// status. Only a non-api-key caller may — the portal UI's JWT session or an
+// in-process call. An api-key caller (the agent over MCP/exec, or the gate's
+// minted reviewer key) is refused the field: status then moves only through the
+// gate's status_transition ledger row, closing the raw-patch self-accept
+// (sty_42d13ae4).
+func upsertStatusHonoured(ctx context.Context) bool {
+	return auth.APIKeyRoleFromContext(ctx) == ""
+}
+
+// createStatus returns the create-time status an upsert caller may set: the
+// requested value for a non-api-key caller, "" (the store then defaults to
+// backlog) for an api-key caller.
+func createStatus(ctx context.Context, req *string) string {
+	if !upsertStatusHonoured(ctx) {
+		return ""
+	}
+	return strDeref(req)
 }
 
 func sliceDeref(p *[]string) []string {

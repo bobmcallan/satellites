@@ -25,8 +25,9 @@ import (
 //     verb requires admin user-role.
 //  2. apikey_list surfaces role on every row.
 //  3. ledger_append rejects executor-role callers and accepts reviewer.
-//  4. document_upsert status-patch on a story rejects executor and
-//     accepts reviewer; body-only patches stay open to executor.
+//  4. document_upsert ignores the status field for every role (sty_42d13ae4);
+//     a story's status moves only via the reviewer-gated status_transition
+//     ledger row; body-only patches stay open to executor.
 //  5. The server-internal IssueReviewerKey path mints a key with the
 //     requested TTL; ValidateKey rejects it once expired.
 func TestAPIKeyRoleGate(t *testing.T) {
@@ -171,15 +172,27 @@ func TestAPIKeyRoleGate(t *testing.T) {
 	executorCtx := auth.WithAPIKeyRole(adminCtx, auth.APIKeyRoleExecutor)
 	reviewerCtx := auth.WithAPIKeyRole(adminCtx, auth.APIKeyRoleReviewer)
 
-	t.Run("executor cannot patch story status", func(t *testing.T) {
-		newStatus := "in_progress"
-		body, _ := json.Marshal(verb.DocumentUpsertRequest{
-			ID:     storyID,
-			Status: &newStatus,
-		})
-		_, err := verb.Dispatch(executorCtx, "document_upsert", body)
-		if !errors.Is(err, verb.ErrForbidden) {
-			t.Fatalf("expected ErrForbidden, got %v", err)
+	t.Run("document_upsert ignores the status field for every role", func(t *testing.T) {
+		// After sty_42d13ae4 status is redundant on document_upsert: the field
+		// is ignored and the status is preserved — for the executor AND the
+		// reviewer, so a reviewer-capable credential cannot self-accept via a
+		// raw patch. The new story sits at backlog.
+		before := storyStatusByID(t, adminCtx, storyID)
+		newStatus := "done"
+		for _, c := range []struct {
+			name string
+			ctx  context.Context
+		}{
+			{"executor", executorCtx},
+			{"reviewer", reviewerCtx},
+		} {
+			body, _ := json.Marshal(verb.DocumentUpsertRequest{ID: storyID, Status: &newStatus})
+			if _, err := verb.Dispatch(c.ctx, "document_upsert", body); err != nil {
+				t.Fatalf("%s: document_upsert with a status field should succeed (field ignored), got %v", c.name, err)
+			}
+			if got := storyStatusByID(t, adminCtx, storyID); got != before {
+				t.Fatalf("%s: status moved to %q via document_upsert; want unchanged %q", c.name, got, before)
+			}
 		}
 	})
 
@@ -193,14 +206,32 @@ func TestAPIKeyRoleGate(t *testing.T) {
 		}
 	})
 
-	t.Run("reviewer can patch story status", func(t *testing.T) {
-		newStatus := "in_progress"
-		body, _ := json.Marshal(verb.DocumentUpsertRequest{
-			ID:     storyID,
-			Status: &newStatus,
+	t.Run("status moves only via the status_transition ledger row", func(t *testing.T) {
+		// The reviewer-gated status_transition append is the sole writer of a
+		// story's status (sty_42d13ae4): its to_status projects onto the row.
+		payload, _ := json.Marshal(map[string]any{"from_status": "backlog", "to_status": "in_progress"})
+		body, _ := json.Marshal(verb.LedgerAppendRequest{
+			StoryID:     storyID,
+			ProjectID:   pj.ID,
+			WorkspaceID: ws.ID,
+			Kind:        "status_transition",
+			Body:        "backlog → in_progress",
+			Payload:     payload,
 		})
-		if _, err := verb.Dispatch(reviewerCtx, "document_upsert", body); err != nil {
-			t.Fatalf("reviewer status patch failed: %v", err)
+		if _, err := verb.Dispatch(reviewerCtx, "ledger_append", body); err != nil {
+			t.Fatalf("reviewer status_transition append: %v", err)
+		}
+		if got := storyStatusByID(t, adminCtx, storyID); got != "in_progress" {
+			t.Fatalf("status_transition did not project: status = %q, want in_progress", got)
+		}
+		// And an executor cannot drive that row — the ledger role gate refuses
+		// any non-log kind from an executor key.
+		ex, _ := json.Marshal(verb.LedgerAppendRequest{
+			StoryID: storyID, ProjectID: pj.ID, WorkspaceID: ws.ID,
+			Kind: "status_transition", Body: "rogue", Payload: payload,
+		})
+		if _, err := verb.Dispatch(executorCtx, "ledger_append", ex); !errors.Is(err, verb.ErrForbidden) {
+			t.Fatalf("executor status_transition should be forbidden, got %v", err)
 		}
 	})
 
@@ -308,4 +339,20 @@ func TestAPIKeyRoleGate(t *testing.T) {
 			t.Fatalf("expected ErrInvalidKey after revoke, got %v", err)
 		}
 	})
+}
+
+// storyStatusByID reads a story's current status via document_get (sty_42d13ae4
+// tests assert status moves only via the gate's status_transition).
+func storyStatusByID(t *testing.T, callerCtx context.Context, id string) string {
+	t.Helper()
+	body, _ := json.Marshal(verb.DocumentGetRequest{ID: id})
+	raw, err := verb.Dispatch(callerCtx, "document_get", body)
+	if err != nil {
+		t.Fatalf("document_get %s: %v", id, err)
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal document_get: %v", err)
+	}
+	return resp.Document.Status
 }

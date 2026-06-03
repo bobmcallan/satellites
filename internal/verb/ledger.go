@@ -19,8 +19,15 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/ledger"
 )
+
+// statusTransitionKind is the ledger kind whose append also moves the story's
+// status. After sty_42d13ae4 this row is the ONLY writer of a story's status
+// (document_upsert ignores the field), so the documents.status column is a
+// projection of the latest status_transition the reviewer gate recorded.
+const statusTransitionKind = "status_transition"
 
 var ledgerStore *ledger.Store
 
@@ -120,10 +127,37 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
+	// Project a status_transition onto the story's status — the gate's recorded
+	// verdict is the sole status writer (sty_42d13ae4). requireLedgerAppendRole
+	// already restricts status_transition to reviewer keys, so a raw status
+	// patch from an executor (or via document_upsert) cannot reach here.
+	if req.Kind == statusTransitionKind && strings.TrimSpace(req.StoryID) != "" && documentStore != nil {
+		if to := extractToStatus(req.Payload); to != "" {
+			if _, uErr := documentStore.UpdateStory(ctx, req.StoryID, document.UpdateStoryPatch{Status: &to}, time.Now().UTC()); uErr != nil {
+				return nil, fmt.Errorf("ledger_append: status_transition projection onto %s: %w", req.StoryID, uErr)
+			}
+		}
+	}
 	if strings.TrimSpace(req.StoryID) != "" {
 		dispatchSummaryRegen(ctx, req.StoryID)
 	}
 	return json.Marshal(e)
+}
+
+// extractToStatus reads the to_status field from a status_transition payload.
+// Returns "" when the payload is absent or carries no to_status — the projection
+// is then skipped (the audit row is still written).
+func extractToStatus(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var p struct {
+		ToStatus string `json:"to_status"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(p.ToStatus)
 }
 
 func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
