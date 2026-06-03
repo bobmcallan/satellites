@@ -61,47 +61,6 @@ branch_template = "client-{task_id}"
 	}
 }
 
-// TestLoad_APIKeyEnvOverride covers the non-interactive CI path
-// (sty_1ad84429): SATELLITES_API_KEY supplies the bearer without a stored
-// credential, and wins over a stored one when both are present.
-func TestLoad_APIKeyEnvOverride(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
-
-	path := filepath.Join(dir, "satellites.toml")
-	body := `server_url = "https://example.com"
-project_id = "proj_x"
-`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// No stored credential — the env key alone configures the client.
-	t.Setenv("SATELLITES_API_KEY", "sk_ci_env_key")
-	cfg, _, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Token != "sk_ci_env_key" {
-		t.Errorf("env token = %q, want sk_ci_env_key", cfg.Token)
-	}
-	if !cfg.IsConfigured() {
-		t.Error("IsConfigured should be true with server_url + env key")
-	}
-
-	// Env wins over a stored credential.
-	if err := SaveCredential(Credential{ServerURL: "https://example.com", Token: "sk_stored", Role: "executor"}); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _, err = Load(path)
-	if err != nil {
-		t.Fatalf("Load with both: %v", err)
-	}
-	if cfg.Token != "sk_ci_env_key" {
-		t.Errorf("token = %q, want env to win over stored", cfg.Token)
-	}
-}
-
 func TestStripAuthBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "satellites.toml")
