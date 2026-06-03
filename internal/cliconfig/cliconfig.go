@@ -85,6 +85,16 @@ func Load(explicitPath string) (Config, string, error) {
 	if cred, err := LoadCredential(cfg.ServerURL); err == nil {
 		cfg.Token = cred.Token
 	}
+	// Non-interactive override (CI): SATELLITES_API_KEY presents an api-key
+	// without the user-level credential store that `satellites auth` writes.
+	// CI has no interactive OAuth flow — the deploy gate (sty_1ad84429) reads
+	// story status against the prod server using a key injected as a repo
+	// secret. A set env var wins over any stored credential; absent, behaviour
+	// is unchanged. The repo-committed TOML still supplies server_url, so this
+	// is the only credential CI needs to inject.
+	if tok := strings.TrimSpace(os.Getenv("SATELLITES_API_KEY")); tok != "" {
+		cfg.Token = tok
+	}
 	return cfg, path, nil
 }
 

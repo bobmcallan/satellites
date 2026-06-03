@@ -28,11 +28,82 @@ env:
   FLY_APP: satellites-pprod
 
 jobs:
+  # Deploy-path enforcement (sty_1ad84429, epic gated-deploy): refuse to roll
+  # out code whose stories have not passed the done gate. For each sty_<id> in
+  # the commit range this deploy ships, it reads the story's status — the
+  # reviewer-only projection of a status_transition row, evidence an executor
+  # cannot forge (spike sty_a49d425d). The `deploy` job `needs` this gate, so a
+  # not-gated story blocks the rollout. `satellites story gate` is the chokepoint;
+  # this job only feeds it the story refs from git.
+  gate:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0   # need history + tags to scope the deploy's commit range
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: build satellites CLI
+        run: go build -o satellites ./cmd/satellites
+      - name: gate deploy on story status
+        env:
+          # Injected read key (operator provisions: a non-admin api-key as a
+          # repo secret). server_url comes from the committed .satellites/satellites.toml.
+          SATELLITES_API_KEY: ${{ secrets.SATELLITES_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # The commits this deploy ships since the last release tag. The
+          # do-not-batch-stories principle keeps a push to one story, so this
+          # range is normally one story's commits. release.yml may have already
+          # tagged HEAD by the time this runs; step back past any HEAD tag so
+          # the range is never empty for a fresh push.
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ] && [ "$(git rev-list -n1 "$LAST_TAG")" = "$(git rev-parse HEAD)" ]; then
+            LAST_TAG=$(git describe --tags --abbrev=0 "${LAST_TAG}^" 2>/dev/null || true)
+          fi
+          if [ -n "$LAST_TAG" ]; then RANGE="${LAST_TAG}..HEAD"; else RANGE="HEAD"; fi
+          echo "deploy-gate: inspecting commit range ${RANGE}"
+
+          # Story refs are linked to commits by the sty_<id> subject convention
+          # — the only commit↔story thread today (spike §3, open question e).
+          IDS=$(git log "$RANGE" --format='%s%n%b' | grep -oE 'sty_[0-9a-f]{8}' | sort -u || true)
+
+          if [ -z "$IDS" ]; then
+            # KNOWN GAP (epic-order:4, open question a): a commit with no sty_
+            # ref is allowed in this first cut. Surfaced loudly, not silently.
+            echo "::warning::deploy-gate: no sty_<id> refs in ${RANGE} — allowing (known gap, fed to epic-order:4)"
+            exit 0
+          fi
+
+          echo "deploy-gate: stories referenced by this deploy:"
+          echo "$IDS" | sed 's/^/  /'
+
+          if [ -z "${SATELLITES_API_KEY:-}" ]; then
+            # PROTOTYPE first cut (story 3 AC#2): without the injected read key
+            # the gate cannot query the server, so enforcement is INERT. It
+            # warns loudly rather than failing closed, so landing the gate does
+            # not brick the pipeline before the operator provisions the secret.
+            # epic-order:4 flips this on once SATELLITES_API_KEY exists.
+            echo "::warning::deploy-gate: SATELLITES_API_KEY not provisioned — enforcement INERT (epic-order:3 prototype). The stories above were NOT verified."
+            exit 0
+          fi
+
+          # shellcheck disable=SC2086
+          ./satellites story gate $(echo "$IDS" | tr '\n' ' ')
+
   deploy:
     # Gate: only run when the upstream `test` workflow succeeded, OR
     # the operator triggered this workflow manually. workflow_run fires
     # on every completion (success + failure) so the conclusion check
-    # is mandatory.
+    # is mandatory. Also `needs: gate` — a not-gated story refuses the
+    # rollout (sty_1ad84429); if the gate job fails, this job is skipped.
+    needs: gate
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'

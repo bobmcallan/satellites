@@ -23,6 +23,7 @@ func init() {
 	story.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")
 
 	story.AddCommand(newStoryReviewCmd(&configArg, &userArg))
+	story.AddCommand(newStoryGateCmd(&configArg, &userArg))
 
 	register(story)
 }
