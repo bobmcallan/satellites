@@ -54,6 +54,23 @@ const (
 // reviewer rotation can never clobber an executor key (sty_e2dea1ec).
 const ReviewerAgentName = "reviewer"
 
+// reviewerSlotAgentName builds the agent_name that keys a reviewer key's
+// single (user, project, agent_name) slot. A storyID scopes the slot to one
+// story (sty_98a9bc0a) so concurrent gate runs on different stories do not
+// clobber each other's key; absent a storyID it falls back to an explicit
+// caller agent_name, then to the bare ReviewerAgentName. The `reviewer`
+// prefix is always present so a reviewer slot stays distinct from any
+// executor key's agent_name and a reviewer rotation can never evict one.
+func reviewerSlotAgentName(agentName, storyID string) string {
+	if sid := strings.TrimSpace(storyID); sid != "" {
+		return ReviewerAgentName + "-" + sid
+	}
+	if a := strings.TrimSpace(agentName); a != "" {
+		return a
+	}
+	return ReviewerAgentName
+}
+
 // User is a satellites operator.
 type User struct {
 	ID          string
@@ -285,7 +302,17 @@ type IssueReviewerKeyInput struct {
 	UserID    string
 	ProjectID string
 	AgentName string
-	TTL       time.Duration
+	// StoryID scopes the reviewer key's slot to one story (sty_98a9bc0a).
+	// Reviewer keys occupy a single (user, project, agent_name) slot that a
+	// re-mint rotates in place; with every reviewer key pinned to the bare
+	// `reviewer` agent_name, two gate runs for the SAME (user, project) — even
+	// on different stories — shared one slot, so the second mint evicted the
+	// first's hash and the first run's enact 401'd. Keying the slot per story
+	// gives concurrent different-story gates independent slots. Same-story
+	// concurrency is already prevented upstream by the work-area lease
+	// (claimWork), so a per-story slot is the right granularity.
+	StoryID string
+	TTL     time.Duration
 }
 
 // IssueReviewerKey mints a `reviewer`-role key with an expiry set
@@ -305,10 +332,7 @@ func (s *Store) IssueReviewerKey(ctx context.Context, in IssueReviewerKeyInput) 
 	if err != nil {
 		return "", nil, err
 	}
-	agentName := strings.TrimSpace(in.AgentName)
-	if agentName == "" {
-		agentName = ReviewerAgentName
-	}
+	agentName := reviewerSlotAgentName(in.AgentName, in.StoryID)
 	id := fmt.Sprintf("apk_rev_%s", randomKeyIDSuffixAuth())
 	expires := time.Now().UTC().Add(ttl)
 	return s.issueWithRaw(ctx, id, in.UserID, in.ProjectID, agentName, rawKey, APIKeyRoleReviewer, &expires)

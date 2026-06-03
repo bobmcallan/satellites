@@ -94,3 +94,86 @@ func TestExecutorKeyRemint(t *testing.T) {
 		t.Fatalf("expected exactly 1 row for the (user,project,agent) slot, got %d", count)
 	}
 }
+
+// TestConcurrentReviewerKeysDoNotCollide covers sty_98a9bc0a: two gate runs
+// for the same (user, project) but DIFFERENT stories must each hold a live
+// reviewer key at once. Before the per-story slot, both pinned to the bare
+// `reviewer` agent_name and shared one slot, so the second mint evicted the
+// first's hash and the first run's enact 401'd. Keyed per story, both keys
+// validate concurrently; a same-story re-mint still rotates its own slot in
+// place (no dead-row accumulation).
+func TestConcurrentReviewerKeysDoNotCollide(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	store := auth.New(env.DB)
+	owner, err := store.CreateUser(ctx, "usr_rev_owner", "rev-owner@example.com", "Rev Owner", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	ws, err := workspace.New(env.DB).Create(ctx, owner.ID, "rev-ws", now)
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	pj, err := project.New(env.DB).Create(ctx, project.CreateInput{
+		WorkspaceID: ws.ID,
+		Name:        "rev-project",
+		OwnerUserID: owner.ID,
+	}, now)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Two overlapping gate runs on different stories, same (user, project).
+	rawA, _, err := store.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
+		UserID: owner.ID, ProjectID: pj.ID, StoryID: "sty_aaaa1111", TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("mint reviewer key A: %v", err)
+	}
+	rawB, _, err := store.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
+		UserID: owner.ID, ProjectID: pj.ID, StoryID: "sty_bbbb2222", TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("mint reviewer key B: %v", err)
+	}
+
+	// AC1: both keys are live at once — B's mint did not clobber A.
+	if _, err := store.ValidateKey(ctx, rawA); err != nil {
+		t.Fatalf("reviewer key A must still validate after B is minted (the collision bug): %v", err)
+	}
+	if _, err := store.ValidateKey(ctx, rawB); err != nil {
+		t.Fatalf("reviewer key B should validate: %v", err)
+	}
+
+	// Same-story re-mint rotates that story's slot in place; the other story's
+	// key is untouched (no cross-story eviction, no dead-row accumulation).
+	rawA2, _, err := store.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
+		UserID: owner.ID, ProjectID: pj.ID, StoryID: "sty_aaaa1111", TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("re-mint reviewer key A: %v", err)
+	}
+	if _, err := store.ValidateKey(ctx, rawA2); err != nil {
+		t.Fatalf("rotated key A2 should validate: %v", err)
+	}
+	if _, err := store.ValidateKey(ctx, rawA); err == nil {
+		t.Fatalf("superseded key A should no longer validate after same-story rotate")
+	}
+	if _, err := store.ValidateKey(ctx, rawB); err != nil {
+		t.Fatalf("key B must survive A's rotation: %v", err)
+	}
+
+	// One row per (story) slot — A rotated in place, B independent: 2 total.
+	var count int
+	if err := env.DB.QueryRowContext(ctx,
+		`SELECT count(*) FROM api_keys WHERE user_id=$1 AND project_id=$2 AND role='reviewer'`,
+		owner.ID, pj.ID).Scan(&count); err != nil {
+		t.Fatalf("count reviewer rows: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected exactly 2 reviewer slot rows (one per story), got %d", count)
+	}
+}

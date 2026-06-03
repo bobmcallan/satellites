@@ -53,6 +53,11 @@ type APIKeyCreateRequest struct {
 	// its short default and a long gate run loses those writes to a 401
 	// (sty_64c6159f). Ignored for executor-role mints (they never expire).
 	TTLSeconds int `json:"ttl_seconds,omitempty"`
+	// StoryID scopes a reviewer-role mint to one story's slot (sty_98a9bc0a),
+	// so concurrent gate runs on different stories get independent reviewer
+	// keys instead of clobbering a single shared slot. Ignored for executor
+	// mints. The gate (`satellites story review`) passes the story under review.
+	StoryID string `json:"story_id,omitempty"`
 }
 
 // APIKeyCreateResponse mirrors the shape declared in story
@@ -183,7 +188,8 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 			UserID:    caller.ID,
 			ProjectID: projectID,
 			AgentName: agentName,
-			TTL:       ttl, // 0 ⇒ IssueReviewerKey's default; the client passes a gate-covering TTL (sty_64c6159f)
+			StoryID:   strings.TrimSpace(req.StoryID), // per-story slot — concurrent different-story gates don't collide (sty_98a9bc0a)
+			TTL:       ttl,                            // 0 ⇒ IssueReviewerKey's default; the client passes a gate-covering TTL (sty_64c6159f)
 		})
 	default:
 		keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())

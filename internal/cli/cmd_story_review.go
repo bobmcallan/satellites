@@ -574,6 +574,7 @@ func mintReviewerKey(ctx context.Context, opts reviewOpts, story reviewStory) (s
 	req, err := json.Marshal(verb.APIKeyCreateRequest{
 		Role:       "reviewer",
 		ProjectID:  story.ProjectID,
+		StoryID:    story.ID,                          // per-story reviewer slot — concurrent different-story gates don't collide (sty_98a9bc0a)
 		TTLSeconds: int(reviewerKeyTTL / time.Second), // outlive the gate dispatch (sty_64c6159f)
 	})
 	if err != nil {
