@@ -142,19 +142,24 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
-// --- sty_f651aad9: self-healing install ---
+// --- sty_f651aad9 + sty_7d469fb6: self-healing install (no global hijack) ---
 
-func TestReconcileInstall_RemovesStaleSymlinkAndLinksCanonical(t *testing.T) {
+// sty_7d469fb6 AC1/AC3: run from a per-repo/source build (the running binary's
+// dir is NOT on PATH) — a stale legacy symlink is still removed, but the global
+// `satellites` is NOT repointed at the per-repo binary.
+func TestReconcileInstall_SourceBuildRemovesStaleButDoesNotHijackGlobal(t *testing.T) {
 	home := t.TempDir()
 	localBin := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(localBin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	exe := filepath.Join(t.TempDir(), "satellites")
+	// exe lives in a repo's .satellites/, which is NOT on PATH.
+	repoSat := filepath.Join(t.TempDir(), ".satellites")
+	_ = os.MkdirAll(repoSat, 0o755)
+	exe := filepath.Join(repoSat, "satellites")
 	if err := os.WriteFile(exe, []byte("BIN"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A prior rename left a dangling satellites-client symlink.
 	stale := filepath.Join(localBin, "satellites-client")
 	if err := os.Symlink(filepath.Join(home, "gone", "satellites-client"), stale); err != nil {
 		t.Fatal(err)
@@ -163,15 +168,39 @@ func TestReconcileInstall_RemovesStaleSymlinkAndLinksCanonical(t *testing.T) {
 	actions := reconcileInstall(exe, []string{localBin}, home)
 
 	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale legacy symlink not removed")
+		t.Errorf("stale legacy symlink should still be removed")
 	}
-	link := filepath.Join(localBin, "satellites")
-	resolved, err := filepath.EvalSymlinks(link)
+	if _, err := os.Lstat(filepath.Join(localBin, "satellites")); !os.IsNotExist(err) {
+		t.Errorf("global satellites must NOT be repointed at a per-repo binary")
+	}
+	if len(actions) != 1 {
+		t.Errorf("expected exactly 1 action (stale removal, no link), got %v", actions)
+	}
+}
+
+// sty_7d469fb6 AC2: when the running binary IS an on-PATH install (e.g. a
+// renamed predecessor still on PATH), the global `satellites` link is repaired.
+func TestReconcileInstall_RepairsGlobalWhenOnPath(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(localBin, 0o755)
+	binDir := filepath.Join(t.TempDir(), "bin")
+	_ = os.MkdirAll(binDir, 0o755)
+	// The running binary is on PATH under the legacy name; `satellites` resolves
+	// nowhere yet.
+	exe := filepath.Join(binDir, "satellites-client")
+	if err := os.WriteFile(exe, []byte("BIN"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	actions := reconcileInstall(exe, []string{localBin, binDir}, home)
+
+	resolved, err := filepath.EvalSymlinks(filepath.Join(localBin, "satellites"))
 	if err != nil || resolved != exe {
-		t.Errorf("canonical satellites not linked to exe: resolved=%q err=%v", resolved, err)
+		t.Errorf("on-PATH binary should get a repaired global link: resolved=%q err=%v", resolved, err)
 	}
-	if len(actions) != 2 {
-		t.Errorf("expected 2 actions (remove + link), got %v", actions)
+	if len(actions) == 0 {
+		t.Errorf("expected a link action for an on-PATH repair, got none")
 	}
 }
 

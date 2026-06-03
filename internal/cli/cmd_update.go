@@ -226,6 +226,16 @@ func reconcileInstall(exePath string, pathDirs []string, home string) []string {
 		return actions
 	}
 
+	// 2b. Only repair the GLOBAL install, never hijack it (sty_7d469fb6). If the
+	// running binary's own dir is not on PATH it is a per-repo/source-checkout
+	// build (a repo's .satellites/ or bin/); repointing the global `satellites`
+	// at it would silently bind the shared command to one repo's working binary.
+	// Leave the global alone — install (`satellites install`) is what places it;
+	// healInstall still prints the source-build warning.
+	if !dirOnPath(filepath.Dir(exePath), pathDirs) {
+		return actions
+	}
+
 	// 3. Install a `satellites` link in a PATH dir, preferring ~/.local/bin.
 	installDir := preferredInstallDir(pathDirs, home)
 	if installDir == "" {
