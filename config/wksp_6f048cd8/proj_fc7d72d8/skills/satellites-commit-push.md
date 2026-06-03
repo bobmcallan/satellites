@@ -34,6 +34,19 @@ supplies its own checkpoint skill.
    re-run. A STALE row on a complete run means a window closed — remove it (the
    register only shrinks). "It was already broken" is not a pass.
 
+1b. **Command-surface drift gate — pre-commit, fail closed** when the change
+   touches the CLI ([[satellites-doc-drift-review]], [[broken-windows]]):
+
+   ```bash
+   .satellites/satellites surface check
+   ```
+
+   It fails closed when a live `satellites` command is not named in the
+   `client-command-surface` doc. **Exit 0 (CLEAN)** → proceed. **Exit 1
+   (BLOCKED)** → an added/renamed command is undocumented; reconcile the doc in
+   this same change (`satellites document upload`) and re-run. Skip only when the
+   change does not touch `internal/cli` / `cmd/satellites`.
+
 2. **Configure + stage**
 
    ```bash

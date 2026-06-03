@@ -218,7 +218,7 @@ func loadRegister(ctx context.Context, opts techdebtOpts) ([]techdebt.Entry, err
 	}
 	workspaceID := opts.WorkspaceID
 	if workspaceID == "" {
-		ws, err := resolveWorkspaceID(ctx, opts, projectID)
+		ws, err := resolveWorkspaceID(ctx, projectID, opts.ConfigPath, opts.UserArg)
 		if err != nil {
 			return nil, fmt.Errorf("resolve workspace_id: %w", err)
 		}
@@ -252,13 +252,13 @@ func loadRegister(ctx context.Context, opts techdebtOpts) ([]techdebt.Entry, err
 
 // resolveWorkspaceID looks up the project's workspace_id via project_get. The
 // CLI decodes only the one field it needs (layering guard: no internal/project
-// import).
-func resolveWorkspaceID(ctx context.Context, opts techdebtOpts, projectID string) (string, error) {
+// import). Shared by the techdebt and surface gates.
+func resolveWorkspaceID(ctx context.Context, projectID, configPath, userArg string) (string, error) {
 	req, err := json.Marshal(verb.ProjectGetRequest{ID: projectID})
 	if err != nil {
 		return "", err
 	}
-	raw, err := dispatchVerb(ctx, "project_get", req, opts.ConfigPath, opts.UserArg)
+	raw, err := dispatchVerb(ctx, "project_get", req, configPath, userArg)
 	if err != nil {
 		return "", err
 	}

@@ -70,6 +70,24 @@ records the target shape so the skill, when written, only orchestrates.
   `install` places it, `update` refreshes it. Neither touches a repo's
   `.satellites/` (which is per-project working state, not the executable).
 
+## 4. Operational + gate commands
+
+Beyond the identity/binary/substrate verbs of §1, the client carries a few
+operational and gate commands. They are part of the surface and are kept here
+so the `satellites surface check` gate stays green ([[broken-windows]]):
+
+| Command | Owns | State |
+| ------- | ---- | ----- |
+| `satellites version` | Print the binary's build info. A non-release build reports a git-derived `0.0.0-dev+<sha>` version (never bare `dev`). | DONE. |
+| `satellites exec <verb>` | Direct verb dispatch — JSON in, JSON out, byte-identical to the MCP call. The single execution path. | DONE. |
+| `satellites seed` | Push file-based seeds to the substrate. | DONE. |
+| `satellites story review` | Run a story's reviewer gate client-side (`claude -p` against the worktree); the reviewer enacts the status transition. | DONE. |
+| `satellites techdebt review` | The technical-debt pre-commit gate — build + unit + integration reconciled against the quarantine register, fail closed on an unregistered red. | DONE. |
+| `satellites surface check` | The command-surface drift gate — fail closed when a live command is not named in this document. Keeps the reference docs in step with the CLI as `update` ships changes. | DONE. |
+
+When `update` adds, renames, or removes a command, reconcile this section in the
+same change — `satellites surface check` blocks the commit until it matches.
+
 ## See also
 
 - The verbs above — `satellites auth`, `satellites update`, `satellites deploy` —

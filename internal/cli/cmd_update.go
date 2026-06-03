@@ -58,7 +58,17 @@ No-op when already current. With --check it only reports current vs latest.`,
 			if resolved, rErr := filepath.EvalSymlinks(exe); rErr == nil {
 				exe = resolved
 			}
-			return runUpdate(ctx, cmd.OutOrStdout(), exe, currentCLIVersion(), githubReleaseSource{}, checkOnly)
+			out := cmd.OutOrStdout()
+			if err := runUpdate(ctx, out, exe, currentCLIVersion(), githubReleaseSource{}, checkOnly); err != nil {
+				return err
+			}
+			// Self-heal the install so `satellites` resolves on PATH with
+			// no manual symlink surgery — but only on a real update, not a
+			// report-only --check (sty_f651aad9).
+			if !checkOnly {
+				healInstall(out, exe, envPathDirs(), userHome())
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "Report current vs latest without downloading or replacing.")
@@ -90,6 +100,14 @@ func runUpdate(ctx context.Context, out io.Writer, exePath, currentVer string, s
 	latest := strings.TrimSpace(tag)
 	cur := strings.TrimSpace(currentVer)
 	fmt.Fprintf(out, "current: %s   latest: %s\n", displayVer(cur), latest)
+
+	// A dev/untagged build isn't "behind" a release — it's off-channel.
+	// Say so plainly rather than letting isNewer's "unparseable current
+	// is always older" silently present it as a normal upgrade
+	// (sty_d6c95262).
+	if !verb.IsReleaseVersion(cur) {
+		fmt.Fprintf(out, "note: this is a dev/untagged build, not a tagged release — installing latest release %s\n", latest)
+	}
 
 	if !isNewer(cur, latest) {
 		fmt.Fprintf(out, "already up to date (%s)\n", displayVer(cur))
@@ -147,6 +165,151 @@ func runUpdate(ctx context.Context, out io.Writer, exePath, currentVer string, s
 	}
 	fmt.Fprintf(out, "updated %s → %s\n", displayVer(cur), latest)
 	return nil
+}
+
+// canonicalBinary is the installed client's command name; legacyBinaries
+// are prior names a rename may have left behind on PATH as stale links.
+const canonicalBinary = "satellites"
+
+var legacyBinaries = []string{"satellites-client"}
+
+// healInstall runs reconcileInstall and reports what it did + warns when
+// the running binary looks like a source/dev build (sty_f651aad9).
+func healInstall(out io.Writer, exePath string, pathDirs []string, home string) {
+	for _, a := range reconcileInstall(exePath, pathDirs, home) {
+		fmt.Fprintf(out, "install: %s\n", a)
+	}
+	// The binary file itself sitting outside any PATH dir means the
+	// running binary is a source/dev-checkout build (e.g. a gitignored
+	// repo bin/), not the installed client — updating it replaces a file
+	// in the source tree. Warn regardless of any link we just made.
+	if !dirOnPath(filepath.Dir(exePath), pathDirs) {
+		fmt.Fprintf(out, "install: note: %s is not on PATH — this looks like a source/dev build, not the installed client\n", exePath)
+	}
+}
+
+// reconcileInstall repairs the canonical client install so `satellites`
+// resolves on PATH after an update, with no manual symlink surgery
+// (sty_f651aad9). It removes a stale legacy-named symlink that a binary
+// rename left dangling or pointing elsewhere, then ensures a
+// `satellites` entry on PATH points at the running binary. It only ever
+// removes symlinks — never a real file — and returns the actions taken.
+func reconcileInstall(exePath string, pathDirs []string, home string) []string {
+	var actions []string
+
+	dirs := dedupeDirs(pathDirs, home)
+
+	// 1. Remove stale legacy-named symlinks (e.g. a prior satellites-client
+	//    left dangling, or now pointing at a different binary).
+	for _, d := range dirs {
+		for _, name := range legacyBinaries {
+			p := filepath.Join(d, name)
+			fi, err := os.Lstat(p)
+			if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+				continue // absent, or a real file — never our business to delete
+			}
+			target, _ := os.Readlink(p)
+			abs := target
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(d, target)
+			}
+			if _, statErr := os.Stat(abs); statErr != nil || abs != exePath {
+				if os.Remove(p) == nil {
+					actions = append(actions, "removed stale symlink "+p)
+				}
+			}
+		}
+	}
+
+	// 2. Ensure `satellites` already resolves on PATH to exePath.
+	if resolvesOnPath(exePath, pathDirs) {
+		return actions
+	}
+
+	// 3. Install a `satellites` link in a PATH dir, preferring ~/.local/bin.
+	installDir := preferredInstallDir(pathDirs, home)
+	if installDir == "" {
+		return actions
+	}
+	link := filepath.Join(installDir, canonicalBinary)
+	_ = os.Remove(link) // replace whatever stale entry is there
+	if err := os.Symlink(exePath, link); err == nil {
+		actions = append(actions, "linked "+link+" -> "+exePath)
+	}
+	return actions
+}
+
+// resolvesOnPath reports whether a `satellites` entry on PATH resolves
+// to exePath (i.e. the canonical command already points at this binary).
+func resolvesOnPath(exePath string, pathDirs []string) bool {
+	for _, d := range pathDirs {
+		p := filepath.Join(d, canonicalBinary)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil && resolved == exePath {
+			return true
+		}
+	}
+	return false
+}
+
+func dirOnPath(dir string, pathDirs []string) bool {
+	for _, d := range pathDirs {
+		if d == dir {
+			return true
+		}
+	}
+	return false
+}
+
+// preferredInstallDir picks where to place the `satellites` link:
+// ~/.local/bin when it's on PATH, else the first PATH entry.
+func preferredInstallDir(pathDirs []string, home string) string {
+	if home != "" {
+		localBin := filepath.Join(home, ".local", "bin")
+		if dirOnPath(localBin, pathDirs) {
+			return localBin
+		}
+	}
+	if len(pathDirs) > 0 {
+		return pathDirs[0]
+	}
+	return ""
+}
+
+// dedupeDirs returns the PATH dirs plus ~/.local/bin, de-duplicated and
+// order-preserving, for the legacy-symlink sweep.
+func dedupeDirs(pathDirs []string, home string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(d string) {
+		if d == "" || seen[d] {
+			return
+		}
+		seen[d] = true
+		out = append(out, d)
+	}
+	for _, d := range pathDirs {
+		add(d)
+	}
+	if home != "" {
+		add(filepath.Join(home, ".local", "bin"))
+	}
+	return out
+}
+
+func envPathDirs() []string {
+	raw := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))
+	out := make([]string, 0, len(raw))
+	for _, d := range raw {
+		if d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func userHome() string {
+	h, _ := os.UserHomeDir()
+	return h
 }
 
 // downloadTo streams url into w, returning the content's sha256 hex.

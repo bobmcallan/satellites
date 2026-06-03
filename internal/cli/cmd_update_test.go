@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -138,5 +139,105 @@ func TestIsNewer(t *testing.T) {
 		if got := isNewer(c.cur, c.latest); got != c.want {
 			t.Errorf("isNewer(%q,%q)=%v want %v", c.cur, c.latest, got, c.want)
 		}
+	}
+}
+
+// --- sty_f651aad9: self-healing install ---
+
+func TestReconcileInstall_RemovesStaleSymlinkAndLinksCanonical(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "satellites")
+	if err := os.WriteFile(exe, []byte("BIN"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A prior rename left a dangling satellites-client symlink.
+	stale := filepath.Join(localBin, "satellites-client")
+	if err := os.Symlink(filepath.Join(home, "gone", "satellites-client"), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	actions := reconcileInstall(exe, []string{localBin}, home)
+
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale legacy symlink not removed")
+	}
+	link := filepath.Join(localBin, "satellites")
+	resolved, err := filepath.EvalSymlinks(link)
+	if err != nil || resolved != exe {
+		t.Errorf("canonical satellites not linked to exe: resolved=%q err=%v", resolved, err)
+	}
+	if len(actions) != 2 {
+		t.Errorf("expected 2 actions (remove + link), got %v", actions)
+	}
+}
+
+func TestReconcileInstall_LeavesRealFileAlone(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(localBin, 0o755)
+	exe := filepath.Join(t.TempDir(), "satellites")
+	_ = os.WriteFile(exe, []byte("BIN"), 0o755)
+	// A REAL file named satellites-client — never our business to delete.
+	realFile := filepath.Join(localBin, "satellites-client")
+	_ = os.WriteFile(realFile, []byte("real"), 0o755)
+
+	reconcileInstall(exe, []string{localBin}, home)
+
+	if _, err := os.Stat(realFile); err != nil {
+		t.Errorf("real satellites-client file must not be removed: %v", err)
+	}
+}
+
+func TestReconcileInstall_NoopWhenAlreadyLinked(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(localBin, 0o755)
+	exe := filepath.Join(t.TempDir(), "satellites")
+	_ = os.WriteFile(exe, []byte("BIN"), 0o755)
+	if err := os.Symlink(exe, filepath.Join(localBin, "satellites")); err != nil {
+		t.Fatal(err)
+	}
+
+	actions := reconcileInstall(exe, []string{localBin}, home)
+	if len(actions) != 0 {
+		t.Errorf("already-correct install should need no actions, got %v", actions)
+	}
+}
+
+func TestReconcileInstall_KeepsLegacyLinkPointingAtCurrentBinary(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(localBin, 0o755)
+	exe := filepath.Join(t.TempDir(), "satellites")
+	_ = os.WriteFile(exe, []byte("BIN"), 0o755)
+	// Legacy name still pointing at the live binary is not stale.
+	legacy := filepath.Join(localBin, "satellites-client")
+	_ = os.Symlink(exe, legacy)
+
+	reconcileInstall(exe, []string{localBin}, home)
+
+	if _, err := os.Lstat(legacy); err != nil {
+		t.Errorf("legacy link pointing at current binary should be kept: %v", err)
+	}
+}
+
+func TestHealInstall_WarnsOnSourceBuild(t *testing.T) {
+	home := t.TempDir()
+	localBin := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(localBin, 0o755)
+	// exe lives in a repo bin/, which is NOT on PATH.
+	srcBin := filepath.Join(t.TempDir(), "bin")
+	_ = os.MkdirAll(srcBin, 0o755)
+	exe := filepath.Join(srcBin, "satellites")
+	_ = os.WriteFile(exe, []byte("BIN"), 0o755)
+
+	out := &bytes.Buffer{}
+	healInstall(out, exe, []string{localBin}, home)
+	if !bytes.Contains(out.Bytes(), []byte("source/dev build")) {
+		t.Errorf("expected source/dev-build warning, got: %s", out.String())
 	}
 }
