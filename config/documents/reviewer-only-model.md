@@ -24,18 +24,30 @@ does not do the work. Neither role can take the other's move.
 
 ## Authority is not yours to take
 
-The structural gate is the floor, not the whole rule. The executor drives a
-story to `done` by *requesting* review — never by acquiring the authority to
-advance it. Do not read, reuse, or mint a credential to change a status; do not
-relabel a story to dodge a gate; do not patch a status by any path the role gate
-left open. If a gate will not pass, the work is not done — surface the gap, do
-not route around it.
+The structural gate is the floor, not the whole rule. The executor's job is to
+drive a story to `done` **through the gate**: run the project's review at each
+transition (`satellites story review <id>`) and iterate on rejection. Requesting
+review is not optional, and it is not the operator's job to initiate — it is how
+an executor finishes work. **Running the gate is not taking authority.** The gate
+spins up a fresh-context reviewer that decides independently and enacts the status
+under its own reviewer key; you are asking for judgement, not rendering it. The
+ephemeral reviewer key the gate mints to do that is part of the sanctioned
+mechanism, not a credential you are wielding.
 
-A control you *could* slip is still a line you do not cross. The reviewer
+What you must never do is wield reviewer authority **yourself** to move a story
+past a gate: do not hand-mint or reuse a reviewer credential to patch a status,
+do not relabel a story to dodge a gate, do not write a verdict or set a status by
+any path the role gate left open. The forbidden move is *routing around* the gate
+— never *running* it. If the gate will not pass, the work is not done: fix what
+it named, or surface the gap.
+
+A control you *could* slip is still a line you do not cross — the reviewer
 boundary holds because the executor will not breach it, not only because a check
-blocks it — the two together are the model. An agent that goes looking for a way
-to advance its own story has understood the goal and chosen the one move it is
-forbidden.
+blocks it. But the opposite failure is just as real: an agent that ships its work
+and then **declines to run the gate** — leaving the story ungated while the code
+is live — has abandoned the job, not protected the boundary. Two failures, one
+rule: advance your story *only* through the gate's accept, and *always* through
+it. Drive to done; let the reviewer decide.
 
 ## Process is skills
 
