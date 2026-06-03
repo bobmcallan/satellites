@@ -66,6 +66,7 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 	var (
 		claudeBin    string
 		worktreeRoot string
+		skill        string
 	)
 	cmd := &cobra.Command{
 		Use:   "review <story-id>",
@@ -91,6 +92,7 @@ substrate stays on the server.`,
 				UserArg:      *userArg,
 				ClaudeBin:    claudeBin,
 				WorktreeRoot: worktreeRoot,
+				Skill:        strings.TrimSpace(skill),
 				Stdout:       cmd.OutOrStdout(),
 				Stderr:       cmd.ErrOrStderr(),
 			})
@@ -98,6 +100,7 @@ substrate stays on the server.`,
 	}
 	cmd.Flags().StringVar(&claudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or `claude` on PATH).")
 	cmd.Flags().StringVar(&worktreeRoot, "worktree", "", "Worktree root the workflow skill + gate run against (default: current directory).")
+	cmd.Flags().StringVar(&skill, "skill", "", "Agent-driven: name the gate skill (a reviewer_skill declared in the story's workflow) to request. Omit to resolve the gate from the story's current status. An unknown/unimplemented skill is rejected, no status change.")
 	return cmd
 }
 
@@ -107,8 +110,14 @@ type reviewOpts struct {
 	UserArg      string
 	ClaudeBin    string
 	WorktreeRoot string
-	Stdout       io.Writer
-	Stderr       io.Writer
+	// Skill, when set, is the agent-driven gate selector: the name of a
+	// reviewer_skill declared on a transition in the story's workflow. When
+	// empty the transition is resolved from the story's current status
+	// (PickTransition). An unknown skill, or one whose edge does not leave the
+	// current status, is rejected before any gate dispatch (sty_bd6a4f53).
+	Skill  string
+	Stdout io.Writer
+	Stderr io.Writer
 	// ReviewerKey is the minted reviewer-role api-key the spine writes
 	// (review_*, status_transition) and the status patch authenticate
 	// with. Empty until mintReviewerKey runs; the reads above stay on the
@@ -126,6 +135,36 @@ type reviewStory struct {
 	Category    string
 	ProjectID   string
 	WorkspaceID string
+}
+
+// resolveReviewTransition picks the gated transition the review will run.
+// With skill=="" it defers to the workflow's status-derived rule
+// (PickTransition) — the long-standing behaviour. With a skill named it is
+// agent-driven (sty_bd6a4f53): the skill must be a reviewer_skill declared on a
+// transition that leaves the story's current status; otherwise the request is
+// rejected (returned as an error the caller renders as a reject decision, no
+// status change). The workflow stays authoritative for the destination: naming
+// a skill only selects which declared gate judges, never the target state — so
+// agent-driven selection cannot steer to an undeclared state or a lenient pass.
+func resolveReviewTransition(wf *workflow.Workflow, status, skill string) (workflow.Transition, string, bool, error) {
+	if strings.TrimSpace(skill) == "" {
+		return wf.PickTransition(status)
+	}
+	var gated []workflow.Transition
+	for _, t := range wf.Transitions {
+		if t.ReviewerSkill == skill {
+			gated = append(gated, t)
+		}
+	}
+	if len(gated) == 0 {
+		return workflow.Transition{}, "", false, fmt.Errorf("skill %q is not a gate in this story's workflow (not implemented)", skill)
+	}
+	for _, t := range gated {
+		if t.From == status {
+			return t, t.ReviewerSkill, t.Dynamic, nil
+		}
+	}
+	return workflow.Transition{}, "", false, fmt.Errorf("skill %q gates a transition that does not leave the current status %q", skill, status)
 }
 
 func runReview(ctx context.Context, opts reviewOpts) error {
@@ -169,9 +208,21 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return fmt.Errorf("parse workflow %q: %w", skillPath, err)
 	}
 
-	// 4. Pick the gated transition (owned by internal/workflow).
-	transition, gateSkill, isDynamic, err := wf.PickTransition(story.Status)
+	// 4. Resolve the gated transition. Agent-driven (sty_bd6a4f53): when the
+	// caller names a --skill, request that gate; otherwise resolve from status
+	// (PickTransition). A named skill the workflow does not declare — or whose
+	// edge does not leave the current status — is rejected here, before any
+	// gate dispatch, with no status change. The workflow target stays
+	// authoritative: naming a skill only chooses which declared gate judges,
+	// never the destination state.
+	transition, gateSkill, isDynamic, err := resolveReviewTransition(wf, story.Status, opts.Skill)
 	if err != nil {
+		if opts.Skill != "" {
+			fmt.Fprintf(opts.Stdout, "decision: reject\n")
+			fmt.Fprintf(opts.Stdout, "notes: %v\n", err)
+			fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
+			return nil
+		}
 		return err
 	}
 

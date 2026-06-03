@@ -73,3 +73,35 @@ func TestClientResolvesWorkflowFromSkillMdPath(t *testing.T) {
 		t.Fatal("expected in_progress→done transition in the resolved workflow")
 	}
 }
+
+// TestResolveReviewTransition pins the agent-driven gate selector
+// (sty_bd6a4f53): no --skill falls back to the status-derived rule; a named
+// skill must be a reviewer_skill that leaves the current status, else the
+// request is rejected (error) before any gate dispatch.
+func TestResolveReviewTransition(t *testing.T) {
+	wf := &workflow.Workflow{
+		Name:      "fixwf",
+		AppliesTo: []string{"fix"},
+		States:    []string{"backlog", "in_progress", "done"},
+		Transitions: []workflow.Transition{
+			{From: "backlog", To: "in_progress", ReviewerSkill: "plan-review"},
+			{From: "in_progress", To: "done", ReviewerSkill: "done-review"},
+		},
+	}
+	// No skill -> status-derived (PickTransition).
+	if tr, gs, _, err := resolveReviewTransition(wf, "backlog", ""); err != nil || gs != "plan-review" || tr.To != "in_progress" {
+		t.Fatalf("status-derived: got (to=%q, skill=%q, err=%v)", tr.To, gs, err)
+	}
+	// Named skill that leaves the current status -> that transition.
+	if tr, gs, _, err := resolveReviewTransition(wf, "in_progress", "done-review"); err != nil || gs != "done-review" || tr.To != "done" {
+		t.Fatalf("named skill: got (to=%q, skill=%q, err=%v)", tr.To, gs, err)
+	}
+	// Unknown/unimplemented skill -> reject.
+	if _, _, _, err := resolveReviewTransition(wf, "backlog", "story_close"); err == nil {
+		t.Fatal("unknown skill should be rejected")
+	}
+	// Known skill but not from the current status -> reject (status mismatch).
+	if _, _, _, err := resolveReviewTransition(wf, "backlog", "done-review"); err == nil {
+		t.Fatal("status-mismatch skill should be rejected")
+	}
+}
