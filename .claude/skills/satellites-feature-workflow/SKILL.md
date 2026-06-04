@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_68ab47dc","version":3,"hash":"b2aa4f4dde139585f2bbdc080cd83f5be5e5e659f31014eb69708bca40918fcd"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_68ab47dc","version":4,"hash":"e4a3680e97cf32e2fd41a1d9e3173e648a337c388a6c9ebe06b3d9555b16482c"} satellites-sync:end -->
 ---
 name: satellites-feature-workflow
 type: skill

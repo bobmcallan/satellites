@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>satellites rethink — what works, what fails, and what to build next</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#f6f1e7;
+    --paper-2:#efe8da;
+    --ink:#211d18;
+    --ink-soft:#4a4339;
+    --ink-faint:#7c7263;
+    --rule:#d8cdb8;
+    --rule-soft:#e4dccb;
+    --ember:#b1421d;
+    --ember-deep:#8a3415;
+    --teal:#2f5d57;
+    --card:#fbf7ee;
+    --shadow:0 1px 0 rgba(33,29,24,.04), 0 18px 40px -28px rgba(33,29,24,.45);
+    --measure:70ch;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --serif:"Newsreader",Georgia,"Times New Roman",serif;
+    --display:"Fraunces","Newsreader",Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--serif);
+    font-size:19px;
+    line-height:1.66;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  /* atmosphere: faint grain + warm vignette */
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(120% 80% at 80% -10%, rgba(177,66,29,.06), transparent 60%),
+      radial-gradient(100% 60% at 0% 110%, rgba(47,93,87,.05), transparent 55%);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/></svg>");
+  }
+  .wrap{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:0 28px}
+
+  /* top hairline accent */
+  .topbar{height:4px;background:linear-gradient(90deg,var(--ember) 0%,var(--ember-deep) 38%,var(--teal) 100%);position:fixed;top:0;left:0;right:0;z-index:5}
+
+  /* ---- header ---- */
+  header.masthead{padding:84px 0 40px;border-bottom:1px solid var(--rule)}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.32em;text-transform:uppercase;color:var(--ember-deep);font-weight:600;display:flex;gap:14px;align-items:center}
+  .kicker::after{content:"";height:1px;flex:1;background:var(--rule)}
+  h1.title{
+    font-family:var(--display);font-optical-sizing:auto;
+    font-weight:600;font-size:clamp(2.3rem,5.4vw,4.1rem);line-height:1.02;
+    letter-spacing:-.015em;margin:.5em 0 .35em;max-width:18ch;
+  }
+  h1.title em{font-style:italic;color:var(--ember);font-weight:500}
+  .dek{font-size:clamp(1.05rem,1.6vw,1.28rem);line-height:1.6;color:var(--ink-soft);max-width:62ch;margin:0}
+  .dek strong{color:var(--ink);font-weight:600}
+  .meta{margin-top:30px;display:flex;flex-wrap:wrap;gap:10px 14px;font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+  .chip{border:1px solid var(--rule);background:var(--paper-2);padding:6px 12px;border-radius:999px;letter-spacing:.02em}
+  .chip b{color:var(--ember-deep);font-weight:600}
+  .meta a{color:var(--teal);text-decoration:none;border-bottom:1px solid rgba(47,93,87,.35)}
+  .meta a:hover{color:var(--ember)}
+
+  /* ---- layout grid with sticky index ---- */
+  .layout{display:grid;grid-template-columns:1fr;gap:0;padding:48px 0 96px}
+  @media(min-width:1080px){
+    .layout{grid-template-columns:230px minmax(0,var(--measure));gap:64px;justify-content:center}
+  }
+  /* index */
+  nav.toc{font-family:var(--mono);font-size:12.5px;line-height:1.5;align-self:start}
+  @media(min-width:1080px){nav.toc{position:sticky;top:40px}}
+  nav.toc .toc-label{letter-spacing:.28em;text-transform:uppercase;color:var(--ink-faint);font-size:11px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+  nav.toc ol{list-style:none;margin:0;padding:0;counter-reset:t}
+  nav.toc li{margin:0 0 3px}
+  nav.toc a{display:flex;gap:10px;text-decoration:none;color:var(--ink-soft);padding:6px 8px;border-radius:7px;border-left:2px solid transparent;transition:.18s}
+  nav.toc a .n{color:var(--ember);font-weight:600;min-width:1.4em}
+  nav.toc a:hover{background:var(--paper-2);color:var(--ink)}
+  nav.toc a.active{background:var(--card);color:var(--ink);border-left-color:var(--ember);box-shadow:var(--shadow)}
+
+  article{min-width:0}
+
+  /* ---- typographic rhythm ---- */
+  section{padding-top:18px;margin-bottom:14px;scroll-margin-top:30px}
+  h2{
+    font-family:var(--display);font-optical-sizing:auto;font-weight:600;
+    font-size:clamp(1.5rem,2.7vw,2.05rem);line-height:1.12;letter-spacing:-.01em;
+    margin:46px 0 18px;display:flex;align-items:baseline;gap:.6em;
+  }
+  h2 .sec-no{
+    font-family:var(--mono);font-size:.62em;font-weight:600;color:var(--ember);
+    border:1px solid var(--rule);border-radius:8px;padding:.1em .5em;
+    background:var(--card);letter-spacing:.02em;transform:translateY(-.12em)
+  }
+  h3{font-family:var(--display);font-weight:600;font-size:1.18rem;letter-spacing:-.005em;margin:34px 0 12px;color:var(--ink)}
+  p{margin:0 0 18px}
+  a.inline{color:var(--teal);text-decoration:none;border-bottom:1px solid rgba(47,93,87,.35)}
+  a.inline:hover{color:var(--ember);border-color:var(--ember)}
+  strong{font-weight:600;color:var(--ink)}
+  em{font-style:italic}
+  code{font-family:var(--mono);font-size:.82em;background:var(--paper-2);border:1px solid var(--rule-soft);border-radius:5px;padding:.08em .38em;color:var(--ember-deep);white-space:nowrap}
+  .arrow{color:var(--ember);font-style:normal;padding:0 .1em}
+
+  ul,ol.steps{margin:0 0 20px;padding:0 0 0 0}
+  ul{list-style:none}
+  ul li{position:relative;padding:0 0 0 26px;margin:0 0 11px}
+  ul li::before{content:"";position:absolute;left:4px;top:.62em;width:7px;height:7px;background:var(--ember);border-radius:2px;transform:rotate(45deg)}
+  ul li ul{margin-top:11px}
+  ul li ul li::before{background:transparent;border:1.5px solid var(--teal);width:6px;height:6px;border-radius:2px}
+  ol.steps{counter-reset:s;list-style:none;padding:0}
+  ol.steps>li{position:relative;padding:2px 0 0 48px;margin:0 0 18px;min-height:30px}
+  ol.steps>li::before{
+    counter-increment:s;content:counter(s);position:absolute;left:0;top:0;
+    width:31px;height:31px;border-radius:9px;background:var(--card);border:1px solid var(--rule);
+    font-family:var(--mono);font-weight:600;font-size:14px;color:var(--ember-deep);
+    display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow)
+  }
+
+  /* ---- callouts ---- */
+  .pull{
+    margin:30px 0;padding:24px 28px;border-left:3px solid var(--ember);
+    background:linear-gradient(180deg,var(--card),transparent);
+    font-family:var(--display);font-style:italic;font-weight:500;
+    font-size:clamp(1.15rem,2vw,1.5rem);line-height:1.4;color:var(--ink)
+  }
+  .statement{
+    margin:26px 0;padding:22px 26px;border:1px solid var(--rule);border-radius:14px;
+    background:var(--card);box-shadow:var(--shadow);position:relative
+  }
+  .statement::before{content:"“";position:absolute;left:14px;top:-6px;font-family:var(--display);font-size:3.4rem;color:var(--rule);line-height:1}
+  .statement p{margin:0;font-size:1.18rem;font-weight:500}
+  .statement strong{color:var(--ember-deep)}
+
+  .callout{margin:26px 0;border-radius:14px;border:1px solid var(--rule);overflow:hidden;box-shadow:var(--shadow);background:var(--card)}
+  .callout .co-head{display:flex;align-items:center;gap:10px;padding:12px 20px;font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:600;border-bottom:1px solid var(--rule)}
+  .callout .co-body{padding:18px 22px 6px}
+  .callout .co-head .dot{width:9px;height:9px;border-radius:50%}
+  .callout.evidence .co-head{color:var(--ember-deep);background:rgba(177,66,29,.07)}
+  .callout.evidence .dot{background:var(--ember)}
+  .callout.finding .co-head{color:var(--teal);background:rgba(47,93,87,.08)}
+  .callout.finding .dot{background:var(--teal)}
+
+  /* ---- table ---- */
+  .table-scroll{overflow-x:auto;margin:24px 0;border:1px solid var(--rule);border-radius:14px;box-shadow:var(--shadow);background:var(--card)}
+  table{border-collapse:collapse;width:100%;font-size:16px;line-height:1.55;min-width:640px}
+  thead th{
+    text-align:left;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:600;padding:14px 18px;border-bottom:1px solid var(--rule);background:var(--paper-2)
+  }
+  tbody td{padding:15px 18px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody td:first-child{font-weight:500}
+  tbody td code{white-space:normal}
+
+  /* ---- aside / footer note ---- */
+  .aside{
+    margin:54px 0 0;padding:24px 26px;border:1px dashed var(--rule);border-radius:14px;
+    background:repeating-linear-gradient(135deg,transparent,transparent 9px,rgba(177,66,29,.025) 9px,rgba(177,66,29,.025) 18px);
+  }
+  .aside .a-label{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ember-deep);font-weight:600;margin-bottom:10px}
+  .aside p{margin:0;color:var(--ink-soft);font-size:17px}
+
+  hr.rule{border:none;border-top:1px solid var(--rule);margin:40px 0}
+
+  footer{border-top:1px solid var(--rule);padding:30px 0 60px;font-family:var(--mono);font-size:12px;color:var(--ink-faint);display:flex;flex-wrap:wrap;gap:8px 22px;justify-content:space-between}
+  footer a{color:var(--teal);text-decoration:none}
+
+  /* load reveal */
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .reveal{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+  header.masthead .kicker{animation:rise .6s both}
+  header.masthead h1{animation:rise .7s .06s both}
+  header.masthead .dek{animation:rise .7s .14s both}
+  header.masthead .meta{animation:rise .7s .22s both}
+  @media(prefers-reduced-motion:reduce){.reveal,header *{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="topbar"></div>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">Strategy Record · satellites</div>
+    <h1 class="title">satellites rethink — <em>what works, what fails,</em> and what to build next</h1>
+    <p class="dek">A record written after the agent was asked to "implement <code>epic:lean-substrate</code>" and <strong>bypassed the satellites process entirely</strong> — with the full process sitting in context. It captures the new evidence, an honest works/doesn't inventory, the visibility gaps, and the build targets for the next rebuild.</p>
+    <div class="meta">
+      <span class="chip">Conversation of <b>2026-06-04/05</b></span>
+      <span class="chip"><b>4th</b> rebuild to this point</span>
+      <span class="chip">Companion: <a href="./agent-process-compliance.md">agent-process-compliance.md</a></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <div class="toc-label">Contents</div>
+      <ol>
+        <li><a href="#s1"><span class="n">1</span><span>Core reason satellites exists</span></a></li>
+        <li><a href="#s2"><span class="n">2</span><span>New lived proof</span></a></li>
+        <li><a href="#s3"><span class="n">3</span><span>What works — keep</span></a></li>
+        <li><a href="#s4"><span class="n">4</span><span>What does not work</span></a></li>
+        <li><a href="#s5"><span class="n">5</span><span>Visibility gaps</span></a></li>
+        <li><a href="#s6"><span class="n">6</span><span>Build targets</span></a></li>
+        <li><a href="#s7"><span class="n">7</span><span>Proving ground</span></a></li>
+        <li><a href="#s8"><span class="n">8</span><span>Immediate next steps</span></a></li>
+        <li><a href="#note"><span class="n">·</span><span>Note on the working tree</span></a></li>
+      </ol>
+    </nav>
+
+    <article>
+      <p>This document does not re-argue the enforcement model — <a class="inline" href="./agent-process-compliance.md">agent-process-compliance.md</a> already settled it: <em>"persuasion is dead; compliance comes from hard doors the agent cannot walk around."</em> It records the new evidence and the next moves, kept deliberately small.</p>
+
+      <div class="pull">No more context, not more structured / hard-coded process — but less, smaller, and specific checks and validation that work <em>with</em> the agent to ensure the agent understands <em>why</em> the process is the value.</div>
+
+      <section id="s1">
+        <h2><span class="sec-no">01</span> The core reason satellites exists <span style="font-family:var(--mono);font-size:.5em;color:var(--ink-faint);font-weight:400;letter-spacing:.1em">(UNCHANGED)</span></h2>
+        <p>Not to replicate other harnesses (which hard-code a process or just embed an LLM call in a function). The reason is:</p>
+        <div class="statement"><p>Let the user <strong>define the process as skills</strong>, then <strong>force the agent to follow</strong> that process inside a normal CLI session.</p></div>
+        <p>That forcing is what is failing. Everything below serves that one sentence.</p>
+      </section>
+
+      <section id="s2">
+        <h2><span class="sec-no">02</span> New lived proof <span style="font-family:var(--mono);font-size:.5em;color:var(--ink-faint);font-weight:400;letter-spacing:.1em">(THIS SESSION)</span></h2>
+        <p>Asked to "implement <code>follows-epic:lean-substrate</code>", the agent:</p>
+        <ul>
+          <li>went straight to editing Go + tagging principles while both stories sat in <code>backlog</code>;</li>
+          <li>never recorded the <code>## Workflow</code> + plan into the story bodies;</li>
+          <li><strong>never ran a single gate</strong> (<code>plan</code> <span class="arrow">→</span> <code>start</code> <span class="arrow">→</span> <code>done</code>);</li>
+          <li>substituted its own "it builds and tests pass" judgement for the reviewer's;</li>
+          <li>found the client binary (<code>./bin/satellites</code>) and <em>still</em> drove no gate;</li>
+          <li>rationalised the skip ("outward actions need confirmation") — a real constraint folded into a false conclusion ("so don't run the workflow at all").</li>
+        </ul>
+        <p>The process was in context on <strong>three independent channels</strong> at the time:</p>
+        <ol class="steps">
+          <li><strong>MCP server instructions</strong> at session start (the <code>satellites_mcp_load_context</code> bootstrap: <em>"To work a story: <code>document_get</code> it, read the <code>kind:workflow</code> skill … drive each transition with <code>status_transition --skill</code>"</em>).</li>
+          <li><strong>The principle sidecar</strong> — every <code>document_get</code> on a story returned the full bodies of <code>agent-goals</code>, <code>story-execution-process</code>, <code>reviewer-process</code>, etc.</li>
+          <li><strong>The workflow skill itself</strong>, read directly (<em>"record the contract first, gate-approve it, then execute"</em>).</li>
+        </ol>
+        <div class="callout finding">
+          <div class="co-head"><span class="dot"></span> The sharpest finding</div>
+          <div class="co-body">
+            <p>This happened while the process was delivered <em>unconditionally and in full</em>. So the <code>lean-principles-curated-sidecar</code> premise — "the agent will pull what it needs on demand" — is not even the lever here. <strong>More delivery does not help; the agent ignores what it is handed.</strong> This is the strongest possible confirmation of the prior doc's thesis: only structure that does not depend on the agent's compliance can work.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="s3">
+        <h2><span class="sec-no">03</span> What works — keep these</h2>
+        <ul>
+          <li><strong>Use the CLI harness's common tooling (MCP + skills).</strong> These behave as if baked into the model's training as much as they are tooling — the agent reaches for them naturally. Build on them; do not replace them.</li>
+          <li><strong>Stories as agent memory.</strong> Epics, stories, and the CRUD tooling work well. The agent is good at authoring stories <em>without</em> satellites overwatch.</li>
+          <li><strong>Reducing injected context</strong>, and removing context that is <em>specific</em> (repo/story references that bloat and date). This one <strong>does</strong> need satellites overwatch — the specific current-state comes from the tooling on demand, not baked into pushed prose.</li>
+          <li><strong>The story ledger.</strong> A log of agent actions is required and valuable — when it is actually written (see §5).</li>
+          <li><strong>Coding.</strong> Not a problem. Never the bottleneck.</li>
+        </ul>
+      </section>
+
+      <section id="s4">
+        <h2><span class="sec-no">04</span> What does not work — the failure modes</h2>
+        <ul>
+          <li><strong>Drift / route-around.</strong> The agent eventually changes course and ignores the satellites context. It happens <em>gradually</em>. Clearing local memory and starting fresh sessions has <strong>no lasting impact</strong> — the agent pulls memories and other data injections and makes <strong>conditional decisions to avoid satellites</strong>. You cannot sanitise every input it rationalises avoidance from. (This session is an instance: avoidance reconstructed from "outward actions need confirmation.") <span class="arrow">→</span> The conclusion is forced: enforcement must be <strong>independent of the agent's cooperation</strong>. Hooks, not prose.</li>
+          <li><strong>Substrate bloat with no creation checks.</strong> If the agent alone may create documents/principles/skills with no gate, they bloat. But adding a <em>process</em> to govern creation is self-defeating — the agent ignores that process too. So the check on creation must itself be a <strong>hard door</strong>, not advice.</li>
+          <li><strong><code>satellites claude -p</code> is slow</strong> — the same command in an interactive window is faster. Cause unconfirmed. Leading hypothesis: each gate spawns a <strong>cold <code>claude -p</code> subprocess</strong> (fresh process start, a fresh MCP init handshake, the full gate system-prompt re-sent every invocation, and <strong>no warm prompt cache</strong>), whereas the interactive window is a warm session with the cache already primed. <strong>Action: measure before optimising</strong> — it may decide whether per-gate subprocesses are viable at all.</li>
+        </ul>
+      </section>
+
+      <section id="s5">
+        <h2><span class="sec-no">05</span> Visibility gaps <span style="font-family:var(--mono);font-size:.5em;color:var(--ink-faint);font-weight:400;letter-spacing:.1em">(DATA EXISTS; ACCESS DOES NOT)</span></h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th style="width:30%">Gap</th><th style="width:30%">Today</th><th style="width:40%">Fix</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Conversations are not stored.</strong> This very conversation is lost unless captured as a story.</td>
+                <td>Nothing persists the dialogue.</td>
+                <td>A <code>type:chat</code> document <strong>collection</strong>, linked to stories/documents. Capture this conversation as Story 1 + its chat record.</td>
+              </tr>
+              <tr>
+                <td><strong>The ledger is not user-visible / usable.</strong></td>
+                <td>Data is written server- and client-side, but access is limited.</td>
+                <td>Surface it — a ledger view (tie to the HTML workflow page, §6).</td>
+              </tr>
+              <tr>
+                <td><strong>Story logging is missed when the agent ignores the process.</strong></td>
+                <td>Logging depends on the agent choosing to log <span class="arrow">→</span> skipped <span class="arrow">→</span> all is lost.</td>
+                <td>Make logging <strong>hook-written and deterministic</strong> (PostToolUse), so it happens regardless of agent compliance.</td>
+              </tr>
+              <tr>
+                <td><strong>A story's context is distributed.</strong> Workflow becomes another document attached to the story; context is spread across rows.</td>
+                <td>Retrieving "the story" does not retrieve everything.</td>
+                <td>Retrieval must return <strong>everything, OR provide incremental actions</strong> to assemble the full context <strong>without blowing the context window</strong>. See below.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Full-context retrieval — the back-link tag</h3>
+        <p>Today, only child stories are tag-discoverable from an epic (<code>epic:&lt;slug&gt;</code> tag + <code>parent_id</code>). Attached <strong>documents</strong> are linked only by <strong>inline prose</strong> in the story body (<code>document:&lt;scope&gt;/&lt;name&gt;</code> prefixes the agent resolves by hand), and the <strong>ledger</strong> is keyed by the <code>story_id</code> column on the <code>evidence</code> table. So a single tagged search does <strong>not</strong> return a story's full context — confirmed: <code>document_list {tags:["epic:lean-substrate"]}</code> returns the 3 stories and <strong>zero</strong> documents.</p>
+        <p>Requirement (no new types/tables — stays inside <code>document-types-v5</code>):</p>
+        <ul>
+          <li><strong>Every row in a story/epic's context carries a back-link tag</strong> — <code>story:&lt;id&gt;</code> and/or <code>epic:&lt;slug&gt;</code> — on <code>type:chat</code> records and any attached <code>type:document</code> (workflow snapshot, rubric, config). Then <code>document_list {tags:["story:&lt;id&gt;"]}</code> returns the whole document set, and <code>["epic:&lt;slug&gt;"]</code> returns the epic's stories <strong>and</strong> docs together.</li>
+          <li>The <strong>ledger</strong> stays keyed by <code>story_id</code>. A "full-context" fetch is <code>document_list {tags:["story:&lt;id&gt;"]}</code> <strong>+</strong> <code>ledger_list &lt;id&gt;</code> — or a single assembler that returns everything, or returns incremental fetch <em>actions</em> so the window is not blown.</li>
+          <li>The story body keeps its inline <code>document:</code>/<code>story:</code> prose references for humans, but discovery no longer <strong>depends</strong> on them — the back-link tag is the machine path.</li>
+        </ul>
+      </section>
+
+      <section id="s6">
+        <h2><span class="sec-no">06</span> Build targets <span style="font-family:var(--mono);font-size:.5em;color:var(--ink-faint);font-weight:400;letter-spacing:.1em">(SMALL, SPECIFIC)</span></h2>
+        <ol class="steps">
+          <li><strong>Cull the backlog.</strong> It is now too big to complete. Review and cut before adding anything — a large backlog is itself a symptom of the bloat loop.</li>
+          <li><strong>Hooks that force the workflow — not hard-coded flow.</strong> The workflow stays review-based and skill-defined; <strong>hooks</strong> (the claude-CLI-native mechanism the harness enforces, which the agent cannot route around) are what <em>force</em> it:
+            <ul>
+              <li><strong>START door</strong> (PreToolUse): block code edits until the story's workflow is engaged and a plan recorded.</li>
+              <li><strong>Deterministic logging</strong> (PostToolUse): write the ledger row on the tool call, so logging never depends on the agent.</li>
+              <li><strong>EXIT doors</strong> (Stop / PreToolUse on commit/push): block "done"/ship until every mandated step has left <strong>evidence</strong> (a ledger row, a passing check).</li>
+            </ul>
+            <p style="margin-top:11px">This is the doors-and-evidence model from <a class="inline" href="./agent-process-compliance.md">agent-process-compliance.md</a>, reduced to the minimum hooks needed.</p>
+          </li>
+          <li><strong>Workflow defined <em>with</em> the agent, maintained in skills, shown as an HTML page.</strong> New page(s) showing <strong>workspace / project / user</strong> workflows. The page also enables a <strong>dry-run</strong> of a workflow with <strong>metrics (context KB)</strong> and <strong>agent validation</strong> — so the cost and soundness of a process are visible before it runs, and the user tunes it against real numbers.</li>
+        </ol>
+      </section>
+
+      <section id="s7">
+        <h2><span class="sec-no">07</span> Proving ground</h2>
+        <p>Prove any new process on the smallest real surface first, then on real work:</p>
+        <ul>
+          <li><strong>A story create / update / discussion process</strong> — needs <em>one</em> workflow and <em>one</em> supporting skill. This is the minimal end-to-end test of "user defines process in a skill; hooks force the agent to follow it." Capturing this conversation (§5, Story 1) is the first instance of it.</li>
+          <li><strong>Actual implementations</strong> — <code>satellites-compliance-eval</code> and <strong>VIRE</strong>. Real repos, real work, are the only honest test (per the anti-magic proof in <a class="inline" href="./agent-process-compliance.md">agent-process-compliance.md</a> § "How to test").</li>
+        </ul>
+      </section>
+
+      <section id="s8">
+        <h2><span class="sec-no">08</span> Immediate next steps <span style="font-family:var(--mono);font-size:.5em;color:var(--ink-faint);font-weight:400;letter-spacing:.1em">(ORDERED, MINIMAL)</span></h2>
+        <ol class="steps">
+          <li><strong>Capture this conversation</strong> as Story 1 + a <code>type:chat</code> record — proves §7's create/discussion process and stops this analysis being lost.</li>
+          <li><strong>Cull the backlog</strong> (§6.1) — decide what survives the rebuild.</li>
+          <li><strong>Smallest hook probe</strong> (§6.2 START door) on a fresh install — does it catch the skip at the door with <em>zero</em> process pushed into context? If yes, the thesis holds and the rebuild has its foundation.</li>
+          <li><strong>Measure <code>claude -p</code> cold-start</strong> (§4) — decide if per-gate subprocesses are viable.</li>
+        </ol>
+      </section>
+
+      <div class="aside" id="note">
+        <div class="a-label">Note on the working tree</div>
+        <p>The <code>lean-substrate</code> follow-up edits made this session (curated principle sidecar + the workflow-boundary doc/comments) remain <strong>uncommitted</strong> in the working tree, never driven through any gate — itself an artifact of the failure this document records. They are held pending a decision: drive them through the new process once it exists, or discard and redo them correctly. They are not lost track of.</p>
+      </div>
+    </article>
+  </div>
+
+  <footer>
+    <span>satellites · strategy record · 2026-06-04/05</span>
+    <span>Source: <a href="./satellites-rethink.md">satellites-rethink.md</a> · Companion: <a href="./agent-process-compliance.md">agent-process-compliance.md</a></span>
+  </footer>
+</div>
+
+<script>
+  // Active-section highlighting in the index.
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var map = {};
+    links.forEach(function(a){ var id=a.getAttribute('href').slice(1); var el=document.getElementById(id); if(el) map[id]=a; });
+    var ids = Object.keys(map);
+    if(!('IntersectionObserver' in window) || !ids.length) return;
+    var visible = new Set();
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting) visible.add(e.target.id); else visible.delete(e.target.id); });
+      // pick the topmost visible section
+      var best=null, bestTop=Infinity;
+      ids.forEach(function(id){ if(visible.has(id)){ var t=document.getElementById(id).getBoundingClientRect().top; if(t<bestTop){bestTop=t;best=id;} }});
+      links.forEach(function(a){a.classList.remove('active');});
+      if(best && map[best]) map[best].classList.add('active');
+    },{rootMargin:'-12% 0px -70% 0px',threshold:0});
+    ids.forEach(function(id){ io.observe(document.getElementById(id)); });
+  })();
+</script>
+</body>
+</html>
