@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_4732f444","version":2,"hash":"759f27833b21b2e6205574efb834f8a5586b8808b1c8f89eedcf313aba077eda"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_4732f444","version":3,"hash":"f52809037b32780318fc683f07b7fb3307494d2fcffbf47f685a60ce22e3c1f9"} satellites-sync:end -->
 ---
 name: satellites-technical-debt-review
 type: skill
@@ -52,7 +52,7 @@ not name) or an *unowned* register row. Do not commit. Resolve it:
 - **Or file it** — when the failure genuinely cannot be fixed in this change:
   1. Create a tracking story (`document_upsert` type:story) that names the
      failing check and what must be done.
-  2. Add an **owned** row to `config/<wksp>/<proj>/documents/technical-debt-register.md`:
+  2. Add an **owned** row to `.satellites/documents/technical-debt-register.md`:
      `| <check_id> | <story_id> | <reason> |`. Every row MUST name its story —
      an unowned row blocks.
   3. `satellites document upload`, then re-run the gate. The now-registered red

@@ -1,7 +1,7 @@
 ---
 name: agent-goals
 type: document
-tags: [principles:project]
+tags: [principles:project, principles:always]
 ---
 
 # Agent goals

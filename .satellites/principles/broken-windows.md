@@ -1,7 +1,7 @@
 ---
 name: broken-windows
 type: document
-tags: [principles:project]
+tags: [principles:project, principles:always]
 ---
 
 # Broken windows

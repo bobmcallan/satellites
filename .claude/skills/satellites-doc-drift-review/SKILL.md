@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_ead0d53a","version":1,"hash":"19028c2fbffa174efec5fcbef8e2b31dbdd20e393f11217efe4d92c952262727"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_ead0d53a","version":2,"hash":"fc6f9fc1aa3dcab0d7553bb842505deefe8be595daecd520b06037a867b4fc9f"} satellites-sync:end -->
 ---
 name: satellites-doc-drift-review
 type: skill
@@ -45,7 +45,7 @@ proceed.
 **Exit 1 (BLOCKED)** — a command exists in the binary but not in the doc. Do not
 commit. Reconcile it:
 
-1. Add the command to `config/<wksp>/<proj>/documents/client-command-surface.md`
+1. Add the command to `.satellites/documents/client-command-surface.md`
    — name it, say what it owns, give its state.
 2. `satellites document upload`, then re-run the gate.
 

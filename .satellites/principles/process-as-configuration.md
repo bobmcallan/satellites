@@ -36,4 +36,25 @@ the *mechanism* and lets each project state its own process.
 The satellites project is the worked example — prove the mechanism here
 before asking any other project to adopt it.
 
+## The boundary: gating authority vs rendering
+
+"satellites holds no workflow knowledge" is a statement about **authority**,
+not about every line of code. The line is:
+
+- **Gating / transition authority — the skill owns it, the binary holds
+  none.** The client never resolves a workflow, picks a transition, or
+  computes a next status. `story status_transition --skill <gate>` runs the
+  named gate; the gate reads the story's embedded `## Workflow` and enacts its
+  own target. No workflow parsing on this path.
+- **Rendering / observability — the binary MAY parse a workflow to display
+  it.** The story-detail view and the process-trace overlay parse a workflow
+  purely to *show* states, transitions, and where a story sits. This is
+  read-only presentation; it decides nothing and advances nothing. Parsing for
+  a picture is not holding authority.
+
+So `internal/workflow` legitimately survives in the server for observability
+(`story_detail`, `processtrace`) — what the epic retired is its use in the
+*gating* path. When you touch a server site that parses a workflow, keep it on
+the observability side of this line: render, never gate.
+
 See [[agent-goals]], [[reviewer-process]].

@@ -266,6 +266,10 @@ func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
 // story type, resolved through the dynamic skill index (effective, so a user's
 // overridden workflow wins for that viewer — sty_cbeeb452). Returns nil (no
 // error) when no workflow governs the type.
+//
+// Observability only (see principle process-as-configuration, "the boundary"):
+// this parses a workflow purely to RENDER the story-detail view. It decides
+// and advances nothing — gating authority lives in the gate skill, never here.
 func resolveWorkflowForStory(ctx context.Context, storyType string) (*workflow.Workflow, error) {
 	storyType = strings.TrimSpace(storyType)
 	if storyType == "" {

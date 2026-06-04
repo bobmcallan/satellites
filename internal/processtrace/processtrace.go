@@ -96,6 +96,9 @@ type ProcessTrace struct {
 // Reconcile overlays the actual ledger trail onto the declared workflow.
 // Entries may arrive in any order; they are processed oldest-first so a
 // later accept supersedes an earlier reject on a retried transition.
+//
+// Observability only (see principle process-as-configuration, "the boundary"):
+// the workflow is parsed here to DISPLAY where a story sits, not to gate it.
 func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, entries []LedgerEntry) ProcessTrace {
 	out := ProcessTrace{
 		StoryID:       storyID,

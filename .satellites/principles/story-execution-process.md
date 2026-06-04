@@ -1,6 +1,6 @@
 ---
 name: story-execution-process
-tags: ["principles:project"]
+tags: ["principles:project", "principles:always"]
 ---
 # Story execution process
 
