@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_fcb911a6","version":1,"hash":"cdb9095a884231ce41b7d82cd39471ba3e535d4af56154f71a4046d5d8e67883"} satellites-sync:end -->
 ---
 name: satellites-parent-close-review
 type: skill
@@ -30,8 +29,9 @@ A single JSON object arrives on stdin:
 }
 ```
 
-`SATELLITES_REVIEWER_API_KEY` is set in the environment. Use it with the
-`.satellites/satellites` CLI to read the children.
+The gate's `.satellites/satellites exec` calls authenticate as the operator's
+own (admin) user, which the server authorizes to write status_transition /
+review_* rows. Use the `.satellites/satellites` CLI to read the children.
 
 ## What to check — the genuine-anchor guard
 
@@ -62,35 +62,39 @@ stories, page with the response `next_cursor` so no child is missed.
 
 ## Enact your decision
 
-You do not just report a verdict — you **enact** it. You hold the reviewer key
-(`SATELLITES_REVIEWER_API_KEY` is set in your environment), so
-`.satellites/satellites exec` calls you make authenticate as the reviewer and
-may write the spine rows + patch the status that an executor key cannot. The
-input payload gives you `story_id`, `project_id`, `workspace_id`, `story_status`
-(the current state) and `next_status` (the workflow target to advance to on
-accept).
+You do not just report a verdict — you **enact** it. The gate's
+`.satellites/satellites exec` calls authenticate as the operator's own (admin)
+user, which the server authorizes to write status_transition / review_* rows.
+The input payload gives you `story_id`, `project_id`, `workspace_id`,
+`story_status` (the current state) and `next_status` (the workflow target to
+advance to on accept).
 
 Run these with Bash before you print your decision.
 
-**On accept** — advance the anchor, then record the verdict and the transition:
+**On accept** — record the verdict, then append the status_transition that
+closes the anchor. This is exactly two `ledger_append` calls (no
+document_upsert):
 
 ```sh
-.satellites/satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"satellites-parent-close-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
 ```
 
-**On reject** — do not patch the status; record only the rejection so the
-executor reads your notes:
+The status_transition row IS the status change — the server projects its
+`to_status` onto the story. Do NOT call document_upsert to move status; the
+status field is ignored there.
+
+**On reject** — do not append a status_transition; record only the rejection so
+the executor reads your notes:
 
 ```sh
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"satellites-parent-close-review"}}'
 ```
 
 Only advance to the workflow's `next_status` — never to a state the workflow
-does not declare. If `document_upsert` fails (e.g. the role gate rejects the
-key), your decision did not take effect: print `reject` with the failure as the
-reason rather than claiming an accept that did not land.
+does not declare. If the status_transition `ledger_append` fails (e.g. the
+server refuses the write), the transition did not land: print `reject` with the
+failure as the reason rather than claiming an accept that did not take.
 
 ## Output
 

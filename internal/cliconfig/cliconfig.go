@@ -44,6 +44,10 @@ type Config struct {
 	// verbatim.
 	SkillsRoot string `toml:"skills_root"`
 
+	// Measure configures measure mode — the client's session observability.
+	// It is DEFAULT ON: an absent [measure] section means enabled + record.
+	Measure MeasureConfig `toml:"measure"`
+
 	// Token is the executor api-key presented on every server call.
 	// Resolved at Load from the credential store (NOT the TOML), so it
 	// is never a repo-committed secret. Empty until `satellites auth`.
@@ -98,6 +102,68 @@ func RepoRootFromConfigPath(configPath string) string {
 	return filepath.Dir(filepath.Dir(configPath))
 }
 
+// MeasureConfig is the [measure] table — measure mode's client config.
+// Measure mode is DEFAULT ON: an absent section (zero value: Enabled nil,
+// Mode "") resolves to enabled + record. You opt out with enabled=false or
+// mode="off".
+type MeasureConfig struct {
+	// Enabled is a pointer so "absent" (nil) is distinguishable from an
+	// explicit false. nil ⇒ default ON.
+	Enabled *bool `toml:"enabled"`
+	// Mode is off|record|enforce; empty defaults to record.
+	Mode string `toml:"mode"`
+	// LogDir overrides where session logs are written; empty falls back to
+	// log_path / DefaultLogDir via Config.MeasureLogDir.
+	LogDir string `toml:"log_dir"`
+	// ReviewerSkill names a custom session-review skill (optional).
+	ReviewerSkill string `toml:"reviewer_skill"`
+}
+
+// ResolveMode returns the effective mode, defaulting empty to "record".
+func (m MeasureConfig) ResolveMode() string {
+	if s := strings.ToLower(strings.TrimSpace(m.Mode)); s != "" {
+		return s
+	}
+	return "record"
+}
+
+// IsEnabled reports whether measure mode should collect data. Default ON:
+// enabled unless explicitly disabled (enabled=false) or mode="off".
+func (m MeasureConfig) IsEnabled() bool {
+	if m.Enabled != nil && !*m.Enabled {
+		return false
+	}
+	return m.ResolveMode() != "off"
+}
+
+// validMeasureMode reports whether a (non-empty) mode string is one of the
+// three accepted values. Empty is valid (defaults to record).
+func validMeasureMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "off", "record", "enforce":
+		return true
+	}
+	return false
+}
+
+// MeasureLogDir resolves the directory measure-mode session logs are written
+// to: an explicit measure.log_dir (repo-relative or absolute) wins, otherwise
+// it falls back to ResolveLogDir (log_path / DefaultLogDir). One owner for the
+// measure log location.
+func (c Config) MeasureLogDir(repoRoot string) string {
+	d := strings.TrimSpace(c.Measure.LogDir)
+	if d == "" {
+		return c.ResolveLogDir(repoRoot)
+	}
+	if filepath.IsAbs(d) {
+		return d
+	}
+	if strings.TrimSpace(repoRoot) == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, d)
+}
+
 // Load returns the resolved Config. An empty explicitPath triggers the
 // env / walk-up resolution chain. A missing file returns the zero
 // Config plus a typed ErrNotFound — caller decides whether to treat
@@ -117,6 +183,9 @@ func Load(explicitPath string) (Config, string, error) {
 	var cfg Config
 	if _, err := toml.Decode(string(b), &cfg); err != nil {
 		return Config{}, path, fmt.Errorf("cliconfig: parse %s: %w", path, err)
+	}
+	if !validMeasureMode(cfg.Measure.Mode) {
+		return Config{}, path, fmt.Errorf("cliconfig: %s: invalid measure.mode %q (want off, record, or enforce)", path, cfg.Measure.Mode)
 	}
 	// Resolve the bearer from the user-level credential store keyed by
 	// server_url (provisioned by `satellites auth`). A missing credential

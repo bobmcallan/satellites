@@ -31,24 +31,30 @@ A single JSON object arrives on stdin:
 }
 ```
 
-`SATELLITES_REVIEWER_API_KEY` is set in the environment, so your
-`.satellites/satellites exec` calls authenticate as the reviewer and may patch
-the status and write the spine rows an executor key cannot.
+The gate's `.satellites/satellites exec` calls authenticate as the operator's
+own (admin) user, which the server authorizes to write status_transition /
+review_* rows.
 
 ## Enact (always accept)
 
-Read `story_id`, `project_id`, `workspace_id`, `story_status`, and `next_status`
-from the input, then run these with Bash before printing your decision:
+This is a pass-through gate: always accept and advance. Read `story_id`,
+`project_id`, `workspace_id`, `story_status`, and `next_status` from the input,
+then run these two `ledger_append` calls with Bash before printing your decision
+(no document_upsert):
 
 ```sh
-.satellites/satellites exec document_upsert --json '{"id":"<story_id>","status":"<next_status>"}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"pass-through gate","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"urgent-plan-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
 ```
 
-Only advance to the workflow's `next_status`. If `document_upsert` fails (e.g.
-the role gate rejects the key), the transition did not land — print `reject`
-with the failure as the reason rather than claiming an accept that did not take.
+The status_transition row IS the status change — the server projects its
+`to_status` onto the story. Do NOT call document_upsert to move status; the
+status field is ignored there.
+
+Only advance to the workflow's `next_status`. If the status_transition
+`ledger_append` fails (e.g. the server refuses the write), the transition did
+not land — print `reject` with the failure as the reason rather than claiming an
+accept that did not take.
 
 ## Output
 
