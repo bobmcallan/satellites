@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -70,71 +69,6 @@ func skillToIndexEntry(s substrateSkill) (skillIndexEntry, error) {
 		Description: strings.TrimSpace(fm.Description),
 		LocalName:   localSkillName(s.Name),
 	}, nil
-}
-
-// buildEffectiveSkillIndex builds the dispatch index a project actually
-// resolves against: the scope cascade system → workspace → project, merged by
-// name with the higher scope winning (project overrides workspace overrides
-// system). This is what makes a baseline workflow + gate skills seeded at
-// system scope run for a project with zero project-scoped skills, while a
-// project still overrides any baseline by authoring a same-named skill
-// (sty_050b6653). The project layer is resolved effectively so a caller's
-// user-scope override wins at the top (sty_cbeeb452). No new MCP verb — it
-// composes listSubstrateSkills across scopes.
-func buildEffectiveSkillIndex(ctx context.Context, dispatch verbDispatch, wsID, pjID string) ([]skillIndexEntry, error) {
-	byName := map[string]skillIndexEntry{}
-	merge := func(scope, ws, pj string, effective bool) error {
-		subs, err := listSubstrateSkills(ctx, dispatch, scope, ws, pj, effective)
-		if err != nil {
-			return err
-		}
-		for _, s := range subs {
-			e, ferr := skillToIndexEntry(s)
-			if ferr != nil {
-				return ferr
-			}
-			byName[e.Name] = e // later (higher-precedence) scope overrides
-		}
-		return nil
-	}
-	// Lowest precedence first.
-	if err := merge("system", "", "", false); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(wsID) != "" {
-		if err := merge("workspace", wsID, "", false); err != nil {
-			return nil, err
-		}
-	}
-	if strings.TrimSpace(pjID) != "" {
-		if err := merge("project", wsID, pjID, true); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]skillIndexEntry, 0, len(byName))
-	for _, e := range byName {
-		out = append(out, e)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-// selectWorkflowSkill returns the materialised local path of the workflow
-// skill bound to storyType — the kind:workflow entry whose applies_to contains
-// it. Index-derived dispatch: applies_to is the single source, no
-// project-config story_types (sty_815c09e7).
-func selectWorkflowSkill(index []skillIndexEntry, storyType string) (string, error) {
-	for _, e := range index {
-		if e.Kind != "workflow" {
-			continue
-		}
-		for _, t := range e.AppliesTo {
-			if strings.TrimSpace(t) == storyType {
-				return filepath.Join(".claude", "skills", e.LocalName, "SKILL.md"), nil
-			}
-		}
-	}
-	return "", fmt.Errorf("no kind:workflow skill has applies_to %q in the skill index", storyType)
 }
 
 func newSkillIndexCmd(configArg, userArg *string) *cobra.Command {

@@ -15,15 +15,18 @@ later; until then, pass through.
 
 ## Input
 
-A single JSON object arrives on stdin:
+A single JSON object arrives on stdin. It carries the story's CURRENT status
+(`story_status`) and its body (`story_body`), which contains a `## Workflow`
+fenced yaml block of states + transitions — but **NO `next_status`**: even a
+pass-through gate resolves the target itself from that block.
 
 ```json
 {
   "story_id":     "sty_<hex>",
   "project_id":   "proj_<hex>",
   "workspace_id": "wksp_<hex>",
-  "story_status": "deploy",
-  "next_status":  "done"
+  "story_body":   "the full story markdown (contains a ## Workflow yaml block)",
+  "story_status": "deploy"
 }
 ```
 
@@ -33,28 +36,39 @@ review_* rows.
 
 ## Enact (always accept)
 
-This is a pass-through gate: always accept and close. Read `story_id`,
-`project_id`, `workspace_id`, `story_status`, and `next_status` from the input,
-then run these two `ledger_append` calls with Bash before printing your decision
+This is a pass-through gate: it does no review, but it still derives its target
+from the story's `## Workflow` — pass-through means no requirements, not a
+free-floating destination.
+
+**Resolve your target status from the story's `## Workflow`.** Read the
+`## Workflow` fenced yaml block out of `story_body` and parse its
+`transitions`. Find the transition whose **`from` == `story_status`** AND whose
+**`reviewer_skill` == `satellites-urgent-done-review`** (this gate's own name).
+That transition's **`to`** is your resolved target status (call it
+`to_status`). If no such transition exists, this gate was requested for a
+transition the workflow does not declare — **reject**: append a `review_reject`
+and print reject. Never invent a `to_status`.
+
+Then run these two `ledger_append` calls with Bash before printing your decision
 (no document_upsert):
 
 ```sh
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"pass-through gate","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"urgent-done-review"}}'
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"pass-through gate","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-urgent-done-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
 The status_transition row IS the status change — the server projects its
 `to_status` onto the story. Do NOT call document_upsert to move status; the
 status field is ignored there.
 
-Only advance to the workflow's `next_status`. If the status_transition
-`ledger_append` fails (e.g. the server refuses the write), the transition did
-not land — print `reject` with the failure as the reason.
+Only advance to the `to_status` you resolved from the story's `## Workflow`. If
+the status_transition `ledger_append` fails (e.g. the server refuses the write),
+the transition did not land — print `reject` with the failure as the reason.
 
 ## Output
 
 After enacting, print exactly one JSON object and nothing else:
 
 ```json
-{"decision": "accept", "notes": "pass-through: deploy → done"}
+{"decision": "accept", "notes": "pass-through: <story_status> → <to_status>"}
 ```

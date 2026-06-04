@@ -1,28 +1,28 @@
-// `satellites story status_transition <story-id>` — the client-side
-// reviewer gate (sty_ffec5dab). The gate is intrinsically client-side: it
-// reads the workflow skill from the local worktree and runs `claude -p
-// --append-system-prompt <gate-body>` against the tree under review. The substrate (story, project-config,
-// ledger, status) stays server-side and is reached through the existing
-// document_get / document_upsert / ledger_* verbs — no new server verb.
+// `satellites story status_transition --skill <gate> <story-id>` — the
+// client-side reviewer gate (sty_ffec5dab). The client holds NO workflow
+// knowledge: it loads the story, runs the NAMED gate skill (--skill, required)
+// against the story via `claude -p --append-system-prompt <gate-body>`, and
+// reports the status the skill enacted. It does NOT resolve, read, or parse
+// any workflow, and it does NOT compute a next_status. The story's `## Workflow`
+// section (embedded in the story body by the executing agent) IS the workflow;
+// the GATE skill reads it and derives its own target status.
 //
 // This is the one execution primitive: where the executing agent DOES the
 // work, `status_transition` spawns the gate skill to JUDGE the transition
 // (the former `story run` executor driver was retired in sty_6e1c3641 — the
 // local agent is the executor). The gate skill enacts its own verdict — it
-// patches the status and writes the spine rows. Those writes authenticate
-// as the operator's own admin user (the server authorizes status_transition
-// / review_* by the admin user behind the call), so there is no separately
-// minted reviewer key. This command orchestrates (pick transition, record
-// that the gate was requested) and then reports the status the skill
-// enacted; it does not patch the status itself.
+// patches the status (via the status_transition spine row) and writes the
+// review_* rows. Those writes authenticate as the operator's own admin user
+// (the server authorizes status_transition / review_* by the admin user behind
+// the call), so there is no separately minted reviewer key. This command
+// orchestrates (record that the gate was requested, dispatch it) and then
+// reports the status the skill enacted; it does not patch the status itself.
 //
-// Single-source reuse: transition selection is owned by
-// internal/workflow (Workflow.PickTransition); project-config parsing
-// and the gate subprocess + decision parse are owned by internal/verb
-// (ParseProjectConfig, ClaudeCLIGateDispatcher). This command only
-// orchestrates them, and stays behind internal/verb's request/response
-// types per the CLI layering guard (no internal/document or
-// internal/ledger imports).
+// Single-source reuse: the gate subprocess + decision parse are owned by
+// internal/verb (ClaudeCLIGateDispatcher). This command only orchestrates,
+// and stays behind internal/verb's request/response types per the CLI
+// layering guard (no internal/document, internal/ledger, or internal/workflow
+// imports).
 
 package cli
 
@@ -31,13 +31,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/verb"
-	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -69,17 +66,18 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 		skill        string
 	)
 	cmd := &cobra.Command{
-		Use:   "status_transition <story-id>",
-		Short: "Run the workflow gate for a story's current → next transition, client-side",
-		Long: `status_transition runs the reviewer gate for one story on the operator machine.
+		Use:   "status_transition --skill <gate> <story-id>",
+		Short: "Run a named reviewer gate skill against a story, client-side",
+		Long: `status_transition runs a named reviewer gate skill for one story on the
+operator machine.
 
-It resolves the story and project-config via server verbs, reads the
-workflow skill from the LOCAL worktree, picks the gated transition, and
-runs the gate as ` + "`claude -p --append-system-prompt <gate-body>`" + ` against the worktree.
-On accept it advances the story status via document_upsert and records
-review_accept + status_transition ledger rows; on reject it records the
-rejection notes. The gate runs where the worktree and claude live — the
-substrate stays on the server.`,
+It resolves the story via server verbs and runs the gate named by --skill
+(required) as ` + "`claude -p --append-system-prompt <gate-body>`" + ` against the worktree.
+The client holds no workflow knowledge: the story's ` + "`## Workflow`" + ` section is
+the workflow, and the GATE skill reads it to derive its own target status and
+enact the transition (review_accept + status_transition ledger rows on accept;
+the rejection notes on reject). The gate runs where the worktree and claude
+live — the substrate stays on the server.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -99,8 +97,8 @@ substrate stays on the server.`,
 		},
 	}
 	cmd.Flags().StringVar(&claudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or `claude` on PATH).")
-	cmd.Flags().StringVar(&worktreeRoot, "worktree", "", "Worktree root the workflow skill + gate run against (default: current directory).")
-	cmd.Flags().StringVar(&skill, "skill", "", "Agent-driven: name the gate skill (a reviewer_skill declared in the story's workflow) to request. Omit to resolve the gate from the story's current status. An unknown/unimplemented skill is rejected, no status change.")
+	cmd.Flags().StringVar(&worktreeRoot, "worktree", "", "Worktree root the gate runs against (default: current directory).")
+	cmd.Flags().StringVar(&skill, "skill", "", "REQUIRED. Name the gate skill to run against the story. The gate reads the story's `## Workflow` to derive its own target status and enact the transition.")
 	return cmd
 }
 
@@ -110,11 +108,10 @@ type reviewOpts struct {
 	UserArg      string
 	ClaudeBin    string
 	WorktreeRoot string
-	// Skill, when set, is the agent-driven gate selector: the name of a
-	// reviewer_skill declared on a transition in the story's workflow. When
-	// empty the transition is resolved from the story's current status
-	// (PickTransition). An unknown skill, or one whose edge does not leave the
-	// current status, is rejected before any gate dispatch (sty_bd6a4f53).
+	// Skill is REQUIRED: the name of the gate skill to run against the story.
+	// The client does not resolve a workflow or pick a transition — it
+	// dispatches this gate and reports. The gate reads the story's `## Workflow`
+	// to derive its own target status and enact the transition.
 	Skill  string
 	Stdout io.Writer
 	Stderr io.Writer
@@ -132,49 +129,22 @@ type reviewStory struct {
 	WorkspaceID string
 }
 
-// resolveReviewTransition picks the gated transition the review will run.
-// With skill=="" it defers to the workflow's status-derived rule
-// (PickTransition) — the long-standing behaviour. With a skill named it is
-// agent-driven (sty_bd6a4f53): the skill must be a reviewer_skill declared on a
-// transition that leaves the story's current status; otherwise the request is
-// rejected (returned as an error the caller renders as a reject decision, no
-// status change). The workflow stays authoritative for the destination: naming
-// a skill only selects which declared gate judges, never the target state — so
-// agent-driven selection cannot steer to an undeclared state or a lenient pass.
-func resolveReviewTransition(wf *workflow.Workflow, status, skill string) (workflow.Transition, string, bool, error) {
-	if strings.TrimSpace(skill) == "" {
-		return wf.PickTransition(status)
-	}
-	var gated []workflow.Transition
-	for _, t := range wf.Transitions {
-		if t.ReviewerSkill == skill {
-			gated = append(gated, t)
-		}
-	}
-	if len(gated) == 0 {
-		return workflow.Transition{}, "", false, fmt.Errorf("skill %q is not a gate in this story's workflow (not implemented)", skill)
-	}
-	for _, t := range gated {
-		if t.From == status {
-			return t, t.ReviewerSkill, t.Dynamic, nil
-		}
-	}
-	return workflow.Transition{}, "", false, fmt.Errorf("skill %q gates a transition that does not leave the current status %q", skill, status)
-}
-
 func runReview(ctx context.Context, opts reviewOpts) error {
 	if opts.StoryID == "" {
 		return fmt.Errorf("story id required")
+	}
+
+	// 0. The gate to run is named explicitly — the client holds no workflow
+	// knowledge and never resolves a gate from status. --skill is required.
+	gateSkill := strings.TrimSpace(opts.Skill)
+	if gateSkill == "" {
+		return fmt.Errorf("--skill is required: name the gate skill to run")
 	}
 
 	// 1. Resolve the story (substrate read — server).
 	story, body, err := reviewGetStory(ctx, opts)
 	if err != nil {
 		return err
-	}
-	storyType := strings.TrimSpace(story.Category)
-	if storyType == "" {
-		return fmt.Errorf("story %s has no category — workflow lookup needs a story type", story.ID)
 	}
 
 	// 1b. Claim the local work area (sty_8e8ec0e7) — flock + lease, atomic.
@@ -185,41 +155,14 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return fmt.Errorf("claim work area for %s: %w", story.ID, err)
 	}
 
-	// 2. project-config → workflow skill path for this story type, plus the
-	// optional step-summariser skill (server read).
-	skillPath, summariserSkill, err := reviewWorkflowSkillPath(ctx, opts, story, storyType)
-	if err != nil {
-		return err
+	// 2. Resolve only the optional step-summariser skill (a post-transition
+	// project-config setting — NOT a workflow read). The client does not read,
+	// resolve, or parse any workflow: the story's `## Workflow` is the workflow,
+	// and the gate skill derives its own target from it.
+	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		return dispatchVerb(ctx, name, req, opts.ConfigPath, opts.UserArg)
 	}
-
-	// 3. Read + parse the workflow skill from the LOCAL worktree.
-	clean := filepath.Clean(skillPath)
-	skillBytes, err := os.ReadFile(filepath.Join(opts.WorktreeRoot, clean))
-	if err != nil {
-		return fmt.Errorf("read workflow skill %q from worktree: %w", skillPath, err)
-	}
-	wf, err := workflow.Parse(skillBytes)
-	if err != nil {
-		return fmt.Errorf("parse workflow %q: %w", skillPath, err)
-	}
-
-	// 4. Resolve the gated transition. Agent-driven (sty_bd6a4f53): when the
-	// caller names a --skill, request that gate; otherwise resolve from status
-	// (PickTransition). A named skill the workflow does not declare — or whose
-	// edge does not leave the current status — is rejected here, before any
-	// gate dispatch, with no status change. The workflow target stays
-	// authoritative: naming a skill only chooses which declared gate judges,
-	// never the destination state.
-	transition, gateSkill, isDynamic, err := resolveReviewTransition(wf, story.Status, opts.Skill)
-	if err != nil {
-		if opts.Skill != "" {
-			fmt.Fprintf(opts.Stdout, "decision: reject\n")
-			fmt.Fprintf(opts.Stdout, "notes: %v\n", err)
-			fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
-			return nil
-		}
-		return err
-	}
+	summariserSkill := reviewStepSummariserSkill(ctx, dispatch, story)
 
 	// 5. Recent ledger for gate context. Hot path (sty_8e8ec0e7): serve from
 	// the local inbox when present — no wire round-trip — and fall back to
@@ -251,9 +194,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// 6b. Spine: the gate was requested. Stage it to the local inbox
 	// (sty_8e8ec0e7); the batched flush (step 10) writes it durably to the
 	// server with its local_ref. The verdict rows stay the skill's to enact.
-	reqPayload, _ := json.Marshal(map[string]any{"gate": gateSkill, "from_status": story.Status, "to_status": transition.To, "dynamic": isDynamic})
+	// No to_status — the client does not know it; the gate derives it from the
+	// story's `## Workflow`.
+	reqPayload, _ := json.Marshal(map[string]any{"gate": gateSkill, "from_status": story.Status})
 	if _, sErr := inboxAppend(story.ID, "review_requested",
-		fmt.Sprintf("gate %s: %s → %s", gateSkill, story.Status, transition.To), reqPayload, time.Now()); sErr != nil {
+		fmt.Sprintf("gate %s: from %s", gateSkill, story.Status), reqPayload, time.Now()); sErr != nil {
 		fmt.Fprintf(opts.Stderr, "warn: stage review_requested to inbox: %v\n", sErr)
 	}
 
@@ -270,8 +215,6 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		WorkspaceID:  story.WorkspaceID,
 		StoryBody:    body,
 		StoryStatus:  story.Status,
-		NextStatus:   transition.To,
-		Dynamic:      isDynamic,
 		RecentLedger: recent,
 		WorktreeRoot: opts.WorktreeRoot,
 	})
@@ -286,10 +229,10 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Running
 	// under the operator's inherited admin auth, the gate skill writes the
 	// review_accept/review_reject + status_transition spine rows and, on
-	// accept, patches the story status toward the workflow-declared target.
-	// The client no longer performs the status patch or those spine writes —
-	// it requests the gate (step 6b) and reports; enactment is configuration
-	// in the skill, not code here.
+	// accept, patches the story status toward the target it derived from the
+	// story's `## Workflow`. The client no longer performs the status patch or
+	// those spine writes — it requests the gate (step 6b) and reports;
+	// enactment is configuration in the skill, not code here.
 	//
 	// Read the status back (operator's own key — a plain read) so the
 	// operator sees whether the skill enacted. This read is observability,
@@ -312,11 +255,16 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 
 	// 9. Per-transition step summary (sty_2517f6b8). When project-config names
 	// a step_summariser_skill, run it and record its prose as a step_summary
-	// ledger row, tied to this transition. Best-effort: the transition has
-	// already happened, so a summariser failure warns but does not fail the
-	// review. Inlined (not a helper) so the recent-ledger slice flows by
-	// inference and the CLI never names internal/ledger.
+	// ledger row, tied to this transition. The to_status is the status the gate
+	// enacted (read back at step 8) — the client does not compute it. Best-
+	// effort: the transition has already happened, so a summariser failure warns
+	// but does not fail the review. Inlined (not a helper) so the recent-ledger
+	// slice flows by inference and the CLI never names internal/ledger.
 	if summariserSkill != "" {
+		toStatus := observed
+		if toStatus == "" {
+			toStatus = story.Status
+		}
 		summariser := verb.ClaudeCLISummariser{
 			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
 			DefaultTimeout: summariserTimeout,
@@ -328,7 +276,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			WorkspaceID:  story.WorkspaceID,
 			StoryBody:    body,
 			FromStatus:   story.Status,
-			ToStatus:     transition.To,
+			ToStatus:     toStatus,
 			Decision:     gateOut.Decision,
 			RecentLedger: recent,
 			WorktreeRoot: opts.WorktreeRoot,
@@ -337,7 +285,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		case sErr != nil:
 			fmt.Fprintf(opts.Stderr, "warn: step summariser %q failed: %v\n", summariserSkill, sErr)
 		case strings.TrimSpace(summary) != "":
-			sumPayload, _ := json.Marshal(map[string]any{"from_status": story.Status, "to_status": transition.To, "gate_skill": gateSkill, "decision": gateOut.Decision})
+			sumPayload, _ := json.Marshal(map[string]any{"from_status": story.Status, "to_status": toStatus, "gate_skill": gateSkill, "decision": gateOut.Decision})
 			if _, aErr := inboxAppend(story.ID, "step_summary", summary, sumPayload, time.Now()); aErr != nil {
 				fmt.Fprintf(opts.Stderr, "warn: stage step_summary to inbox: %v\n", aErr)
 			} else {
@@ -352,16 +300,6 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// local_ref. The verdict rows are NOT here — the gate skill enacts those
 	// (sty_db5cdef0).
 	flushLocalInbox(ctx, opts, story)
-
-	// 11. Reconcile + cleanup (AC6): the server ledger is authority. Once the
-	// story reaches a terminal state (no outgoing transition), the local work
-	// area has served its purpose — remove it. A non-terminal story keeps its
-	// inbox so the next run serves recent context locally.
-	if observed != "" && len(wf.TransitionsFrom(observed)) == 0 {
-		if cErr := cleanupWork(story.ID); cErr != nil {
-			fmt.Fprintf(opts.Stderr, "warn: cleanup work area %s: %v\n", story.ID, cErr)
-		}
-	}
 	return nil
 }
 
@@ -463,32 +401,6 @@ func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, 
 		ProjectID:   resp.Document.ProjectID,
 		WorkspaceID: resp.Document.WorkspaceID,
 	}, body, nil
-}
-
-// reviewWorkflowSkillPath returns the workflow-skill path for the story type
-// (index-derived) and the project's optional step-summariser skill name.
-//
-// Dispatch is index-derived (sty_815c09e7): the workflow skill is the
-// kind:workflow entry in the dynamic skill index whose applies_to contains the
-// story type — applies_to is the single source, no project-config on the
-// dispatch path. The step-summariser is a post-transition setting (not
-// dispatch); it stays the lone residual project-config read and is optional.
-func reviewWorkflowSkillPath(ctx context.Context, opts reviewOpts, story reviewStory, storyType string) (string, string, error) {
-	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
-		return dispatchVerb(ctx, name, req, opts.ConfigPath, opts.UserArg)
-	}
-	// Resolve across the scope cascade (system → workspace → project) so a
-	// project with no project-scoped workflow/gate skills inherits the system
-	// baseline, while a project override still wins (sty_050b6653).
-	index, err := buildEffectiveSkillIndex(ctx, dispatch, story.WorkspaceID, story.ProjectID)
-	if err != nil {
-		return "", "", fmt.Errorf("build skill index: %w", err)
-	}
-	skillPath, err := selectWorkflowSkill(index, storyType)
-	if err != nil {
-		return "", "", err
-	}
-	return skillPath, reviewStepSummariserSkill(ctx, dispatch, story), nil
 }
 
 // reviewStepSummariserSkill returns the project's optional step-summariser

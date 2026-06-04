@@ -28,15 +28,15 @@ func TestParseGateOutput_WrappedFence(t *testing.T) {
 }
 
 func TestParseGateOutput_PreambleAndJSON(t *testing.T) {
-	out, err := ParseGateOutput([]byte("Some preamble.\n\n{\"decision\":\"accept\",\"next_status\":\"complex\"}"))
+	out, err := ParseGateOutput([]byte("Some preamble.\n\n{\"decision\":\"accept\",\"notes\":\"ok\"}"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if out.Decision != GateDecisionAccept {
 		t.Fatalf("decision = %q", out.Decision)
 	}
-	if out.NextStatus != "complex" {
-		t.Fatalf("next_status = %q, want complex", out.NextStatus)
+	if out.Notes != "ok" {
+		t.Fatalf("notes = %q, want ok", out.Notes)
 	}
 }
 

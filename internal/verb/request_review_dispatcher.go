@@ -39,20 +39,17 @@ type GateInput struct {
 	WorkspaceID  string
 	StoryBody    string
 	StoryStatus  string
-	NextStatus   string
-	Dynamic      bool
 	RecentLedger []ledger.Entry
 	WorktreeRoot string
 	Timeout      time.Duration
 }
 
-// GateOutput is what the dispatcher returns. NextStatus is honoured only
-// when the input had Dynamic=true — declarative dispatchers can leave it
-// empty and the verb fills it from the workflow's `to`.
+// GateOutput is what the dispatcher returns — the gate's verdict. The gate
+// derives its own target status from the story's `## Workflow` and enacts it
+// itself, so the dispatcher no longer carries a next_status back.
 type GateOutput struct {
-	Decision   string `json:"decision"`
-	Notes      string `json:"notes,omitempty"`
-	NextStatus string `json:"next_status,omitempty"`
+	Decision string `json:"decision"`
+	Notes    string `json:"notes,omitempty"`
 }
 
 // GateDispatcher is the indirection seam. One method, one call — keeps
@@ -79,9 +76,9 @@ func (f GateDispatcherFunc) Dispatch(ctx context.Context, in GateInput) (GateOut
 // prompt; the subprocess inherits the operator's own auth from the
 // environment so the skill can write back through the verbs.
 //
-// The skill is expected to print one JSON object: `{decision, notes,
-// next_status?}`. Anything else is a dispatcher-level error — the
-// substrate refuses to interpret malformed gate output.
+// The skill is expected to print one JSON object: `{decision, notes}`.
+// Anything else is a dispatcher-level error — the substrate refuses to
+// interpret malformed gate output.
 type ClaudeCLIGateDispatcher struct {
 	// BinaryPath overrides the discovered `claude` binary. Production
 	// callers leave it empty; tests that exercise the subprocess path
@@ -121,8 +118,6 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		"workspace_id":  in.WorkspaceID,
 		"story_body":    in.StoryBody,
 		"story_status":  in.StoryStatus,
-		"next_status":   in.NextStatus,
-		"dynamic":       in.Dynamic,
 		"recent_ledger": in.RecentLedger,
 	})
 	if err != nil {

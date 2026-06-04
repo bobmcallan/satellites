@@ -14,22 +14,24 @@ criterion met, verified against the real tree, not asserted.
 
 **Follow the workflow the story records.** plan-review already validated the
 story's `## Workflow` against the canonical skill; that embedded snapshot is
-authoritative. The transition you enact is the one your input `next_status`
-names (the dispatcher resolved it from the same workflow) — do not re-resolve
-the workflow or advance to a state it does not declare. Your verification
+authoritative. The transition you enact is the one you resolve from the story's
+`## Workflow` yourself (see *Enact*) — the input carries no `next_status`. Do
+not advance to a state the workflow does not declare. Your verification
 guardrails below are unchanged: the embedded workflow tells you the target, the
 acceptance criteria and the tree tell you whether the story has earned it.
 
 ## Input
 
-A single JSON object arrives on stdin:
+A single JSON object arrives on stdin. It carries the story's CURRENT status
+(`story_status`) and its body (`story_body`), which contains a `## Workflow`
+fenced yaml block of states + transitions — but **NO `next_status`**: you
+resolve the target yourself from that block.
 
 ```json
 {
   "story_id":      "sty_<hex>",
-  "story_body":    "the full story markdown",
+  "story_body":    "the full story markdown (contains a ## Workflow yaml block)",
   "story_status":  "in_progress",
-  "next_status":   "done",
   "recent_ledger": [ { "kind": "...", "body": "..." } ]
 }
 ```
@@ -72,18 +74,27 @@ You do not just report a verdict — you **enact** it. The gate's
 `.satellites/satellites exec` calls authenticate as the operator's own
 (admin) user, which the server authorizes to write status_transition /
 review_* rows. The input payload gives you `story_id`, `project_id`,
-`workspace_id`, `story_status` (the current state) and `next_status` (the
-workflow target to advance to on accept).
+`workspace_id`, and `story_status` (the current state).
+
+**Resolve your target status from the story's `## Workflow`.** Read the
+`## Workflow` fenced yaml block out of `story_body` and parse its
+`transitions`. Find the transition whose **`from` == `story_status`** AND whose
+**`reviewer_skill` == `satellites-story-done-review`** (this gate's own name).
+That transition's **`to`** is your resolved target status (call it
+`to_status`). If no such transition exists, this gate was requested for a
+transition the workflow does not declare — **reject**: append a `review_reject`
+(below) and print reject. Never invent a `to_status`; only the one the workflow
+declares for THIS gate from the current status.
 
 Run these with Bash before you print your decision.
 
 **On accept** — record the verdict, then append the status_transition that
-moves the story. This is exactly two `ledger_append` calls (no
-document_upsert):
+moves the story to the resolved `to_status`. This is exactly two
+`ledger_append` calls (no document_upsert):
 
 ```sh
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<next_status>","gate":"satellites-story-done-review"}}'
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <next_status>","payload":{"from_status":"<story_status>","to_status":"<next_status>"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-story-done-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
 The status_transition row IS the status change — the server projects its
@@ -97,11 +108,11 @@ rejection so the executor reads your notes:
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_reject","body":"<your notes>","payload":{"from_status":"<story_status>","gate":"satellites-story-done-review"}}'
 ```
 
-Only advance to the workflow's `next_status` — never to a state the
-workflow does not declare. If the status_transition `ledger_append` fails
-(e.g. the server refuses the write), the transition did not land: print
-`reject` with the failure as the reason rather than claiming an accept that
-did not take.
+Only advance to the `to_status` you resolved from the story's `## Workflow` —
+never to a state the workflow does not declare for this gate. If the
+status_transition `ledger_append` fails (e.g. the server refuses the write),
+the transition did not land: print `reject` with the failure as the reason
+rather than claiming an accept that did not take.
 
 ## Output
 
