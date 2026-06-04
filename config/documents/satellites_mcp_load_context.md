@@ -5,38 +5,31 @@ tags: [kind:mcp-startup, v2]
 ---
 # satellites · bootstrap
 
-Complete these before any other tool call.
+**To work a story:** `document_get` it, read the `kind:workflow` skill it names
+(that skill IS the process — its `## Workflow` lists the gated transitions), and
+drive each transition with `satellites story status_transition --skill <gate>`.
+Fetch everything else only when a task needs it — **do not preload.**
 
-## 1. Translate operator prefixes
+## Prefixes (resolve when one appears)
 
-| Prefix | Resolve via |
-|---|---|
-| `document:<scope>/<name>` | `document_get` |
-| `project:<id>` | `project_get` |
-| `story:<id>` | `document_get` |
-| `epic:<slug>` | `document_list` with `tags:["epic:<slug>"]` |
-| `variable:<scope>/<name>` | `variable_get` |
+`document:<scope>/<name>` → `document_get` · `project:<id>` → `project_get` ·
+`story:<id>` → `document_get` · `epic:<slug>` → `document_list {tags:["epic:<slug>"]}` ·
+`variable:<scope>/<name>` → `variable_get`
 
-## 2. Bootstrap the client
+## First-time setup (once per repo)
 
-`document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`, then per the schema. Shell clients: `satellites install` then `satellites auth` (not an in-band mint); MCP-only: `apikey_create`. Write the TOML; `project_match` the git remote for `project_id`.
+`document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
+and follow it — shell client: `satellites install` then `satellites auth`; write
+the TOML; `project_match` the git remote for `project_id`. Then sync skills:
+`satellites skill list` per scope, reconcile into `.claude/skills/<name>/SKILL.md`
+per `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}`.
 
-## 3. Load principles
+## On demand — do NOT load eagerly
 
-Call `document_list` three times to fetch every layer that applies:
-
-- `{scope:"system", tags:["principles:global"]}`
-- `{scope:"workspace", tags:["principles:workspace"], workspace_id:<wksp_id>}`
-- `{scope:"project", tags:["principles:project"], project_id:<proj_id>}`
-
-Read each body. Re-deliver on every read verb that names a matching scope — refresh per call, do not cache.
-
-## 4. Sync Claude Code skills
-
-Mandatory on session start. Run `satellites skill list` per applicable scope and reconcile each row into `.claude/skills/<name>/SKILL.md` per the contract in `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}` — version comparison, frontmatter shape, workflow-spec exclusion, pull-only.
-
-## 5. Fetch reference docs on demand
-
-- `document_get {name:"satellites_mcp_reference_dispatch", scope:"system"}` — CLI dispatch surface, typed subcommands, story actions.
-- `document_get {name:"satellites_mcp_reference_documents", scope:"system"}` — upsert modes, list filter shape, MCP-only client surface.
-- `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}` — Claude Code skill reconciliation contract (referenced by step 4).
+- **Principles** — `document_list {tags:["principles:global"]}` (and the
+  `principles:workspace` / `principles:project` layers). Fetch only when a
+  task's correctness depends on them, never at startup.
+- **Reference** — `satellites_mcp_reference_dispatch` (CLI dispatch surface),
+  `satellites_mcp_reference_documents` (upsert modes + list shapes),
+  `satellites_mcp_reference_skill_sync` (skill reconciliation contract). Fetch
+  the one whose contract you need.
