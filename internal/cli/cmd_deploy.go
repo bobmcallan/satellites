@@ -65,7 +65,9 @@ func runDeploy(ctx context.Context, out io.Writer, configArg, userArg string, dr
 	if err != nil {
 		return err
 	}
-	return syncSkills(ctx, out, "project", ws, pj, configArg, userArg, "", dryRun)
+	// Non-interactive: deploy never prompts and never clobbers a local edit —
+	// a conflict is reported and kept local.
+	return syncSkills(ctx, out, nil, "project", ws, pj, configArg, userArg, "", conflictLocal, dryRun)
 }
 
 // resolveDeployScope reads project_id from the repo config and resolves

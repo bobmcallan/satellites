@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -102,7 +104,8 @@ func TestReconcileAction(t *testing.T) {
 	stampedCurrent := &localSkill{Name: "s", Stamped: true, Stamp: skillStamp{DocumentID: "doc_1", Version: 2, Hash: "h"}, BodyHash: "h"}
 	stampedOld := &localSkill{Name: "s", Stamped: true, Stamp: skillStamp{DocumentID: "doc_1", Version: 1, Hash: "h"}, BodyHash: "h"}
 	stampedEdited := &localSkill{Name: "s", Stamped: true, Stamp: skillStamp{DocumentID: "doc_1", Version: 2, Hash: "h"}, BodyHash: "DIFFERENT"}
-	unstamped := &localSkill{Name: "s", Stamped: false}
+	unstamped := &localSkill{Name: "s", Stamped: false, BodyHash: hashBody("DIFFERENT")}
+	unstampedMatch := &localSkill{Name: "s", Stamped: false, BodyHash: hashBody("b")} // identical to sub.Body
 
 	cases := []struct {
 		name  string
@@ -114,7 +117,8 @@ func TestReconcileAction(t *testing.T) {
 		{"update: stamped, version advanced, unedited", sub, stampedOld, actionUpdate},
 		{"skip: stamped, already current", sub, stampedCurrent, actionSkip},
 		{"conflict: stamped but edited", sub, stampedEdited, actionConflict},
-		{"leave: unstamped local + substrate present", sub, unstamped, actionLeaveUnstamped},
+		{"leave: unstamped local + substrate present + body differs", sub, unstamped, actionLeaveUnstamped},
+		{"match: unstamped local byte-identical to substrate", sub, unstampedMatch, actionMatchUnstamped},
 		{"remove: stamped, substrate gone", nil, stampedCurrent, actionRemove},
 		{"conflict-on-remove: edited, substrate gone", nil, stampedEdited, actionConflict},
 		{"leave: unstamped, substrate gone", nil, unstamped, actionLeaveUnstamped},
@@ -272,5 +276,96 @@ func TestApplySyncItem_InstallThenRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "fix-workflow")); !os.IsNotExist(err) {
 		t.Fatalf("expected dir removed, stat err = %v", err)
+	}
+}
+
+// TestResolveConflict_ForceBacksUpAndOverwrites: the `force` policy writes the
+// current local copy to a .bak (so the operator's edit is never lost) and then
+// overwrites SKILL.md with the materialised substrate copy.
+func TestResolveConflict_ForceBacksUpAndOverwrites(t *testing.T) {
+	root := t.TempDir()
+	name := "satellites-fix-workflow"
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edited := "MY LOCAL EDIT — must survive as a backup\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := &substrateSkill{Name: "fix-workflow", DocumentID: "doc_fw", Version: 3, Body: "---\nname: fix-workflow\n---\n# upstream\n"}
+
+	var out bytes.Buffer
+	if err := resolveConflict(&out, nil, conflictForce, root, syncPlanItem{Name: name, Action: actionConflict, Sub: sub}); err != nil {
+		t.Fatalf("resolveConflict force: %v", err)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if string(got) != materialise(*sub) {
+		t.Errorf("SKILL.md not overwritten with the substrate copy")
+	}
+	entries, _ := os.ReadDir(dir)
+	var baks []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".bak") {
+			baks = append(baks, e.Name())
+		}
+	}
+	if len(baks) != 1 {
+		t.Fatalf("want exactly one .bak, got %v", baks)
+	}
+	bak, _ := os.ReadFile(filepath.Join(dir, baks[0]))
+	if string(bak) != edited {
+		t.Errorf("backup must preserve the local edit verbatim, got %q", string(bak))
+	}
+}
+
+// TestResolveConflict_NonInteractivePromptKeepsLocal: with the default
+// `prompt` policy but no terminal, the conflict degrades to leave — the local
+// edit stays and nothing is backed up or overwritten.
+func TestResolveConflict_NonInteractivePromptKeepsLocal(t *testing.T) {
+	root := t.TempDir()
+	name := "satellites-fix-workflow"
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edited := "MY LOCAL EDIT\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := &substrateSkill{Name: "fix-workflow", DocumentID: "doc_fw", Version: 3, Body: "upstream"}
+
+	var out bytes.Buffer
+	// strings.Reader is not an *os.File → isInteractive is false → degrade.
+	if err := resolveConflict(&out, strings.NewReader(""), conflictPrompt, root, syncPlanItem{Name: name, Action: actionConflict, Sub: sub}); err != nil {
+		t.Fatalf("resolveConflict prompt(non-tty): %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(got) != edited {
+		t.Errorf("local edit must be kept under a non-interactive prompt, got %q", string(got))
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".bak") {
+			t.Errorf("no backup should be written when leaving local, found %s", e.Name())
+		}
+	}
+}
+
+// TestPromptConflict_Choice pins the prompt parsing: an explicit f/force picks
+// force; anything else (incl. empty) is the safe leave-local default.
+func TestPromptConflict_Choice(t *testing.T) {
+	var out bytes.Buffer
+	if got := promptConflict(&out, strings.NewReader("f\n"), "x"); got != conflictForce {
+		t.Errorf("promptConflict(\"f\") = %q, want force", got)
+	}
+	if got := promptConflict(&out, strings.NewReader("force\n"), "x"); got != conflictForce {
+		t.Errorf("promptConflict(\"force\") = %q, want force", got)
+	}
+	if got := promptConflict(&out, strings.NewReader("\n"), "x"); got != conflictLocal {
+		t.Errorf("promptConflict(empty) = %q, want local", got)
+	}
+	if got := promptConflict(&out, strings.NewReader("yes\n"), "x"); got != conflictLocal {
+		t.Errorf("promptConflict(\"yes\") = %q, want local", got)
 	}
 }

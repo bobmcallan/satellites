@@ -17,6 +17,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -28,9 +29,20 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/spf13/cobra"
+)
+
+// Conflict-resolution policy for an edited (stamped, hash-mismatch) local
+// skill. `prompt` (the default) asks the operator interactively; it degrades
+// to `local` when stdin is not a terminal so automation never blocks or
+// silently clobbers a local edit.
+const (
+	conflictPrompt = "prompt"
+	conflictLocal  = "local"
+	conflictForce  = "force"
 )
 
 // stampMarker delimits the injected sync-identity block at the top of a
@@ -69,7 +81,8 @@ const (
 	actionSkip                             // stamped local copy already current
 	actionRemove                           // stamped local copy, substrate row gone
 	actionConflict                         // stamped local copy edited (hash mismatch) — refuse to overwrite
-	actionLeaveUnstamped                   // local copy with no stamp — operator-authored, never touch
+	actionLeaveUnstamped                   // local copy with no stamp + content differs — operator-authored, never touch
+	actionMatchUnstamped                   // local copy with no stamp but byte-identical to the substrate body
 )
 
 func (a syncAction) String() string {
@@ -86,6 +99,8 @@ func (a syncAction) String() string {
 		return "conflict"
 	case actionLeaveUnstamped:
 		return "leave"
+	case actionMatchUnstamped:
+		return "match"
 	}
 	return "?"
 }
@@ -168,7 +183,13 @@ func reconcileAction(sub *substrateSkill, local *localSkill) syncAction {
 		return actionInstall
 	case sub != nil && local != nil:
 		if !local.Stamped {
-			// Operator authored a skill with this name; never clobber.
+			// Unstamped local. If its body is byte-identical to the
+			// substrate, it already matches — report `match` (it is simply
+			// unmanaged, missing only the stamp). Otherwise it is
+			// operator-authored content; never clobber → `leave`.
+			if local.BodyHash == hashBody(sub.Body) {
+				return actionMatchUnstamped
+			}
 			return actionLeaveUnstamped
 		}
 		if local.Malformed {
@@ -206,10 +227,10 @@ func readLocalSkill(skillsRoot, name string) (*localSkill, error) {
 		return nil, err
 	}
 	stamp, authored, ok, malformed := splitStamp(string(raw))
-	ls := &localSkill{Name: name, Stamped: ok, Stamp: stamp, Malformed: malformed}
-	if ok {
-		ls.BodyHash = hashBody(authored)
-	}
+	// Hash the authored body whether or not it carries a stamp: a stamped
+	// file's hash detects operator edits; an unstamped file's hash lets the
+	// reconcile spot one that is byte-identical to the substrate (match).
+	ls := &localSkill{Name: name, Stamped: ok, Stamp: stamp, Malformed: malformed, BodyHash: hashBody(authored)}
 	return ls, nil
 }
 
@@ -270,11 +291,12 @@ type syncPlanItem struct {
 
 func newSkillSyncCmd(configArg, userArg *string) *cobra.Command {
 	var (
-		scopeArg string
-		wsArg    string
-		pjArg    string
-		dryRun   bool
-		root     string
+		scopeArg   string
+		wsArg      string
+		pjArg      string
+		dryRun     bool
+		root       string
+		onConflict string
 	)
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -285,13 +307,24 @@ func newSkillSyncCmd(configArg, userArg *string) *cobra.Command {
 Pull-only and stamp-keyed: sync only updates or removes a local skill it
 materialised (one carrying the injected identity stamp); an operator-authored
 skill with no stamp is never touched. Editing a rubric in the substrate and
-re-running sync takes effect with no hand-edit and no binary release.`,
+re-running sync takes effect with no hand-edit and no binary release.
+
+A 'conflict' (a stamped local copy you have edited since it was materialised)
+is resolved per --on-conflict: 'prompt' (default) asks you to force-overwrite
+(backing up your copy to SKILL.md-<datetime-ms>.bak first) or leave the local
+copy; 'local' always keeps your edit; 'force' always overwrites with a backup.
+Outside a terminal, 'prompt' degrades to 'local' so nothing is clobbered.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			return syncSkills(ctx, cmd.OutOrStdout(), scopeArg, wsArg, pjArg, *configArg, *userArg, root, dryRun)
+			switch onConflict {
+			case conflictPrompt, conflictLocal, conflictForce:
+			default:
+				return fmt.Errorf("--on-conflict must be one of prompt|local|force, got %q", onConflict)
+			}
+			return syncSkills(ctx, cmd.OutOrStdout(), cmd.InOrStdin(), scopeArg, wsArg, pjArg, *configArg, *userArg, root, onConflict, dryRun)
 		},
 	}
 	cmd.Flags().StringVar(&scopeArg, "scope", "project", "Scope to sync (system / workspace / project)")
@@ -299,6 +332,7 @@ re-running sync takes effect with no hand-edit and no binary release.`,
 	cmd.Flags().StringVar(&pjArg, "project", "", "project_id (required for scope=project)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the reconcile plan without writing files")
 	cmd.Flags().StringVar(&root, "skills-root", "", "Materialisation root (default .claude/skills)")
+	cmd.Flags().StringVar(&onConflict, "on-conflict", conflictPrompt, "How to resolve an edited local skill: prompt | local | force")
 	return cmd
 }
 
@@ -337,7 +371,7 @@ func resolveSkillsRoot(flagRoot, configArg string) (string, error) {
 // skills for a scope, reconcile them against the materialised local
 // `.claude/skills/` tree by identity stamp, and apply (unless dryRun).
 // Single source shared by `skill sync` and `satellites deploy`.
-func syncSkills(ctx context.Context, out io.Writer, scope, ws, pj, configArg, userArg, root string, dryRun bool) error {
+func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj, configArg, userArg, root, onConflict string, dryRun bool) error {
 	skillsRoot, err := resolveSkillsRoot(root, configArg)
 	if err != nil {
 		return err
@@ -396,12 +430,104 @@ func syncSkills(ctx context.Context, out io.Writer, scope, ws, pj, configArg, us
 			fmt.Fprintf(out, "[dry-run] %-8s %s\n", item.Action, item.Name)
 			continue
 		}
+		// A conflict (edited stamped copy) is not applied blindly — it is
+		// resolved per the operator's policy, which may back up + overwrite.
+		if item.Action == actionConflict {
+			if err := resolveConflict(out, in, onConflict, skillsRoot, item); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := applySyncItem(skillsRoot, item); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%-8s %s\n", item.Action, item.Name)
 	}
 	return nil
+}
+
+// isInteractive reports whether in is an interactive terminal — used so the
+// conflict prompt only fires for a human and degrades to "leave local" under
+// automation. Dependency-free: a char-device stdin is a TTY.
+func isInteractive(in io.Reader) bool {
+	f, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// resolveConflict applies the conflict policy for one edited (stamped,
+// hash-mismatch) local skill. `prompt` asks the operator when interactive and
+// otherwise leaves the local copy; `force` backs up + overwrites; `local`
+// keeps the edit. A backup is written to <name>/SKILL.md-<datetime-ms>.bak
+// before any overwrite, so the operator's edit is never lost.
+func resolveConflict(out io.Writer, in io.Reader, policy, skillsRoot string, item syncPlanItem) error {
+	choice := policy
+	if policy == "" || policy == conflictPrompt {
+		if isInteractive(in) {
+			choice = promptConflict(out, in, item.Name)
+		} else {
+			fmt.Fprintf(out, "conflict %s — kept local (non-interactive; re-run with --on-conflict force to overwrite)\n", item.Name)
+			return nil
+		}
+	}
+	if choice == conflictForce {
+		if item.Sub == nil {
+			// Edited copy whose substrate row is gone — nothing to restore from.
+			fmt.Fprintf(out, "conflict %s — kept local (no substrate row to restore from)\n", item.Name)
+			return nil
+		}
+		bak, err := backupSkill(skillsRoot, item.Name)
+		if err != nil {
+			return fmt.Errorf("backup %s: %w", item.Name, err)
+		}
+		if err := applySyncItem(skillsRoot, syncPlanItem{Name: item.Name, Action: actionUpdate, Sub: item.Sub}); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "force    %s (backed up your copy to %s)\n", item.Name, filepath.Base(bak))
+		return nil
+	}
+	fmt.Fprintf(out, "local    %s (kept your edit)\n", item.Name)
+	return nil
+}
+
+// promptConflict asks the operator how to resolve one conflict, returning the
+// chosen policy. Anything but an explicit force defaults to leaving the local
+// copy — the safe choice.
+func promptConflict(out io.Writer, in io.Reader, name string) string {
+	fmt.Fprintf(out, "conflict %s — your local edit differs from the substrate.\n  [f]orce overwrite (backs up your copy first)  ·  [l]eave local (default): ", name)
+	sc := bufio.NewScanner(in)
+	if sc.Scan() {
+		switch strings.ToLower(strings.TrimSpace(sc.Text())) {
+		case "f", "force":
+			return conflictForce
+		}
+	}
+	return conflictLocal
+}
+
+// backupSkill copies the current SKILL.md aside to
+// <skillsRoot>/<name>/SKILL.md-<YYYYMMDD-HHMMSS-mmm>.bak before an overwrite
+// and returns the backup path. The .bak sits beside SKILL.md and is ignored by
+// the reconcile (which only reads SKILL.md).
+func backupSkill(skillsRoot, name string) (string, error) {
+	src := filepath.Join(skillsRoot, name, "SKILL.md")
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	// e.g. 20260605-091530-123
+	ts := strings.Replace(time.Now().Format("20060102-150405.000"), ".", "-", 1)
+	bak := filepath.Join(skillsRoot, name, "SKILL.md-"+ts+".bak")
+	if err := os.WriteFile(bak, raw, 0o644); err != nil {
+		return "", err
+	}
+	return bak, nil
 }
 
 // applySyncItem performs the verdict for one plan item. Conflicts, skips,
@@ -420,7 +546,7 @@ func applySyncItem(skillsRoot string, item syncPlanItem) error {
 		if err := os.RemoveAll(filepath.Join(skillsRoot, item.Name)); err != nil {
 			return fmt.Errorf("remove %s: %w", item.Name, err)
 		}
-	case actionSkip, actionConflict, actionLeaveUnstamped:
+	case actionSkip, actionConflict, actionLeaveUnstamped, actionMatchUnstamped:
 		// no write
 	}
 	return nil
