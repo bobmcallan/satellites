@@ -58,6 +58,46 @@ func (c Config) IsConfigured() bool {
 	return strings.TrimSpace(c.ServerURL) != "" && strings.TrimSpace(c.Token) != ""
 }
 
+// DefaultLogDir is the in-repo session-log location when log_path is unset.
+// Session data belongs in the consumer repo (alongside .satellites/work/),
+// NOT in $HOME — see ResolveLogDir.
+const DefaultLogDir = ".satellites/logs"
+
+// ResolveLogDir is the ONE authoritative computation of where the client
+// writes session/measure logs. It is the log_path counterpart of how
+// skills_root is anchored: a relative log_path (or the default) resolves
+// against the repo root — the directory that HOLDS .satellites/ — never the
+// process CWD; an absolute log_path is used verbatim.
+//
+// This exists because log_path was previously parsed but never consumed, so
+// session data had no in-repo home and fell to the separate satellites-client
+// daemon's $HOME path (~/.satellites/daemon/logs) — out of this binary's
+// control. Routing every consumer through here keeps session data in the repo.
+func (c Config) ResolveLogDir(repoRoot string) string {
+	p := strings.TrimSpace(c.LogPath)
+	if p == "" {
+		p = DefaultLogDir
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	if strings.TrimSpace(repoRoot) == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, p)
+}
+
+// RepoRootFromConfigPath derives the repo root (the directory holding
+// .satellites/) from a resolved satellites.toml path of the shape
+// <repo>/.satellites/satellites.toml. Empty path → "." (CWD), matching the
+// unconfigured-repo fallback used elsewhere.
+func RepoRootFromConfigPath(configPath string) string {
+	if strings.TrimSpace(configPath) == "" {
+		return "."
+	}
+	return filepath.Dir(filepath.Dir(configPath))
+}
+
 // Load returns the resolved Config. An empty explicitPath triggers the
 // env / walk-up resolution chain. A missing file returns the zero
 // Config plus a typed ErrNotFound — caller decides whether to treat

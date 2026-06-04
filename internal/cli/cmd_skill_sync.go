@@ -321,11 +321,9 @@ func resolveSkillsRoot(flagRoot, configArg string) (string, error) {
 	if err != nil && !errors.Is(err, cliconfig.ErrNotFound) {
 		return "", err
 	}
-	repoRoot := "."
-	if path != "" {
-		// path is <repo>/.satellites/satellites.toml; climb two dirs to <repo>.
-		repoRoot = filepath.Dir(filepath.Dir(path))
-	}
+	// Repo root = the dir holding .satellites/ (one computation, shared with
+	// log_path resolution via cliconfig.RepoRootFromConfigPath).
+	repoRoot := cliconfig.RepoRootFromConfigPath(path)
 	if s := strings.TrimSpace(cfg.SkillsRoot); s != "" {
 		if filepath.IsAbs(s) {
 			return s, nil
