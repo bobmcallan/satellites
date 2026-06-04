@@ -28,48 +28,21 @@ const (
 )
 
 // APIKeyRole enumerates the per-key role surface added by sty_25d5b21e.
-// Executor keys can edit story bodies; reviewer keys are the only ones
-// permitted to patch story status or append ledger entries. The split
-// is structural so the review subprocess can mint a short-lived
-// reviewer key, do its work, and revoke — without ever handing the
-// executor the ability to forge a transition.
+// Executor keys can edit story bodies but cannot patch story status or
+// append non-log ledger rows. Reviewer keys are no longer minted: status /
+// review writes are now authorized by the authenticated ADMIN USER behind
+// the call, not by a per-key role.
 type APIKeyRole string
 
 const (
 	APIKeyRoleExecutor APIKeyRole = "executor"
-	APIKeyRoleReviewer APIKeyRole = "reviewer"
-	// APIKeyRoleRunner is a third role minted for the `satellites story
+	// APIKeyRoleRunner is a second role minted for the `satellites story
 	// run` driver (sty_7af47a91). A runner key may append log-kind
 	// ledger rows so the driver's captured `claude -p` output can land
-	// in the substrate ledger without the broader reviewer permissions
-	// (status patching, review_finding kinds, etc.).
+	// in the substrate ledger without the broader status-patching
+	// permission.
 	APIKeyRoleRunner APIKeyRole = "runner"
 )
-
-// ReviewerAgentName is the reserved agent slot every reviewer key
-// occupies. Reviewer keys are an ephemeral single-slot-per-(user,project)
-// credential the gate rotates each run; pinning them to one reserved
-// agent_name keeps them in their own row in the api_keys_project_agent
-// unique index, separate from the executor key's real agent name, so a
-// reviewer rotation can never clobber an executor key (sty_e2dea1ec).
-const ReviewerAgentName = "reviewer"
-
-// reviewerSlotAgentName builds the agent_name that keys a reviewer key's
-// single (user, project, agent_name) slot. A storyID scopes the slot to one
-// story (sty_98a9bc0a) so concurrent gate runs on different stories do not
-// clobber each other's key; absent a storyID it falls back to an explicit
-// caller agent_name, then to the bare ReviewerAgentName. The `reviewer`
-// prefix is always present so a reviewer slot stays distinct from any
-// executor key's agent_name and a reviewer rotation can never evict one.
-func reviewerSlotAgentName(agentName, storyID string) string {
-	if sid := strings.TrimSpace(storyID); sid != "" {
-		return ReviewerAgentName + "-" + sid
-	}
-	if a := strings.TrimSpace(agentName); a != "" {
-		return a
-	}
-	return ReviewerAgentName
-}
 
 // User is a satellites operator.
 type User struct {
@@ -82,10 +55,9 @@ type User struct {
 
 // APIKey is a credential authenticating HTTP/MCP requests.
 //
-// Role is `executor` (default) or `reviewer`. ExpiresAt is set only
-// for short-lived reviewer keys minted by the review subprocess;
-// ValidateKey filters out rows past their expiry so revocation is
-// implicit when the TTL elapses.
+// Role is `executor` (default) or `runner`. ExpiresAt is set only for
+// short-lived keys; ValidateKey filters out rows past their expiry so
+// revocation is implicit when the TTL elapses.
 type APIKey struct {
 	ID        string
 	UserID    string
@@ -276,8 +248,7 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (*User, error) {
 }
 
 // IssueAPIKey mints an `executor`-role api-key (the only role
-// available to operators via the apikey_create verb). Reviewer keys
-// go through IssueReviewerKey, which is server-internal.
+// available to operators via the apikey_create verb).
 func (s *Store) IssueAPIKey(ctx context.Context, id, userID, projectID, agentName string) (string, *APIKey, error) {
 	rawKey, err := generateRawKey()
 	if err != nil {
@@ -294,53 +265,8 @@ func (s *Store) IssueAPIKeyWithRaw(ctx context.Context, id, userID, projectID, a
 	return s.issueWithRaw(ctx, id, userID, projectID, agentName, rawKey, APIKeyRoleExecutor, nil)
 }
 
-// IssueReviewerKeyInput is the server-internal mint surface for the
-// short-lived reviewer key the review subprocess wields. TTL is
-// caller-supplied so the orchestrator can pick the value from
-// server config; zero defaults to 5 minutes per the story.
-type IssueReviewerKeyInput struct {
-	UserID    string
-	ProjectID string
-	AgentName string
-	// StoryID scopes the reviewer key's slot to one story (sty_98a9bc0a).
-	// Reviewer keys occupy a single (user, project, agent_name) slot that a
-	// re-mint rotates in place; with every reviewer key pinned to the bare
-	// `reviewer` agent_name, two gate runs for the SAME (user, project) — even
-	// on different stories — shared one slot, so the second mint evicted the
-	// first's hash and the first run's enact 401'd. Keying the slot per story
-	// gives concurrent different-story gates independent slots. Same-story
-	// concurrency is already prevented upstream by the work-area lease
-	// (claimWork), so a per-story slot is the right granularity.
-	StoryID string
-	TTL     time.Duration
-}
-
-// IssueReviewerKey mints a `reviewer`-role key with an expiry set
-// from TTL. The verb-layer apikey_create cannot mint this role
-// (admin-gated); this is the path the review subprocess uses
-// server-internally. Mint/revoke audit-trail belongs to the caller
-// (the verb layer appends to ledger so auth stays narrow).
-func (s *Store) IssueReviewerKey(ctx context.Context, in IssueReviewerKeyInput) (string, *APIKey, error) {
-	if strings.TrimSpace(in.UserID) == "" {
-		return "", nil, fmt.Errorf("auth: reviewer key: user_id required")
-	}
-	ttl := in.TTL
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
-	rawKey, err := generateRawKey()
-	if err != nil {
-		return "", nil, err
-	}
-	agentName := reviewerSlotAgentName(in.AgentName, in.StoryID)
-	id := fmt.Sprintf("apk_rev_%s", randomKeyIDSuffixAuth())
-	expires := time.Now().UTC().Add(ttl)
-	return s.issueWithRaw(ctx, id, in.UserID, in.ProjectID, agentName, rawKey, APIKeyRoleReviewer, &expires)
-}
-
-// issueWithRaw is the single insert path for both executor and
-// reviewer keys. expiresAt is nil for executor keys; reviewer keys
-// always carry a value.
+// issueWithRaw is the single insert path for api-keys. expiresAt is nil
+// for executor keys (they never expire).
 func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentName, rawKey string, role APIKeyRole, expiresAt *time.Time) (string, *APIKey, error) {
 	hash := HashKey(rawKey)
 
@@ -354,8 +280,7 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
 	// counts a row even after it is revoked or expired. Re-minting such a key
 	// must ROTATE THE SLOT IN PLACE rather than collide: the prior row's
 	// hash / expiry / revoked_at are overwritten so a fresh token takes the
-	// slot. This covers both the reviewer key the gate rotates every run
-	// (sty_e2dea1ec) AND a project-scoped executor (bootstrap) key re-minted
+	// slot. This covers a project-scoped executor (bootstrap) key re-minted
 	// after a revoke (sty_03d714c2) — the collision vire hit. One row per
 	// slot, no accumulation of dead rows.
 	//
@@ -366,7 +291,7 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
         INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (key_hash) DO NOTHING`
-	if role == APIKeyRoleReviewer || projectID != "" {
+	if projectID != "" {
 		query = `
         INSERT INTO api_keys (id, user_id, project_id, agent_name, role, key_hash, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -393,12 +318,6 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
 	}
 	k.Role = APIKeyRole(roleStr)
 	return rawKey, &k, nil
-}
-
-func randomKeyIDSuffixAuth() string {
-	var b [4]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
 }
 
 // ValidateKey looks up the user for a given raw api-key. Returns

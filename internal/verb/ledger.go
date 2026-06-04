@@ -82,7 +82,7 @@ type LedgerListResponse struct {
 func init() {
 	Register(&Verb{
 		Name:        "ledger_append",
-		Description: "Append an entry to the evidence ledger. Append-only: entries cannot be updated or deleted once written. Correlation ids (story/project/workspace/session/run) are all optional; kind is required. Runner-role keys may append rows whose kind starts with 'log:'; reviewer keys may append any kind.",
+		Description: "Append an entry to the evidence ledger. Append-only: entries cannot be updated or deleted once written. Correlation ids (story/project/workspace/session/run) are all optional; kind is required. Runner / executor api-keys may append rows whose kind starts with 'log:'; an admin user may append any kind.",
 		Invoke:      invokeLedgerAppend,
 	})
 	Register(&Verb{
@@ -129,7 +129,7 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	}
 	// Project a status_transition onto the story's status — the gate's recorded
 	// verdict is the sole status writer (sty_42d13ae4). requireLedgerAppendRole
-	// already restricts status_transition to reviewer keys, so a raw status
+	// already restricts status_transition to the admin user, so a raw status
 	// patch from an executor (or via document_upsert) cannot reach here.
 	if req.Kind == statusTransitionKind && strings.TrimSpace(req.StoryID) != "" && documentStore != nil {
 		if to := extractToStatus(req.Payload); to != "" {
@@ -202,19 +202,25 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 	return json.Marshal(LedgerListResponse{Entries: res.Entries, NextCursor: res.NextCursor})
 }
 
-// requireLedgerAppendRole gates ledger_append. Reviewer keeps its
-// full append rights across every kind. Runner and executor keys may
-// only append log-kind rows — an observability harness driving a
-// `claude -p` stream writes `log:info` /
-// `log:warn` events; other kinds
-// (status transitions, review findings) stay reviewer-only.
-// Unauthenticated callers (CLI in-process, JWT portal users with no
-// api-key context) pass — they're gated by a separate membership
-// check upstream.
+// requireLedgerAppendRole gates ledger_append. An authenticated admin user
+// may append any kind (status_transition / review_*) — this is the authority
+// behind `satellites story status_transition`: the operator's own admin auth.
+// Runner and executor keys may only append log-kind rows — an observability
+// harness driving a `claude -p` stream writes `log:info` / `log:warn`
+// events; other kinds (status transitions, review findings) stay admin-only.
+// Unauthenticated callers (CLI in-process, JWT portal users with no api-key
+// context) pass — they're gated by a separate membership check upstream.
 func requireLedgerAppendRole(ctx context.Context, kind string) error {
+	// The client authenticates as a user. An admin user may append any kind
+	// (status_transition / review_*) regardless of the api-key's role — this
+	// is the authority behind `satellites story status_transition`: the
+	// operator's own admin auth.
+	if u := auth.FromContext(ctx); u != nil && u.Role == auth.RoleAdmin {
+		return nil
+	}
 	role := auth.APIKeyRoleFromContext(ctx)
 	switch role {
-	case "", auth.APIKeyRoleReviewer:
+	case "":
 		return nil
 	case auth.APIKeyRoleRunner, auth.APIKeyRoleExecutor:
 		if strings.HasPrefix(kind, ledger.LogKindPrefix) {
@@ -222,7 +228,7 @@ func requireLedgerAppendRole(ctx context.Context, kind string) error {
 		}
 		return fmt.Errorf("ledger_append: %w: %s-role api-key may only append log-kind rows (kind=%s)", ErrForbidden, role, kind)
 	}
-	return fmt.Errorf("ledger_append: %w: requires reviewer / runner / executor api-key (got %s)", ErrForbidden, role)
+	return fmt.Errorf("ledger_append: %w: requires an admin user or a runner / executor api-key (got %s)", ErrForbidden, role)
 }
 
 // actorFromContext returns the authenticated user id when present

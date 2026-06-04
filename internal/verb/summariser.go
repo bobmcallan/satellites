@@ -26,8 +26,6 @@ import (
 
 // SummariserInput is what the summariser receives: the skill to run and the
 // transition to describe (story body + from/to + decision + recent ledger).
-// ReviewerKey rides along so the subprocess authenticates back as the
-// reviewer if the skill itself reads the substrate, matching the gate path.
 type SummariserInput struct {
 	SkillName    string
 	StoryID      string
@@ -38,7 +36,6 @@ type SummariserInput struct {
 	ToStatus     string
 	Decision     string
 	RecentLedger []ledger.Entry
-	ReviewerKey  string
 	WorktreeRoot string
 	Timeout      time.Duration
 }
@@ -119,9 +116,6 @@ func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) 
 		cmd.Dir = in.WorktreeRoot
 	}
 	cmd.Env = os.Environ()
-	if strings.TrimSpace(in.ReviewerKey) != "" {
-		cmd.Env = append(cmd.Env, "SATELLITES_REVIEWER_API_KEY="+in.ReviewerKey)
-	}
 
 	out, err := cmd.Output()
 	if err != nil {

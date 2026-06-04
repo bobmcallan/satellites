@@ -37,27 +37,16 @@ import (
 // scopes get a round-tripped key today; tightening lands when the
 // substrate grows the column.
 //
-// Role defaults to `executor`. Minting `reviewer` via this verb
-// requires the caller to hold the admin user role; the server-internal
-// short-lived path goes through auth.Store.IssueReviewerKey instead.
+// Role defaults to `executor` and is the only role this verb mints.
+// Reviewer keys are no longer minted: gate enactment runs under the
+// operator's own admin auth, so a request for the `reviewer` role is
+// rejected.
 type APIKeyCreateRequest struct {
 	WorkspaceID string   `json:"workspace_id,omitempty"`
 	ProjectID   string   `json:"project_id,omitempty"`
 	AgentName   string   `json:"agent_name,omitempty"`
 	Scopes      []string `json:"scopes,omitempty"`
 	Role        string   `json:"role,omitempty"`
-	// TTLSeconds, when > 0, sets the lifetime of a minted reviewer key.
-	// The client requests a TTL covering the full gate dispatch (build +
-	// test can run many minutes) so the gate can still write its
-	// post-decision spine rows; absent it, IssueReviewerKey falls back to
-	// its short default and a long gate run loses those writes to a 401
-	// (sty_64c6159f). Ignored for executor-role mints (they never expire).
-	TTLSeconds int `json:"ttl_seconds,omitempty"`
-	// StoryID scopes a reviewer-role mint to one story's slot (sty_98a9bc0a),
-	// so concurrent gate runs on different stories get independent reviewer
-	// keys instead of clobbering a single shared slot. Ignored for executor
-	// mints. The gate (`satellites story review`) passes the story under review.
-	StoryID string `json:"story_id,omitempty"`
 }
 
 // APIKeyCreateResponse mirrors the shape declared in story
@@ -170,31 +159,15 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		return nil, err
 	}
 
-	role, err := normalizeAPIKeyRole(req.Role, caller)
-	if err != nil {
+	if _, err := normalizeAPIKeyRole(req.Role); err != nil {
 		return nil, err
 	}
 
+	// apikey_create mints executor keys only; normalizeAPIKeyRole rejects any
+	// other requested role above.
 	agentName := strings.TrimSpace(req.AgentName)
-	var rawKey string
-	var k *auth.APIKey
-	switch role {
-	case auth.APIKeyRoleReviewer:
-		var ttl time.Duration
-		if req.TTLSeconds > 0 {
-			ttl = time.Duration(req.TTLSeconds) * time.Second
-		}
-		rawKey, k, err = authStore.IssueReviewerKey(ctx, auth.IssueReviewerKeyInput{
-			UserID:    caller.ID,
-			ProjectID: projectID,
-			AgentName: agentName,
-			StoryID:   strings.TrimSpace(req.StoryID), // per-story slot — concurrent different-story gates don't collide (sty_98a9bc0a)
-			TTL:       ttl,                            // 0 ⇒ IssueReviewerKey's default; the client passes a gate-covering TTL (sty_64c6159f)
-		})
-	default:
-		keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())
-		rawKey, k, err = authStore.IssueAPIKey(ctx, keyID, caller.ID, projectID, agentName)
-	}
+	keyID := fmt.Sprintf("apk_mcp_%s", randomKeyIDSuffix())
+	rawKey, k, err := authStore.IssueAPIKey(ctx, keyID, caller.ID, projectID, agentName)
 	if err != nil {
 		return nil, fmt.Errorf("apikey_create: issue: %w", err)
 	}
@@ -210,29 +183,19 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	})
 }
 
-// normalizeAPIKeyRole resolves the requested role and enforces the
-// admin-gate for reviewer minting. Empty input defaults to executor —
-// the bootstrap path and pre-role callers continue to work unchanged.
-//
-// NOTE: the gate keys on the caller's USER role (admin), not the api-key
-// role. That is a known hole (an agent under the operator's admin user
-// can mint a reviewer key via an executor key — vire 2026-06-02). Closing
-// it MUST land together with a replacement reviewer-authority path, because
-// `satellites story review` itself mints its reviewer key through this verb
-// under the operator's (executor) key (cmd_story_review.go mintReviewerKey).
-// Tightening here without that replacement breaks the legitimate gate. See
-// story:sty_63d57099 (per-transition reviewer consent).
-func normalizeAPIKeyRole(requested string, caller *auth.User) (auth.APIKeyRole, error) {
+// normalizeAPIKeyRole resolves the requested role. Empty input defaults to
+// executor — the bootstrap path and pre-role callers continue to work
+// unchanged. Reviewer keys are no longer minted (gate enactment runs under
+// the operator's own admin auth), so a request for the `reviewer` role is
+// rejected with a clear error; executor is the only role apikey_create issues.
+func normalizeAPIKeyRole(requested string) (auth.APIKeyRole, error) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "", string(auth.APIKeyRoleExecutor):
 		return auth.APIKeyRoleExecutor, nil
-	case string(auth.APIKeyRoleReviewer):
-		if caller == nil || caller.Role != auth.RoleAdmin {
-			return "", fmt.Errorf("apikey_create: forbidden — minting reviewer role requires admin")
-		}
-		return auth.APIKeyRoleReviewer, nil
+	case "reviewer":
+		return "", fmt.Errorf("apikey_create: reviewer keys are no longer minted — status/review writes are authorized by the admin user")
 	default:
-		return "", fmt.Errorf("apikey_create: unknown role %q (want executor|reviewer)", requested)
+		return "", fmt.Errorf("apikey_create: unknown role %q (want executor)", requested)
 	}
 }
 

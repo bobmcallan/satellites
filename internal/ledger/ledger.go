@@ -25,13 +25,11 @@ import (
 // layer emits. Operators can append entries of any kind via
 // ledger_append; these are the names the substrate itself uses.
 const (
-	KindStoryCreated       = "story_created"
-	KindStoryUpdated       = "story_updated"
-	KindReviewFinding      = "review_finding"
-	KindSummaryUpdated     = "summary_updated"
-	KindComment            = "comment"
-	KindReviewerKeyMinted  = "reviewer_key_minted"
-	KindReviewerKeyRevoked = "reviewer_key_revoked"
+	KindStoryCreated   = "story_created"
+	KindStoryUpdated   = "story_updated"
+	KindReviewFinding  = "review_finding"
+	KindSummaryUpdated = "summary_updated"
+	KindComment        = "comment"
 	// KindStepSummary is the per-transition step summary the loop writes
 	// after a gated transition: the prose a config-named summariser skill
 	// produced, recorded next to the transition it describes (sty_2517f6b8).
@@ -40,8 +38,8 @@ const (
 
 // LogKindPrefix is the marker on rows the arbor LedgerHandler emits.
 // Anything starting with this prefix is a log event (e.g. log:info,
-// log:warn) and may be appended by a runner-role key. Reviewer keys
-// keep their existing append rights across all kinds.
+// log:warn) and may be appended by a runner / executor key. An admin user
+// keeps full append rights across all kinds.
 const LogKindPrefix = "log:"
 
 // Entry is one row of the evidence ledger. All correlation ids are

@@ -45,29 +45,13 @@ func dispatchTestServer(t *testing.T) (configPath string, lastBearer *string) {
 	return configPath, lastBearer
 }
 
-// TestDispatchVerb_ReviewerKeyOverridesBearer pins the sty_db5cdef0
-// keystone: when SATELLITES_REVIEWER_API_KEY is set (a gate skill running
-// under a minted reviewer key), `satellites exec` authenticates as the
-// reviewer, so a skill can enact its own transition. This is what moves
-// enactment out of the client and into the skill.
-func TestDispatchVerb_ReviewerKeyOverridesBearer(t *testing.T) {
+// TestDispatchVerb_UsesOperatorToken confirms a configured client
+// authenticates with the operator's stored token. Gate enactment now runs
+// under the operator's own admin auth (status / review writes are authorized
+// by the admin user, not a minted reviewer key), so there is no separate
+// reviewer-key bearer to override it.
+func TestDispatchVerb_UsesOperatorToken(t *testing.T) {
 	configPath, lastBearer := dispatchTestServer(t)
-	t.Setenv(reviewerKeyEnv, "tok-reviewer-minted")
-
-	if _, err := dispatchVerb(context.Background(), "document_upsert",
-		json.RawMessage(`{"id":"sty_x","status":"done"}`), configPath, ""); err != nil {
-		t.Fatalf("dispatchVerb: %v", err)
-	}
-	if *lastBearer != "tok-reviewer-minted" {
-		t.Fatalf("bearer = %q, want the minted reviewer key", *lastBearer)
-	}
-}
-
-// TestDispatchVerb_NoReviewerKeyUsesToken confirms the default path is
-// unchanged: absent the env var, the TOML's operator token authenticates.
-func TestDispatchVerb_NoReviewerKeyUsesToken(t *testing.T) {
-	configPath, lastBearer := dispatchTestServer(t)
-	t.Setenv(reviewerKeyEnv, "") // explicitly unset for isolation
 
 	if _, err := dispatchVerb(context.Background(), "document_get",
 		json.RawMessage(`{"id":"sty_x"}`), configPath, ""); err != nil {

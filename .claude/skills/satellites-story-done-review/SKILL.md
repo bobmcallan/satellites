@@ -8,7 +8,7 @@ tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---
 
-You are the **satellites-story-done-review** gate. `satellites story review` runs
+You are the **satellites-story-done-review** gate. `satellites story status_transition` runs
 you before it promotes a story from `in_progress` to `done`. Your one
 job: decide whether the change is genuinely complete — every acceptance
 criterion met, verified against the real tree, not asserted.

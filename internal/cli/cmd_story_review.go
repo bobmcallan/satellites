@@ -1,18 +1,20 @@
-// `satellites story review <story-id>` — the client-side reviewer gate
-// (sty_ffec5dab). The gate is intrinsically client-side: it reads the
-// workflow skill from the local worktree and runs `claude -p
+// `satellites story status_transition <story-id>` — the client-side
+// reviewer gate (sty_ffec5dab). The gate is intrinsically client-side: it
+// reads the workflow skill from the local worktree and runs `claude -p
 // --append-system-prompt <gate-body>` against the tree under review. The substrate (story, project-config,
 // ledger, status) stays server-side and is reached through the existing
 // document_get / document_upsert / ledger_* verbs — no new server verb.
 //
 // This is the one execution primitive: where the executing agent DOES the
-// work, `review` spawns the gate skill to JUDGE the transition (the former
-// `story run` executor driver was retired in sty_6e1c3641 — the local agent
-// is the executor). The gate skill enacts its own verdict — it patches the
-// status and writes the spine rows under its minted reviewer key
-// (sty_db5cdef0). This command orchestrates (mint key, pick transition,
-// record that the gate was requested) and then reports the status the
-// skill enacted; it does not patch the status itself.
+// work, `status_transition` spawns the gate skill to JUDGE the transition
+// (the former `story run` executor driver was retired in sty_6e1c3641 — the
+// local agent is the executor). The gate skill enacts its own verdict — it
+// patches the status and writes the spine rows. Those writes authenticate
+// as the operator's own admin user (the server authorizes status_transition
+// / review_* by the admin user behind the call), so there is no separately
+// minted reviewer key. This command orchestrates (pick transition, record
+// that the gate was requested) and then reports the status the skill
+// enacted; it does not patch the status itself.
 //
 // Single-source reuse: transition selection is owned by
 // internal/workflow (Workflow.PickTransition); project-config parsing
@@ -52,15 +54,13 @@ const gateDispatchTimeout = 15 * time.Minute
 // and emits prose — no build — so it is far shorter than the gate cap.
 const summariserTimeout = 5 * time.Minute
 
-// reviewerKeyTTL is the lifetime of the reviewer key minted for a gate
-// run. It MUST outlive the whole dispatch so the gate can write its
-// post-decision spine rows (review_accept/reject + status_transition) after
-// a long build+test, AND the step summariser that runs after the decision
-// can write its step_summary row under the same key — otherwise those
-// writes 401 on an expired key and the ledger trail is lost (sty_64c6159f,
-// sty_2517f6b8). Derived from both timeouts + headroom so they cannot
-// silently drift apart.
-const reviewerKeyTTL = gateDispatchTimeout + summariserTimeout + 5*time.Minute
+// claimLeaseTTL is the lifetime of the local work-claim lease a gate run
+// holds (claimWork). It MUST outlive the whole dispatch so a second
+// reviewer cannot reclaim the work area mid-run while the gate is still
+// building+testing and writing its post-decision spine + step_summary rows.
+// Derived from both timeouts + headroom so the lease and the work it covers
+// cannot silently drift apart.
+const claimLeaseTTL = gateDispatchTimeout + summariserTimeout + 5*time.Minute
 
 func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 	var (
@@ -69,9 +69,9 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 		skill        string
 	)
 	cmd := &cobra.Command{
-		Use:   "review <story-id>",
+		Use:   "status_transition <story-id>",
 		Short: "Run the workflow gate for a story's current → next transition, client-side",
-		Long: `review runs the reviewer gate for one story on the operator machine.
+		Long: `status_transition runs the reviewer gate for one story on the operator machine.
 
 It resolves the story and project-config via server verbs, reads the
 workflow skill from the LOCAL worktree, picks the gated transition, and
@@ -118,11 +118,6 @@ type reviewOpts struct {
 	Skill  string
 	Stdout io.Writer
 	Stderr io.Writer
-	// ReviewerKey is the minted reviewer-role api-key the spine writes
-	// (review_*, status_transition) and the status patch authenticate
-	// with. Empty until mintReviewerKey runs; the reads above stay on the
-	// operator's stored (executor) key (sty_e16f0553).
-	ReviewerKey string
 }
 
 // reviewStory is the minimal projection the reviewer needs from a
@@ -186,7 +181,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// A second reviewer with a live foreign lease is refused, so two
 	// reviewers cannot double-claim the same transition (AC5). A re-run by
 	// the same operator reclaims its own lease.
-	if err := claimWork(story.ID, workClaimant(resolveCallerUserID(opts.UserArg)), story.Status, reviewerKeyTTL, time.Now()); err != nil {
+	if err := claimWork(story.ID, workClaimant(resolveCallerUserID(opts.UserArg)), story.Status, claimLeaseTTL, time.Now()); err != nil {
 		return fmt.Errorf("claim work area for %s: %w", story.ID, err)
 	}
 
@@ -247,18 +242,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	}
 	fmt.Fprintf(opts.Stdout, "recent context: %s (%d rows)\n", recentSource, len(recent))
 
-	// 6. Mint a short-lived reviewer key for the spine writes + status
-	// patch. The operator's stored key is executor-role and the server
-	// refuses review_*/status_transition rows and status patches from it;
-	// reviewer minting is admin-gated (apikey_create), so an autonomous
-	// non-admin executor cannot self-accept (sty_e16f0553). Fail before
-	// the costly gate dispatch if the caller lacks reviewer authority.
-	reviewerKey, reviewerKeyID, err := mintReviewerKey(ctx, opts, story)
-	if err != nil {
-		return fmt.Errorf("mint reviewer key for gate run (reviewer minting requires an admin user): %w", err)
-	}
-	opts.ReviewerKey = reviewerKey
-	defer revokeReviewerKey(ctx, opts, reviewerKeyID)
+	// 6. The gate's spine writes + status patch run under the operator's own
+	// authenticated credential — no separately-minted reviewer key. The
+	// server authorizes status_transition / review_* by the admin user behind
+	// the call (see requireLedgerAppendRole), so the client's own auth is the
+	// authority.
 
 	// 6b. Spine: the gate was requested. Stage it to the local inbox
 	// (sty_8e8ec0e7); the batched flush (step 10) writes it durably to the
@@ -271,9 +259,9 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 
 	// 7. Run the gate locally (owned by internal/verb's dispatcher). The
 	// dispatch timeout (gateDispatchTimeout) must cover a done-review that
-	// actually builds + runs the change's tests; the minted reviewer key's
-	// TTL (reviewerKeyTTL, above) is derived from it so the key outlives the
-	// run and the gate's post-decision spine writes do not 401.
+	// actually builds + runs the change's tests; the work-claim lease
+	// (claimLeaseTTL, above) is derived from it so the lease outlives the run
+	// and a second reviewer cannot reclaim mid-build.
 	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: gateDispatchTimeout}
 	gateOut, err := disp.Dispatch(ctx, verb.GateInput{
 		SkillName:    gateSkill,
@@ -286,7 +274,6 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		Dynamic:      isDynamic,
 		RecentLedger: recent,
 		WorktreeRoot: opts.WorktreeRoot,
-		ReviewerKey:  opts.ReviewerKey,
 	})
 	if err != nil {
 		return fmt.Errorf("gate dispatch: %w", err)
@@ -296,13 +283,13 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stdout, "notes: %s\n", gateOut.Notes)
 	}
 
-	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Under
-	// its minted reviewer key (SATELLITES_REVIEWER_API_KEY, passed in env),
-	// the gate skill writes the review_accept/review_reject + status_transition
-	// spine rows and, on accept, patches the story status toward the
-	// workflow-declared target. The client no longer performs the status
-	// patch or those spine writes — it requests the gate (step 6b) and
-	// reports; enactment is configuration in the skill, not code here.
+	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Running
+	// under the operator's inherited admin auth, the gate skill writes the
+	// review_accept/review_reject + status_transition spine rows and, on
+	// accept, patches the story status toward the workflow-declared target.
+	// The client no longer performs the status patch or those spine writes —
+	// it requests the gate (step 6b) and reports; enactment is configuration
+	// in the skill, not code here.
 	//
 	// Read the status back (operator's own key — a plain read) so the
 	// operator sees whether the skill enacted. This read is observability,
@@ -327,9 +314,8 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// a step_summariser_skill, run it and record its prose as a step_summary
 	// ledger row, tied to this transition. Best-effort: the transition has
 	// already happened, so a summariser failure warns but does not fail the
-	// review. Runs under the still-valid reviewer key (reviewerKeyTTL covers
-	// gate + summariser). Inlined (not a helper) so the recent-ledger slice
-	// flows by inference and the CLI never names internal/ledger.
+	// review. Inlined (not a helper) so the recent-ledger slice flows by
+	// inference and the CLI never names internal/ledger.
 	if summariserSkill != "" {
 		summariser := verb.ClaudeCLISummariser{
 			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
@@ -345,7 +331,6 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			ToStatus:     transition.To,
 			Decision:     gateOut.Decision,
 			RecentLedger: recent,
-			ReviewerKey:  opts.ReviewerKey,
 			WorktreeRoot: opts.WorktreeRoot,
 		})
 		switch {
@@ -363,8 +348,9 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 
 	// 10. Batched flush (sty_8e8ec0e7): write the client-owned signals staged
 	// in the inbox this run (seq > last flushed) to the server ledger in a
-	// single pass under the reviewer key, each carrying its local_ref. The
-	// verdict rows are NOT here — the gate skill enacts those (sty_db5cdef0).
+	// single pass under the operator's own credential, each carrying its
+	// local_ref. The verdict rows are NOT here — the gate skill enacts those
+	// (sty_db5cdef0).
 	flushLocalInbox(ctx, opts, story)
 
 	// 11. Reconcile + cleanup (AC6): the server ledger is authority. Once the
@@ -381,7 +367,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 
 // flushLocalInbox writes the inbox messages staged this run (seq above the
 // last flushed seq recorded in status.json) to the server ledger via the
-// reviewer key, each carrying local_ref:<seq> in its payload, then advances
+// operator's own credential, each carrying local_ref:<seq> in its payload, then advances
 // the high-water mark. Idempotent across iterative review runs — a row is
 // flushed once. Best-effort: a flush failure warns; the server ledger remains
 // the authority and a later run re-flushes from the persisted inbox.
@@ -430,9 +416,9 @@ func flushLocalInbox(ctx context.Context, opts reviewOpts, story reviewStory) {
 }
 
 // reviewObserveStatus re-reads the story's current status for reporting.
-// It uses the operator's stored key (a plain read), never the reviewer
-// key, and never writes — it only lets the client show whether the skill
-// enacted. Errors are non-fatal: an unreadable status just prints nothing.
+// It uses the operator's stored key (a plain read) and never writes — it
+// only lets the client show whether the skill enacted. Errors are
+// non-fatal: an unreadable status just prints nothing.
 func reviewObserveStatus(ctx context.Context, opts reviewOpts, storyID string) (string, error) {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: storyID})
 	if err != nil {
@@ -560,53 +546,7 @@ func reviewAppendLedger(ctx context.Context, opts reviewOpts, story reviewStory,
 	if err != nil {
 		return
 	}
-	if _, err := dispatchVerbAs(ctx, "ledger_append", req, opts.ConfigPath, opts.UserArg, opts.ReviewerKey); err != nil {
+	if _, err := dispatchVerb(ctx, "ledger_append", req, opts.ConfigPath, opts.UserArg); err != nil {
 		fmt.Fprintf(opts.Stderr, "ledger append %s failed: %v\n", kind, err)
-	}
-}
-
-// mintReviewerKey mints a short-lived reviewer-role api-key for this gate
-// run via apikey_create (under the operator's stored key). The verb
-// admin-gates reviewer minting, so this fails for a non-admin caller —
-// keeping the gate's authority real: an autonomous executor cannot mint
-// a reviewer key and self-accept (sty_e16f0553).
-func mintReviewerKey(ctx context.Context, opts reviewOpts, story reviewStory) (string, string, error) {
-	req, err := json.Marshal(verb.APIKeyCreateRequest{
-		Role:       "reviewer",
-		ProjectID:  story.ProjectID,
-		StoryID:    story.ID,                          // per-story reviewer slot — concurrent different-story gates don't collide (sty_98a9bc0a)
-		TTLSeconds: int(reviewerKeyTTL / time.Second), // outlive the gate dispatch (sty_64c6159f)
-	})
-	if err != nil {
-		return "", "", err
-	}
-	raw, err := dispatchVerb(ctx, "apikey_create", req, opts.ConfigPath, opts.UserArg)
-	if err != nil {
-		return "", "", err
-	}
-	var resp verb.APIKeyCreateResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", "", fmt.Errorf("decode apikey_create: %w", err)
-	}
-	if strings.TrimSpace(resp.APIKey) == "" {
-		return "", "", fmt.Errorf("apikey_create returned an empty key")
-	}
-	return resp.APIKey, resp.KeyID, nil
-}
-
-// revokeReviewerKey best-effort revokes the minted reviewer key once the
-// gate run is done, so the elevated credential does not outlive the
-// review. A revoke failure is logged, not fatal — the key is short-lived
-// regardless (IssueReviewerKey).
-func revokeReviewerKey(ctx context.Context, opts reviewOpts, keyID string) {
-	if strings.TrimSpace(keyID) == "" {
-		return
-	}
-	req, err := json.Marshal(verb.APIKeyRevokeRequest{KeyID: keyID})
-	if err != nil {
-		return
-	}
-	if _, err := dispatchVerb(ctx, "apikey_revoke", req, opts.ConfigPath, opts.UserArg); err != nil {
-		fmt.Fprintf(opts.Stderr, "warn: revoke reviewer key %s failed: %v\n", keyID, err)
 	}
 }

@@ -30,15 +30,15 @@ contract into it first, get the plan gate-approved, then execute.
      pins the workflow the later gates follow; plan-review validates it once,
      and the later gates trust the story's copy.
    - **The plan** — Purpose / Approach / numbered Acceptance criteria.
-3. Request the entry gate: `satellites story review <story-id>`.
+3. Request the entry gate: `satellites story status_transition <story-id>`.
    **`urgent-plan-review`'s accept IS the approval of your plan** — the
    go-ahead to start (`plan → in-progress`). There is no separate sign-off.
 4. Do the work the plan describes. Run the tests until they pass.
-5. Request `satellites story review <story-id>` again — **`urgent-deploy-review`**
+5. Request `satellites story status_transition <story-id>` again — **`urgent-deploy-review`**
    confirms the work is complete and the tests pass (`in-progress → deploy`).
 6. Deploy the change (for this repo: `/commit-push` and let CI carry it
    through test → release → deploy; for another repo: that repo's ship step).
-7. Request `satellites story review <story-id>` a final time —
+7. Request `satellites story status_transition <story-id>` a final time —
    **`urgent-done-review`** verifies the change actually shipped and closes it
    (`deploy → done`).
 

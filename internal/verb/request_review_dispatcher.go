@@ -25,9 +25,8 @@ import (
 )
 
 // GateInput is what the dispatcher receives. The verb hands over the
-// minimum a gate skill needs to make its call: which skill to dispatch,
-// the story body + recent ledger to feed it on stdin, and the reviewer
-// key the subprocess wields when patching back through verbs.
+// minimum a gate skill needs to make its call: which skill to dispatch and
+// the story body + recent ledger to feed it on stdin.
 //
 // ProjectID/WorkspaceID ride along so a skill that enacts its own
 // transition (sty_db5cdef0) can stamp the spine rows it writes
@@ -43,7 +42,6 @@ type GateInput struct {
 	NextStatus   string
 	Dynamic      bool
 	RecentLedger []ledger.Entry
-	ReviewerKey  string
 	WorktreeRoot string
 	Timeout      time.Duration
 }
@@ -78,8 +76,8 @@ func (f GateDispatcherFunc) Dispatch(ctx context.Context, in GateInput) (GateOut
 // read from the worktree (.claude/skills/<name>/SKILL.md) and delivered
 // as the appended system prompt — the claude CLI has no `--skill` flag
 // (sty_1312d692). The story body + recent ledger arrive on stdin as the
-// prompt; the reviewer key arrives in env as SATELLITES_REVIEWER_API_KEY
-// so the skill can authenticate back through the verbs.
+// prompt; the subprocess inherits the operator's own auth from the
+// environment so the skill can write back through the verbs.
 //
 // The skill is expected to print one JSON object: `{decision, notes,
 // next_status?}`. Anything else is a dispatcher-level error — the
@@ -142,14 +140,11 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		cmd.Dir = in.WorktreeRoot
 	}
 	// Inherit the caller's environment — claude needs PATH/HOME and the
-	// operator's auth to run at all. The reviewer key, when minted, is
-	// layered on top so the subprocess authenticates back as the
-	// reviewer; an empty key leaves the inherited operator auth in place
-	// (the client-side gate path mints no key).
+	// operator's auth to run at all. The gate skill enacts its transition
+	// under that same inherited operator auth (the server authorizes
+	// status_transition / review_* by the admin user); no separate reviewer
+	// key is layered on.
 	cmd.Env = os.Environ()
-	if strings.TrimSpace(in.ReviewerKey) != "" {
-		cmd.Env = append(cmd.Env, "SATELLITES_REVIEWER_API_KEY="+in.ReviewerKey)
-	}
 
 	out, err := cmd.Output()
 	if err != nil {

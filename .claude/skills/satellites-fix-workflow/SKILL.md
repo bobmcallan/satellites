@@ -30,7 +30,7 @@ later gate judges against the story alone.
      rather than re-resolving.
    - **The plan** — Purpose / Approach / numbered Acceptance criteria. The plan
      is the loop you will run.
-3. Request the entry gate: `.satellites/satellites story review <story-id>`.
+3. Request the entry gate: `.satellites/satellites story status_transition <story-id>`.
    **`satellites-story-plan-review`'s accept IS the approval of your plan** —
    the go-ahead to start, advancing the story `backlog → in_progress`. There
    is no separate operator sign-off.

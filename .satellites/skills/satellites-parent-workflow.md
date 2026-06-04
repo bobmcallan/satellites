@@ -24,7 +24,7 @@ An anchor records its workflow into its body like any other story:
    (the fenced ```yaml block below) verbatim. There is no separate plan to
    write — the anchor's contract IS "every child is terminal", and the close
    gate checks exactly that.
-3. Request the close gate: `.satellites/satellites story review <story-id>`.
+3. Request the close gate: `.satellites/satellites story status_transition <story-id>`.
    `satellites-parent-close-review` assesses the children and, when every one is
    terminal, enacts `backlog → done`.
 
