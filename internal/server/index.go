@@ -147,3 +147,20 @@ func staticHandler() http.Handler {
 	}
 	return http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
 }
+
+// faviconHandler serves the embedded favicon at /favicon.ico — the path
+// browsers auto-request at the site root. One root handler gives every portal
+// page the icon with no per-template <head> edits: the templates share no head
+// layout, so a single source here beats duplicating a <link> across them all.
+func faviconHandler() http.HandlerFunc {
+	data, err := assets.ReadFile("static/favicon.ico")
+	if err != nil {
+		// Embed contract violated at build time — panic is appropriate.
+		panic(err)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/x-icon")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	}
+}

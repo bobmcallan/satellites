@@ -44,6 +44,7 @@ func Build(cfg Config) http.Handler {
 
 	// Public routes.
 	mux.Handle("/static/", staticHandler())
+	mux.HandleFunc("/favicon.ico", faviconHandler())
 
 	// UI auth: cookie-based session via the login form.
 	mux.HandleFunc("/login", loginHandler(cfg))
