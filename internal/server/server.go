@@ -98,6 +98,9 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
 	mux.HandleFunc("/settings/system-kv", systemKVHandler(cfg))
 	mux.HandleFunc("/projects", projectsHandler(cfg))
+	// Live story-list refetch fragment (sty_8f69be8b) — more specific than
+	// /projects/ so it wins under Go 1.22 pattern precedence.
+	mux.HandleFunc("GET /projects/{id}/stories.fragment", storyFragmentHandler(cfg))
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
 	// More-specific than /api/stories/ (storyStatusHandler) so the SSE stream

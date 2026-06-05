@@ -44,12 +44,13 @@
   </section>
 
   <section class="panel" data-section="project-stories">
-    <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body">
+    <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body"
+         data-project-id="{{.Project.ID}}" data-story-total="{{.StoryTotal}}">
     <div class="panel-header">
       <h2>stories</h2>
       <span class="stories-count-indicator" data-field="stories-count-indicator"
             title="shown on this page / total matching the active filter">
-        <span x-text="visibleRowCount + ' / {{.StoryTotal}}'">{{.StoryShown}} / {{.StoryTotal}}</span>
+        <span x-text="visibleRowCount + ' / ' + total">{{.StoryShown}} / {{.StoryTotal}}</span>
       </span>
     </div>
       <input type="text"
@@ -121,8 +122,50 @@
             <th class="col-updated">updated</th>
           </tr>
         </thead>
-        <tbody>
-          {{range .Stories}}
+        <tbody data-field="stories-tbody">
+          {{template "story-rows" .}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
+      {{end}}
+
+      {{if or .Paginator.HasPrev .Paginator.HasNext}}
+      <nav class="panel-paginator" aria-label="Stories pagination" data-field="panel-stories-paginator">
+        {{if .Paginator.HasPrev}}
+        <a class="panel-paginator-link prev"
+           href="{{.Paginator.PrevURL}}"
+           data-field="panel-stories-prev">prev</a>
+        {{else}}
+        <span class="panel-paginator-link is-disabled">prev</span>
+        {{end}}
+        <span class="panel-paginator-indicator" data-field="panel-stories-page-indicator">page {{.Paginator.Page}}{{if gt .Paginator.PageCount 0}} of {{.Paginator.PageCount}}{{end}}</span>
+        {{if .Paginator.HasNext}}
+        <a class="panel-paginator-link next"
+           href="{{.Paginator.NextURL}}"
+           data-field="panel-stories-next">next</a>
+        {{else}}
+        <span class="panel-paginator-link is-disabled">next</span>
+        {{end}}
+      </nav>
+      {{end}}
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
+{{/* story-rows: the story <tbody> contents, rendered both inline (full page)
+     and standalone by storyFragmentHandler for the live SSE refetch
+     (sty_8f69be8b). Keep markup here only — both paths share it, no drift. */}}
+{{define "story-rows"}}
+{{range .Stories}}
           <tr class="story-row"
               data-id="{{.ID}}"
               data-status="{{.Status}}"
@@ -195,41 +238,5 @@
               </div>
             </td>
           </tr>
-          {{end}}
-        </tbody>
-      </table>
-      {{else}}
-      <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
-      {{end}}
-
-      {{if or .Paginator.HasPrev .Paginator.HasNext}}
-      <nav class="panel-paginator" aria-label="Stories pagination" data-field="panel-stories-paginator">
-        {{if .Paginator.HasPrev}}
-        <a class="panel-paginator-link prev"
-           href="{{.Paginator.PrevURL}}"
-           data-field="panel-stories-prev">prev</a>
-        {{else}}
-        <span class="panel-paginator-link is-disabled">prev</span>
-        {{end}}
-        <span class="panel-paginator-indicator" data-field="panel-stories-page-indicator">page {{.Paginator.Page}}{{if gt .Paginator.PageCount 0}} of {{.Paginator.PageCount}}{{end}}</span>
-        {{if .Paginator.HasNext}}
-        <a class="panel-paginator-link next"
-           href="{{.Paginator.NextURL}}"
-           data-field="panel-stories-next">next</a>
-        {{else}}
-        <span class="panel-paginator-link is-disabled">next</span>
-        {{end}}
-      </nav>
-      {{end}}
-    </div>
-  </section>
-</main>
-
-<footer class="site-footer">
-  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
-  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
-  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
-</footer>
-
-</body>
-</html>
+{{end}}
+{{end}}

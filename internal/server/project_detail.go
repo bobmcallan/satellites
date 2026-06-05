@@ -95,103 +95,11 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		q := r.URL.Query()
-		pageSize := readStoryPageSize(ctx)
-		page := 1
-		if p := strings.TrimSpace(q.Get("stories_page")); p != "" {
-			if n, err := strconv.Atoi(p); err == nil && n > 0 {
-				page = n
-			}
-		}
-
-		// Server-side filter (sty_1bd0098a): when the panel query is on the
-		// URL (stories_q), gather the whole project story set, filter+sort it
-		// here, and offset-paginate the result — so page/total reflect the
-		// filter, prev/next carry it, and matches on any page are reachable.
-		// With no active filter we keep the cheaper cursor pagination.
-		base := "/projects/" + projectID
-		var (
-			stories   []storyRow
-			paginator paginatorData
-		)
-		if sq := parseStoryQuery(q.Get("stories_q")); !sq.isEmpty() {
-			qparam := strings.TrimSpace(q.Get("stories_q"))
-			all, err := gatherAllStories(ctx, projectID, pageSize)
-			if err != nil {
-				arbor.ErrorCtx(ctx, "project_detail: story_list (filtered)", "id", projectID, "err", err)
-				http.Error(w, "could not list stories", http.StatusInternalServerError)
-				return
-			}
-			filtered := filterStories(all, sq)
-			sortStories(filtered, sq.order)
-			total := len(filtered)
-			start := (page - 1) * pageSize
-			if start > total {
-				start = total
-			}
-			end := start + pageSize
-			if end > total {
-				end = total
-			}
-			stories = filtered[start:end]
-			paginator = paginatorData{
-				Page: page, Total: total, PageSize: pageSize,
-				HasPrev: page > 1, HasNext: end < total,
-			}
-			if pageSize > 0 {
-				paginator.PageCount = (total + pageSize - 1) / pageSize
-				if paginator.PageCount < 1 {
-					paginator.PageCount = 1
-				}
-			}
-			if paginator.HasPrev {
-				paginator.PrevURL = filteredPageURL(base, qparam, page-1)
-			}
-			if paginator.HasNext {
-				paginator.NextURL = filteredPageURL(base, qparam, page+1)
-			}
-		} else {
-			cursor := q.Get("stories_cursor")
-			backStack := readBackStack(q, storyPaginatorKeys)
-			rows, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
-			if err != nil {
-				arbor.ErrorCtx(ctx, "project_detail: story_list", "id", projectID, "err", err)
-				http.Error(w, "could not list stories", http.StatusInternalServerError)
-				return
-			}
-			stories = rows
-			// document_count for the unfiltered total + PageCount. Failure
-			// degrades the indicator to "page N" without a total; the page
-			// still renders.
-			total := dispatchStoryCount(ctx, projectID)
-			paginator = paginatorData{
-				Page: page, Total: total, PageSize: pageSize,
-				HasPrev: len(backStack) > 0, HasNext: nextCursor != "",
-			}
-			if total > 0 && pageSize > 0 {
-				paginator.PageCount = (total + pageSize - 1) / pageSize
-				if paginator.PageCount < 1 {
-					paginator.PageCount = 1
-				}
-			}
-			if paginator.HasPrev {
-				paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
-			}
-			if paginator.HasNext {
-				paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
-			}
-		}
-
-		// Per-story body fetch so the expanded row can render the
-		// description section. Loop only over the visible slice.
-		for i := range stories {
-			body, err := dispatchStoryBody(ctx, stories[i].ID)
-			if err != nil {
-				arbor.WarnCtx(ctx, "project_detail: story_body",
-					"story_id", stories[i].ID, "err", err)
-				continue
-			}
-			stories[i].Body = body
+		stories, paginator, err := gatherStoryPage(ctx, projectID, r.URL.Query())
+		if err != nil {
+			arbor.ErrorCtx(ctx, "project_detail: gather stories", "id", projectID, "err", err)
+			http.Error(w, "could not list stories", http.StatusInternalServerError)
+			return
 		}
 
 		var userEmail, userName, userAvatar string
@@ -225,6 +133,142 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := projectDetailTmpl.Execute(w, data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+// gatherStoryPage resolves the story slice + paginator for a project given the
+// request query (filter + cursor/page params), including the per-story body
+// fetch for the visible slice. Shared by the full-page handler and the live
+// fragment endpoint (sty_8f69be8b) so both render the identical page.
+func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]storyRow, paginatorData, error) {
+	pageSize := readStoryPageSize(ctx)
+	page := 1
+	if p := strings.TrimSpace(q.Get("stories_page")); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			page = n
+		}
+	}
+
+	// Server-side filter (sty_1bd0098a): when the panel query is on the URL
+	// (stories_q), gather the whole project story set, filter+sort here, and
+	// offset-paginate — so page/total reflect the filter and matches on any
+	// page are reachable. With no active filter we keep cursor pagination.
+	base := "/projects/" + projectID
+	var (
+		stories   []storyRow
+		paginator paginatorData
+	)
+	if sq := parseStoryQuery(q.Get("stories_q")); !sq.isEmpty() {
+		qparam := strings.TrimSpace(q.Get("stories_q"))
+		all, err := gatherAllStories(ctx, projectID, pageSize)
+		if err != nil {
+			return nil, paginatorData{}, err
+		}
+		filtered := filterStories(all, sq)
+		sortStories(filtered, sq.order)
+		total := len(filtered)
+		start := (page - 1) * pageSize
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		stories = filtered[start:end]
+		paginator = paginatorData{
+			Page: page, Total: total, PageSize: pageSize,
+			HasPrev: page > 1, HasNext: end < total,
+		}
+		if pageSize > 0 {
+			paginator.PageCount = (total + pageSize - 1) / pageSize
+			if paginator.PageCount < 1 {
+				paginator.PageCount = 1
+			}
+		}
+		if paginator.HasPrev {
+			paginator.PrevURL = filteredPageURL(base, qparam, page-1)
+		}
+		if paginator.HasNext {
+			paginator.NextURL = filteredPageURL(base, qparam, page+1)
+		}
+	} else {
+		cursor := q.Get("stories_cursor")
+		backStack := readBackStack(q, storyPaginatorKeys)
+		rows, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
+		if err != nil {
+			return nil, paginatorData{}, err
+		}
+		stories = rows
+		// document_count for the unfiltered total + PageCount. Failure
+		// degrades the indicator to "page N" without a total.
+		total := dispatchStoryCount(ctx, projectID)
+		paginator = paginatorData{
+			Page: page, Total: total, PageSize: pageSize,
+			HasPrev: len(backStack) > 0, HasNext: nextCursor != "",
+		}
+		if total > 0 && pageSize > 0 {
+			paginator.PageCount = (total + pageSize - 1) / pageSize
+			if paginator.PageCount < 1 {
+				paginator.PageCount = 1
+			}
+		}
+		if paginator.HasPrev {
+			paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
+		}
+		if paginator.HasNext {
+			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
+		}
+	}
+
+	// Per-story body fetch so the expanded row can render the description.
+	for i := range stories {
+		body, err := dispatchStoryBody(ctx, stories[i].ID)
+		if err != nil {
+			arbor.WarnCtx(ctx, "project_detail: story_body", "story_id", stories[i].ID, "err", err)
+			continue
+		}
+		stories[i].Body = body
+	}
+	return stories, paginator, nil
+}
+
+// storyFragmentHandler renders just the story-rows table fragment for the
+// current query — the live-update refetch target (sty_8f69be8b). The browser
+// swaps it into the panel's <tbody> on a project-scoped SSE trigger; counts
+// ride response headers so the indicator updates without a full reload. Same
+// read verbs as the full page; no new MCP verb.
+func storyFragmentHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := cfg.Sessions.UserID(r)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := withSessionUser(r.Context(), cfg, userID)
+		projectID := strings.TrimSpace(r.PathValue("id"))
+		if projectID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		stories, paginator, err := gatherStoryPage(ctx, projectID, r.URL.Query())
+		if err != nil {
+			arbor.ErrorCtx(ctx, "story_fragment: gather", "id", projectID, "err", err)
+			http.Error(w, "could not list stories", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("X-Story-Total", strconv.Itoa(paginator.Total))
+		w.Header().Set("X-Story-Page", strconv.Itoa(paginator.Page))
+		w.Header().Set("X-Story-Page-Count", strconv.Itoa(paginator.PageCount))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data := projectDetailData{
+			Stories: stories, Paginator: paginator,
+			StoryTotal: paginator.Total, StoryShown: len(stories),
+		}
+		if err := projectDetailTmpl.ExecuteTemplate(w, "story-rows", data); err != nil {
+			arbor.ErrorCtx(ctx, "story_fragment: render", "id", projectID, "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}

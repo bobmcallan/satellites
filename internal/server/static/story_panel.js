@@ -24,6 +24,18 @@
 (function () {
     'use strict';
 
+    // debounce coalesces a burst of calls into one trailing invocation after
+    // ms of quiet — used so a flurry of SSE triggers yields a single refetch
+    // (sty_8f69be8b).
+    function debounce(fn, ms) {
+        let t = null;
+        return function () {
+            const args = arguments, self = this;
+            if (t) { clearTimeout(t); }
+            t = setTimeout(function () { t = null; fn.apply(self, args); }, ms);
+        };
+    }
+
     // legacyCopy writes value to the clipboard via a temporary textarea
     // + document.execCommand('copy'). Used as the fallback when
     // navigator.clipboard is missing (older browsers) or rejected
@@ -275,6 +287,14 @@
             // server-rendered order, captured once on init() so removing
             // the order chip can restore the table.
             _originalRowOrder: [],
+            // total = project-wide story count for the "shown / total"
+            // indicator; seeded from the server-rendered data-story-total and
+            // refreshed live from the fragment response header (sty_8f69be8b).
+            total: 0,
+            // _rev bumps on each live refresh so visibleRowCount (and the
+            // indicator) recompute even though this.query did not change.
+            _rev: 0,
+            _liveOff: null,
 
             // Seed this.query from the URL ?stories_q= param so refresh
             // + deep-link preserve the filter. The $watch wired below
@@ -318,6 +338,66 @@
                 this.$nextTick(() => {
                     applyStoryOrder(root, parseStoryQuery(this.query).order);
                 });
+
+                // Live updates off the SSE bus (sty_8f69be8b). Seed the total
+                // from the server-rendered data attr, then subscribe to this
+                // project's topic — the shared client (live.js) opens its one
+                // EventSource on this first live.on call. A burst of triggers
+                // debounces into a single refetch.
+                if (root) {
+                    const t0 = parseInt(root.dataset.storyTotal || '', 10);
+                    if (!isNaN(t0)) { this.total = t0; }
+                    const pid = root.dataset.projectId || '';
+                    if (pid && window.live && typeof window.live.on === 'function') {
+                        this._liveOff = window.live.on('project:' + pid,
+                            debounce(() => { this.liveRefresh(pid, root); }, 250));
+                    }
+                }
+            },
+
+            // liveRefresh refetches the CURRENT page's story-rows fragment
+            // (same query — never resets to page 1) and swaps it into the
+            // tbody, re-binds Alpine on the new rows, re-captures the server
+            // order, re-applies the active sort, and updates the total. Scroll
+            // is untouched (no reload) and selection/expand survive because
+            // they live in component state, not the DOM (sty_8f69be8b).
+            async liveRefresh(projectID, root) {
+                const tbody = root.querySelector('tbody[data-field="stories-tbody"]');
+                if (!tbody) { return; }
+                let resp;
+                try {
+                    resp = await fetch(
+                        '/projects/' + encodeURIComponent(projectID) + '/stories.fragment' + window.location.search,
+                        { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+                } catch (e) { return; }
+                if (!resp || !resp.ok) { return; }
+                const html = await resp.text();
+                const total = parseInt(resp.headers.get('X-Story-Total') || '', 10);
+                const page = parseInt(resp.headers.get('X-Story-Page') || '', 10);
+                const pageCount = parseInt(resp.headers.get('X-Story-Page-Count') || '', 10);
+
+                tbody.innerHTML = html;
+                if (window.Alpine && typeof window.Alpine.initTree === 'function') {
+                    window.Alpine.initTree(tbody);
+                }
+
+                // Re-capture the server order for the freshly-rendered rows,
+                // then re-apply the active sort (or restore server order).
+                const order = [];
+                tbody.querySelectorAll('tr.story-row').forEach(r => {
+                    if (r.dataset && r.dataset.id) { order.push(r.dataset.id); }
+                });
+                this._originalRowOrder = order;
+                const ord = parseStoryQuery(this.query).order;
+                if (ord) { applyStoryOrder(root, ord); } else { restoreStoryOrder(root, order); }
+
+                if (!isNaN(total)) { this.total = total; }
+                this._rev++; // force visibleRowCount + indicator to recompute
+
+                const ind = root.querySelector('[data-field="panel-stories-page-indicator"]');
+                if (ind && !isNaN(page)) {
+                    ind.textContent = 'page ' + page + (pageCount > 0 ? ' of ' + pageCount : '');
+                }
             },
 
             get selectionCount() { return this.selectedIDs.size; },
@@ -334,6 +414,7 @@
             // not the panel root that contains the rows).
             get visibleRowCount() {
                 void this.query;
+                void this._rev;
                 const root = this.$root || this.$el;
                 if (!root) { return 0; }
                 const rows = root.querySelectorAll('tr.story-row');
