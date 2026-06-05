@@ -44,6 +44,14 @@ type Config struct {
 	// verbatim.
 	SkillsRoot string `toml:"skills_root"`
 
+	// WorkDir overrides where per-worktree engagement state lives (the
+	// `.satellites/work` the START-door hook reads and `satellites work init`
+	// writes). NOT required in the toml — empty means the default
+	// <repo>/.satellites/work. A relative value resolves against the repo root;
+	// absolute is used verbatim. Reader (hook) and writer (work init) both
+	// resolve through ResolveWorkDir so they always agree.
+	WorkDir string `toml:"work_dir"`
+
 	// Measure configures measure mode — the client's session observability.
 	// It is DEFAULT ON: an absent [measure] section means enabled + record.
 	Measure MeasureConfig `toml:"measure"`
@@ -81,6 +89,30 @@ func (c Config) ResolveLogDir(repoRoot string) string {
 	p := strings.TrimSpace(c.LogPath)
 	if p == "" {
 		p = DefaultLogDir
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	if strings.TrimSpace(repoRoot) == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, p)
+}
+
+// DefaultWorkDir is the per-worktree engagement-state location when work_dir
+// is unset — repo-relative, alongside the other .satellites/ working state.
+const DefaultWorkDir = ".satellites/work"
+
+// ResolveWorkDir is the ONE authoritative computation of where engagement
+// state lives, shared by the START-door hook (reader) and `satellites work
+// init` (writer) so they never disagree. An explicit work_dir wins
+// (repo-relative or absolute); otherwise it defaults to <repo>/.satellites/work.
+// Mirrors ResolveLogDir: a relative value resolves against the repo root — the
+// directory that HOLDS .satellites/ — never the process CWD.
+func (c Config) ResolveWorkDir(repoRoot string) string {
+	p := strings.TrimSpace(c.WorkDir)
+	if p == "" {
+		p = DefaultWorkDir
 	}
 	if filepath.IsAbs(p) {
 		return p

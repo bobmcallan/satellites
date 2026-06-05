@@ -8,6 +8,21 @@ import (
 	"testing"
 )
 
+func TestResolveWorkDir(t *testing.T) {
+	// Default: empty work_dir → <repo>/.satellites/work (repo-relative).
+	if got, want := (Config{}).ResolveWorkDir("/repo"), filepath.Join("/repo", ".satellites", "work"); got != want {
+		t.Errorf("default work dir = %q, want %q", got, want)
+	}
+	// Relative override resolves against the repo root.
+	if got, want := (Config{WorkDir: "var/engage"}).ResolveWorkDir("/repo"), filepath.Join("/repo", "var", "engage"); got != want {
+		t.Errorf("relative work dir = %q, want %q", got, want)
+	}
+	// Absolute override is used verbatim.
+	if got := (Config{WorkDir: "/abs/work"}).ResolveWorkDir("/repo"); got != "/abs/work" {
+		t.Errorf("absolute work dir = %q, want /abs/work", got)
+	}
+}
+
 func TestLoad_ExplicitPath(t *testing.T) {
 	dir := t.TempDir()
 	// Isolate the credential store under a temp XDG dir.
