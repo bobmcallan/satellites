@@ -57,6 +57,34 @@ not name) or an *unowned* register row. Do not commit. Resolve it:
   3. `satellites document upload`, then re-run the gate. The now-registered red
      is absorbed.
 
+### Triage first: is the red *yours*?
+
+A new red is not automatically yours to fix. Before sinking time into a fix,
+establish whether your in-flight change caused it — fixing someone else's
+pre-existing breakage is scope creep into another subsystem and stalls the
+story you are actually on.
+
+1. **Confirm provenance.** Stash your change and re-run the failing check on the
+   clean tree:
+
+   ```bash
+   git stash push -u -- cmd/ internal/ tests/   # set aside the in-flight change
+   go test -tags integration -run <CheckName> ./tests/integration/ -count=1
+   git stash pop
+   ```
+
+   - **Still red without your change → pre-existing & unrelated.** Do NOT fix it
+     inline. **File it** (above): open a tracking story in the *owning feature's
+     epic* (the epic/area whose code the check exercises, not the epic you happen
+     to be on), register the row against that story, upload, re-run → proceed.
+     Note the provenance ("fails on clean tree, unrelated to <your-story>") in
+     the story so the next executor doesn't re-litigate it.
+   - **Green without your change → you caused it.** It is yours: fix it before
+     committing. The register is not an escape hatch for your own regressions.
+
+2. When in doubt about which epic owns it, `git log` the failing check's file /
+   feature to find the introducing change and its epic; file there.
+
 ## The register only shrinks
 
 When the gate reports a check as **STALE** on a complete run (a registered check

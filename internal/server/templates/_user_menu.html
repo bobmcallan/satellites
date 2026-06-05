@@ -41,5 +41,9 @@
     </form>
   </div>
 </div>
+{{/* sty_b6e39eb8: shared SSE trigger-bus client. Loaded on every authed page
+     (this partial is the common chrome). Pages opt in with live.on(topic, fn);
+     loading it here is inert until a page registers a handler. */}}
+<script src="/static/live.js"></script>
 {{end}}
 {{end}}

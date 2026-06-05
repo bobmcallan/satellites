@@ -139,6 +139,29 @@ func (s *Store) RemoveMember(ctx context.Context, workspaceID, userID string) er
 	return nil
 }
 
+// ListWorkspaceIDsForUser returns the ids of every workspace the user is a
+// member of (any role), unordered. Backs the SSE trigger bus's per-user topic
+// scoping (sty_b6e39eb8): a non-admin only receives triggers for workspaces in
+// this set. Reads via the workspace_members(user_id) index.
+func (s *Store) ListWorkspaceIDsForUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+        SELECT workspace_id FROM workspace_members WHERE user_id = $1
+    `, userID)
+	if err != nil {
+		return nil, fmt.Errorf("workspace: list workspaces for user: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("workspace: scan workspace id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // GetRole returns the member's role on the workspace, or
 // ErrMemberNotFound.
 func (s *Store) GetRole(ctx context.Context, workspaceID, userID string) (string, error) {

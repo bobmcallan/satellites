@@ -23,3 +23,5 @@ story-backed capture of a failure that cannot be fixed in the moment.
 | TestStoryPanel_FilterBugs | sty_b7ba18b3 | portal chromedp UI — flaky/timeout under WSL headless |
 | TestStoryPanelOrder | sty_b7ba18b3 | portal UI order/free-text-fallthrough — red under WSL |
 | TestProjectDetailPanel_Chromedp | sty_b7ba18b3 | portal chromedp UI — flaky/red under WSL headless |
+| TestPrinciplesRideAlong | sty_256a2b3f | principles ride-along sidecar returns empty on read verbs (a0783cc regression) |
+| TestDocumentsUploadEndToEnd | sty_256a2b3f | uploaded principle missing from read-verb sidecar (same ride-along regression) |

@@ -22,6 +22,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ledger"
+	"github.com/bobmcallan/satellites/internal/live"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
@@ -413,6 +414,33 @@ func main() {
 	})
 	arbor.Info("oauth authorization server ready")
 
+	// SSE trigger bus (sty_b6e39eb8): one Postgres LISTEN connection per
+	// instance fans NOTIFYs to the in-memory hub, which the session-gated
+	// /events stream subscribes to. Opened on its own pq connection, separate
+	// from the app sql.DB pool.
+	liveHub := live.NewHub()
+	liveListener, err := live.NewListener(cfg.DSN, liveHub)
+	if err != nil {
+		arbor.Fatal("live: start listener", "err", err)
+	}
+	defer func() { _ = liveListener.Close() }()
+	arbor.Info("live trigger bus ready", "channel", live.EventsChannel)
+
+	// liveScope resolves a session user's /events topic scope: an admin sees
+	// every topic; everyone else only their workspaces' topics. Injected here
+	// (not as a store on server.Config) so the transport package stays free of
+	// substrate-domain imports per the layering guard.
+	liveScope := func(ctx context.Context, userID string) (live.Scope, error) {
+		if u, err := store.GetUserByID(ctx, userID); err == nil && u != nil && u.Role == auth.RoleAdmin {
+			return live.Scope{Admin: true}, nil
+		}
+		ids, err := wsStore.ListWorkspaceIDsForUser(ctx, userID)
+		if err != nil {
+			return live.Scope{}, err
+		}
+		return live.NewScope(false, ids), nil
+	}
+
 	handler := server.Build(server.Config{
 		Store:       store,
 		Sessions:    sessions,
@@ -421,6 +449,8 @@ func main() {
 		Providers:   providers,
 		OAuthStates: auth.NewPGStateStore(sqlDB, 0),
 		OAuthServer: oauthServer,
+		Live:        liveHub,
+		LiveScope:   liveScope,
 	})
 
 	arbor.Info("satellites-server listening", "addr", cfg.Addr)

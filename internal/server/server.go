@@ -8,9 +8,11 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/live"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 )
 
@@ -30,7 +32,20 @@ type Config struct {
 	Providers   *auth.ProviderSet
 	OAuthStates auth.StateStore
 	OAuthServer *auth.OAuthServer
+	// Live is the SSE trigger bus hub (sty_b6e39eb8). When non-nil (and
+	// LiveScope is set) the session-gated GET /events stream is registered;
+	// nil (tests / CLI without a Postgres listener) leaves it off and the rest
+	// of the surface builds.
+	Live *live.Hub
+	// LiveScope resolves a user's /events authorization scope. Injected from
+	// main (which may import substrate stores) so this transport package stays
+	// free of substrate-domain imports per the layering guard.
+	LiveScope LiveScoper
 }
+
+// LiveScoper resolves the SSE topic-scope for a session user — admins see
+// every topic, others only their workspaces' topics. See cmd/satellites-server.
+type LiveScoper func(ctx context.Context, userID string) (live.Scope, error)
 
 // Build returns the configured root handler.
 func Build(cfg Config) http.Handler {
@@ -90,6 +105,13 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("GET /api/stories/{id}/events", storyEventsHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
+
+	// SSE trigger bus (sty_b6e39eb8): one app-wide, per-user-scoped,
+	// trigger-only event stream. Registered only when a hub is wired (a
+	// Postgres listener is running); absent that, the surface still builds.
+	if cfg.Live != nil && cfg.LiveScope != nil {
+		mux.HandleFunc("GET /events", liveEventsHandler(cfg))
+	}
 
 	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
 	// correlationMiddleware lifts X-Satellites-* headers onto request
