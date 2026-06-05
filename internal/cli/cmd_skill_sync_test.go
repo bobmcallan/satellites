@@ -141,7 +141,7 @@ func TestReconcileSkills_OmitsUnstampedOrphans(t *testing.T) {
 		{Name: "satellites-gate", Stamped: true, Stamp: skillStamp{DocumentID: "doc_g", Version: 1, Hash: hashBody("b")}, BodyHash: hashBody("b")},
 		{Name: "my-personal-skill", Stamped: false}, // operator-authored
 	}
-	plan := reconcileSkills(subs, locals)
+	plan := reconcileSkills(subs, locals, nil)
 	for _, item := range plan {
 		if item.Name == "my-personal-skill" {
 			t.Fatalf("unstamped operator skill must not appear in the sync plan, got action %v", item.Action)
@@ -173,7 +173,7 @@ func TestReconcileSkills_InjectsLocalPrefix(t *testing.T) {
 	subs := []substrateSkill{{Name: "fix-workflow", DocumentID: "doc_fw", Version: 1, Body: "b"}}
 
 	// First sync: no local copy → install under the prefixed name.
-	plan := reconcileSkills(subs, nil)
+	plan := reconcileSkills(subs, nil, nil)
 	if len(plan) != 1 || plan[0].Name != "satellites-fix-workflow" || plan[0].Action != actionInstall {
 		t.Fatalf("plan = %+v, want install satellites-fix-workflow", plan)
 	}
@@ -184,9 +184,73 @@ func TestReconcileSkills_InjectsLocalPrefix(t *testing.T) {
 		Stamp:    skillStamp{DocumentID: "doc_fw", Version: 1, Hash: hashBody("b")},
 		BodyHash: hashBody("b"),
 	}}
-	plan = reconcileSkills(subs, locals)
+	plan = reconcileSkills(subs, locals, nil)
 	if len(plan) != 1 || plan[0].Name != "satellites-fix-workflow" || plan[0].Action != actionSkip {
 		t.Fatalf("re-sync plan = %+v, want skip satellites-fix-workflow", plan)
+	}
+}
+
+// TestMergeByPrecedence_MostSpecificWins pins the union merge (sty_cae81f8c):
+// sets are folded low→high (system, workspace, project) keyed on the
+// materialised name, so a name owned by more than one scope lands the
+// most-specific (project) body on disk.
+func TestMergeByPrecedence_MostSpecificWins(t *testing.T) {
+	sys := []substrateSkill{
+		{Name: "commit-push", DocumentID: "doc_sys", Version: 1, Body: "system body"},
+		{Name: "project-setup", DocumentID: "doc_ps", Version: 3, Body: "system project-setup"},
+	}
+	wsp := []substrateSkill{{Name: "commit-push", DocumentID: "doc_ws", Version: 2, Body: "workspace body"}}
+	prj := []substrateSkill{{Name: "commit-push", DocumentID: "doc_prj", Version: 5, Body: "project body"}}
+
+	union := mergeByPrecedence(sys, wsp, prj)
+	byName := map[string]substrateSkill{}
+	for _, s := range union {
+		byName[localSkillName(s.Name)] = s
+	}
+	if len(byName) != 2 {
+		t.Fatalf("union should collapse the shared name to one entry: %d names", len(byName))
+	}
+	if got := byName["satellites-commit-push"]; got.DocumentID != "doc_prj" || got.Body != "project body" {
+		t.Errorf("commit-push winner = %+v, want the project body (most specific)", got)
+	}
+	if got := byName["satellites-project-setup"]; got.DocumentID != "doc_ps" {
+		t.Errorf("system-only project-setup must survive the merge, got %+v", got)
+	}
+}
+
+// TestReconcileSkills_ProtectedGuardsCrossScopeRemoval pins the union-guarded
+// removal (sty_cae81f8c): a stamped local owned by ANOTHER scope (present in
+// `protected`) is NOT removed when this scope's substrate omits it — it
+// downgrades to skip. A stamped local absent from every scope (not protected)
+// is still a true orphan → remove.
+func TestReconcileSkills_ProtectedGuardsCrossScopeRemoval(t *testing.T) {
+	// This sync reconciles only the system scope's substrate.
+	sysSubs := []substrateSkill{{Name: "project-setup", DocumentID: "doc_ps", Version: 3, Body: "ps"}}
+	// Local tree: a stamped project skill (owned elsewhere) + a stamped orphan
+	// whose substrate row is gone from every scope.
+	locals := []localSkill{
+		{Name: "satellites-fix-workflow", Stamped: true, Stamp: skillStamp{DocumentID: "doc_fw", Version: 1, Hash: hashBody("fw")}, BodyHash: hashBody("fw")},
+		{Name: "satellites-dead-skill", Stamped: true, Stamp: skillStamp{DocumentID: "doc_dead", Version: 1, Hash: hashBody("d")}, BodyHash: hashBody("d")},
+	}
+	// The union owns the project workflow skill (and the system skill) but NOT
+	// the dead one.
+	protected := map[string]bool{
+		"satellites-project-setup": true,
+		"satellites-fix-workflow":  true,
+	}
+
+	got := map[string]syncAction{}
+	for _, item := range reconcileSkills(sysSubs, locals, protected) {
+		got[item.Name] = item.Action
+	}
+	if got["satellites-project-setup"] != actionInstall {
+		t.Errorf("system skill should install, got %v", got["satellites-project-setup"])
+	}
+	if got["satellites-fix-workflow"] != actionSkip {
+		t.Errorf("cross-scope-owned skill must be guarded to skip, got %v", got["satellites-fix-workflow"])
+	}
+	if got["satellites-dead-skill"] != actionRemove {
+		t.Errorf("true orphan (owned by no scope) must still remove, got %v", got["satellites-dead-skill"])
 	}
 }
 

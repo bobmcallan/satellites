@@ -239,7 +239,16 @@ func readLocalSkill(skillsRoot, name string) (*localSkill, error) {
 // those that carry a stamp OR appear in the substrate — an unstamped local
 // skill not in the substrate is operator-authored and simply omitted (sync
 // has no business with it). Deterministic order for stable output + tests.
-func reconcileSkills(subs []substrateSkill, locals []localSkill) []syncPlanItem {
+//
+// protected guards removal across scopes (sty_cae81f8c): when sync reconciles
+// only one scope's substrate (an explicit --scope, or deploy's project scope)
+// against the whole local tree, a stamped local owned by ANOTHER scope would
+// otherwise read as an orphan and be removed. protected holds every local name
+// present in ANY resolvable scope's substrate, so a `remove` verdict for a name
+// still owned elsewhere is downgraded to `skip` — only a name absent from every
+// scope is a true orphan. A nil/empty protected set leaves removal unguarded
+// (single-scope behaviour, as before).
+func reconcileSkills(subs []substrateSkill, locals []localSkill, protected map[string]bool) []syncPlanItem {
 	subByName := map[string]substrateSkill{}
 	for _, s := range subs {
 		// Key on the materialised (prefixed) name so a substrate row pairs
@@ -277,9 +286,35 @@ func reconcileSkills(subs []substrateSkill, locals []localSkill) []syncPlanItem 
 			lCopy := l
 			localPtr = &lCopy
 		}
-		plan = append(plan, syncPlanItem{Name: n, Action: reconcileAction(subPtr, localPtr), Sub: subPtr})
+		action := reconcileAction(subPtr, localPtr)
+		if action == actionRemove && protected[n] {
+			// Owned by another scope (still in the union) — not a true orphan.
+			action = actionSkip
+		}
+		plan = append(plan, syncPlanItem{Name: n, Action: action, Sub: subPtr})
 	}
 	return plan
+}
+
+// mergeByPrecedence folds several substrate skill sets into one keyed on the
+// materialised (satellites-prefixed) name, with LATER sets winning a name
+// collision. Callers pass sets low→high precedence — system, then workspace,
+// then project — so the most-specific scope's body lands on disk
+// (most-specific-wins, sty_cae81f8c). User-scope overrides are deliberately
+// excluded: sync reconciles the shared rows, and a user override is applied at
+// the dynamic-skill-index / gate layer, not on disk (sty_cbeeb452).
+func mergeByPrecedence(sets ...[]substrateSkill) []substrateSkill {
+	byName := map[string]substrateSkill{}
+	for _, set := range sets {
+		for _, s := range set {
+			byName[localSkillName(s.Name)] = s
+		}
+	}
+	out := make([]substrateSkill, 0, len(byName))
+	for _, s := range byName {
+		out = append(out, s)
+	}
+	return out
 }
 
 // syncPlanItem is one reconcile verdict the command applies.
@@ -327,7 +362,7 @@ Outside a terminal, 'prompt' degrades to 'local' so nothing is clobbered.`,
 			return syncSkills(ctx, cmd.OutOrStdout(), cmd.InOrStdin(), scopeArg, wsArg, pjArg, *configArg, *userArg, root, onConflict, dryRun)
 		},
 	}
-	cmd.Flags().StringVar(&scopeArg, "scope", "project", "Scope to sync (system / workspace / project)")
+	cmd.Flags().StringVar(&scopeArg, "scope", "", "Scope to install/update (system / workspace / project); empty = all (the union). Removal is union-guarded regardless.")
 	cmd.Flags().StringVar(&wsArg, "workspace", "", "workspace_id (required for scope=workspace or project)")
 	cmd.Flags().StringVar(&pjArg, "project", "", "project_id (required for scope=project)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the reconcile plan without writing files")
@@ -377,26 +412,68 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 		return err
 	}
 
-	// A project-scoped sync must be bound to a project — skills are
-	// project-bound and the server now refuses an empty-project list
-	// (sty_2fa6f087). When --project wasn't passed, resolve it (and its
-	// workspace) from local config the way `deploy` does, rather than
-	// dispatching the unbounded request that used to drag in every project's
-	// skills.
-	if scope == "project" && strings.TrimSpace(pj) == "" {
-		rws, rpj, rerr := resolveDeployScope(ctx, configArg, userArg)
-		if rerr != nil {
-			return fmt.Errorf("skill sync: project scope needs a project_id — pass --project or set project_id in .satellites/satellites.toml: %w", rerr)
-		}
-		ws, pj = rws, rpj
+	switch scope {
+	case "", "system", "workspace", "project":
+	default:
+		return fmt.Errorf("--scope must be one of system|workspace|project (or empty for all), got %q", scope)
 	}
 
 	dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
 		return dispatchVerb(ctx, name, req, configArg, userArg)
 	}
-	subs, err := listSubstrateSkills(ctx, dispatch, scope, ws, pj, false /* reconcile shared rows, not per-caller overrides */)
+
+	// Resolve the scopes to reconcile. System is always pulled. Workspace and
+	// project are pulled when a workspace_id / project_id resolves — passed in
+	// (deploy) or read best-effort from .satellites/satellites.toml the way
+	// deploy does. An unconfigured repo tolerates the miss and yields system
+	// only (sty_cae81f8c). reconcile shared rows, not per-caller overrides.
+	if strings.TrimSpace(pj) == "" {
+		if rws, rpj, rerr := resolveDeployScope(ctx, configArg, userArg); rerr == nil {
+			ws, pj = rws, rpj
+		}
+	}
+	// project scope needs a project binding; a bare --scope project with no
+	// config is the one case we surface rather than silently no-op.
+	if scope == "project" && strings.TrimSpace(pj) == "" {
+		return fmt.Errorf("skill sync: project scope needs a project_id — pass --project or set project_id in .satellites/satellites.toml")
+	}
+
+	sysSet, err := listSubstrateSkills(ctx, dispatch, "system", "", "", false)
 	if err != nil {
 		return err
+	}
+	var wsSet, pjSet []substrateSkill
+	if strings.TrimSpace(ws) != "" {
+		if wsSet, err = listSubstrateSkills(ctx, dispatch, "workspace", ws, "", false); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(pj) != "" {
+		if pjSet, err = listSubstrateSkills(ctx, dispatch, "project", ws, pj, false); err != nil {
+			return err
+		}
+	}
+
+	// The union (precedence project > workspace > system) is what every
+	// resolvable scope owns — its local names guard removal so no scope orphans
+	// another's stamped skill. The install/update set is the union by default,
+	// or a single scope when --scope narrows it.
+	union := mergeByPrecedence(sysSet, wsSet, pjSet)
+	protected := make(map[string]bool, len(union))
+	for _, s := range union {
+		protected[localSkillName(s.Name)] = true
+	}
+
+	var subs []substrateSkill
+	switch scope {
+	case "system":
+		subs = sysSet
+	case "workspace":
+		subs = wsSet
+	case "project":
+		subs = pjSet
+	default: // "" → all scopes
+		subs = union
 	}
 
 	// Read the local copy for every substrate name plus every
@@ -424,7 +501,7 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 		locals = append(locals, l)
 	}
 
-	plan := reconcileSkills(subs, locals)
+	plan := reconcileSkills(subs, locals, protected)
 	for _, item := range plan {
 		if dryRun {
 			fmt.Fprintf(out, "[dry-run] %-8s %s\n", item.Action, item.Name)

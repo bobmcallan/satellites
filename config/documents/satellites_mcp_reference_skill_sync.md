@@ -5,43 +5,12 @@ tags: [kind:mcp-reference]
 ---
 # satellites · reference: Claude Code skill sync
 
-How the agent reconciles substrate `type:"skill"` rows into the local `.claude/skills/` tree on session start. The load-context bootstrap step names this contract; the detail lives here so the orientation payload stays within the host's reminder cap.
+Retired as an agent contract. Skill reconciliation is a **client** function, not
+an agent one — do not hand-reconcile.
 
-## Contract
-
-For each applicable scope (system; workspace with `--scope workspace --workspace <wksp_id>`; project with `--scope project --workspace <wksp_id> --project <proj_id>`), run `satellites skill list`. For each returned row:
-
-1. Read `.claude/skills/<name>/SKILL.md`. Missing file, missing `version:` in frontmatter, or `version` below the substrate `latest_version` → outdated.
-2. For each outdated row, call `satellites skill get <name>` (same scope flags) and write the body to `.claude/skills/<name>/SKILL.md` with frontmatter `name`, `description`, and `version` set to the synced `latest_version`.
-3. Pull-only. Never delete a local skill file — operators own `.claude/skills/`, and a local skill with no substrate counterpart is left alone.
-
-## The stored body is a clean SKILL.md; identity is injected locally
-
-The substrate row for a `type:"skill"` is the **authored** SKILL.md — `name`, `description`, the body — and nothing more. `satellites skill upload` preserves that frontmatter in the stored body (documents strip theirs); the row is therefore directly registerable as a skill. The substrate never stores sync bookkeeping.
-
-When the client **materialises** `.claude/skills/<name>/SKILL.md` it injects a sync-identity block that lives only on disk, never in the substrate:
-
-- `document_id` — the source row id. A rename-stable pointer from the local file back to its source, so a reconcile keys on identity, not name.
-- `version` — the source `document_version` this copy was cut from. Cheap staleness check: substrate `latest_version` > stamped `version` ⇒ an update is available, no hashing needed.
-- `hash` — content hash of the **authored** body, computed with the injected block excluded. To detect a local edit the client strips its own block, re-hashes the on-disk body, and compares to the stamped `hash`; a mismatch means the operator edited the file ⇒ do not overwrite.
-
-Injection is client-side at materialise time. Storing the block in the substrate would make a body contain its own hash (circular) and break the upload round-trip, so it stays local. These three keys are sufficient for a client to decide create / update / skip / refuse-overwrite from the local file plus the document row alone; the non-clobber reconcile that uses them is the materialise/deploy path, not this read contract.
-
-### The local name carries the `satellites-` prefix
-
-Every materialised substrate skill is named `satellites-<name>` in
-`.claude/skills/` — the human-visible marker that the substrate owns it,
-distinguishing it from an operator-authored skill such as `commit-push`. The
-reconcile keys on the stamp above, not the name, so the prefix is an identity
-marker rather than the match key, and the local name need not equal the source
-row name. A substrate skill that reads as unprefixed locally is a defect.
-
-## Scope: every `type:"skill"` row — including workflow skills
-
-Substrate rows with `type:"skill"` are what this contract materialises, and that **includes workflow skills** (a project's `<type>-workflow` skills). A workflow is process, and process in Claude Code is a skill: each is a `type:"skill"` `<name>/SKILL.md` carrying skill frontmatter (`name`, `description`, `version`) for indexing/sync plus the workflow-only `applies_to` and a fenced ```yaml states/transitions block. `skill list` returns them like any other skill, and the reconcile materialises them into `.claude/skills/<name>/SKILL.md`.
-
-One artifact, two readers, no fork: Claude Code indexes the skill by its `description`, and the gate's workflow parser reads only the fenced yaml block (ignoring the prose), so the same SKILL.md serves both. The gate selects the workflow from the dynamic skill index — the `kind:workflow` skill whose `applies_to` matches the story type — and runs the materialised `.claude/skills/<name>/SKILL.md`, the same file the operator authored and synced.
-
-## Failure mode
-
-Skip this step and skills drift between sessions. Reviewer behaviour then varies by whichever client ran last — the failure mode this contract exists to prevent.
+Run **`satellites skill sync`** to materialise the substrate's `type:"skill"`
+rows into `.claude/skills/<name>/SKILL.md`. One pull-only pass covers every scope
+the repo can see (system + workspace + project, most-specific body winning a name
+collision), keyed by an injected identity stamp: install / update / skip, and
+removal only for a stamp owned by no scope — never clobbering an operator-edited
+or operator-authored skill. The local copy carries the `satellites-` prefix.

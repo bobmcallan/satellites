@@ -20,9 +20,15 @@ Fetch everything else only when a task needs it — **do not preload.**
 
 `document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
 and follow it — shell client: `satellites install` then `satellites auth`; write
-the TOML; `project_match` the git remote for `project_id`. Then sync skills:
-`satellites skill list` per scope, reconcile into `.claude/skills/<name>/SKILL.md`
-per `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}`.
+the TOML; `project_match` the git remote for `project_id`.
+
+## Skill sync (session start)
+
+Materialise the substrate's skills with the client: **`satellites skill sync`**.
+One pull-only pass reconciles every scope the repo can see — system + workspace +
+project — into `.claude/skills/<name>/SKILL.md` by identity stamp (install /
+update / skip; never clobbering an operator-edited or operator-authored skill).
+This is the client's job — do **not** hand-reconcile by listing + writing files.
 
 ## On demand — do NOT load eagerly
 
@@ -30,6 +36,5 @@ per `document_get {name:"satellites_mcp_reference_skill_sync", scope:"system"}`.
   `principles:workspace` / `principles:project` layers). Fetch only when a
   task's correctness depends on them, never at startup.
 - **Reference** — `satellites_mcp_reference_dispatch` (CLI dispatch surface),
-  `satellites_mcp_reference_documents` (upsert modes + list shapes),
-  `satellites_mcp_reference_skill_sync` (skill reconciliation contract). Fetch
-  the one whose contract you need.
+  `satellites_mcp_reference_documents` (upsert modes + list shapes). Fetch the
+  one whose contract you need.
