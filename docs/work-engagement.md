@@ -41,27 +41,36 @@ hook) and writer (`satellites work init`) resolve it through the **same**
 Unknown fields are ignored, so the writer may carry more (timestamps, gate
 evidence) without breaking the reader.
 
-## What "active engagement" means (today)
+## What "active engagement" means (sty_2b6cd041)
 
-The START door treats the engagement as **active** when the file:
+The door no longer trusts `engagement.json` presence. It reads the engagement
+**store** (`.satellites/work/state.db`, `internal/workstate`) keyed by the
+PreToolUse **`session_id`**, and treats an engagement as **active** only when, for
+that session, it is:
 
-1. exists at the path above,
-2. parses as JSON, and
-3. names a story (`story_id` is non-empty).
+1. present (an `engage` row, not a bare `candidate` from a story access),
+2. **lease-fresh** (`lease_until` is in the future), AND
+3. in an **editable phase** — `work init` records, at engage time, whether the
+   story's current status is editable per its `## Workflow`
+   (`internal/workflow.IsEditable`); the door reads that stored flag (fast, no
+   per-edit workflow fetch). Editable is **derived from the workflow**, never
+   hard-coded; an unresolvable workflow defaults editable so the lease stays the
+   hard gate.
 
-That is the whole assessment — a **presence check**. The door does **not** read
-the workflow, judge work, or check the `status` value yet. Richer,
-workflow-position guards (e.g. "edits permitted only once the story has passed
-its plan gate") are a later story and will be **derived from the workflow
-skill**, not hard-coded — keeping configuration-over-code intact.
+A stale (expired-lease) engagement, a non-editable phase (e.g. backlog/done), a
+candidate row, or no engagement for the session → **deny**. This closes the VIRE
+bug, where a 9.5h-expired-lease engagement admitted ~20 edits. `engagement.json`
+is kept as a transitional artifact but is no longer the door's authority.
 
 ## Gate decision
 
-| State of `.satellites/work/engagement.json` | Door |
+| State for the editing session (in the store) | Door |
 | ------------------------------------------- | ---- |
-| repo not configured (no `satellites.toml`)  | **deny** — fail closed; run `satellites init` |
-| configured, no active engagement            | **deny** — run `satellites work init <story>` |
-| configured, active engagement               | **allow** (tool proceeds through normal permissioning) |
+| repo not configured (no `satellites.toml`) / store unreadable | **deny** — fail closed |
+| no engagement for the session               | **deny** — run `satellites work init <story>` |
+| engagement present but lease expired        | **deny** — re-engage (`satellites work init`) |
+| engagement lease-fresh but non-editable phase | **deny** — transition to an editable status |
+| engagement lease-fresh AND editable          | **allow** (tool proceeds through normal permissioning) |
 
 A `deny` is emitted as a Claude Code `PreToolUse` decision
 (`permissionDecision: "deny"`); an `allow` emits nothing, so the door only ever

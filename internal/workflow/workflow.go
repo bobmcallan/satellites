@@ -248,6 +248,28 @@ func (w *Workflow) EditableStates() []string {
 	return out
 }
 
+// HasState reports whether s is a declared state of this workflow. Callers use
+// it to distinguish "unknown status" (don't classify) from "non-editable".
+func (w *Workflow) HasState(s string) bool { return w.hasState(s) }
+
+// ParseBody parses just the fenced ```yaml workflow block from a story BODY (no
+// skill frontmatter required) into states + transitions — for callers that have
+// a story whose `## Workflow` section pins the workflow but not a full skill file.
+func ParseBody(body []byte) (*Workflow, error) {
+	yamlBlock, err := ExtractYAMLBlock(body)
+	if err != nil {
+		return nil, err
+	}
+	var w Workflow
+	if err := yaml.Unmarshal(yamlBlock, &w); err != nil {
+		return nil, fmt.Errorf("workflow: yaml block: %w", err)
+	}
+	if err := w.validate(); err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
 // hasState reports whether s is a declared state.
 func (w *Workflow) hasState(s string) bool {
 	for _, st := range w.States {

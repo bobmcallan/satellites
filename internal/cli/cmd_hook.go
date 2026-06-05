@@ -24,8 +24,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/workstate"
 	"github.com/spf13/cobra"
 )
 
@@ -59,8 +61,10 @@ It fails closed: an unconfigured repo is denied, never allowed.`,
 // reads. We only need cwd (to locate the repo); tool_name is read for clarity
 // and possible future scoping. Unknown fields are ignored.
 type preToolUseInput struct {
-	ToolName string `json:"tool_name"`
-	Cwd      string `json:"cwd"`
+	ToolName        string `json:"tool_name"`
+	Cwd             string `json:"cwd"`
+	SessionID       string `json:"session_id"`
+	ParentSessionID string `json:"parent_session_id"`
 }
 
 // gateDecisionJSON is the Claude Code PreToolUse hook output for a block.
@@ -88,29 +92,57 @@ func runHookGate(in io.Reader, out io.Writer) error {
 		}
 	}
 
-	allow, reason := gateOutcome(start)
+	allow, reason := gateOutcome(start, sessionKey(ev.SessionID, ev.ParentSessionID), time.Now().UTC())
 	if allow {
 		return nil // no output → tool proceeds through normal permissioning
 	}
 	return emitGateDeny(out, reason)
 }
 
-// gateOutcome is the pure decision core (story AC: testable). From a starting
-// directory it locates the satellites repo and reports whether a file edit may
-// proceed, with the divert reason when it may not.
-//
-//   - no .satellites/satellites.toml found → deny (fail closed: not configured)
-//   - configured, an active engagement     → allow
-//   - configured, no active engagement     → deny (the START door)
-func gateOutcome(start string) (allow bool, reason string) {
+// gateOutcome is the pure decision core (testable). It reads the engagement
+// STORE (not engagement.json presence) keyed by the editing session: an edit is
+// allowed only under a LEASE-FRESH, EDITABLE engagement for this session. A
+// stale/expired/absent engagement, a candidate (access-only) row, or a
+// non-editable phase is blocked. Fails closed when the repo is unconfigured or
+// the store is unreadable — the store is the authority, so uncertainty denies.
+func gateOutcome(start, session string, now time.Time) (allow bool, reason string) {
 	root, ok := findSatellitesRepoRoot(start)
 	if !ok {
 		return false, "satellites is not configured here (no .satellites/satellites.toml). Run `satellites init` to set up this repo, then `satellites work init <story>` to engage a story."
 	}
-	if _, ok := readEngagement(gateWorkDir(root)); ok {
-		return true, ""
+	store, err := workstate.Open(stateDBForRoot(root))
+	if err != nil {
+		return false, "satellites engagement store unavailable — cannot verify an active engagement (fail closed). Run `satellites work init <story>` (and `satellites update` if the client is stale)."
 	}
-	return false, "No active engagement. Run `satellites work init <story>` to engage a story's workflow before editing code (epic:hook-enforcement)."
+	defer store.Close()
+
+	engs, err := store.LiveEngagement(session)
+	if err != nil {
+		return false, "satellites engagement store unreadable — blocking. Run `satellites work init <story>`."
+	}
+
+	var sawEngagement, sawFresh bool
+	for _, e := range engs {
+		if e.Phase == phaseCandidate {
+			continue // an access-only candidate never authorises edits
+		}
+		sawEngagement = true
+		if !e.IsLeaseFresh(now) {
+			continue
+		}
+		sawFresh = true
+		if e.Editable {
+			return true, "" // lease-fresh + editable → allow
+		}
+	}
+	switch {
+	case !sawEngagement:
+		return false, "No active engagement for this session. Run `satellites work init <story>` to engage a story's workflow before editing code."
+	case !sawFresh:
+		return false, "Your engagement's lease has expired (stale). Re-engage with `satellites work init <story>` before editing."
+	default:
+		return false, "The engaged story is not in an editable phase (e.g. backlog/done). Transition it to an editable status, or `satellites work init` the story you are actually working."
+	}
 }
 
 // gateWorkDir resolves the engagement directory through the shared cliconfig

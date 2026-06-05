@@ -42,6 +42,7 @@ type Event struct {
 	Kind       string
 	Tags       []string
 	LeaseUntil time.Time // zero ⇒ no lease recorded on this event
+	Editable   bool      // whether edits are permitted in this phase (workflow-derived at engage; the door reads it)
 	TS         time.Time // zero ⇒ stamped by Append's caller-supplied now
 }
 
@@ -52,6 +53,7 @@ type Engagement struct {
 	Story      string
 	Phase      string
 	LeaseUntil time.Time // zero ⇒ no lease
+	Editable   bool      // edits permitted in this phase (the door requires it)
 	UpdatedAt  time.Time
 }
 
@@ -109,6 +111,7 @@ CREATE TABLE IF NOT EXISTS current (
     story       TEXT NOT NULL,
     phase       TEXT NOT NULL DEFAULT '',
     lease_until TEXT NOT NULL DEFAULT '',
+    editable    INTEGER NOT NULL DEFAULT 1,
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (session, story)
 );
@@ -120,6 +123,9 @@ CREATE TABLE IF NOT EXISTS meta (
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
 	}
+	// Backfill the editable column on stores created before sty_2b6cd041. A
+	// duplicate-column error means it's already present — ignore it (idempotent).
+	_, _ = s.db.Exec(`ALTER TABLE current ADD COLUMN editable INTEGER NOT NULL DEFAULT 1`)
 	return nil
 }
 
@@ -168,13 +174,14 @@ func (s *Store) Append(ev Event) (int64, error) {
 		}
 	} else {
 		if _, err := tx.Exec(
-			`INSERT INTO current (session, story, phase, lease_until, updated_at)
-			 VALUES (?, ?, ?, ?, ?)
+			`INSERT INTO current (session, story, phase, lease_until, editable, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(session, story) DO UPDATE SET
 			     phase = excluded.phase,
 			     lease_until = excluded.lease_until,
+			     editable = excluded.editable,
 			     updated_at = excluded.updated_at`,
-			ev.Session, ev.Story, ev.Phase, lease, ts.UTC().Format(time.RFC3339),
+			ev.Session, ev.Story, ev.Phase, lease, boolToInt(ev.Editable), ts.UTC().Format(time.RFC3339),
 		); err != nil {
 			return 0, fmt.Errorf("workstate: upsert projection: %w", err)
 		}
@@ -189,7 +196,7 @@ func (s *Store) Append(ev Event) (int64, error) {
 // the single indexed read the hooks rely on. ok is false when none is open.
 func (s *Store) Current(session, story string) (Engagement, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT session, story, phase, lease_until, updated_at FROM current WHERE session = ? AND story = ?`,
+		`SELECT session, story, phase, lease_until, editable, updated_at FROM current WHERE session = ? AND story = ?`,
 		session, story,
 	)
 	e, err := scanEngagement(row)
@@ -205,7 +212,7 @@ func (s *Store) Current(session, story string) (Engagement, bool, error) {
 // ListCurrent returns every open engagement, newest-updated first — the basis
 // for `satellites work status` and the cross-agent view.
 func (s *Store) ListCurrent() ([]Engagement, error) {
-	return s.queryCurrent(`SELECT session, story, phase, lease_until, updated_at FROM current ORDER BY updated_at DESC`)
+	return s.queryCurrent(`SELECT session, story, phase, lease_until, editable, updated_at FROM current ORDER BY updated_at DESC`)
 }
 
 // LiveEngagement returns the open engagements for one session, newest first.
@@ -214,7 +221,7 @@ func (s *Store) ListCurrent() ([]Engagement, error) {
 // door (sty_2b6cd041), not in the store.
 func (s *Store) LiveEngagement(session string) ([]Engagement, error) {
 	return s.queryCurrent(
-		`SELECT session, story, phase, lease_until, updated_at FROM current WHERE session = ? ORDER BY updated_at DESC`,
+		`SELECT session, story, phase, lease_until, editable, updated_at FROM current WHERE session = ? ORDER BY updated_at DESC`,
 		session,
 	)
 }
@@ -313,7 +320,8 @@ type scanner interface {
 
 func scanEngagement(sc scanner) (Engagement, error) {
 	var session, story, phase, lease, updated string
-	if err := sc.Scan(&session, &story, &phase, &lease, &updated); err != nil {
+	var editable int
+	if err := sc.Scan(&session, &story, &phase, &lease, &editable, &updated); err != nil {
 		return Engagement{}, err
 	}
 	return Engagement{
@@ -321,8 +329,16 @@ func scanEngagement(sc scanner) (Engagement, error) {
 		Story:      story,
 		Phase:      phase,
 		LeaseUntil: parseRFC3339(lease),
+		Editable:   editable != 0,
 		UpdatedAt:  parseRFC3339(updated),
 	}, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func nonNil(s []string) []string {

@@ -12,6 +12,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,8 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/verb"
+	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/bobmcallan/satellites/internal/workstate"
 	"github.com/spf13/cobra"
 )
@@ -52,8 +55,9 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(configArg)
+			editable := resolveEditable(cmd.Context(), configArg, args[0], status)
 			return runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
-				args[0], status, resolveSession(sessionArg), time.Now().UTC())
+				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC())
 		},
 	}
 	initCmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (resolves repo root + work_dir; defaults to walk-up from CWD).")
@@ -199,11 +203,43 @@ func resolveSession(flag string) string {
 	return "local"
 }
 
+// resolveEditable best-effort decides whether the engaged story's current phase
+// permits edits, by fetching the story and asking its `## Workflow` (via
+// internal/workflow.IsEditable). It NEVER over-blocks: any failure (offline, no
+// workflow block, unknown status) returns true so the lease remains the hard
+// gate. The door reads the stored result; this resolves it once at engage.
+func resolveEditable(ctx context.Context, configPath, storyID, status string) bool {
+	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
+	if err != nil {
+		return true
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, configPath, "")
+	if err != nil {
+		return true // offline / not resolvable → don't over-block
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return true
+	}
+	body := resp.RawBody
+	if body == "" && len(resp.Versions) > 0 {
+		body = resp.Versions[0].Body
+	}
+	if strings.TrimSpace(status) == "" {
+		status = resp.Document.Status
+	}
+	wf, err := workflow.ParseBody([]byte(body))
+	if err != nil || strings.TrimSpace(status) == "" || !wf.HasState(status) {
+		return true
+	}
+	return wf.IsEditable(status)
+}
+
 // runWorkInit records the engagement in the per-repo store (the new authority,
 // keyed by session) and writes engagement.json for the legacy door. It enforces
 // single-open: a session may not open a second DIFFERENT story under a fresh
 // lease. Testable core: callers pass the resolved paths, session, and a fixed now.
-func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, session string, now time.Time) error {
+func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, session string, editable bool, now time.Time) error {
 	storyID = strings.TrimSpace(storyID)
 	if storyID == "" {
 		return fmt.Errorf("work init: story id required")
@@ -233,7 +269,7 @@ func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, ses
 
 	if _, err := store.Append(workstate.Event{
 		Session: session, Story: storyID, Phase: strings.TrimSpace(status),
-		Kind: "engage", LeaseUntil: now.Add(engageLeaseTTL), TS: now,
+		Kind: "engage", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, TS: now,
 	}); err != nil {
 		return fmt.Errorf("work init: record engagement: %w", err)
 	}

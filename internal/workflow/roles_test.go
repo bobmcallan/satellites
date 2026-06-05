@@ -46,6 +46,26 @@ func TestStateRoles_FixWorkflow(t *testing.T) {
 	}
 }
 
+// TestParseBody: parse a `## Workflow` yaml block from a story BODY (no skill
+// frontmatter) and derive editability — what work init uses to stamp the door's
+// editable flag.
+func TestParseBody(t *testing.T) {
+	body := []byte("# A story\n\nsome prose\n\n```yaml\nstates:\n  - backlog\n  - in_progress\n  - done\ntransitions:\n  - {from: backlog, to: in_progress, reviewer_skill: plan}\n  - {from: in_progress, to: done, reviewer_skill: done}\n```\n")
+	wf, err := ParseBody(body)
+	if err != nil {
+		t.Fatalf("ParseBody: %v", err)
+	}
+	if !wf.IsEditable("in_progress") || wf.IsEditable("backlog") || wf.IsEditable("done") {
+		t.Errorf("editable derivation wrong: editable=%v", wf.EditableStates())
+	}
+	if !wf.HasState("done") || wf.HasState("nope") {
+		t.Errorf("HasState wrong")
+	}
+	if _, err := ParseBody([]byte("# no workflow block here")); err == nil {
+		t.Errorf("a body with no yaml block should error")
+	}
+}
+
 // TestValidateLifecycle: a clear begin→work→end workflow passes (incl. an
 // epic-style backlog→done with no work phase); a cyclic (no-terminal) or
 // single-state (no transitions) workflow fails loudly (AC1/AC2/AC4).
