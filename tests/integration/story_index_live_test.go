@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -153,5 +154,45 @@ func TestStoryIndexLiveUpdate(t *testing.T) {
 	}
 	if path != "/projects/"+pj.ID {
 		t.Fatalf("navigated away to %q; live update must not navigate", path)
+	}
+
+	// AC6 — an ADDED story reconciles in, exactly once (the tbody is fully
+	// re-rendered each refresh, so a dupe would mean a reconcile bug).
+	added, err := docStore.CreateStory(bg, document.CreateStoryInput{
+		ProjectID: pj.ID, WorkspaceID: ws.ID, Title: "added live story",
+	}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("create added story: %v", err)
+	}
+	var addOK bool
+	if err := chromedp.Run(ctx, chromedp.Poll(
+		`document.querySelectorAll('tr.story-row[data-id="`+added.ID+`"]').length === 1`,
+		&addOK, chromedp.WithPollingTimeout(8*time.Second),
+	)); err != nil {
+		t.Fatalf("added story did not appear exactly once (dupe or missing): %v", err)
+	}
+
+	// AC6 — a REMOVED (soft-deleted) story drops from the page. document_delete
+	// updates documents.status → fires the trigger; document_list then excludes
+	// it so the refreshed fragment omits the row.
+	delReq, _ := json.Marshal(verb.DocumentDeleteRequest{ID: story.ID})
+	if _, err := verb.Dispatch(bg, "document_delete", delReq); err != nil {
+		t.Fatalf("delete story: %v", err)
+	}
+	var removeOK bool
+	if err := chromedp.Run(ctx, chromedp.Poll(
+		`document.querySelectorAll('tr.story-row[data-id="`+story.ID+`"]').length === 0`,
+		&removeOK, chromedp.WithPollingTimeout(8*time.Second),
+	)); err != nil {
+		t.Fatalf("removed story did not drop from the page: %v", err)
+	}
+
+	// The added row must still be present (and singular) after the remove
+	// refresh — no skip/dupe across reconciles.
+	var addStillOne bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`document.querySelectorAll('tr.story-row[data-id="`+added.ID+`"]').length === 1`, &addStillOne,
+	)); err != nil || !addStillOne {
+		t.Fatalf("added row not present-exactly-once after remove reconcile (skip/dupe): err=%v", err)
 	}
 }
