@@ -95,6 +95,25 @@ the store read-only and self-initialises an empty one if none exists.`,
 	statusCmd.Flags().StringVar(&statusConfigArg, "config", "", "Path to satellites.toml (resolves repo root + state_db; defaults to walk-up from CWD).")
 	work.AddCommand(statusCmd)
 
+	var syncConfigArg string
+	syncCmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Flush engagement events from the local store to the server ledger",
+		Long: `sync flushes engagement events recorded since the last sync to the server
+ledger via the existing ledger_append verb (kind engagement:<kind>, carrying
+session_id), so the server can assemble the cross-agent view and run the
+process-adherence audit. Best-effort and idempotent: a flush failure warns and is
+retried next run; the server ledger stays the authority.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, _ := cliconfig.Load(syncConfigArg)
+			return runWorkSync(cmd.OutOrStdout(), resolveStateDB(syncConfigArg),
+				realLedgerAppender(cmd.Context(), cfg.ProjectID, syncConfigArg))
+		},
+	}
+	syncCmd.Flags().StringVar(&syncConfigArg, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
+	work.AddCommand(syncCmd)
+
 	register(work)
 }
 

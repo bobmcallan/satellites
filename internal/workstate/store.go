@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,11 @@ CREATE TABLE IF NOT EXISTS current (
     lease_until TEXT NOT NULL DEFAULT '',
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (session, story)
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
@@ -228,6 +234,64 @@ func (s *Store) queryCurrent(query string, args ...any) ([]Engagement, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// LoggedEvent is an event as stored, including its assigned seq — the unit the
+// server-sync flush reads and high-water-marks against.
+type LoggedEvent struct {
+	Seq int64
+	Event
+}
+
+// EventsSince returns every event with seq greater than `seq`, oldest first —
+// the unflushed tail for the server-sync flush.
+func (s *Store) EventsSince(seq int64) ([]LoggedEvent, error) {
+	rows, err := s.db.Query(
+		`SELECT seq, session, story, phase, kind, tags, lease_until, ts FROM events WHERE seq > ? ORDER BY seq ASC`,
+		seq,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LoggedEvent
+	for rows.Next() {
+		var le LoggedEvent
+		var tags, lease, ts string
+		if err := rows.Scan(&le.Seq, &le.Session, &le.Story, &le.Phase, &le.Kind, &tags, &lease, &ts); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(tags), &le.Tags)
+		le.LeaseUntil = parseRFC3339(lease)
+		le.TS = parseRFC3339(ts)
+		out = append(out, le)
+	}
+	return out, rows.Err()
+}
+
+// LastFlushedSeq returns the high-water mark of events already flushed to the
+// server ledger, or 0 when nothing has flushed.
+func (s *Store) LastFlushedSeq() (int64, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'last_flushed_seq'`).Scan(&v)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	return n, nil
+}
+
+// SetLastFlushedSeq advances the flush high-water mark.
+func (s *Store) SetLastFlushedSeq(seq int64) error {
+	_, err := s.db.Exec(
+		`INSERT INTO meta (key, value) VALUES ('last_flushed_seq', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		strconv.FormatInt(seq, 10),
+	)
+	return err
 }
 
 // IsLeaseFresh reports whether the engagement's lease is still in the future at
