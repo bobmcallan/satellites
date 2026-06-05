@@ -6,9 +6,11 @@
 // writes a ledger row or patches a status; it only reports what the loop
 // recorded.
 //
-// GET /api/stories/{id}/events is the realtime companion: a Server-Sent-Events
-// stream that pushes newly-appended ledger rows for the story so the view
-// updates live as gates fire, with no full-page poll from the browser.
+// GET /stories/{id}/trace.fragment is the realtime companion (sty_96cc0ade):
+// the shared SSE bus client (live.js) refetches it on a story-scoped trigger
+// and swaps the trace region in place, so the view updates live as gates fire
+// with no full-page reload. It replaces the retired per-story SSE endpoint
+// (/api/stories/{id}/events, sty_0915e1b7).
 //
 // Transport layering (pr_mcp_cli_shared_path): this file reaches the substrate
 // only through internal/verb's Dispatch. It does NOT import internal/ledger —
@@ -38,11 +40,7 @@ import (
 var storyDetailTmpl = template.Must(template.ParseFS(assets,
 	"templates/story_detail.html", "templates/_user_menu.html"))
 
-const (
-	storyEventsPollInterval = 2 * time.Second
-	storyEventsMaxLifetime  = 10 * time.Minute // browser EventSource auto-reconnects
-	storyLedgerLimit        = 200
-)
+const storyLedgerLimit = 200
 
 type storyTraceRowView struct {
 	From        string
@@ -90,46 +88,23 @@ func storyDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		story, err := dispatchStoryMeta(ctx, storyID)
+		data, err := buildStoryDetail(ctx, storyID)
 		if err != nil {
-			arbor.WarnCtx(ctx, "story_detail: document_get", "id", storyID, "err", err)
+			arbor.WarnCtx(ctx, "story_detail: build", "id", storyID, "err", err)
 			http.NotFound(w, r)
 			return
 		}
-
-		data := storyDetailData{
-			Title:         story.Title + " · stories · satellites",
-			StoryID:       story.ID,
-			StoryTitle:    story.Title,
-			StoryType:     story.Category,
-			CurrentStatus: story.Status,
-			ActiveNav:     "projects",
-			FooterName:    footerName,
-			FooterEmail:   footerEmail,
-			Version:       versionString(),
-		}
+		data.Title = data.StoryTitle + " · stories · satellites"
+		data.ActiveNav = "projects"
+		data.FooterName = footerName
+		data.FooterEmail = footerEmail
+		data.Version = versionString()
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
 				data.UserEmail = u.Email
 				data.UserName = u.DisplayName
 				data.UserAvatar = avatarLetter(u.DisplayName, u.Email)
 			}
-		}
-
-		wf, err := resolveWorkflowForStory(ctx, story.Category)
-		if err != nil || wf == nil {
-			if err != nil {
-				arbor.WarnCtx(ctx, "story_detail: resolve workflow", "type", story.Category, "err", err)
-			}
-			data.NoWorkflow = true
-		} else {
-			entries, lErr := dispatchStoryLedger(ctx, storyID, time.Time{})
-			if lErr != nil {
-				arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
-			}
-			trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
-			data.WorkflowName = trace.WorkflowName
-			data.Rows = traceRows(trace)
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -139,11 +114,44 @@ func storyDetailHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// storyEventsHandler streams new ledger rows for a story as SSE. On connect it
-// anchors at "now" and, on a short server-side tick, pushes any entry appended
-// since the last seen timestamp. The browser client reloads the view on each
-// event so the freshly-fired gate verdict appears live.
-func storyEventsHandler(cfg Config) http.HandlerFunc {
+// buildStoryDetail resolves the read-only story-trace view model (story meta +
+// declared workflow reconciled against the ledger) for storyID. Shared by the
+// full-page handler and the live trace fragment (sty_96cc0ade). Read-only: it
+// dispatches only read verbs and never writes a ledger row or patches status.
+func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, error) {
+	story, err := dispatchStoryMeta(ctx, storyID)
+	if err != nil {
+		return storyDetailData{}, err
+	}
+	data := storyDetailData{
+		StoryID:       story.ID,
+		StoryTitle:    story.Title,
+		StoryType:     story.Category,
+		CurrentStatus: story.Status,
+	}
+	wf, err := resolveWorkflowForStory(ctx, story.Category)
+	if err != nil || wf == nil {
+		if err != nil {
+			arbor.WarnCtx(ctx, "story_detail: resolve workflow", "type", story.Category, "err", err)
+		}
+		data.NoWorkflow = true
+		return data, nil
+	}
+	entries, lErr := dispatchStoryLedger(ctx, storyID, time.Time{})
+	if lErr != nil {
+		arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
+	}
+	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
+	data.WorkflowName = trace.WorkflowName
+	data.Rows = traceRows(trace)
+	return data, nil
+}
+
+// storyTraceFragmentHandler renders just the live trace region (status pill +
+// process-trace table) for a story — the refetch target the shared SSE client
+// swaps in on a story-scoped trigger (sty_96cc0ade), replacing the retired
+// per-story SSE endpoint. Read-only; same read verbs; no new MCP verb.
+func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := cfg.Sessions.UserID(r)
 		if err != nil {
@@ -156,81 +164,17 @@ func storyEventsHandler(cfg Config) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		data, err := buildStoryDetail(ctx, storyID)
+		if err != nil {
+			arbor.WarnCtx(ctx, "story_trace_fragment: build", "id", storyID, "err", err)
+			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-
-		// Anchor at the newest existing entry so we only stream what arrives
-		// after the client connected.
-		since := time.Now().UTC()
-		if existing, err := dispatchStoryLedger(ctx, storyID, time.Time{}); err == nil {
-			for _, e := range existing {
-				if e.CreatedAt.After(since) {
-					since = e.CreatedAt
-				}
-			}
-		}
-		fmt.Fprint(w, ": connected\n\n")
-		flusher.Flush()
-
-		ticker := time.NewTicker(storyEventsPollInterval)
-		defer ticker.Stop()
-		deadline := time.NewTimer(storyEventsMaxLifetime)
-		defer deadline.Stop()
-
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-deadline.C:
-				return
-			case <-ticker.C:
-				fresh, since2 := ledgerEntriesSince(ctx, storyID, since)
-				since = since2
-				for _, e := range fresh {
-					fmt.Fprintf(w, "event: ledger\ndata: %s\n\n", sseData(e))
-				}
-				if len(fresh) > 0 {
-					flusher.Flush()
-				}
-			}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := storyDetailTmpl.ExecuteTemplate(w, "story-trace", data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
-}
-
-// ledgerEntriesSince returns the story's ledger rows newer than `since`,
-// oldest-first, and the high-water timestamp to anchor the next poll. Testable
-// seam for the realtime path. A dispatch error yields no entries and the same
-// anchor (the stream simply waits for the next tick).
-func ledgerEntriesSince(ctx context.Context, storyID string, since time.Time) ([]processtrace.LedgerEntry, time.Time) {
-	entries, err := dispatchStoryLedger(ctx, storyID, since)
-	if err != nil {
-		return nil, since
-	}
-	out := make([]processtrace.LedgerEntry, 0, len(entries))
-	high := since
-	for _, e := range entries {
-		if e.CreatedAt.After(since) {
-			out = append(out, e)
-			if e.CreatedAt.After(high) {
-				high = e.CreatedAt
-			}
-		}
-	}
-	return out, high
-}
-
-// sseData renders a single SSE data line (one line, newline-free) describing a
-// ledger row. The client only needs a signal that something changed; the kind
-// is included for debuggability.
-func sseData(e processtrace.LedgerEntry) string {
-	b, _ := json.Marshal(map[string]string{"kind": e.Kind, "at": e.CreatedAt.UTC().Format(time.RFC3339)})
-	return string(b)
 }
 
 // storyMeta is the minimal story projection the view needs.

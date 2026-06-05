@@ -102,10 +102,11 @@ func Build(cfg Config) http.Handler {
 	// /projects/ so it wins under Go 1.22 pattern precedence.
 	mux.HandleFunc("GET /projects/{id}/stories.fragment", storyFragmentHandler(cfg))
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
+	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it
+	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE
+	// (/api/stories/{id}/events); the QA view now refetches off the shared bus.
+	mux.HandleFunc("GET /stories/{id}/trace.fragment", storyTraceFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
-	// More-specific than /api/stories/ (storyStatusHandler) so the SSE stream
-	// wins for the events sub-path under Go 1.22 pattern precedence.
-	mux.HandleFunc("GET /api/stories/{id}/events", storyEventsHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 

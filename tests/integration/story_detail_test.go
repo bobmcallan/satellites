@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -160,44 +159,45 @@ func TestStoryDetailQAView(t *testing.T) {
 		}
 	})
 
-	t.Run("SSE stream emits a newly-appended ledger row", func(t *testing.T) {
+	// sty_96cc0ade retired the per-story SSE (/api/stories/{id}/events); the QA
+	// view now refetches the trace fragment off the shared bus. Assert the old
+	// endpoint no longer serves a stream and the fragment renders the trace.
+	t.Run("retired per-story SSE is gone; trace fragment serves the reconciled view", func(t *testing.T) {
 		srv := httptest.NewServer(handler)
 		defer srv.Close()
 
-		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/stories/"+storyID+"/events", nil)
+		oldReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/stories/"+storyID+"/events", nil)
 		for _, c := range sessionCookies() {
-			req.AddCookie(c)
+			oldReq.AddCookie(c)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		oldResp, err := http.DefaultClient.Do(oldReq)
 		if err != nil {
-			t.Fatalf("open stream: %v", err)
+			t.Fatalf("old endpoint request: %v", err)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("stream status %d", resp.StatusCode)
+		defer oldResp.Body.Close()
+		if oldResp.StatusCode == http.StatusOK &&
+			strings.Contains(oldResp.Header.Get("Content-Type"), "text/event-stream") {
+			t.Fatalf("retired /api/stories/{id}/events still serves an SSE stream (status %d)", oldResp.StatusCode)
 		}
 
-		got := make(chan string, 1)
-		go func() {
-			sc := bufio.NewScanner(resp.Body)
-			for sc.Scan() {
-				if strings.HasPrefix(sc.Text(), "event: ledger") {
-					got <- sc.Text()
-					return
-				}
+		fragReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/stories/"+storyID+"/trace.fragment", nil)
+		for _, c := range sessionCookies() {
+			fragReq.AddCookie(c)
+		}
+		fragResp, err := http.DefaultClient.Do(fragReq)
+		if err != nil {
+			t.Fatalf("trace fragment request: %v", err)
+		}
+		defer fragResp.Body.Close()
+		if fragResp.StatusCode != http.StatusOK {
+			t.Fatalf("trace.fragment status %d", fragResp.StatusCode)
+		}
+		fb, _ := io.ReadAll(fragResp.Body)
+		fs := string(fb)
+		for _, want := range []string{`data-table="process-trace"`, `data-field="current-status"`, "in_progress"} {
+			if !strings.Contains(fs, want) {
+				t.Errorf("trace fragment missing %q", want)
 			}
-		}()
-
-		// Append a NEW row after connecting (timestamp strictly after the
-		// stream's connect-time anchor) — the server poll should push it.
-		time.Sleep(300 * time.Millisecond)
-		appendLedger("status_transition", "in_progress → done", map[string]any{"from_status": "in_progress", "to_status": "done"}, time.Now().Add(time.Minute))
-
-		select {
-		case <-got:
-			// streamed — success
-		case <-time.After(10 * time.Second):
-			t.Fatal("SSE stream did not emit the newly-appended ledger row")
 		}
 	})
 }
