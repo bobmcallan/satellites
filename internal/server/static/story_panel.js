@@ -287,9 +287,11 @@
             // server-rendered order, captured once on init() so removing
             // the order chip can restore the table.
             _originalRowOrder: [],
-            // total = project-wide story count for the "shown / total"
-            // indicator; seeded from the server-rendered data-story-total and
-            // refreshed live from the fragment response header (sty_8f69be8b).
+            // The count indicator reads `filtered / total` (sty_47234d6e):
+            // filtered = stories matching the active filter across all pages,
+            // total = project-wide all-status count. Both are server-authoritative
+            // — seeded from data attributes, refreshed from the fragment headers.
+            filtered: 0,
             total: 0,
             // _rev bumps on each live refresh so visibleRowCount (and the
             // indicator) recompute even though this.query did not change.
@@ -345,6 +347,8 @@
                 // EventSource on this first live.on call. A burst of triggers
                 // debounces into a single refetch.
                 if (root) {
+                    const f0 = parseInt(root.dataset.storyFiltered || '', 10);
+                    if (!isNaN(f0)) { this.filtered = f0; }
                     const t0 = parseInt(root.dataset.storyTotal || '', 10);
                     if (!isNaN(t0)) { this.total = t0; }
                     const pid = root.dataset.projectId || '';
@@ -372,6 +376,7 @@
                 } catch (e) { return; }
                 if (!resp || !resp.ok) { return; }
                 const html = await resp.text();
+                const filtered = parseInt(resp.headers.get('X-Story-Filtered') || '', 10);
                 const total = parseInt(resp.headers.get('X-Story-Total') || '', 10);
                 const page = parseInt(resp.headers.get('X-Story-Page') || '', 10);
                 const pageCount = parseInt(resp.headers.get('X-Story-Page-Count') || '', 10);
@@ -391,8 +396,9 @@
                 const ord = parseStoryQuery(this.query).order;
                 if (ord) { applyStoryOrder(root, ord); } else { restoreStoryOrder(root, order); }
 
+                if (!isNaN(filtered)) { this.filtered = filtered; }
                 if (!isNaN(total)) { this.total = total; }
-                this._rev++; // force visibleRowCount + indicator to recompute
+                this._rev++; // force any visibleRowCount readers to recompute
 
                 const ind = root.querySelector('[data-field="panel-stories-page-indicator"]');
                 if (ind && !isNaN(page)) {

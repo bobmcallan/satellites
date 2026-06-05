@@ -45,12 +45,12 @@
 
   <section class="panel" data-section="project-stories">
     <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body"
-         data-project-id="{{.Project.ID}}" data-story-total="{{.StoryTotal}}">
+         data-project-id="{{.Project.ID}}" data-story-filtered="{{.StoryFiltered}}" data-story-total="{{.StoryTotal}}">
     <div class="panel-header">
       <h2>stories</h2>
       <span class="stories-count-indicator" data-field="stories-count-indicator"
-            title="shown on this page / total matching the active filter">
-        <span x-text="visibleRowCount + ' / ' + total">{{.StoryShown}} / {{.StoryTotal}}</span>
+            title="matching the active filter / project total">
+        <span x-text="filtered + ' / ' + total">{{.StoryFiltered}} / {{.StoryTotal}}</span>
       </span>
     </div>
       <input type="text"

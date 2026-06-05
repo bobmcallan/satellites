@@ -224,9 +224,10 @@ func TestProjectDetailPanel(t *testing.T) {
 			}
 		}
 
-		// Verify both rows pick up the new status on re-render — what a
-		// reload after a bulk apply would show.
-		_, body := get(t, "/projects/"+pj.ID)
+		// Verify both rows pick up the new status on re-render. Query
+		// status:all — the default view now filters status:open server-side
+		// (sty_47234d6e), so done rows are (correctly) absent from it.
+		_, body := get(t, "/projects/"+pj.ID+"?stories_q=status:all")
 		for _, id := range []string{storyA.Document.ID, storyB.Document.ID} {
 			want := `data-id="` + id + `"
               data-status="done"`

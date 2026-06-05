@@ -28,30 +28,29 @@ var projectDetailTmpl = template.Must(
 func templateList(items ...string) []string { return items }
 
 type projectDetailData struct {
-	Title       string
-	UserEmail   string
-	UserName    string
-	UserAvatar  string
-	ActiveNav   string
-	Project     projectRow
-	Stories     []storyRow
-	StoryShown  int // initial visible count = len(Stories); Alpine x-text overwrites on filter change
-	StoryTotal  int // project-wide total from document_count; 0 = unavailable
-	Paginator   paginatorData
-	DevMode     bool
-	FooterName  string
-	FooterEmail string
-	Version     string
+	Title         string
+	UserEmail     string
+	UserName      string
+	UserAvatar    string
+	ActiveNav     string
+	Project       projectRow
+	Stories       []storyRow
+	StoryShown    int // rows rendered on this page = len(Stories)
+	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
+	StoryTotal    int // project-wide all-status total (indicator denominator)
+	Paginator     paginatorData
+	DevMode       bool
+	FooterName    string
+	FooterEmail   string
+	Version       string
 }
 
-// paginatorData carries the cursor-paginator state the template
-// renders. Total + PageCount come from document_count (sty_cc20c0f5)
-// alongside dispatchStoryList; if that call fails the template falls
-// back to a "page N" rendering with no total.
+// paginatorData carries the paginator state the template renders.
 type paginatorData struct {
 	Page      int
-	PageCount int // 0 = unknown; renders as "page N" instead of "page N of M"
-	Total     int // unfiltered project-wide story count
+	PageCount int // pages over the FILTERED set; 0 = unknown
+	Filtered  int // stories matching the active filter (numerator + page basis)
+	Total     int // project-wide all-status count (indicator denominator)
 	HasPrev   bool
 	HasNext   bool
 	PrevURL   string
@@ -117,18 +116,19 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 				ID: pj.ID, Name: pj.Name, Description: pj.Description,
 				GitURL: pj.GitURLCanonical, Status: pj.Status, CreatedAt: pj.CreatedAt,
 			},
-			UserEmail:   userEmail,
-			UserName:    userName,
-			UserAvatar:  userAvatar,
-			ActiveNav:   "projects",
-			Stories:     stories,
-			StoryShown:  len(stories),
-			StoryTotal:  paginator.Total,
-			Paginator:   paginator,
-			DevMode:     cfg.DevMode,
-			FooterName:  footerName,
-			FooterEmail: footerEmail,
-			Version:     versionString(),
+			UserEmail:     userEmail,
+			UserName:      userName,
+			UserAvatar:    userAvatar,
+			ActiveNav:     "projects",
+			Stories:       stories,
+			StoryShown:    len(stories),
+			StoryFiltered: paginator.Filtered,
+			StoryTotal:    paginator.Total,
+			Paginator:     paginator,
+			DevMode:       cfg.DevMode,
+			FooterName:    footerName,
+			FooterEmail:   footerEmail,
+			Version:       versionString(),
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -151,76 +151,54 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 		}
 	}
 
-	// Server-side filter (sty_1bd0098a): when the panel query is on the URL
-	// (stories_q), gather the whole project story set, filter+sort here, and
-	// offset-paginate — so page/total reflect the filter and matches on any
-	// page are reachable. With no active filter we keep cursor pagination.
+	// All filtering + paging is server-side (sty_47234d6e): gather the whole
+	// project story set, apply the EFFECTIVE query, sort, then offset-paginate.
+	// An empty stories_q is the default view = `status:open` — applied here, not
+	// client-side, so each page is a full page of matching rows and the count
+	// reflects the filter (was: client hid done/cancelled over a server page,
+	// holing the pages). `filtered` is the match count across all pages; `total`
+	// is the project-wide all-status count.
 	base := "/projects/" + projectID
-	var (
-		stories   []storyRow
-		paginator paginatorData
-	)
-	if sq := parseStoryQuery(q.Get("stories_q")); !sq.isEmpty() {
-		qparam := strings.TrimSpace(q.Get("stories_q"))
-		all, err := gatherAllStories(ctx, projectID, pageSize)
-		if err != nil {
-			return nil, paginatorData{}, err
+	qparam := strings.TrimSpace(q.Get("stories_q"))
+	sq := parseStoryQuery(qparam)
+	if sq.isEmpty() {
+		sq = parseStoryQuery("status:open")
+	}
+
+	all, err := gatherAllStories(ctx, projectID, pageSize)
+	if err != nil {
+		return nil, paginatorData{}, err
+	}
+	grandTotal := len(all)
+	filtered := filterStories(all, sq)
+	sortStories(filtered, sq.order)
+	filteredCount := len(filtered)
+
+	start := (page - 1) * pageSize
+	if start > filteredCount {
+		start = filteredCount
+	}
+	end := start + pageSize
+	if end > filteredCount {
+		end = filteredCount
+	}
+	stories := filtered[start:end]
+
+	paginator := paginatorData{
+		Page: page, Filtered: filteredCount, Total: grandTotal, PageSize: pageSize,
+		HasPrev: page > 1, HasNext: end < filteredCount,
+	}
+	if pageSize > 0 {
+		paginator.PageCount = (filteredCount + pageSize - 1) / pageSize
+		if paginator.PageCount < 1 {
+			paginator.PageCount = 1
 		}
-		filtered := filterStories(all, sq)
-		sortStories(filtered, sq.order)
-		total := len(filtered)
-		start := (page - 1) * pageSize
-		if start > total {
-			start = total
-		}
-		end := start + pageSize
-		if end > total {
-			end = total
-		}
-		stories = filtered[start:end]
-		paginator = paginatorData{
-			Page: page, Total: total, PageSize: pageSize,
-			HasPrev: page > 1, HasNext: end < total,
-		}
-		if pageSize > 0 {
-			paginator.PageCount = (total + pageSize - 1) / pageSize
-			if paginator.PageCount < 1 {
-				paginator.PageCount = 1
-			}
-		}
-		if paginator.HasPrev {
-			paginator.PrevURL = filteredPageURL(base, qparam, page-1)
-		}
-		if paginator.HasNext {
-			paginator.NextURL = filteredPageURL(base, qparam, page+1)
-		}
-	} else {
-		cursor := q.Get("stories_cursor")
-		backStack := readBackStack(q, storyPaginatorKeys)
-		rows, nextCursor, err := dispatchStoryList(ctx, projectID, cursor, pageSize)
-		if err != nil {
-			return nil, paginatorData{}, err
-		}
-		stories = rows
-		// document_count for the unfiltered total + PageCount. Failure
-		// degrades the indicator to "page N" without a total.
-		total := dispatchStoryCount(ctx, projectID)
-		paginator = paginatorData{
-			Page: page, Total: total, PageSize: pageSize,
-			HasPrev: len(backStack) > 0, HasNext: nextCursor != "",
-		}
-		if total > 0 && pageSize > 0 {
-			paginator.PageCount = (total + pageSize - 1) / pageSize
-			if paginator.PageCount < 1 {
-				paginator.PageCount = 1
-			}
-		}
-		if paginator.HasPrev {
-			paginator.PrevURL = prevPageURL(base, page, backStack, storyPaginatorKeys)
-		}
-		if paginator.HasNext {
-			paginator.NextURL = nextPageURL(base, page, cursor, nextCursor, backStack, storyPaginatorKeys)
-		}
+	}
+	if paginator.HasPrev {
+		paginator.PrevURL = filteredPageURL(base, qparam, page-1)
+	}
+	if paginator.HasNext {
+		paginator.NextURL = filteredPageURL(base, qparam, page+1)
 	}
 
 	// Per-story body fetch so the expanded row can render the description.
@@ -259,13 +237,14 @@ func storyFragmentHandler(cfg Config) http.HandlerFunc {
 			http.Error(w, "could not list stories", http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("X-Story-Filtered", strconv.Itoa(paginator.Filtered))
 		w.Header().Set("X-Story-Total", strconv.Itoa(paginator.Total))
 		w.Header().Set("X-Story-Page", strconv.Itoa(paginator.Page))
 		w.Header().Set("X-Story-Page-Count", strconv.Itoa(paginator.PageCount))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		data := projectDetailData{
 			Stories: stories, Paginator: paginator,
-			StoryTotal: paginator.Total, StoryShown: len(stories),
+			StoryFiltered: paginator.Filtered, StoryTotal: paginator.Total, StoryShown: len(stories),
 		}
 		if err := projectDetailTmpl.ExecuteTemplate(w, "story-rows", data); err != nil {
 			arbor.ErrorCtx(ctx, "story_fragment: render", "id", projectID, "err", err)
@@ -354,38 +333,22 @@ func gatherAllStories(ctx context.Context, projectID string, pageSize int) ([]st
 	return all, nil
 }
 
-// filteredPageURL builds a paginator link for the server-side filtered mode:
-// the panel query is carried verbatim as stories_q so prev/next preserve the
-// filter, and stories_page selects the offset page (omitted for page 1).
+// filteredPageURL builds a paginator link: the panel query rides as stories_q
+// so prev/next preserve the filter, and stories_page selects the offset page
+// (omitted for page 1). An empty query is the default view and is omitted so
+// the default URL stays clean (/projects/{id}).
 func filteredPageURL(base, query string, page int) string {
 	v := url.Values{}
-	v.Set("stories_q", query)
+	if query != "" {
+		v.Set("stories_q", query)
+	}
 	if page > 1 {
 		v.Set("stories_page", strconv.Itoa(page))
 	}
-	return base + "?" + v.Encode()
-}
-
-// dispatchStoryCount returns the total story count for the project
-// (path B per sty_975afe24 — count ignores the panel's client-side
-// chip filter). Failures degrade silently; the handler falls back to
-// 0 which the template renders as "page N" without an "of M".
-func dispatchStoryCount(ctx context.Context, projectID string) int {
-	body, _ := json.Marshal(verb.DocumentCountRequest{
-		Type:      "story",
-		ProjectID: projectID,
-	})
-	raw, err := verb.Dispatch(ctx, "document_count", body)
-	if err != nil {
-		arbor.WarnCtx(ctx, "story count: dispatch failed, total unavailable", "err", err)
-		return 0
+	if enc := v.Encode(); enc != "" {
+		return base + "?" + enc
 	}
-	var resp verb.DocumentCountResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		arbor.WarnCtx(ctx, "story count: decode failed, total unavailable", "err", err)
-		return 0
-	}
-	return resp.Count
+	return base
 }
 
 // dispatchStoryBody fetches the latest body for a story via
@@ -455,15 +418,11 @@ func readStoryPageSize(ctx context.Context) int {
 // with a real cursor value.
 const emptyCursorSentinel = "_"
 
-// paginatorKeys names the URL params a paginator uses. The same
-// cursor-stack model serves story-panel pagination and the /changelog
-// page; the only thing that differs is the param prefix.
+// paginatorKeys names the URL params a paginator uses. The cursor-stack model
+// now serves only the /changelog page (the stories panel moved to server-side
+// offset paging in sty_47234d6e); the helpers below stay for changelog.
 type paginatorKeys struct {
 	Page, Cursor, Back string
-}
-
-var storyPaginatorKeys = paginatorKeys{
-	Page: "stories_page", Cursor: "stories_cursor", Back: "stories_back",
 }
 
 // readBackStack pulls the comma-separated list of cursors we came from
