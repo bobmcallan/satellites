@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/workstate"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +57,66 @@ story against the substrate or resolve its workflow.`,
 	initCmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (resolves repo root + work_dir; defaults to walk-up from CWD).")
 	initCmd.Flags().StringVar(&status, "status", "", "Optional workflow status to record in the engagement (advisory).")
 	work.AddCommand(initCmd)
+
+	var statusConfigArg string
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show the open engagements recorded in this repo's event store",
+		Long: `status renders the open engagements from the per-repo engagement event
+store (.satellites/work/state.db by default, or satellites.toml state_db) — what
+each session is working on, its phase, and whether its lease is fresh. It opens
+the store read-only and self-initialises an empty one if none exists.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkStatus(cmd.OutOrStdout(), resolveStateDB(statusConfigArg))
+		},
+	}
+	statusCmd.Flags().StringVar(&statusConfigArg, "config", "", "Path to satellites.toml (resolves repo root + state_db; defaults to walk-up from CWD).")
+	work.AddCommand(statusCmd)
+
 	register(work)
+}
+
+// resolveStateDB returns the per-repo engagement event-store path, honouring an
+// optional satellites.toml state_db (default .satellites/work/state.db). Mirrors
+// resolveWorkContext: an unconfigured repo falls back to a CWD-rooted default.
+func resolveStateDB(configArg string) string {
+	cfg, path, err := cliconfig.Load(configArg)
+	if err != nil || strings.TrimSpace(path) == "" {
+		return cfg.ResolveStateDB(cwdOrDot())
+	}
+	return cfg.ResolveStateDB(cliconfig.RepoRootFromConfigPath(path))
+}
+
+// runWorkStatus opens the store and renders its open engagements, newest first.
+func runWorkStatus(out io.Writer, stateDB string) error {
+	s, err := workstate.Open(stateDB)
+	if err != nil {
+		return fmt.Errorf("work status: open store: %w", err)
+	}
+	defer s.Close()
+	engs, err := s.ListCurrent()
+	if err != nil {
+		return fmt.Errorf("work status: %w", err)
+	}
+	if len(engs) == 0 {
+		fmt.Fprintln(out, "no open engagements")
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, e := range engs {
+		lease := "—"
+		if !e.LeaseUntil.IsZero() {
+			if e.LeaseUntil.After(now) {
+				lease = "fresh→" + e.LeaseUntil.Format(time.RFC3339)
+			} else {
+				lease = "EXPIRED@" + e.LeaseUntil.Format(time.RFC3339)
+			}
+		}
+		fmt.Fprintf(out, "%s  story=%s  phase=%s  lease=%s  session=%s\n",
+			e.UpdatedAt.Format(time.RFC3339), e.Story, e.Phase, lease, e.Session)
+	}
+	return nil
 }
 
 // resolveWorkContext returns the repo root and the resolved work directory,
