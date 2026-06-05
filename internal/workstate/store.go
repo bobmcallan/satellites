@@ -199,9 +199,22 @@ func (s *Store) Current(session, story string) (Engagement, bool, error) {
 // ListCurrent returns every open engagement, newest-updated first — the basis
 // for `satellites work status` and the cross-agent view.
 func (s *Store) ListCurrent() ([]Engagement, error) {
-	rows, err := s.db.Query(
-		`SELECT session, story, phase, lease_until, updated_at FROM current ORDER BY updated_at DESC`,
+	return s.queryCurrent(`SELECT session, story, phase, lease_until, updated_at FROM current ORDER BY updated_at DESC`)
+}
+
+// LiveEngagement returns the open engagements for one session, newest first.
+// The caller composes lease freshness (Engagement.IsLeaseFresh) and workflow
+// editability to decide whether edits are permitted — that policy lives at the
+// door (sty_2b6cd041), not in the store.
+func (s *Store) LiveEngagement(session string) ([]Engagement, error) {
+	return s.queryCurrent(
+		`SELECT session, story, phase, lease_until, updated_at FROM current WHERE session = ? ORDER BY updated_at DESC`,
+		session,
 	)
+}
+
+func (s *Store) queryCurrent(query string, args ...any) ([]Engagement, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +228,18 @@ func (s *Store) ListCurrent() ([]Engagement, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// IsLeaseFresh reports whether the engagement's lease is still in the future at
+// now. A missing lease (zero) is treated as NOT fresh — a proper engagement
+// always carries a lease, so the absence is the stale/leftover case the door
+// must fail closed on (the VIRE bug). Candidate rows carry no lease and are
+// excluded here too; the door additionally excludes them by editable phase.
+func (e Engagement) IsLeaseFresh(now time.Time) bool {
+	if e.LeaseUntil.IsZero() {
+		return false
+	}
+	return now.Before(e.LeaseUntil)
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.

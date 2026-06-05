@@ -187,6 +187,77 @@ func (w *Workflow) TransitionsFrom(state string) []Transition {
 	return out
 }
 
+// InitialState returns the workflow's entry state: the declared state with no
+// incoming transition. Falls back to the first declared state when every state
+// has an incoming edge (an unusual cyclic workflow). Used to classify the
+// pre-work state that should NOT authorise edits.
+func (w *Workflow) InitialState() string {
+	hasIncoming := make(map[string]bool, len(w.Transitions))
+	for _, t := range w.Transitions {
+		hasIncoming[t.To] = true
+	}
+	for _, s := range w.States {
+		if !hasIncoming[s] {
+			return s
+		}
+	}
+	if len(w.States) > 0 {
+		return w.States[0]
+	}
+	return ""
+}
+
+// IsTerminal reports whether a declared state has no outgoing transition (a
+// finished state). An undeclared state is treated as terminal (no edges).
+func (w *Workflow) IsTerminal(state string) bool {
+	return len(w.TransitionsFrom(state)) == 0
+}
+
+// TerminalStates returns every declared state with no outgoing transition.
+func (w *Workflow) TerminalStates() []string {
+	var out []string
+	for _, s := range w.States {
+		if w.IsTerminal(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// IsEditable reports whether file edits should be permitted while a story sits
+// in `state`: a working state PAST the entry gate and BEFORE the close gate —
+// i.e. neither the initial (pre-entry) state nor a terminal (finished) state.
+// Derived purely from the workflow shape; no hard-coded state names, so a
+// re-authored workflow needs no code change.
+func (w *Workflow) IsEditable(state string) bool {
+	s := strings.TrimSpace(state)
+	if s == "" || !w.hasState(s) {
+		return false
+	}
+	return s != w.InitialState() && !w.IsTerminal(s)
+}
+
+// EditableStates returns every state for which IsEditable is true.
+func (w *Workflow) EditableStates() []string {
+	var out []string
+	for _, s := range w.States {
+		if w.IsEditable(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// hasState reports whether s is a declared state.
+func (w *Workflow) hasState(s string) bool {
+	for _, st := range w.States {
+		if st == s {
+			return true
+		}
+	}
+	return false
+}
+
 // PickTransition resolves the single transition a reviewer gate should
 // run from currentStatus, and the gate skill that guards it:
 //

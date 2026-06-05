@@ -35,28 +35,49 @@ which story the agent is currently working on. The START-door hook
 	}
 
 	var (
-		configArg string
-		status    string
+		configArg  string
+		status     string
+		sessionArg string
 	)
 	initCmd := &cobra.Command{
 		Use:   "init <story-id>",
-		Short: "Engage a story — set up .satellites/work and record the engagement",
-		Long: `init engages a story's workflow in this worktree. It ensures the work
-directory exists (.satellites/work by default, or satellites.toml work_dir) and
-writes engagement.json naming the story, so the START door allows edits.
+		Short: "Engage a story — record the engagement in the per-repo event store",
+		Long: `init engages a story's workflow in this worktree. It records the engagement
+in the per-repo event store (keyed by session) and writes engagement.json for the
+legacy START door. The session is resolved from $CLAUDE_CODE_SESSION_ID (the
+harness exposes it), overridable with --session, default "local".
 
-It is intentionally minimal: it records the engagement; it does not validate the
-story against the substrate or resolve its workflow.`,
+A session may have only ONE open story: init refuses a second different story
+under a fresh lease and points at ` + "`satellites work close`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(configArg)
-			now := time.Now().UTC().Format(time.RFC3339)
-			return runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, args[0], status, now)
+			return runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
+				args[0], status, resolveSession(sessionArg), time.Now().UTC())
 		},
 	}
 	initCmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (resolves repo root + work_dir; defaults to walk-up from CWD).")
-	initCmd.Flags().StringVar(&status, "status", "", "Optional workflow status to record in the engagement (advisory).")
+	initCmd.Flags().StringVar(&status, "status", "", "Optional workflow status to record as the engagement phase (advisory).")
+	initCmd.Flags().StringVar(&sessionArg, "session", "", "Session key for the engagement (default $CLAUDE_CODE_SESSION_ID, else 'local').")
 	work.AddCommand(initCmd)
+
+	var closeConfigArg, closeSessionArg string
+	closeCmd := &cobra.Command{
+		Use:   "close <story-id>",
+		Short: "Close a story's engagement — clear it from the store so it no longer vouches",
+		Long: `close ends a story's engagement for this session: it records a close event
+(removing the store row) and clears engagement.json when it names the story. A
+finished story then leaves no leftover that could authorise later edits.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repoRoot, workDir := resolveWorkContext(closeConfigArg)
+			return runWorkClose(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(closeConfigArg),
+				args[0], resolveSession(closeSessionArg), time.Now().UTC())
+		},
+	}
+	closeCmd.Flags().StringVar(&closeConfigArg, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
+	closeCmd.Flags().StringVar(&closeSessionArg, "session", "", "Session key (default $CLAUDE_CODE_SESSION_ID, else 'local').")
+	work.AddCommand(closeCmd)
 
 	var statusConfigArg string
 	statusCmd := &cobra.Command{
@@ -140,9 +161,30 @@ func cwdOrDot() string {
 	return "."
 }
 
-// runWorkInit ensures the work dir exists and writes the engagement record.
-// Testable core: callers pass the resolved workDir + a fixed timestamp.
-func runWorkInit(out io.Writer, repoRoot, workDir, storyID, status, now string) error {
+// engageLeaseTTL is how long an engagement's freshness lease lasts. After it
+// expires the engagement is stale and (once sty_2b6cd041 lands) no longer
+// authorises edits. Re-engaging the same story refreshes it.
+const engageLeaseTTL = 2 * time.Hour
+
+// resolveSession resolves the engagement session key: the --session flag, else
+// the harness-exposed $CLAUDE_CODE_SESSION_ID, else "local". The access/edit
+// hooks read the same session_id from their event payloads, so the writer and
+// the readers agree.
+func resolveSession(flag string) string {
+	if s := strings.TrimSpace(flag); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID")); s != "" {
+		return s
+	}
+	return "local"
+}
+
+// runWorkInit records the engagement in the per-repo store (the new authority,
+// keyed by session) and writes engagement.json for the legacy door. It enforces
+// single-open: a session may not open a second DIFFERENT story under a fresh
+// lease. Testable core: callers pass the resolved paths, session, and a fixed now.
+func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, session string, now time.Time) error {
 	storyID = strings.TrimSpace(storyID)
 	if storyID == "" {
 		return fmt.Errorf("work init: story id required")
@@ -150,19 +192,69 @@ func runWorkInit(out io.Writer, repoRoot, workDir, storyID, status, now string) 
 	if _, err := ensureDir(workDir); err != nil {
 		return err
 	}
-	eng := engagement{StoryID: storyID, Status: strings.TrimSpace(status), UpdatedAt: now}
-	b, err := json.MarshalIndent(eng, "", "  ")
+
+	store, err := workstate.Open(stateDB)
 	if err != nil {
-		return err
+		return fmt.Errorf("work init: open store: %w", err)
 	}
+	defer store.Close()
+
+	// Single-open: refuse a second different story while one is open under a
+	// fresh lease for this session.
+	engs, err := store.LiveEngagement(session)
+	if err != nil {
+		return fmt.Errorf("work init: %w", err)
+	}
+	for _, e := range engs {
+		if e.Story != storyID && e.Phase != phaseCandidate && e.IsLeaseFresh(now) {
+			return fmt.Errorf("work init: session already has an open story %s (phase %q). "+
+				"Run `satellites work close %s` to finish it before engaging %s", e.Story, e.Phase, e.Story, storyID)
+		}
+	}
+
+	if _, err := store.Append(workstate.Event{
+		Session: session, Story: storyID, Phase: strings.TrimSpace(status),
+		Kind: "engage", LeaseUntil: now.Add(engageLeaseTTL), TS: now,
+	}); err != nil {
+		return fmt.Errorf("work init: record engagement: %w", err)
+	}
+
+	// Legacy engagement.json for the current START door (transitional).
+	eng := engagement{StoryID: storyID, Status: strings.TrimSpace(status), UpdatedAt: now.Format(time.RFC3339)}
+	b, _ := json.MarshalIndent(eng, "", "  ")
 	path := filepath.Join(workDir, "engagement.json")
 	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
 		return fmt.Errorf("work init: write %s: %w", path, err)
 	}
-	shown := path
-	if rel, rerr := filepath.Rel(repoRoot, path); rerr == nil {
-		shown = rel
+
+	fmt.Fprintf(out, "engaged %s (session %s, lease %s)\n", storyID, session, now.Add(engageLeaseTTL).Format(time.RFC3339))
+	return nil
+}
+
+// runWorkClose ends a story's engagement for a session: a close event clears the
+// store row, and engagement.json is removed when it names the story.
+func runWorkClose(out io.Writer, repoRoot, workDir, stateDB, storyID, session string, now time.Time) error {
+	storyID = strings.TrimSpace(storyID)
+	if storyID == "" {
+		return fmt.Errorf("work close: story id required")
 	}
-	fmt.Fprintf(out, "engaged %s → %s\n", storyID, shown)
+	store, err := workstate.Open(stateDB)
+	if err != nil {
+		return fmt.Errorf("work close: open store: %w", err)
+	}
+	defer store.Close()
+	if _, err := store.Append(workstate.Event{Session: session, Story: storyID, Kind: workstate.KindClose, TS: now}); err != nil {
+		return fmt.Errorf("work close: %w", err)
+	}
+
+	// Clear the legacy file when it names this story.
+	path := filepath.Join(workDir, "engagement.json")
+	if b, rerr := os.ReadFile(path); rerr == nil {
+		var eng engagement
+		if json.Unmarshal(b, &eng) == nil && strings.TrimSpace(eng.StoryID) == storyID {
+			_ = os.Remove(path)
+		}
+	}
+	fmt.Fprintf(out, "closed %s (session %s)\n", storyID, session)
 	return nil
 }

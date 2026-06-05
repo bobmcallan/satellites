@@ -137,6 +137,50 @@ func TestAppendRejectsIncomplete(t *testing.T) {
 	}
 }
 
+// TestLiveEngagementAndLeaseFresh: LiveEngagement returns a session's open rows;
+// a fresh-lease engagement is admitted while a candidate (no lease) or an expired
+// one is not — the lookup the edit backstop composes with workflow editability (AC5).
+func TestLiveEngagementAndLeaseFresh(t *testing.T) {
+	s := openTemp(t)
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	mustAppend(t, s, Event{Session: "sess1", Story: "sty_a", Phase: "in_progress", Kind: "engage", LeaseUntil: now.Add(time.Hour), TS: now})
+	mustAppend(t, s, Event{Session: "sess1", Story: "sty_b", Phase: "candidate", Kind: "candidate", TS: now})
+	mustAppend(t, s, Event{Session: "sess2", Story: "sty_c", Phase: "in_progress", Kind: "engage", LeaseUntil: now.Add(time.Hour), TS: now})
+
+	engs, err := s.LiveEngagement("sess1")
+	if err != nil {
+		t.Fatalf("LiveEngagement: %v", err)
+	}
+	if len(engs) != 2 {
+		t.Fatalf("LiveEngagement(sess1) = %d rows, want 2 (sess2 excluded)", len(engs))
+	}
+	var a, b Engagement
+	for _, e := range engs {
+		switch e.Story {
+		case "sty_a":
+			a = e
+		case "sty_b":
+			b = e
+		}
+	}
+	if !a.IsLeaseFresh(now) {
+		t.Errorf("sty_a lease should be fresh at now")
+	}
+	if a.IsLeaseFresh(now.Add(2 * time.Hour)) {
+		t.Errorf("sty_a lease should be expired 2h later")
+	}
+	if b.IsLeaseFresh(now) {
+		t.Errorf("candidate (no lease) must not count as lease-fresh")
+	}
+}
+
+func mustAppend(t *testing.T, s *Store, ev Event) {
+	t.Helper()
+	if _, err := s.Append(ev); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+}
+
 func openTemp(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(filepath.Join(t.TempDir(), "state.db"))
