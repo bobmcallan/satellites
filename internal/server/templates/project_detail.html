@@ -192,6 +192,11 @@
                 data-field="story-id-copy"><code>{{.ID}}</code></td>
             <td class="col-title">
               <div class="story-row-title">{{.Title}}</div>
+              {{if .Category}}
+              <div class="story-row-category" data-field="story-row-category">
+                <button type="button" class="category-chip is-clickable" data-category="{{.Category}}" @click.stop="addCategoryToQuery" title="Click to filter by this category">category:{{.Category}}</button>
+              </div>
+              {{end}}
               {{if .Tags}}
               <div class="story-row-tags" data-field="story-row-tags">
                 {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery" title="Click to filter by this tag">{{.}}</button>{{end}}

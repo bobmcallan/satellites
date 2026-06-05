@@ -544,6 +544,23 @@
                 this.applyToServer();
             },
 
+            // addCategoryToQuery mirrors addTagToQuery for the category chip
+            // (sty_7772f005). A story has one category, so this REPLACES any
+            // existing category:<v> token rather than appending — clicking a
+            // different category swaps the filter.
+            addCategoryToQuery(ev) {
+                const target = ev && ev.currentTarget;
+                const cat = (target && target.dataset && target.dataset.category) || '';
+                if (!cat) { return; }
+                const q = (this.query || '').trim();
+                const parts = (q.length ? q.split(/\s+/) : []).filter(function (p) {
+                    return p.toLowerCase().indexOf('category:') !== 0;
+                });
+                parts.push('category:' + cat);
+                this.query = parts.join(' ');
+                this.applyToServer();
+            },
+
             // applyToServer commits the current query to the SERVER so the
             // filter/sort applies across every page, not just the rendered
             // one (sty_1bd0098a). It navigates to ?stories_q=<query>, resetting

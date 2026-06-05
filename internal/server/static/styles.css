@@ -625,6 +625,23 @@ button.tag-chip.is-clickable {
 button.tag-chip.is-clickable:hover { background: rgba(106, 159, 181, 0.35); }
 button.tag-chip.is-clickable:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
 
+/* category-chip (sty_7772f005): like tag-chip but a distinct amber accent so
+   the category dimension reads apart from tags. */
+.story-row-category { margin-top: 0.3rem; }
+button.category-chip.is-clickable {
+  background: rgba(201, 162, 106, 0.18);
+  color: #c9a86a;
+  border: 0;
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  margin: 0;
+  cursor: pointer;
+}
+button.category-chip.is-clickable:hover { background: rgba(201, 162, 106, 0.32); }
+button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; outline-offset: 1px; }
+
 .story-detail-flat {
   display: flex;
   flex-direction: column;
