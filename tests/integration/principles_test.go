@@ -51,10 +51,12 @@ func TestPrinciplesRideAlong(t *testing.T) {
 		t.Fatalf("pj: %v", err)
 	}
 
-	// seedPrinciple writes a free-form document at the requested scope
-	// and tags it with the matching principles:<scope> tag via the new
-	// document_upsert tag-merge path.
-	seedPrinciple := func(scope document.Scope, name, body string, princScope verb.PrincipleScope) document.Document {
+	// seedPrinciple writes a free-form document at the requested scope and
+	// tags it with the matching principles:<scope> tag. extraTags appends to
+	// that — pass verb.PrincipleTagAlways for a curated must-read that rides
+	// along the read-verb sidecar, or nothing for an on-demand principle (which
+	// carries only its scope tag and must NOT ride along). See sty_05794178.
+	seedPrinciple := func(scope document.Scope, name, body string, princScope verb.PrincipleScope, extraTags ...string) document.Document {
 		t.Helper()
 		key := document.Key{Scope: scope, Name: name}
 		if scope == document.ScopeWorkspace || scope == document.ScopeProject {
@@ -80,16 +82,24 @@ func TestPrinciplesRideAlong(t *testing.T) {
 		if err != nil {
 			t.Fatalf("lookup principle %q: %v", name, err)
 		}
-		if _, err := docStore.SetDocumentTags(ctx, stored.Document.ID, []string{verb.PrincipleTag(princScope)}, now); err != nil {
+		tags := append([]string{verb.PrincipleTag(princScope)}, extraTags...)
+		if _, err := docStore.SetDocumentTags(ctx, stored.Document.ID, tags, now); err != nil {
 			t.Fatalf("tag principle %q: %v", name, err)
 		}
 		return stored.Document
 	}
 
-	globalP := seedPrinciple(document.ScopeSystem, "global-rule", "do not commit secrets", verb.PrincipleScopeGlobal)
-	workspaceP := seedPrinciple(document.ScopeWorkspace, "ws-rule", "all PRs require review", verb.PrincipleScopeWorkspace)
-	projectP := seedPrinciple(document.ScopeProject, "story-execution", "do not stop unless blocked", verb.PrincipleScopeProject)
-	storyP := seedPrinciple(document.ScopeProject, "story-rule", "every story has a blocked path", verb.PrincipleScopeStory)
+	// Curated must-reads — tagged principles:always, so they ride along the
+	// read-verb sidecar (sty_05794178).
+	globalP := seedPrinciple(document.ScopeSystem, "global-rule", "do not commit secrets", verb.PrincipleScopeGlobal, verb.PrincipleTagAlways)
+	workspaceP := seedPrinciple(document.ScopeWorkspace, "ws-rule", "all PRs require review", verb.PrincipleScopeWorkspace, verb.PrincipleTagAlways)
+	projectP := seedPrinciple(document.ScopeProject, "story-execution", "do not stop unless blocked", verb.PrincipleScopeProject, verb.PrincipleTagAlways)
+	storyP := seedPrinciple(document.ScopeProject, "story-rule", "every story has a blocked path", verb.PrincipleScopeStory, verb.PrincipleTagAlways)
+
+	// On-demand principle — project-scoped, carries ONLY its scope tag (no
+	// principles:always). It must never ride along the sidecar; the agent
+	// pulls it by tag on demand. Locks in the lean curated-push behavior.
+	ondemandP := seedPrinciple(document.ScopeProject, "ondemand-rule", "pull me on demand", verb.PrincipleScopeProject)
 
 	// Seed an irrelevant document — should NOT show in any sidecar.
 	if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
@@ -122,6 +132,25 @@ func TestPrinciplesRideAlong(t *testing.T) {
 		assertPrincipleIDs(t, resp.Principles, projectP.ID, storyP.ID)
 		assertScopes(t, resp.Principles, verb.PrincipleScopeProject, verb.PrincipleScopeStory)
 		assertBodyMatches(t, resp.Principles, projectP.ID, "do not stop unless blocked")
+	})
+
+	t.Run("a scope-only principle does NOT ride along (curated push)", func(t *testing.T) {
+		// ondemandP is project-scoped but lacks principles:always; the story
+		// read (which requests the project + story scopes) must exclude it —
+		// only curated must-reads ride along (sty_05794178).
+		raw, err := verb.Dispatch(ctx, "document_get", json.RawMessage(`{"id":"`+story.ID+`"}`))
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		var resp verb.DocumentGetResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		for _, p := range resp.Principles {
+			if p.ID == ondemandP.ID {
+				t.Fatalf("on-demand principle (scope tag only, no principles:always) rode along the sidecar: %s", string(raw))
+			}
+		}
 	})
 
 	t.Run("project_get attaches workspace + project principles", func(t *testing.T) {

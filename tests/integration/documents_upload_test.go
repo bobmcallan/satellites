@@ -72,7 +72,10 @@ func TestDocumentsUploadEndToEnd(t *testing.T) {
 			"project_id":   pj.ID,
 			"name":         "commit-push-after-each-story",
 			"body":         body,
-			"tags":         []string{"principles:project"},
+			// principles:always marks it a curated must-read so it rides along
+			// the read-verb sidecar; the scope tag alone is on-demand only
+			// (sty_05794178).
+			"tags": []string{"principles:project", "principles:always"},
 		})
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
@@ -101,8 +104,8 @@ func TestDocumentsUploadEndToEnd(t *testing.T) {
 	if firstResp.Document.LatestVersion != 1 {
 		t.Fatalf("first upload latest_version = %d, want 1", firstResp.Document.LatestVersion)
 	}
-	if !sortedEqual(firstResp.Document.Tags, []string{"principles:project"}) {
-		t.Fatalf("first upload tags = %v, want [principles:project]", firstResp.Document.Tags)
+	if !sortedEqual(firstResp.Document.Tags, []string{"principles:project", "principles:always"}) {
+		t.Fatalf("first upload tags = %v, want [principles:project principles:always]", firstResp.Document.Tags)
 	}
 
 	// Idempotent re-run: no new version row, no tag rewrite.
