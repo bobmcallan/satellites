@@ -26,7 +26,31 @@ import (
 const (
 	hookMatcher = "Edit|Write|MultiEdit|NotebookEdit"
 	hookCommand = "satellites hook gate || exit 2"
+
+	// The story-ACCESS trigger (sty_79af820a). PreToolUse on the satellites MCP
+	// story-fetch + UserPromptSubmit on a story id in the prompt. These are
+	// ADVISORY (no `|| exit 2`): a failure must not block a read, and the handler
+	// itself fails open — the door is the hard gate, this only reminds.
+	accessMatcher = "mcp__satellites__document_get"
+	accessCommand = "satellites hook access"
+	promptCommand = "satellites hook prompt"
 )
+
+// installedHook describes one hook init merges into .claude/settings.json.
+type installedHook struct {
+	event   string // "PreToolUse" / "UserPromptSubmit"
+	matcher string // "" ⇒ no matcher (e.g. UserPromptSubmit)
+	command string
+	label   string
+}
+
+// hooksToInstall is the set init ensures, idempotently: the START door plus the
+// advisory story-access triggers.
+var hooksToInstall = []installedHook{
+	{"PreToolUse", hookMatcher, hookCommand, ".claude/settings.json (PreToolUse START-door hook)"},
+	{"PreToolUse", accessMatcher, accessCommand, ".claude/settings.json (PreToolUse story-access reminder)"},
+	{"UserPromptSubmit", "", promptCommand, ".claude/settings.json (UserPromptSubmit story-access reminder)"},
+}
 
 func init() {
 	var configArg string
@@ -87,13 +111,16 @@ func runInit(out io.Writer, repoRoot string) error {
 		return fmt.Errorf("init: stat %s: %w", tomlPath, statErr)
 	}
 
-	// 3. PreToolUse START-door hook in .claude/settings.json.
+	// 3. The harness hooks in .claude/settings.json — the START door plus the
+	//    advisory story-access triggers. Each is merged idempotently.
 	settingsPath := filepath.Join(repoRoot, ".claude", "settings.json")
-	added, err := ensureHookInstalled(settingsPath)
-	if err != nil {
-		return err
+	for _, h := range hooksToInstall {
+		added, err := ensureHookInstalled(settingsPath, h.event, h.matcher, h.command)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, initLine(added, h.label))
 	}
-	fmt.Fprintln(out, initLine(added, ".claude/settings.json (PreToolUse START-door hook)"))
 	return nil
 }
 
@@ -126,10 +153,10 @@ func ensureDir(dir string) (bool, error) {
 	}
 }
 
-// ensureHookInstalled merges the START-door PreToolUse hook into the Claude
-// Code settings at path, idempotently and non-destructively. Returns whether
-// it added the hook (false = already present, nothing written).
-func ensureHookInstalled(path string) (bool, error) {
+// ensureHookInstalled merges one command hook (for the given event/matcher)
+// into the Claude Code settings at path, idempotently and non-destructively.
+// Returns whether it added the hook (false = already present, nothing written).
+func ensureHookInstalled(path, event, matcher, command string) (bool, error) {
 	var raw []byte
 	if b, err := os.ReadFile(path); err == nil {
 		raw = b
@@ -137,7 +164,7 @@ func ensureHookInstalled(path string) (bool, error) {
 		return false, fmt.Errorf("init: read %s: %w", path, err)
 	}
 
-	merged, added, err := mergeHookIntoSettings(raw, hookCommand, hookMatcher)
+	merged, added, err := mergeHookIntoSettings(raw, event, matcher, command)
 	if err != nil {
 		return false, fmt.Errorf("init: merge %s: %w", path, err)
 	}
@@ -153,11 +180,12 @@ func ensureHookInstalled(path string) (bool, error) {
 	return true, nil
 }
 
-// mergeHookIntoSettings adds a PreToolUse command hook to a Claude Code
+// mergeHookIntoSettings adds a command hook for `event` to a Claude Code
 // settings document, preserving everything else. existing may be empty (new
-// file). It returns the new document bytes and whether anything was added
-// (false when a hook with the same command is already present — idempotent).
-func mergeHookIntoSettings(existing []byte, command, matcher string) ([]byte, bool, error) {
+// file); matcher may be empty (omitted, e.g. UserPromptSubmit). It returns the
+// new document bytes and whether anything was added (false when a hook with the
+// same command is already present under that event — idempotent).
+func mergeHookIntoSettings(existing []byte, event, matcher, command string) ([]byte, bool, error) {
 	doc := map[string]any{}
 	if len(strings.TrimSpace(string(existing))) > 0 {
 		if err := json.Unmarshal(existing, &doc); err != nil {
@@ -169,10 +197,11 @@ func mergeHookIntoSettings(existing []byte, command, matcher string) ([]byte, bo
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	pre, _ := hooks["PreToolUse"].([]any)
+	arr, _ := hooks[event].([]any)
 
-	// Idempotency: already installed if any existing entry carries our command.
-	for _, entry := range pre {
+	// Idempotency: already installed if any existing entry under this event
+	// carries our command.
+	for _, entry := range arr {
 		em, _ := entry.(map[string]any)
 		hl, _ := em["hooks"].([]any)
 		for _, h := range hl {
@@ -183,12 +212,15 @@ func mergeHookIntoSettings(existing []byte, command, matcher string) ([]byte, bo
 		}
 	}
 
-	hooks["PreToolUse"] = append(pre, map[string]any{
-		"matcher": matcher,
+	entry := map[string]any{
 		"hooks": []any{
 			map[string]any{"type": "command", "command": command},
 		},
-	})
+	}
+	if strings.TrimSpace(matcher) != "" {
+		entry["matcher"] = matcher
+	}
+	hooks[event] = append(arr, entry)
 	doc["hooks"] = hooks
 
 	out, err := json.MarshalIndent(doc, "", "  ")

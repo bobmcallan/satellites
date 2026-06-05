@@ -36,7 +36,7 @@ func countGateHooks(t *testing.T, raw []byte) int {
 // TestMergeHookIntoSettings_FreshAndIdempotent: a fresh doc gains the hook;
 // merging again is a no-op (added=false), so re-running init never duplicates.
 func TestMergeHookIntoSettings_FreshAndIdempotent(t *testing.T) {
-	out, added, err := mergeHookIntoSettings(nil, hookCommand, hookMatcher)
+	out, added, err := mergeHookIntoSettings(nil, "PreToolUse", hookMatcher, hookCommand)
 	if err != nil || !added {
 		t.Fatalf("fresh merge: added=%v err=%v, want added=true", added, err)
 	}
@@ -44,7 +44,7 @@ func TestMergeHookIntoSettings_FreshAndIdempotent(t *testing.T) {
 		t.Fatalf("fresh merge installed %d gate hooks, want 1", n)
 	}
 
-	out2, added2, err := mergeHookIntoSettings(out, hookCommand, hookMatcher)
+	out2, added2, err := mergeHookIntoSettings(out, "PreToolUse", hookMatcher, hookCommand)
 	if err != nil {
 		t.Fatalf("re-merge err: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestMergeHookIntoSettings_PreservesExisting(t *testing.T) {
     ]
   }
 }`)
-	out, added, err := mergeHookIntoSettings(existing, hookCommand, hookMatcher)
+	out, added, err := mergeHookIntoSettings(existing, "PreToolUse", hookMatcher, hookCommand)
 	if err != nil || !added {
 		t.Fatalf("merge into existing: added=%v err=%v", added, err)
 	}
@@ -172,5 +172,70 @@ func TestRunInit_LeavesExistingTomlAndSettings(t *testing.T) {
 	}
 	if n := countGateHooks(t, s); n != 1 {
 		t.Errorf("gate hook not installed into existing settings (count=%d)", n)
+	}
+}
+
+// commandUnderEvent reports whether a settings doc carries `command` under the
+// named hook event (with the expected matcher, "" = any/none).
+func commandUnderEvent(t *testing.T, raw []byte, event, matcher, command string) bool {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("settings not valid json: %v", err)
+	}
+	hooks, _ := doc["hooks"].(map[string]any)
+	arr, _ := hooks[event].([]any)
+	for _, e := range arr {
+		em, _ := e.(map[string]any)
+		if matcher != "" {
+			if m, _ := em["matcher"].(string); m != matcher {
+				continue
+			}
+		}
+		hl, _ := em["hooks"].([]any)
+		for _, h := range hl {
+			hm, _ := h.(map[string]any)
+			if cmd, _ := hm["command"].(string); cmd == command {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestRunInit_InstallsAccessTriggers: init installs the advisory story-access
+// hooks alongside the door — a PreToolUse hook on the MCP fetch and a
+// UserPromptSubmit hook — and is idempotent across all three (AC6).
+func TestRunInit_InstallsAccessTriggers(t *testing.T) {
+	repo := t.TempDir()
+	var out bytes.Buffer
+	if err := runInit(&out, repo); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	s, err := os.ReadFile(filepath.Join(repo, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("settings.json: %v", err)
+	}
+	if !commandUnderEvent(t, s, "PreToolUse", accessMatcher, accessCommand) {
+		t.Errorf("access reminder hook (PreToolUse %s → %s) not installed", accessMatcher, accessCommand)
+	}
+	if !commandUnderEvent(t, s, "UserPromptSubmit", "", promptCommand) {
+		t.Errorf("prompt reminder hook (UserPromptSubmit → %s) not installed", promptCommand)
+	}
+
+	// Idempotent: a second init adds nothing and reports all present.
+	var out2 bytes.Buffer
+	if err := runInit(&out2, repo); err != nil {
+		t.Fatalf("re-init: %v", err)
+	}
+	s2, _ := os.ReadFile(filepath.Join(repo, ".claude", "settings.json"))
+	var doc map[string]any
+	_ = json.Unmarshal(s2, &doc)
+	hooks := doc["hooks"].(map[string]any)
+	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 2 { // door + access
+		t.Errorf("PreToolUse has %d entries after re-init, want 2 (door + access)", len(pre))
+	}
+	if ups, _ := hooks["UserPromptSubmit"].([]any); len(ups) != 1 {
+		t.Errorf("UserPromptSubmit has %d entries after re-init, want 1", len(ups))
 	}
 }
