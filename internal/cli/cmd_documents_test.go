@@ -266,6 +266,39 @@ func TestValidateUpload_CleanTreePasses(t *testing.T) {
 	}
 }
 
+// TestValidateUpload_WorkflowLifecycleDrift (sty_1604064f): a kind:workflow skill
+// whose state machine breaks the engagement lifecycle — here a cyclic workflow
+// with no terminal state — is flagged loudly at upload, not silently mis-gated.
+func TestValidateUpload_WorkflowLifecycleDrift(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "skills/broken-workflow.md",
+		"---\nname: broken-workflow\ndescription: a cyclic workflow with no terminal\nkind: workflow\napplies_to: [broken]\n---\n# broken\n\n```yaml\nstates:\n  - a\n  - b\ntransitions:\n  - {from: a, to: b}\n  - {from: b, to: a}\n```\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if !flagged(vs, "skills/broken-workflow.md", "workflow-lifecycle") {
+		t.Fatalf("cyclic workflow (no terminal) not flagged: %v", vs)
+	}
+}
+
+// TestValidateUpload_WorkflowLifecycleValidPasses: a well-formed
+// begin→work→end workflow draws no lifecycle violation.
+func TestValidateUpload_WorkflowLifecycleValidPasses(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "skills/ok-workflow.md",
+		"---\nname: ok-workflow\ndescription: a sound lifecycle\nkind: workflow\napplies_to: [ok]\n---\n# ok\n\n```yaml\nstates:\n  - backlog\n  - in_progress\n  - done\ntransitions:\n  - {from: backlog, to: in_progress, reviewer_skill: plan}\n  - {from: in_progress, to: done, reviewer_skill: done}\n```\n")
+
+	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if flagged(vs, "skills/ok-workflow.md", "workflow-lifecycle") {
+		t.Errorf("valid workflow wrongly flagged for lifecycle drift: %v", vs)
+	}
+}
+
 // TestValidateUpload_TypeMismatches pins AC2: a skills/ file declaring
 // type:document, and a documents/ file declaring type:skill, are both
 // rejected — naming file + rule.

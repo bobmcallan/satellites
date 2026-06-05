@@ -55,6 +55,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
+	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -407,6 +408,20 @@ func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) 
 					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|capability", k)})
 				case k == "workflow" && len(fm.AppliesTo) == 0:
 					vs = append(vs, violation{p, "skill-dispatch", "workflow skill missing required frontmatter: applies_to"})
+				}
+				// Workflow-review drift gate (sty_1604064f): when a kind:workflow
+				// skill changes, validate that the engagement lifecycle's
+				// derivations still map — a terminal state is identifiable and an
+				// editable phase is derivable. A broken workflow fails the upload
+				// LOUDLY here rather than silently mis-gating at runtime.
+				if strings.TrimSpace(fm.Kind) == "workflow" && len(fm.AppliesTo) > 0 {
+					if raw, rerr := os.ReadFile(p); rerr == nil {
+						if wf, perr := workflow.Parse(raw); perr == nil {
+							if lerr := wf.ValidateLifecycle(); lerr != nil {
+								vs = append(vs, violation{p, "workflow-lifecycle", lerr.Error()})
+							}
+						}
+					}
 				}
 				configSkillNames[resolveName(filename, fm.Name)] = true
 			}

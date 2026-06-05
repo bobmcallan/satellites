@@ -46,6 +46,36 @@ func TestStateRoles_FixWorkflow(t *testing.T) {
 	}
 }
 
+// TestValidateLifecycle: a clear begin→work→end workflow passes (incl. an
+// epic-style backlog→done with no work phase); a cyclic (no-terminal) or
+// single-state (no transitions) workflow fails loudly (AC1/AC2/AC4).
+func TestValidateLifecycle(t *testing.T) {
+	if err := fixWorkflow().ValidateLifecycle(); err != nil {
+		t.Errorf("fix workflow should pass: %v", err)
+	}
+	// Epic/parent style: backlog → done, no editable middle — still valid.
+	parent := &Workflow{
+		States:      []string{"backlog", "done"},
+		Transitions: []Transition{{From: "backlog", To: "done", ReviewerSkill: "close"}},
+	}
+	if err := parent.ValidateLifecycle(); err != nil {
+		t.Errorf("backlog→done parent workflow should pass (empty editable set is allowed): %v", err)
+	}
+	// Cyclic: every state has an outgoing edge ⇒ no terminal ⇒ fail.
+	cyclic := &Workflow{
+		States:      []string{"a", "b"},
+		Transitions: []Transition{{From: "a", To: "b"}, {From: "b", To: "a"}},
+	}
+	if err := cyclic.ValidateLifecycle(); err == nil {
+		t.Errorf("cyclic workflow (no terminal) should fail")
+	}
+	// Single state: initial == terminal, no transitions ⇒ no editable derivable.
+	single := &Workflow{States: []string{"only"}}
+	if err := single.ValidateLifecycle(); err == nil {
+		t.Errorf("single-state workflow should fail (no derivable editable path)")
+	}
+}
+
 // TestStateRoles_MultiMiddle: a longer pipeline — every middle state is editable,
 // only the final state is terminal (no hard-coded names).
 func TestStateRoles_MultiMiddle(t *testing.T) {

@@ -258,6 +258,38 @@ func (w *Workflow) hasState(s string) bool {
 	return false
 }
 
+// ValidateLifecycle checks that the engagement lifecycle's derivations are
+// well-defined for this workflow (sty_1604064f, epic:process-adherence). It
+// fails LOUDLY at workflow-edit time when a re-authored workflow would break the
+// lifecycle, so drift is a gated event rather than a silent mis-gate later:
+//
+//   - no terminal state (every state has an outgoing edge — a cycle): a story can
+//     never reach a terminal status, so close-on-terminal is undefined; or
+//   - no identifiable initial state; or
+//   - the initial state is itself terminal (no transitions at all): no editable
+//     phase is derivable and no story could ever progress under it.
+//
+// Everything is derived from the parsed shape — no hard-coded state names — so any
+// workflow with a clear begin → work → end shape passes. An empty editable set
+// ALONE is allowed (e.g. an epic's backlog→done parent workflow has no work
+// phase); only a genuinely degenerate workflow is rejected.
+func (w *Workflow) ValidateLifecycle() error {
+	if len(w.States) == 0 {
+		return fmt.Errorf("workflow has no states")
+	}
+	if len(w.TerminalStates()) == 0 {
+		return fmt.Errorf("no terminal state — every state has an outgoing transition (a cycle); a story can never reach a terminal status, so the engagement lifecycle cannot determine when to close-on-terminal")
+	}
+	init := w.InitialState()
+	if init == "" {
+		return fmt.Errorf("no initial state — every state has an incoming transition; the entry point is undefined")
+	}
+	if w.IsTerminal(init) {
+		return fmt.Errorf("initial state %q is also terminal — the workflow has no transitions, so no editable phase is derivable and no story could progress under it", init)
+	}
+	return nil
+}
+
 // PickTransition resolves the single transition a reviewer gate should
 // run from currentStatus, and the gate skill that guards it:
 //
