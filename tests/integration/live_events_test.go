@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,6 +108,30 @@ func TestLiveEventsBus(t *testing.T) {
 		if !strings.HasPrefix(got, "story:") && !strings.HasPrefix(got, "project:") {
 			t.Fatalf("unexpected topic %q", got)
 		}
+
+		// AC2/AC3: the diagnostic surface reflects real bus activity while the
+		// client is still connected.
+		stats := getEventsStats(t, srv.URL, sessions, member.ID)
+		if stats.Clients < 1 {
+			t.Fatalf("/events/stats Clients = %d, want >= 1 while connected", stats.Clients)
+		}
+		if stats.Published < 1 {
+			t.Fatalf("/events/stats Published = %d, want >= 1 after a NOTIFY", stats.Published)
+		}
+		if stats.Delivered < 1 {
+			t.Fatalf("/events/stats Delivered = %d, want >= 1 after delivery", stats.Delivered)
+		}
+	})
+
+	t.Run("stats route is session-gated", func(t *testing.T) {
+		resp, err := http.Get(srv.URL + "/events/stats")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated /events/stats = %d, want 401", resp.StatusCode)
+		}
 	})
 
 	// outsider (not a member, not admin) must not receive a workspace-scoped
@@ -195,6 +220,34 @@ func openStream(t *testing.T, baseURL string, sessions *auth.Sessions, userID st
 		resp.Body.Close()
 	}
 	return topics, stop
+}
+
+// getEventsStats fetches the session-gated /events/stats diagnostic for userID
+// and decodes the live.Stats snapshot.
+func getEventsStats(t *testing.T, baseURL string, sessions *auth.Sessions, userID string) live.Stats {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/events/stats", nil)
+	if err != nil {
+		t.Fatalf("new stats request: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	sessions.Issue(rec, userID)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events/stats status = %d, want 200", resp.StatusCode)
+	}
+	var stats live.Stats
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	return stats
 }
 
 // awaitTopic returns the next delivered topic or fails after d.

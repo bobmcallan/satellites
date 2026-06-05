@@ -11,9 +11,12 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/bobmcallan/satellites/internal/arbor"
 )
 
 // liveHeartbeatInterval bounds idle silence on the stream. EventSource and
@@ -42,6 +45,13 @@ func liveEventsHandler(cfg Config) http.HandlerFunc {
 		client, cancel := cfg.Live.Subscribe(scope)
 		defer cancel()
 
+		scopeSummary := fmt.Sprintf("workspaces=%d", len(scope.Workspaces))
+		if scope.Admin {
+			scopeSummary = "admin"
+		}
+		arbor.Info("live: client connected", "user", userID, "scope", scopeSummary)
+		defer arbor.Info("live: client disconnected", "user", userID)
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -67,6 +77,24 @@ func liveEventsHandler(cfg Config) http.HandlerFunc {
 				fmt.Fprint(w, ": ping\n\n")
 				flusher.Flush()
 			}
+		}
+	}
+}
+
+// liveStatsHandler is the session-gated diagnostic for the SSE bus
+// (sty_2d01bb70): GET /events/stats returns the hub's in-memory counters
+// (clients, published, delivered, dropped, last topic + time) as JSON so an
+// operator can answer "did the trigger fire? did anyone receive it?" from the
+// client, without trawling stderr. In-memory by design — see Hub.Stats.
+func liveStatsHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := cfg.Sessions.UserID(r); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(cfg.Live.Stats()); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
 }

@@ -78,6 +78,44 @@ func TestHubUnsubscribeStopsDelivery(t *testing.T) {
 	}
 }
 
+func TestHubStats(t *testing.T) {
+	h := NewHub()
+	if s := h.Stats(); s.Clients != 0 || s.Published != 0 || s.Delivered != 0 {
+		t.Fatalf("fresh hub stats not zero: %+v", s)
+	}
+
+	c, cancel := h.Subscribe(Scope{Admin: true})
+	defer cancel()
+
+	h.Publish(Notification{Topic: "story:sty_1", WorkspaceID: "wksp_a"})
+	<-c.C() // drain so the next publish also delivers
+
+	s := h.Stats()
+	if s.Clients != 1 {
+		t.Fatalf("Clients = %d, want 1", s.Clients)
+	}
+	if s.Published != 1 {
+		t.Fatalf("Published = %d, want 1", s.Published)
+	}
+	if s.Delivered != 1 {
+		t.Fatalf("Delivered = %d, want 1", s.Delivered)
+	}
+	if s.LastTopic != "story:sty_1" {
+		t.Fatalf("LastTopic = %q, want story:sty_1", s.LastTopic)
+	}
+	if s.LastUnixNano == 0 {
+		t.Fatal("LastUnixNano should be set after a publish")
+	}
+
+	// Overfill the buffer without reading → drops are counted.
+	for i := 0; i < clientBuffer*2; i++ {
+		h.Publish(Notification{Topic: "story:sty_1", WorkspaceID: "wksp_a"})
+	}
+	if h.Stats().Dropped == 0 {
+		t.Fatal("expected Dropped > 0 after overfilling a client buffer")
+	}
+}
+
 func TestHubPublishNonBlockingOnFullBuffer(t *testing.T) {
 	h := NewHub()
 	c, cancel := h.Subscribe(Scope{Admin: true})

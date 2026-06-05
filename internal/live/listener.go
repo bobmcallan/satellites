@@ -45,13 +45,18 @@ func NewListener(dsn string, hub *Hub) (*Listener, error) {
 	pl := pq.NewListener(dsn, listenerMinReconnect, listenerMaxReconnect,
 		func(ev pq.ListenerEventType, err error) {
 			if err != nil {
-				arbor.Warn("live: listener connection event", "event", ev, "err", err)
+				arbor.Warn("live: listener connection event", "event", int(ev), "err", err)
+				return
 			}
+			// Connected / disconnected / reconnected — low frequency, log at
+			// Info so an operator can see the bus's link health (sty_2d01bb70).
+			arbor.Info("live: listener connection event", "event", int(ev))
 		})
 	if err := pl.Listen(EventsChannel); err != nil {
 		_ = pl.Close()
 		return nil, err
 	}
+	arbor.Info("live: listener established", "channel", EventsChannel)
 	l := &Listener{pq: pl, hub: hub}
 	go l.run()
 	return l, nil
@@ -77,6 +82,7 @@ func (l *Listener) run() {
 			if p.T == "" {
 				continue
 			}
+			arbor.Info("live: notify received", "topic", p.T)
 			l.hub.Publish(Notification{Topic: p.T, ProjectID: p.P, WorkspaceID: p.W})
 		case <-ping.C:
 			// Ping can block on a dead socket; isolate it from the loop.

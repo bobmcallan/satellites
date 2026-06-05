@@ -111,6 +111,9 @@ func Build(cfg Config) http.Handler {
 	// Postgres listener is running); absent that, the surface still builds.
 	if cfg.Live != nil && cfg.LiveScope != nil {
 		mux.HandleFunc("GET /events", liveEventsHandler(cfg))
+		// Session-gated diagnostic: in-memory bus counters as JSON
+		// (sty_2d01bb70).
+		mux.HandleFunc("GET /events/stats", liveStatsHandler(cfg))
 	}
 
 	// MCP routes — auth-gated via Bearer middleware (api-key or JWT).
