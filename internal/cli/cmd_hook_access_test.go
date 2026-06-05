@@ -147,6 +147,57 @@ func TestHookPrompt_SilentWithoutStoryID(t *testing.T) {
 	}
 }
 
+// TestHookAccess_SubagentKeysToParentSession: a subagent's fetch carries
+// parent_session_id; the engagement is keyed to the PARENT, so when the parent
+// has already engaged the story the subagent draws no spurious reminder (AC3).
+func TestHookAccess_SubagentKeysToParentSession(t *testing.T) {
+	repo := accessTestRepo(t)
+	store, err := workstate.Open(storePath(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Parent engaged the story.
+	if _, err := store.Append(workstate.Event{Session: "parentSess", Story: "sty_abc123", Phase: "in_progress", Kind: "engage", TS: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	// Subagent (own session childSess) fetches the same story.
+	payload := map[string]any{
+		"session_id":        "childSess",
+		"parent_session_id": "parentSess",
+		"cwd":               repo,
+		"tool_name":         "mcp__satellites__document_get",
+		"tool_input":        map[string]any{"id": "sty_abc123"},
+	}
+	var out bytes.Buffer
+	if err := runHookAccess(jsonReader(t, payload), &out, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != "" {
+		t.Errorf("subagent should inherit the parent's engagement (no reminder), got: %s", out.String())
+	}
+	// And no stray candidate was opened under the child session.
+	store, _ = workstate.Open(storePath(repo))
+	defer store.Close()
+	if _, ok, _ := store.Current("childSess", "sty_abc123"); ok {
+		t.Errorf("a stray candidate was opened under the child session")
+	}
+}
+
+// TestSessionKey: parent wins when present, else own session.
+func TestSessionKey(t *testing.T) {
+	if got := sessionKey("child", "parent"); got != "parent" {
+		t.Errorf("sessionKey(child,parent) = %q, want parent", got)
+	}
+	if got := sessionKey("child", ""); got != "child" {
+		t.Errorf("sessionKey(child,\"\") = %q, want child", got)
+	}
+	if got := sessionKey("child", "  "); got != "child" {
+		t.Errorf("sessionKey with blank parent = %q, want child", got)
+	}
+}
+
 // TestHookAccess_FailsOpenWhenUnconfigured: outside a satellites repo the
 // advisory does nothing and never errors (fail-open).
 func TestHookAccess_FailsOpenWhenUnconfigured(t *testing.T) {

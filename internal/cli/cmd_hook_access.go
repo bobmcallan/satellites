@@ -70,18 +70,33 @@ never blocks the prompt.`,
 }
 
 // accessInput is the slice of the PreToolUse event the access trigger reads.
+// ParentSessionID, when present (a subagent's event), keys the engagement to the
+// PARENT session so a subagent shares its parent's engagement rather than
+// opening a spurious candidate of its own.
 type accessInput struct {
-	SessionID string          `json:"session_id"`
-	Cwd       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	SessionID       string          `json:"session_id"`
+	ParentSessionID string          `json:"parent_session_id"`
+	Cwd             string          `json:"cwd"`
+	ToolName        string          `json:"tool_name"`
+	ToolInput       json.RawMessage `json:"tool_input"`
 }
 
 // promptInput is the slice of the UserPromptSubmit event the prompt trigger reads.
 type promptInput struct {
-	SessionID string `json:"session_id"`
-	Cwd       string `json:"cwd"`
-	Prompt    string `json:"prompt"`
+	SessionID       string `json:"session_id"`
+	ParentSessionID string `json:"parent_session_id"`
+	Cwd             string `json:"cwd"`
+	Prompt          string `json:"prompt"`
+}
+
+// sessionKey resolves the engagement session: the parent session when present
+// (subagent events carry parent_session_id), else the event's own session. This
+// makes a subagent's story access share the parent's engagement.
+func sessionKey(session, parent string) string {
+	if p := strings.TrimSpace(parent); p != "" {
+		return p
+	}
+	return strings.TrimSpace(session)
 }
 
 func runHookAccess(in io.Reader, out io.Writer, now time.Time) error {
@@ -92,7 +107,7 @@ func runHookAccess(in io.Reader, out io.Writer, now time.Time) error {
 	if story == "" {
 		return nil // not a story fetch → silent allow
 	}
-	if remind, reminder := assessAccess(ev.Cwd, ev.SessionID, story, now); remind {
+	if remind, reminder := assessAccess(ev.Cwd, sessionKey(ev.SessionID, ev.ParentSessionID), story, now); remind {
 		return emitAdditionalContext(out, "PreToolUse", reminder)
 	}
 	return nil
@@ -106,7 +121,7 @@ func runHookPrompt(in io.Reader, out io.Writer, now time.Time) error {
 	if story == "" {
 		return nil
 	}
-	if remind, reminder := assessAccess(ev.Cwd, ev.SessionID, story, now); remind {
+	if remind, reminder := assessAccess(ev.Cwd, sessionKey(ev.SessionID, ev.ParentSessionID), story, now); remind {
 		return emitAdditionalContext(out, "UserPromptSubmit", reminder)
 	}
 	return nil
