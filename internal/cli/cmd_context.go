@@ -111,6 +111,7 @@ baseline. --json emits the structured measure.`,
 	contextCmd.PersistentFlags().StringVar(configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	contextCmd.PersistentFlags().StringVar(userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
 	contextCmd.AddCommand(show)
+	contextCmd.AddCommand(newContextReviewCmd(configArg, userArg))
 	return contextCmd
 }
 
