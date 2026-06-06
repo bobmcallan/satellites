@@ -112,6 +112,7 @@ baseline. --json emits the structured measure.`,
 	contextCmd.PersistentFlags().StringVar(userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
 	contextCmd.AddCommand(show)
 	contextCmd.AddCommand(newContextReviewCmd(configArg, userArg))
+	contextCmd.AddCommand(newContextCurateCmd(configArg, userArg))
 	return contextCmd
 }
 
@@ -243,12 +244,22 @@ func skillsIndexSize() (bytes, count int, err error) {
 	return bytes, count, nil
 }
 
-// principlesSidecarSize measures the curated ride-along: for each scope it
-// lists `principles:<scope> ∩ principles:always` (the exact sidecar
-// membership, via the shared verb tag constants) and sums the body bytes
-// the agent would receive. Best-effort per scope — a lookup failure on one
-// scope contributes nothing rather than failing the view.
-func principlesSidecarSize(ctx context.Context, story reviewStory, configPath, userArg string) (bytes, count int) {
+// ridealongPrincipleInfo is one principle in the curated ride-along sidecar —
+// its identity, scope, and delivered body size.
+type ridealongPrincipleInfo struct {
+	Name  string `json:"name"`
+	ID    string `json:"id"`
+	Scope string `json:"scope"`
+	Bytes int    `json:"bytes"`
+}
+
+// ridealongPrinciples enumerates the curated ride-along (principles tagged
+// `principles:<scope>` ∩ `principles:always`) that apply to the story, with each
+// principle's delivered body size — the exact sidecar membership the substrate
+// would ship. Single owner: principlesSidecarSize sums it and `context curate`
+// lists it. Best-effort per scope — a lookup failure on one scope contributes
+// nothing rather than failing the caller.
+func ridealongPrinciples(ctx context.Context, story reviewStory, configPath, userArg string) []ridealongPrincipleInfo {
 	type scopeReq struct {
 		scope       verb.PrincipleScope
 		listScope   string
@@ -260,6 +271,7 @@ func principlesSidecarSize(ctx context.Context, story reviewStory, configPath, u
 		{scope: verb.PrincipleScopeWorkspace, listScope: "workspace", workspaceID: story.WorkspaceID},
 		{scope: verb.PrincipleScopeProject, listScope: "project", workspaceID: story.WorkspaceID, projectID: story.ProjectID},
 	}
+	var out []ridealongPrincipleInfo
 	for _, r := range reqs {
 		if r.listScope == "workspace" && r.workspaceID == "" {
 			continue
@@ -304,11 +316,25 @@ func principlesSidecarSize(ctx context.Context, story reviewStory, configPath, u
 			if pbody == "" && len(gresp.Versions) > 0 {
 				pbody = gresp.Versions[0].Body
 			}
-			bytes += len(pbody)
-			count++
+			out = append(out, ridealongPrincipleInfo{
+				Name:  item.Name,
+				ID:    item.ID,
+				Scope: string(r.scope),
+				Bytes: len(pbody),
+			})
 		}
 	}
-	return bytes, count
+	return out
+}
+
+// principlesSidecarSize sums the curated ride-along — the always-on principle
+// cost. Owner: ridealongPrinciples.
+func principlesSidecarSize(ctx context.Context, story reviewStory, configPath, userArg string) (bytes, count int) {
+	ps := ridealongPrinciples(ctx, story, configPath, userArg)
+	for _, p := range ps {
+		bytes += p.Bytes
+	}
+	return bytes, len(ps)
 }
 
 // skillBodySize reads a materialised gate skill's body (frontmatter +
