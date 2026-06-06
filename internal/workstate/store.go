@@ -148,7 +148,24 @@ CREATE TABLE IF NOT EXISTS work_claim (
     claimed_by  TEXT NOT NULL DEFAULT '',
     lease_until TEXT NOT NULL DEFAULT '',
     last_seq    INTEGER NOT NULL DEFAULT 0
-);`
+);
+
+-- Durable QA-evidence trail per story (sty_7d2e9847): gate runs + CI outcomes.
+-- Unlike inbox/work_claim (transient, dropped on terminal flush), evidence is
+-- the durable record the background audit (order:9) + QA view read out of band.
+CREATE TABLE IF NOT EXISTS qa_evidence (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    story       TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    label       TEXT NOT NULL DEFAULT '',
+    decision    TEXT NOT NULL DEFAULT '',
+    notes       TEXT NOT NULL DEFAULT '',
+    from_status TEXT NOT NULL DEFAULT '',
+    to_status   TEXT NOT NULL DEFAULT '',
+    ref         TEXT NOT NULL DEFAULT '',
+    ts          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qa_evidence_story ON qa_evidence(story, seq);`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
 	}

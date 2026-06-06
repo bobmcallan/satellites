@@ -250,6 +250,26 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		}
 	}
 
+	// 8b. Durable QA-evidence capture (sty_7d2e9847): record this gate run —
+	// skill, decision, reject reasons, from/to status — to the store as a
+	// durable, story-linked, queryable trail that survives the run. This closes
+	// the spike's "gates run in-place with no logging" gap; it is read out of
+	// band by the QA view + the order:9 audit, never injected into a turn. The
+	// server ledger spine (review_accept/reject) is unchanged — this is the
+	// local capture. Best-effort: a capture failure must not fail the review.
+	if _, eErr := store.RecordEvidence(workstate.Evidence{
+		Story:      story.ID,
+		Kind:       workstate.EvidenceGate,
+		Label:      gateSkill,
+		Decision:   string(gateOut.Decision),
+		Notes:      gateOut.Notes,
+		FromStatus: story.Status,
+		ToStatus:   observed,
+		TS:         time.Now(),
+	}); eErr != nil {
+		fmt.Fprintf(opts.Stderr, "warn: capture gate evidence for %s: %v\n", story.ID, eErr)
+	}
+
 	// 9. Per-transition step summary (sty_2517f6b8). When project-config names
 	// a step_summariser_skill, run it and record its prose as a step_summary
 	// ledger row, tied to this transition. The to_status is the status the gate
