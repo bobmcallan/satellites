@@ -82,6 +82,14 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("workstate: open %s: %w", path, err)
 	}
+	// SQLite permits exactly one writer. database/sql pools connections, so
+	// concurrent writers would each grab a connection and race the single-writer
+	// lock — under load that exhausts busy_timeout and surfaces SQLITE_BUSY
+	// instead of serialising (sty_12236a4d). Cap the pool to one connection so
+	// all access funnels through a single writer; WAL + busy_timeout above keep
+	// readers concurrent and give contention headroom. The store is a low-volume
+	// per-repo file, so single-connection access is not a throughput concern.
+	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		db.Close()
