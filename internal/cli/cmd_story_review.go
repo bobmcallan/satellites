@@ -164,25 +164,12 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	}
 	summariserSkill := reviewStepSummariserSkill(ctx, dispatch, story)
 
-	// 5. Recent ledger for gate context. Hot path (sty_8e8ec0e7): serve from
-	// the local inbox when present — no wire round-trip — and fall back to
-	// ledger_list over the server otherwise. Either source unmarshals into
-	// the same response shape, so the CLI never names internal/ledger
-	// (layering guard); the inbox JSON mirrors the ledger Entry fields.
-	var recentResp verb.LedgerListResponse
-	recentSource := "ledger_list"
-	if localRaw, ok, _ := localRecentLedgerJSON(story.ID, 5); ok {
-		_ = json.Unmarshal(localRaw, &recentResp)
-		recentSource = "local inbox"
-	} else if llReq, mErr := json.Marshal(verb.LedgerListRequest{StoryID: story.ID}); mErr == nil {
-		if raw, lErr := dispatchVerb(ctx, "ledger_list", llReq, opts.ConfigPath, opts.UserArg); lErr == nil {
-			_ = json.Unmarshal(raw, &recentResp)
-		}
-	}
+	// 5. Recent ledger for gate context. Owned by recentGateLedger (shared
+	// with `satellites context show` so the gate bundle is sized from the same
+	// assembly it is fed): hot path serves from the local inbox when present —
+	// no wire round-trip — and falls back to ledger_list otherwise, capped at 5.
+	recentResp, recentSource := recentGateLedger(ctx, story.ID, opts.ConfigPath, opts.UserArg)
 	recent := recentResp.Entries
-	if len(recent) > 5 {
-		recent = recent[len(recent)-5:]
-	}
 	fmt.Fprintf(opts.Stdout, "recent context: %s (%d rows)\n", recentSource, len(recent))
 
 	// 6. The gate's spine writes + status patch run under the operator's own
@@ -351,6 +338,31 @@ func flushLocalInbox(ctx context.Context, opts reviewOpts, story reviewStory) {
 		})
 		fmt.Fprintf(opts.Stdout, "flushed %d local inbox row(s) to ledger\n", flushed)
 	}
+}
+
+// recentGateLedger assembles the ≤5-row recent-ledger slice a gate run
+// receives — the hot path serves from the local inbox when present (no wire
+// round-trip), falling back to ledger_list over the server otherwise. Either
+// source unmarshals into the same response shape, so the CLI never names
+// internal/ledger (layering guard); the inbox JSON mirrors the ledger Entry
+// fields. Single source for both the reviewer gate (runReview) and the
+// delivered-context view (`satellites context show`), so the bundle that view
+// sizes is byte-identical to the one a gate is fed (AC2).
+func recentGateLedger(ctx context.Context, storyID, configPath, userArg string) (verb.LedgerListResponse, string) {
+	var recentResp verb.LedgerListResponse
+	source := "ledger_list"
+	if localRaw, ok, _ := localRecentLedgerJSON(storyID, 5); ok {
+		_ = json.Unmarshal(localRaw, &recentResp)
+		source = "local inbox"
+	} else if llReq, mErr := json.Marshal(verb.LedgerListRequest{StoryID: storyID}); mErr == nil {
+		if raw, lErr := dispatchVerb(ctx, "ledger_list", llReq, configPath, userArg); lErr == nil {
+			_ = json.Unmarshal(raw, &recentResp)
+		}
+	}
+	if len(recentResp.Entries) > 5 {
+		recentResp.Entries = recentResp.Entries[len(recentResp.Entries)-5:]
+	}
+	return recentResp, source
 }
 
 // reviewObserveStatus re-reads the story's current status for reporting.

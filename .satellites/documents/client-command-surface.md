@@ -84,6 +84,9 @@ so the `satellites surface check` gate stays green ([[broken-windows]]):
 | `satellites story review` | Run a story's reviewer gate client-side (`claude -p` against the worktree); the reviewer enacts the status transition. | DONE. |
 | `satellites techdebt review` | The technical-debt pre-commit gate — build + unit + integration reconciled against the quarantine register, fail closed on an unregistered red. | DONE. |
 | `satellites surface check` | The command-surface drift gate — fail closed when a live command is not named in this document. Keeps the reference docs in step with the CLI as `update` ships changes. | DONE. |
+| `satellites init` | Make a repo ready for satellites, idempotently — ensure `.satellites/`, a `satellites.toml`, and the PreToolUse START-door hook in `.claude/settings.json`. Re-run when hooks change; existing files/settings are preserved. | DONE. |
+| `satellites hook <gate\|access\|prompt>` | The handlers Claude Code invokes from `.claude/settings.json` (installed by `init`). `gate` is the START door — blocks file edits until a story is engaged; `access`/`prompt` are advisory engage reminders. Read the engagement store. | DONE. |
+| `satellites context show <story>` | Render the COMPLETE delivered context for a story — load-context, skills index, principles ride-along, the story's `## Workflow`, and the envelope + recent ledger — each labelled by source + size (bytes/~tokens), with a grand total. Operator-facing, out of band; the delivered-context baseline (epic:qa-observability). | DONE. |
 
 When `update` adds, renames, or removes a command, reconcile this section in the
 same change — `satellites surface check` blocks the commit until it matches.
