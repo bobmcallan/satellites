@@ -59,6 +59,32 @@
     </ul>
     <p>This is why a stalled or over-confident agent cannot declare success: it has no key that can move the status.</p>
   </section>
+
+  <section class="changelog-intro" data-section="monitor-intro">
+    <h2 class="section-heading">The workflow monitor</h2>
+    <p class="changelog-lede">The gate keeps the loop honest while it runs. The monitor is how an operator sees what the loop actually did — the declared process held against the recorded fact. It only ever reads: it never writes a ledger row and never moves a status, so watching the work can't perturb it.</p>
+  </section>
+
+  <section class="panel" data-section="monitor" data-monitor="trace">
+    <h2 class="changelog-service" data-field="monitor-name">Per-story trace</h2>
+    <p>Each story's page (<code>/stories/{id}</code>) overlays the <strong>declared</strong> workflow — its states, transitions, and the gate on each edge — with the <strong>actual</strong> path taken, read from the ledger. Every transition shows whether its gate was accepted, rejected, fired, or never reached.</p>
+    <p>The view updates live: as a gate fires, the trace region refetches off the shared event bus, with no page reload.</p>
+  </section>
+
+  <section class="panel" data-section="monitor" data-monitor="engagements">
+    <h2 class="changelog-service" data-field="monitor-name">Open engagements</h2>
+    <p><code>satellites work status</code> lists what each agent session is engaged on — the story, its phase, and whether the engagement lease is still fresh. It reads the per-repo engagement store; the START-door hook reads the same store to decide whether a file edit may proceed.</p>
+  </section>
+
+  <section class="panel" data-section="monitor" data-monitor="evidence">
+    <h2 class="changelog-service" data-field="monitor-name">QA evidence</h2>
+    <p><code>satellites evidence show &lt;story&gt;</code> prints a story's durable QA trail — every gate run captured automatically by the reviewer loop, plus the CI outcomes recorded with <code>satellites evidence ci</code> (test / release / deploy → success / failure). The full trail is reconstructable after the fact, out of band from the agent's turn.</p>
+  </section>
+
+  <section class="panel" data-section="monitor" data-monitor="audit">
+    <h2 class="changelog-service" data-field="monitor-name">Loop audit</h2>
+    <p><code>satellites evidence audit [story]</code> walks the captured ledger trail and flags loop anomalies — an ungated deploy, a ship with no gate, status drift, unengaged work, a spurious enact-failure reject, or a rejection with no follow-up. With a story id it audits that one story; with none it sweeps the whole project. Findings surface to the operator only — never the executor's turn.</p>
+  </section>
 </main>
 
 <footer class="site-footer">
