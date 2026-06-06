@@ -165,7 +165,19 @@ CREATE TABLE IF NOT EXISTS qa_evidence (
     ref         TEXT NOT NULL DEFAULT '',
     ts          TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_qa_evidence_story ON qa_evidence(story, seq);`
+CREATE INDEX IF NOT EXISTS idx_qa_evidence_story ON qa_evidence(story, seq);
+
+-- Delivered-context budget time series (sty_e3e8f3ce): the always-on
+-- executor-context size tracked over time, with exactly one row flagged the
+-- baseline the ratchet compares against.
+CREATE TABLE IF NOT EXISTS context_budget (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    bytes       INTEGER NOT NULL,
+    tokens      INTEGER NOT NULL,
+    is_baseline INTEGER NOT NULL DEFAULT 0,
+    components  TEXT NOT NULL DEFAULT ''
+);`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
 	}
