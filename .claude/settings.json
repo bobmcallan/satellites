@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "satellites hook gate || exit 2",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook access",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__satellites__document_get"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "satellites hook prompt",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
