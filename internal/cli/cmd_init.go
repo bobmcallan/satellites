@@ -101,7 +101,19 @@ func runInit(out io.Writer, repoRoot string) error {
 	tomlPath := filepath.Join(satDir, "satellites.toml")
 	switch _, statErr := os.Stat(tomlPath); {
 	case statErr == nil:
-		fmt.Fprintln(out, initLine(false, ".satellites/satellites.toml"))
+		// Never overwrite an existing toml, but DO maintain the ungated_dirs
+		// knob: append its documented block when absent (idempotent), so an
+		// already-initialised repo gains the START-door exemption comment
+		// (sty_11a6077c).
+		appended, aerr := ensureUngatedDirsBlock(tomlPath)
+		if aerr != nil {
+			return fmt.Errorf("init: maintain %s: %w", tomlPath, aerr)
+		}
+		if appended {
+			fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added ungated_dirs note)"))
+		} else {
+			fmt.Fprintln(out, initLine(false, ".satellites/satellites.toml"))
+		}
 	case os.IsNotExist(statErr):
 		if werr := os.WriteFile(tomlPath, []byte(scaffoldToml), 0o644); werr != nil {
 			return fmt.Errorf("init: write %s: %w", tomlPath, werr)
@@ -128,7 +140,51 @@ const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`
 # server_url = "https://your-satellites-server"
 # project_id = "proj_..."
 # work_dir = ".satellites/work"   # where the START-door engagement state lives (default; optional)
+` + ungatedDirsBlock
+
+// ungatedDirsBlock documents + seeds the START-door exemption knob. The door
+// gates only edits INSIDE this repo by default — anything outside the repo root
+// (e.g. ~/.claude, Claude's own config + agent memory) is ungated, so Claude can
+// self-maintain. List EXTRA exempt dirs here (sty_11a6077c). Commented by
+// default: the boundary rule governs until a user opts in.
+const ungatedDirsBlock = `
+# ungated_dirs — paths the START-door (satellites hook gate) will NOT gate.
+# By default the door only gates edits INSIDE this repo; anything outside the
+# repo root (e.g. ~/.claude — Claude's own config + memory) is already ungated.
+# List extra dirs here to also ungate them (globs; a leading ~ expands to $HOME):
+# ungated_dirs = ["~/.claude", "docs/scratch"]
 `
+
+// ungatedDirsKey is the toml key init looks for before appending the block to an
+// existing config (idempotency).
+const ungatedDirsKey = "ungated_dirs"
+
+// ensureUngatedDirsBlock appends the documented ungated_dirs block to an
+// existing toml when the key is not already present (commented or active).
+// Idempotent: a second run is a no-op. Returns whether it appended.
+func ensureUngatedDirsBlock(tomlPath string) (bool, error) {
+	raw, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return false, err
+	}
+	// Match the key whether active (`ungated_dirs =`) or already documented in
+	// the seeded comment (`# ungated_dirs`). Scan line-wise so a substring in
+	// some other value cannot false-match.
+	for _, ln := range strings.Split(string(raw), "\n") {
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ln), "#"))
+		if strings.HasPrefix(t, ungatedDirsKey) {
+			return false, nil // already present
+		}
+	}
+	body := string(raw)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(tomlPath, []byte(body+ungatedDirsBlock), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // initLine renders a one-line report: "+ created" or "= present".
 func initLine(created bool, what string) string {

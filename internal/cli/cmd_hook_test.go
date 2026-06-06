@@ -65,44 +65,44 @@ func TestGateOutcome(t *testing.T) {
 	fresh := now.Add(time.Hour)
 
 	// Unconfigured → deny, fail closed.
-	if allow, reason := gateOutcome(t.TempDir(), "s", now); allow || !strings.Contains(reason, "satellites init") {
+	if allow, reason := gateOutcome(t.TempDir(), "s", "", now); allow || !strings.Contains(reason, "satellites init") {
 		t.Errorf("unconfigured: allow=%v reason=%q", allow, reason)
 	}
 
 	// Configured, no engagement → deny (divert to work init).
 	noEng := writeRepo(t, true, "")
-	if allow, reason := gateOutcome(noEng, "sess1", now); allow || !strings.Contains(reason, "work init") {
+	if allow, reason := gateOutcome(noEng, "sess1", "", now); allow || !strings.Contains(reason, "work init") {
 		t.Errorf("no engagement: allow=%v reason=%q", allow, reason)
 	}
 
 	// Lease-fresh + editable → allow; a different session is not.
 	ok := writeRepo(t, true, "")
 	seedEngagement(t, ok, "sess1", "sty_a", "in_progress", true, fresh)
-	if allow, _ := gateOutcome(ok, "sess1", now); !allow {
+	if allow, _ := gateOutcome(ok, "sess1", "", now); !allow {
 		t.Errorf("lease-fresh editable: want allow")
 	}
-	if allow, _ := gateOutcome(ok, "other", now); allow {
+	if allow, _ := gateOutcome(ok, "other", "", now); allow {
 		t.Errorf("a different session must not ride sess1's engagement")
 	}
 
 	// Expired lease → deny (the VIRE bug).
 	exp := writeRepo(t, true, "")
 	seedEngagement(t, exp, "sess1", "sty_a", "in_progress", true, now.Add(-time.Hour))
-	if allow, reason := gateOutcome(exp, "sess1", now); allow || !strings.Contains(reason, "lease") {
+	if allow, reason := gateOutcome(exp, "sess1", "", now); allow || !strings.Contains(reason, "lease") {
 		t.Errorf("expired lease: allow=%v reason=%q, want deny mentioning lease", allow, reason)
 	}
 
 	// Non-editable phase → deny.
 	ned := writeRepo(t, true, "")
 	seedEngagement(t, ned, "sess1", "sty_a", "backlog", false, fresh)
-	if allow, reason := gateOutcome(ned, "sess1", now); allow || !strings.Contains(reason, "editable") {
+	if allow, reason := gateOutcome(ned, "sess1", "", now); allow || !strings.Contains(reason, "editable") {
 		t.Errorf("non-editable phase: allow=%v reason=%q, want deny mentioning editable", allow, reason)
 	}
 
 	// Candidate (access-only) row → deny.
 	cand := writeRepo(t, true, "")
 	seedEngagement(t, cand, "sess1", "sty_a", phaseCandidate, false, fresh)
-	if allow, _ := gateOutcome(cand, "sess1", now); allow {
+	if allow, _ := gateOutcome(cand, "sess1", "", now); allow {
 		t.Errorf("candidate row must not authorise edits")
 	}
 
@@ -111,7 +111,7 @@ func TestGateOutcome(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if allow, _ := gateOutcome(nested, "sess1", now); !allow {
+	if allow, _ := gateOutcome(nested, "sess1", "", now); !allow {
 		t.Errorf("nested cwd under engaged repo: want allow")
 	}
 }

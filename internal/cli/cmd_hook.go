@@ -58,13 +58,29 @@ It fails closed: an unconfigured repo is denied, never allowed.`,
 }
 
 // preToolUseInput is the slice of the Claude Code PreToolUse event the gate
-// reads. We only need cwd (to locate the repo); tool_name is read for clarity
-// and possible future scoping. Unknown fields are ignored.
+// reads. cwd locates the repo; tool_input carries the edited path so the door
+// can gate only the project tree (sty_11a6077c). Unknown fields are ignored.
 type preToolUseInput struct {
-	ToolName        string `json:"tool_name"`
-	Cwd             string `json:"cwd"`
-	SessionID       string `json:"session_id"`
-	ParentSessionID string `json:"parent_session_id"`
+	ToolName        string        `json:"tool_name"`
+	Cwd             string        `json:"cwd"`
+	SessionID       string        `json:"session_id"`
+	ParentSessionID string        `json:"parent_session_id"`
+	ToolInput       toolInputPath `json:"tool_input"`
+}
+
+// toolInputPath is the subset of tool_input the gate needs: the edited path.
+// Edit/Write/MultiEdit carry file_path; NotebookEdit carries notebook_path.
+type toolInputPath struct {
+	FilePath     string `json:"file_path"`
+	NotebookPath string `json:"notebook_path"`
+}
+
+// path returns the edited target path (file_path or notebook_path), or "".
+func (t toolInputPath) path() string {
+	if p := strings.TrimSpace(t.FilePath); p != "" {
+		return p
+	}
+	return strings.TrimSpace(t.NotebookPath)
 }
 
 // gateDecisionJSON is the Claude Code PreToolUse hook output for a block.
@@ -92,7 +108,7 @@ func runHookGate(in io.Reader, out io.Writer) error {
 		}
 	}
 
-	allow, reason := gateOutcome(start, sessionKey(ev.SessionID, ev.ParentSessionID), time.Now().UTC())
+	allow, reason := gateOutcome(start, sessionKey(ev.SessionID, ev.ParentSessionID), ev.ToolInput.path(), time.Now().UTC())
 	if allow {
 		return nil // no output → tool proceeds through normal permissioning
 	}
@@ -105,10 +121,22 @@ func runHookGate(in io.Reader, out io.Writer) error {
 // stale/expired/absent engagement, a candidate (access-only) row, or a
 // non-editable phase is blocked. Fails closed when the repo is unconfigured or
 // the store is unreadable — the store is the authority, so uncertainty denies.
-func gateOutcome(start, session string, now time.Time) (allow bool, reason string) {
+func gateOutcome(start, session, target string, now time.Time) (allow bool, reason string) {
 	root, ok := findSatellitesRepoRoot(start)
 	if !ok {
 		return false, "satellites is not configured here (no .satellites/satellites.toml). Run `satellites init` to set up this repo, then `satellites work init <story>` to engage a story."
+	}
+	// Boundary rule (sty_11a6077c): the door governs the engaged PROJECT tree,
+	// not Claude's self-maintenance. An edit whose target resolves OUTSIDE the
+	// repo root (e.g. ~/.claude — Claude's own config + agent memory), or into a
+	// configured ungated_dirs path, is allowed regardless of engagement. The
+	// repo's own .claude/ is inside the root, so it stays gated. A target we
+	// cannot determine (empty) falls through to the engagement check (fail safe).
+	if abs := absTargetPath(start, target); abs != "" {
+		cfg, _, _ := cliconfig.Load(filepath.Join(root, ".satellites", "satellites.toml"))
+		if pathIsUngated(abs, root, cfg.UngatedDirs) {
+			return true, ""
+		}
 	}
 	store, err := workstate.Open(stateDBForRoot(root))
 	if err != nil {
@@ -204,6 +232,62 @@ func readEngagement(workDir string) (engagement, bool) {
 		return engagement{}, false
 	}
 	return e, true
+}
+
+// absTargetPath resolves the edited path to a cleaned absolute path. A relative
+// path is joined to the event cwd (where the tool runs); an absolute path is
+// cleaned verbatim. Empty in → empty out (the caller falls through to the
+// engagement check).
+func absTargetPath(cwd, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	if strings.HasPrefix(target, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			target = home + target[1:]
+		}
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(strings.TrimSpace(cwd), target)
+	}
+	return filepath.Clean(target)
+}
+
+// pathIsUngated reports whether an absolute target path is exempt from the
+// START-door. The default boundary: a path NOT under the repo root is ungated
+// (Claude self-maintenance — ~/.claude, agent memory). Beyond that, an explicit
+// ungated_dirs entry (filepath glob, leading ~ → $HOME) ungates a path even
+// inside the repo. Pure over its inputs.
+func pathIsUngated(abs, root string, ungatedDirs []string) bool {
+	root = filepath.Clean(root)
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true // outside the repo tree — not the door's business
+	}
+	home, _ := os.UserHomeDir()
+	for _, d := range ungatedDirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if strings.HasPrefix(d, "~") && home != "" {
+			d = home + d[1:]
+		}
+		// A relative entry is repo-relative (e.g. "docs/scratch" → <root>/docs/scratch).
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(root, d)
+		}
+		d = filepath.Clean(d)
+		// Under an exempt dir, equal to it, or a glob match.
+		if abs == d || strings.HasPrefix(abs, d+string(filepath.Separator)) {
+			return true
+		}
+		if ok, _ := filepath.Match(d, abs); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // emitGateDeny writes the PreToolUse block decision as JSON on stdout.

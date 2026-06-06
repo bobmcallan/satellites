@@ -19,7 +19,7 @@ func TestRunWorkInit_EngagesAndFlipsGate(t *testing.T) {
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
 	// Precondition: the door denies before engagement.
-	if allow, _ := gateOutcome(repo, "sess1", now); allow {
+	if allow, _ := gateOutcome(repo, "sess1", "", now); allow {
 		t.Fatalf("precondition failed: gate should deny before `work init`")
 	}
 
@@ -35,11 +35,11 @@ func TestRunWorkInit_EngagesAndFlipsGate(t *testing.T) {
 	}
 
 	// The gate now allows for this session — writer flipped reader.
-	if allow, _ := gateOutcome(repo, "sess1", now); !allow {
+	if allow, _ := gateOutcome(repo, "sess1", "", now); !allow {
 		t.Errorf("after `work init` the gate should allow, it still denies")
 	}
 	// A different session is still denied.
-	if allow, _ := gateOutcome(repo, "other", now); allow {
+	if allow, _ := gateOutcome(repo, "other", "", now); allow {
 		t.Errorf("a different session must not be allowed by sess1's engagement")
 	}
 	if !strings.Contains(out.String(), "sty_xyz") {

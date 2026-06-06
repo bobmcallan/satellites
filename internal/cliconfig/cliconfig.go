@@ -59,6 +59,15 @@ type Config struct {
 	// self-initializes on open, so no setup step is needed. Override-only.
 	StateDB string `toml:"state_db"`
 
+	// UngatedDirs lists paths the START-door (`satellites hook gate`) will NOT
+	// gate, beyond the default boundary rule. The door already only governs edits
+	// INSIDE this repo's tree — anything outside the repo root (e.g. ~/.claude,
+	// Claude's own config + agent memory) is ungated by default, so Claude can
+	// self-maintain. This list ungates EXTRA paths (including in-repo ones):
+	// filepath globs, with a leading ~ expanded to $HOME. Optional; empty means
+	// only the default boundary applies (sty_11a6077c).
+	UngatedDirs []string `toml:"ungated_dirs"`
+
 	// Measure configures measure mode — the client's session observability.
 	// It is DEFAULT ON: an absent [measure] section means enabled + record.
 	Measure MeasureConfig `toml:"measure"`
