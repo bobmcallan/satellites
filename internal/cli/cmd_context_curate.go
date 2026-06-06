@@ -81,20 +81,11 @@ func curateList(ctx context.Context, storyID string, asJSON bool, configPath, us
 	}
 	ps := ridealongPrinciples(ctx, story, configPath, userArg)
 	always, _ := alwaysOnTotal(ctx, storyID, configPath, userArg)
-	trimmable := 0
-	for _, p := range ps {
-		trimmable += p.Bytes
-	}
+	trimmable := trimmableBytes(ps)
 	if asJSON {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
-		return enc.Encode(map[string]any{
-			"story_id":         storyID,
-			"ridealong":        ps,
-			"always_on_bytes":  always,
-			"trimmable_bytes":  trimmable,
-			"fixed_components": []string{"load-context (MCP instructions)", "MCP tool descriptions", "skills index"},
-		})
+		return enc.Encode(buildCurateJSON(storyID, ps, always))
 	}
 	if len(ps) == 0 {
 		fmt.Fprintf(w, "curate %s: ride-along is empty (0 principles tagged %s) — nothing to trim.\n", storyID, verb.PrincipleTagAlways)
@@ -137,6 +128,28 @@ func curateToggle(ctx context.Context, storyID, name string, include bool, confi
 	fmt.Fprintf(w, "%s %s ride-along (%s, scope=%s)\n", name, verbWord, p.ID, p.Scope)
 	fmt.Fprintf(w, "always-on delivered context: %d → %d bytes (%+d)\n", before, after, after-before)
 	return nil
+}
+
+// trimmableBytes is the curation-trimmable subtotal — the bytes the ride-along
+// contributes to the always-on surface (what --drop can remove). Pure.
+func trimmableBytes(ps []ridealongPrincipleInfo) int {
+	n := 0
+	for _, p := range ps {
+		n += p.Bytes
+	}
+	return n
+}
+
+// buildCurateJSON is the --json payload for the ride-along list. Pure over its
+// inputs so the shape is unit-testable without dispatch.
+func buildCurateJSON(storyID string, ps []ridealongPrincipleInfo, always int) map[string]any {
+	return map[string]any{
+		"story_id":         storyID,
+		"ridealong":        ps,
+		"always_on_bytes":  always,
+		"trimmable_bytes":  trimmableBytes(ps),
+		"fixed_components": []string{"load-context (MCP instructions)", "MCP tool descriptions", "skills index"},
+	}
 }
 
 // alwaysOnTotal recomputes the always-on delivered size via order:2's assembly —
