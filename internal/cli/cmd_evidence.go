@@ -96,6 +96,39 @@ server ledger — never the executor's turn.`,
 	ciCmd.Flags().StringVar(&ciNotes, "notes", "", "Optional detail line.")
 	ev.AddCommand(ciCmd)
 
+	var auditConfig, auditUser string
+	var auditJSON bool
+	auditCmd := &cobra.Command{
+		Use:   "audit [story-id]",
+		Short: "Detect loop anomalies in a story's (or the whole project's) captured ledger trail",
+		Long: `audit walks the durable ledger trail (the captured signal) and flags loop
+anomalies — ungated deploy, ship-then-no-gate, a spurious enact-failure reject,
+status drift, unengaged work, a reject with no follow-up. With a story id it
+audits that story; with none it sweeps the project's stories. Out of band — it
+reads (never writes) and surfaces findings to the operator, never the executor's
+turn.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			story := ""
+			if len(args) == 1 {
+				story = strings.TrimSpace(args[0])
+			}
+			cfg, _, _ := cliconfig.Load(auditConfig)
+			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+				return dispatchVerb(ctx, name, req, auditConfig, auditUser)
+			}
+			return runEvidenceAudit(cmd.Context(), cmd.OutOrStdout(), evidenceAuditOpts{
+				Story:     story,
+				ProjectID: cfg.ProjectID,
+				JSON:      auditJSON,
+			}, dispatch)
+		},
+	}
+	auditCmd.Flags().StringVar(&auditConfig, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
+	auditCmd.Flags().StringVar(&auditUser, "user", "", "Caller user id (defaults to the configured admin user).")
+	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "Emit the findings as JSON.")
+	ev.AddCommand(auditCmd)
+
 	register(ev)
 }
 
