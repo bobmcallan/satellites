@@ -920,12 +920,17 @@ func strDeref(p *string) string {
 }
 
 // upsertStatusHonoured reports whether a document_upsert may set a story's
-// status. Only a non-api-key caller may — the portal UI's JWT session or an
-// in-process call. An api-key caller (the agent over MCP/exec, or the gate's
-// minted reviewer key) is refused the field: status then moves only through the
-// gate's status_transition ledger row, closing the raw-patch self-accept
-// (sty_42d13ae4).
+// status. The check is TRANSPORT-based, not just credential-based (sty_4f5148c4):
+//   - MCP transport → NEVER. An agent on an operator's OAuth MCP session must not
+//     patch status; the api-key drop alone (sty_42d13ae4) left that OAuth-MCP hole
+//     open (it's how this epic was reopened). Status moves via the gate's
+//     status_transition ledger row, or the operator's portal/CLI.
+//   - api-key caller (exec / gate key) → NEVER (sty_42d13ae4, preserved).
+//   - otherwise (portal UI JWT session, in-process/CLI) → yes.
 func upsertStatusHonoured(ctx context.Context) bool {
+	if auth.TransportFromContext(ctx) == auth.TransportMCP {
+		return false
+	}
 	return auth.APIKeyRoleFromContext(ctx) == ""
 }
 
