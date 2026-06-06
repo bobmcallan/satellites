@@ -37,24 +37,44 @@ when the body alone is not enough.
 
 ## What to check
 
-### 1. The embedded workflow — the one consult that keeps the contract honest
+### 1. The embedded workflow — DESIGNED, not copied unread (`no-default-workflow`)
 
-The story body must carry a **`## Workflow`** section holding the matched
-workflow's states + transitions (the executor copies it from the canonical
-workflow skill at planning). Validate it against its source — this is the
-single time the workflow is checked against its skill; every later gate trusts
-the story's copy.
+The story body must carry a **`## Workflow`** section of states + transitions.
+Per the `no-default-workflow` principle, a workflow is **designed from the
+requirement**, not demanded to match the category default verbatim — so you
+validate that it is SOUND, not that it equals a canonical block.
 
-- Resolve the canonical workflow skill for this story's **type**: list the
-  substrate skills and pick the `kind:workflow` entry whose `applies_to`
-  contains the story type (read the materialised skill at
-  `.claude/skills/<workflow-name>/SKILL.md`). The fix workflow serves
-  `fix`/`refactor`/`bug`/`infrastructure`; the feature workflow serves
-  `feature`.
-- Parse the `states` + `transitions` from the story's `## Workflow` and from
-  the canonical skill's fenced ```yaml block. **Reject** when the `## Workflow`
-  section is absent, or when its states/transitions do not match the canonical
-  skill (a stale, hand-edited, or wrong-type copy). Name the mismatch.
+Run the structural review and judge its findings:
+
+```sh
+.satellites/satellites context review <story_id> --json --no-ledger
+```
+
+`context review` parses the story's `## Workflow` and reports structural
+conflicts. **Reject** when it reports any of:
+
+- `workflow-unparseable` — the `## Workflow` section is absent or has no
+  parseable yaml block.
+- `workflow-lifecycle` — a degenerate lifecycle (no initial state, no terminal
+  state, or initial == terminal). A workflow you cannot finish is not a contract.
+- `missing-gate-skill` — a transition names a `reviewer_skill` that is not
+  materialised in `.claude/skills`. A gate that does not exist cannot run.
+
+When `context review` reports **no** such findings, the workflow is structurally
+sound — **accept it whether it is the category default OR a designed per-story
+workflow**. Do NOT reject a workflow merely because it differs from the canonical
+block; a designed workflow that gates more than the default (e.g. an added
+commit-push or techdebt transition) is exactly what `no-default-workflow` wants.
+
+**Advisory flag (do not reject):** if the `## Workflow` is the category default
+copied verbatim AND the body shows no design rationale (no `## Workflow
+resolution`/design note explaining why the default fits, and no
+`satellites workflow design` provenance), note in your accept `notes` that the
+workflow appears to be an undesigned default — per `no-default-workflow` the
+lifecycle should be designed from the requirement, and the default may not gate
+everything the story requires (run `satellites context review <story_id>
+--semantic` to surface `required-step-not-gated` conflicts). This is a flag for
+visibility, NOT a rejection — a sound default still passes.
 
 ### 2. The plan
 
