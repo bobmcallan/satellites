@@ -127,6 +127,27 @@ CREATE TABLE IF NOT EXISTS current (
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+-- The reviewer loop's local signal, consolidated off per-story files
+-- (sty_676e070c). inbox is the append log staged for the server ledger;
+-- work_claim is the per-story claim/lease + the inbox flush high-water mark.
+CREATE TABLE IF NOT EXISTS inbox (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    story      TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    payload    TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_story ON inbox(story, seq);
+
+CREATE TABLE IF NOT EXISTS work_claim (
+    story       TEXT PRIMARY KEY,
+    status      TEXT NOT NULL DEFAULT '',
+    claimed_by  TEXT NOT NULL DEFAULT '',
+    lease_until TEXT NOT NULL DEFAULT '',
+    last_seq    INTEGER NOT NULL DEFAULT 0
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
