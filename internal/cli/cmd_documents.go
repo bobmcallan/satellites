@@ -330,9 +330,11 @@ func (v violation) String() string {
 //   - frontmatter project_id, when set, matches the repo project_id;
 //   - a skills/ file carries the required `name` + `description` + `kind`
 //     frontmatter (and `applies_to` for workflows);
-//   - drift: a stamped (sync-materialised, hence project-owned) skill in
-//     .claude/skills/ with no .satellites/skills/ source. Unstamped local
-//     skills are operator-owned and ignored.
+//   - drift: a project-scoped, stamped (sync-materialised) skill in
+//     .claude/skills/ with no .satellites/skills/ source. System/workspace
+//     stamped skills are owned by another scope (sync materialises them here
+//     with no project source) and are exempt; unstamped local skills are
+//     operator-owned and ignored.
 func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) {
 	var vs []violation
 	configSkillNames := map[string]bool{}
@@ -432,13 +434,23 @@ func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) 
 		}
 	}
 
-	// Drift: a project-owned (stamped) skill on disk with no source under
-	// .satellites/skills/.
+	// Drift: a project-scoped, stamped skill on disk with no source under
+	// .satellites/skills/. System/workspace stamped skills are exempt — sync
+	// materialises them here and they carry no project source by design.
 	stamped, serr := readStampedLocalSkills(skillsRoot)
 	if serr != nil {
 		return nil, fmt.Errorf("validate: scan %s: %w", skillsRoot, serr)
 	}
 	for _, l := range stamped {
+		// Only a project-scoped stamped skill is expected to have a
+		// .satellites/skills/ source. A system- or workspace-scoped skill is
+		// materialised here by `skill sync` (which reconciles every scope the
+		// repo can see) and legitimately has no project source — flagging it is
+		// a false positive. Scope empty/unset is treated as project, so a real
+		// project orphan still fails closed.
+		if sc := strings.TrimSpace(l.Scope); sc != "" && sc != "project" {
+			continue
+		}
 		if !configSkillNames[l.Name] {
 			vs = append(vs, violation{
 				filepath.Join(skillsRoot, l.Name),

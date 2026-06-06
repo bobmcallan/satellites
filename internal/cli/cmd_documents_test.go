@@ -445,6 +445,39 @@ func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 	}
 }
 
+// TestValidateUpload_OrphanCheckScopeAware pins the scope-aware orphan rule:
+// a stamped skill sync materialised from a NON-project scope (system/workspace)
+// has no .satellites/skills/ source by design and must not be flagged, while a
+// project-scoped stamped skill with no source still fails closed.
+func TestValidateUpload_OrphanCheckScopeAware(t *testing.T) {
+	root := t.TempDir()
+	skillsRoot := t.TempDir()
+
+	// System-scoped stamped skill, no source — sync-materialised, exempt.
+	if err := applySyncItem(skillsRoot, syncPlanItem{Name: "satellites-sys", Action: actionInstall,
+		Sub: &substrateSkill{Name: "satellites-sys", DocumentID: "doc_sys", Version: 1,
+			Body: "---\nname: sys\nscope: system\n---\n# sys\n"}}); err != nil {
+		t.Fatalf("install sys: %v", err)
+	}
+	// Project-scoped stamped skill, no source — a real orphan, still flagged.
+	if err := applySyncItem(skillsRoot, syncPlanItem{Name: "satellites-proj", Action: actionInstall,
+		Sub: &substrateSkill{Name: "satellites-proj", DocumentID: "doc_proj", Version: 1,
+			Body: "---\nname: proj\nscope: project\n---\n# proj\n"}}); err != nil {
+		t.Fatalf("install proj: %v", err)
+	}
+
+	vs, err := validateUpload(root, skillsRoot, testProjectID)
+	if err != nil {
+		t.Fatalf("validateUpload: %v", err)
+	}
+	if flagged(vs, "/satellites-sys", "orphan-skill") {
+		t.Errorf("system-scoped stamped skill wrongly flagged as orphan: %v", vs)
+	}
+	if !flagged(vs, "/satellites-proj", "orphan-skill") {
+		t.Errorf("project-scoped orphan not flagged: %v", vs)
+	}
+}
+
 // TestValidateUpload_Idempotent pins AC4: validateUpload is a pure read — two
 // runs over the same tree return identical verdicts and write nothing.
 func TestValidateUpload_Idempotent(t *testing.T) {

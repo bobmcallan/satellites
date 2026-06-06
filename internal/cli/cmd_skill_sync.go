@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/spf13/cobra"
 )
 
@@ -114,6 +115,7 @@ type localSkill struct {
 	Stamp     skillStamp
 	BodyHash  string // hash of on-disk authored body (stamp block stripped)
 	Malformed bool   // stamp block present but unparseable
+	Scope     string // frontmatter scope of the authored body ("" when project/unset)
 }
 
 // localSkillName is the name a substrate skill is materialised under in
@@ -231,6 +233,14 @@ func readLocalSkill(skillsRoot, name string) (*localSkill, error) {
 	// file's hash detects operator edits; an unstamped file's hash lets the
 	// reconcile spot one that is byte-identical to the substrate (match).
 	ls := &localSkill{Name: name, Stamped: ok, Stamp: stamp, Malformed: malformed, BodyHash: hashBody(authored)}
+	// Record the materialised skill's declared scope so the upload orphan
+	// check can tell a project-owned skill (which needs a .satellites/skills/
+	// source) from a system/workspace skill that sync legitimately
+	// materialised here with no project source. A parse failure leaves Scope
+	// empty — treated as project-scoped, the fail-closed default.
+	if fm, _, ferr := frontmatter.Parse([]byte(authored)); ferr == nil {
+		ls.Scope = strings.TrimSpace(fm.Scope)
+	}
 	return ls, nil
 }
 
