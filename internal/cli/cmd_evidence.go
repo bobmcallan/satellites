@@ -129,6 +129,45 @@ turn.`,
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "Emit the findings as JSON.")
 	ev.AddCommand(auditCmd)
 
+	var reviewConfig, reviewUser, reviewClaudeBin string
+	var reviewNoSuggest, reviewJSON bool
+	reviewCmd := &cobra.Command{
+		Use:   "review <story-id>",
+		Short: "Assemble a story's QA signal into review.md + metrics.json (+ improvement suggestions)",
+		Long: `review synthesises a per-story session review from signal the loop already
+captured — processtrace.Reconcile (declared × actual), the loop audit, and the
+evidence store (gate runs + CI). It writes .satellites/work/<story>/review.md +
+metrics.json and appends improvement suggestions from a best-effort claude -p
+pass (degrading to a deterministic anomaly/rejection-derived fallback). It adds
+NO new capture and never writes the ledger or moves a status. Speed is recorded,
+never scored.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, workDir := resolveWorkContext(reviewConfig)
+			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+				return dispatchVerb(ctx, name, req, reviewConfig, reviewUser)
+			}
+			suggest := func(ctx context.Context, metricsJSON string) string {
+				if reviewNoSuggest {
+					return ""
+				}
+				return claudeSuggestImprovements(ctx, reviewClaudeBin, metricsJSON)
+			}
+			return runEvidenceReview(cmd.Context(), cmd.OutOrStdout(), evidenceReviewOpts{
+				Story:   strings.TrimSpace(args[0]),
+				StateDB: resolveStateDB(reviewConfig),
+				WorkDir: workDir,
+				JSON:    reviewJSON,
+			}, dispatch, suggest, time.Now().UTC())
+		},
+	}
+	reviewCmd.Flags().StringVar(&reviewConfig, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
+	reviewCmd.Flags().StringVar(&reviewUser, "user", "", "Caller user id (defaults to the configured admin user).")
+	reviewCmd.Flags().StringVar(&reviewClaudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or claude on PATH).")
+	reviewCmd.Flags().BoolVar(&reviewNoSuggest, "no-suggest", false, "Skip the claude -p improvement-suggestions pass (use the deterministic fallback).")
+	reviewCmd.Flags().BoolVar(&reviewJSON, "json", false, "Also print metrics.json to stdout.")
+	ev.AddCommand(reviewCmd)
+
 	register(ev)
 }
 
