@@ -41,3 +41,44 @@ func TestBuildSkillIndex(t *testing.T) {
 		t.Errorf("description = %q", e.Description)
 	}
 }
+
+// TestMergeScopeBinding covers the precedence the skill-index config fix relies
+// on: an explicit --workspace/--project flag wins, otherwise the config-derived
+// value fills in. This is the pure core of resolveSkillScopeBinding, so the
+// regression (project scope left unbound under a bare --config) can't silently
+// return.
+func TestMergeScopeBinding(t *testing.T) {
+	cases := []struct {
+		name           string
+		flagWS, flagPJ string
+		cfgWS, cfgPJ   string
+		wantWS, wantPJ string
+	}{
+		{"empty flags take config", "", "", "wksp_cfg", "proj_cfg", "wksp_cfg", "proj_cfg"},
+		{"explicit flags win", "wksp_flag", "proj_flag", "wksp_cfg", "proj_cfg", "wksp_flag", "proj_flag"},
+		{"explicit ws, config pj", "wksp_flag", "", "wksp_cfg", "proj_cfg", "wksp_flag", "proj_cfg"},
+		{"explicit pj, config ws", "", "proj_flag", "wksp_cfg", "proj_cfg", "wksp_cfg", "proj_flag"},
+		{"all empty stays empty", "", "", "", "", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ws, pj := mergeScopeBinding(c.flagWS, c.flagPJ, c.cfgWS, c.cfgPJ)
+			if ws != c.wantWS || pj != c.wantPJ {
+				t.Fatalf("mergeScopeBinding(%q,%q,%q,%q) = (%q,%q); want (%q,%q)",
+					c.flagWS, c.flagPJ, c.cfgWS, c.cfgPJ, ws, pj, c.wantWS, c.wantPJ)
+			}
+		})
+	}
+}
+
+// TestResolveSkillScopeBinding_ExplicitProjectShortCircuits asserts an already
+// supplied project id returns immediately without touching the config resolver
+// (no server needed). The config-derived merge is covered by
+// TestMergeScopeBinding; this guards the short-circuit that keeps explicit flags
+// authoritative.
+func TestResolveSkillScopeBinding_ExplicitProjectShortCircuits(t *testing.T) {
+	ws, pj := resolveSkillScopeBinding(context.Background(), "", "", "wksp_x", "proj_x")
+	if ws != "wksp_x" || pj != "proj_x" {
+		t.Fatalf("explicit binding mutated: got (%q,%q), want (wksp_x, proj_x)", ws, pj)
+	}
+}

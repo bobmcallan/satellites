@@ -71,6 +71,36 @@ func skillToIndexEntry(s substrateSkill) (skillIndexEntry, error) {
 	}, nil
 }
 
+// resolveSkillScopeBinding fills the workspace/project binding from the config
+// (via resolveDeployScope, the same source `skill sync` / `deploy` use) when it
+// was not passed explicitly. An already-set project short-circuits the lookup,
+// and an unresolvable config is tolerated (the possibly-empty values pass
+// through — scope=system needs no binding). Explicit flags always win.
+func resolveSkillScopeBinding(ctx context.Context, configArg, userArg, ws, pj string) (string, string) {
+	if strings.TrimSpace(pj) != "" {
+		return ws, pj
+	}
+	rws, rpj, err := resolveDeployScope(ctx, configArg, userArg)
+	if err != nil {
+		return ws, pj
+	}
+	return mergeScopeBinding(ws, pj, rws, rpj)
+}
+
+// mergeScopeBinding applies the precedence "explicit flag wins, else
+// config-derived" to each of workspace/project independently. Pure (no I/O) so
+// the precedence is unit-tested directly.
+func mergeScopeBinding(flagWS, flagPJ, cfgWS, cfgPJ string) (ws, pj string) {
+	ws, pj = flagWS, flagPJ
+	if strings.TrimSpace(pj) == "" {
+		pj = cfgPJ
+	}
+	if strings.TrimSpace(ws) == "" {
+		ws = cfgWS
+	}
+	return ws, pj
+}
+
 func newSkillIndexCmd(configArg, userArg *string) *cobra.Command {
 	var (
 		scopeArg string
@@ -93,6 +123,11 @@ single source for which workflow a story type uses (no project-config).`,
 			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
 				return dispatchVerb(ctx, name, req, *configArg, *userArg)
 			}
+			// Derive the project/workspace binding from --config when not passed
+			// explicitly, mirroring `skill sync` / `deploy` — a bare `--config`
+			// invocation otherwise leaves project scope unbound and the server
+			// rejects it ("project scope requires project_id"). Explicit flags win.
+			wsArg, pjArg = resolveSkillScopeBinding(ctx, *configArg, *userArg, wsArg, pjArg)
 			index, err := buildSkillIndex(ctx, dispatch, scopeArg, wsArg, pjArg)
 			if err != nil {
 				return err
