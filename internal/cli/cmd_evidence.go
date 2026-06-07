@@ -129,7 +129,7 @@ turn.`,
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "Emit the findings as JSON.")
 	ev.AddCommand(auditCmd)
 
-	var reviewConfig, reviewUser, reviewClaudeBin string
+	var reviewConfig, reviewUser, reviewClaudeBin, reviewCompare string
 	var reviewNoSuggest, reviewJSON bool
 	reviewCmd := &cobra.Command{
 		Use:   "review <story-id>",
@@ -140,7 +140,13 @@ evidence store (gate runs + CI). It writes .satellites/work/<story>/review.md +
 metrics.json and appends improvement suggestions from a best-effort claude -p
 pass (degrading to a deterministic anomaly/rejection-derived fallback). It adds
 NO new capture and never writes the ledger or moves a status. Speed is recorded,
-never scored.`,
+never scored.
+
+Iteration loop: to re-run a reviewer after editing a story, use the existing
+primitive ` + "`satellites story status_transition --skill <gate> <story-id>`" + ` —
+it re-runs that named gate, repeatable and repo-local. Pass --compare
+<previous metrics.json> to this command to emit a "Delta vs previous" section
+(+ delta.json) showing what changed between two successive reviews.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, workDir := resolveWorkContext(reviewConfig)
@@ -158,12 +164,14 @@ never scored.`,
 				StateDB: resolveStateDB(reviewConfig),
 				WorkDir: workDir,
 				JSON:    reviewJSON,
+				Compare: strings.TrimSpace(reviewCompare),
 			}, dispatch, suggest, time.Now().UTC())
 		},
 	}
 	reviewCmd.Flags().StringVar(&reviewConfig, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
 	reviewCmd.Flags().StringVar(&reviewUser, "user", "", "Caller user id (defaults to the configured admin user).")
 	reviewCmd.Flags().StringVar(&reviewClaudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or claude on PATH).")
+	reviewCmd.Flags().StringVar(&reviewCompare, "compare", "", "Path to a previous metrics.json; emit a 'Delta vs previous' section + delta.json (M6).")
 	reviewCmd.Flags().BoolVar(&reviewNoSuggest, "no-suggest", false, "Skip the claude -p improvement-suggestions pass (use the deterministic fallback).")
 	reviewCmd.Flags().BoolVar(&reviewJSON, "json", false, "Also print metrics.json to stdout.")
 	ev.AddCommand(reviewCmd)

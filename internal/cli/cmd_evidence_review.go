@@ -219,6 +219,9 @@ type evidenceReviewOpts struct {
 	StateDB string
 	WorkDir string
 	JSON    bool
+	// Compare is an optional path to a previous metrics.json; when set, the run
+	// appends a "## Delta vs previous" section and writes delta.json (M6).
+	Compare string
 }
 
 // suggestFn produces improvement suggestions from the metrics JSON. Injected so
@@ -288,11 +291,35 @@ func runEvidenceReview(ctx context.Context, out io.Writer, opts evidenceReviewOp
 	}
 	md := renderReviewMarkdown(m, suggestions)
 
-	// 9. Write artifacts under .satellites/work/<story>/.
 	dir := filepath.Join(opts.WorkDir, opts.Story)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("evidence review: create %s: %w", dir, err)
 	}
+
+	// 8b. Optional delta against a previous metrics.json (M6, sty_37fef613).
+	var deltaPath string
+	if strings.TrimSpace(opts.Compare) != "" {
+		prevBytes, rerr := os.ReadFile(opts.Compare)
+		if rerr != nil {
+			return fmt.Errorf("evidence review: read --compare %s: %w", opts.Compare, rerr)
+		}
+		var prev reviewMetrics
+		if jerr := json.Unmarshal(prevBytes, &prev); jerr != nil {
+			return fmt.Errorf("evidence review: parse --compare %s: %w", opts.Compare, jerr)
+		}
+		delta := compareReviewMetrics(prev, m)
+		md += renderDeltaMarkdown(delta)
+		deltaJSON, derr := json.MarshalIndent(delta, "", "  ")
+		if derr != nil {
+			return fmt.Errorf("evidence review: marshal delta: %w", derr)
+		}
+		deltaPath = filepath.Join(dir, "delta.json")
+		if werr := os.WriteFile(deltaPath, append(deltaJSON, '\n'), 0o644); werr != nil {
+			return fmt.Errorf("evidence review: write %s: %w", deltaPath, werr)
+		}
+	}
+
+	// 9. Write artifacts under .satellites/work/<story>/.
 	mPath := filepath.Join(dir, "metrics.json")
 	rPath := filepath.Join(dir, "review.md")
 	if err := os.WriteFile(mPath, append(metricsJSON, '\n'), 0o644); err != nil {
@@ -304,6 +331,9 @@ func runEvidenceReview(ctx context.Context, out io.Writer, opts evidenceReviewOp
 
 	fmt.Fprintf(out, "wrote %s\n", rPath)
 	fmt.Fprintf(out, "wrote %s\n", mPath)
+	if deltaPath != "" {
+		fmt.Fprintf(out, "wrote %s\n", deltaPath)
+	}
 	if opts.JSON {
 		out.Write(append(metricsJSON, '\n'))
 	}
