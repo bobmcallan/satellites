@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":4,"hash":"67eefd973dc11d7dafc17701a2149560fb734ec55f603686812f8fc05ee72210"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_481c716d","version":5,"hash":"1c2a58f71c0b4a862ecb1de80bed0c96bf262d2d9593a3e790784977e7f1830a"} satellites-sync:end -->
 ---
 name: satellites-fix-workflow
 type: skill
@@ -46,10 +46,21 @@ Never hand-patch status — only reviewers advance it.
 
 A change to the satellites client/server is invisible to the gate until it is
 built, locally tested, `/commit-push`ed, carried through CI
-(test → release → deploy), and `.satellites/satellites` is refreshed to the
-new release. The gate runs the LOCAL binary, so a client change you have not
-shipped + refreshed will not be seen. Build → test → commit-push → watch CI →
-refresh → then drive the gate.
+(test → release → deploy), and `.satellites/satellites` (or the installed
+client) is refreshed to the new release. The gate runs the LOCAL binary, so a
+client change you have not shipped + refreshed will not be seen.
+
+**Merging is NOT releasing.** The release tag is `v<satellites.version>`; a push
+that does not bump `satellites.version` in `.version` computes an existing tag
+and the release is skipped — your client code reaches `main` but no release, no
+client (sty_5a97504a). So the explicit step is: **bump `.version`
+(`satellites.version`)** as part of any client-affecting change, then
+`satellites update` + (if hooks changed) re-run `satellites init`. CI now FAILS
+loudly when client paths changed without a version bump, rather than skipping
+silently.
+
+Build → test → **bump `.version`** → commit-push → watch CI (test → release →
+deploy) → `satellites update` → then drive the gate.
 
 ## Transitions
 
