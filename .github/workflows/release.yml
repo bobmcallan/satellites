@@ -130,13 +130,18 @@ jobs:
           if [ "$BINARY" = "satellites" ]; then
             BIN_VER="$CLI_VERSION"
             BIN_BUILD="$CLI_BUILD"
+            # CLI embeds the gotreesitter grammar subset for `code index` — same
+            # source of truth as the Makefile (scripts/grammar-tags).
+            TAGS="$(grep -v '^#' scripts/grammar-tags | tr '\n' ' ')"
           else
             BIN_VER="$SERVER_VERSION"
             BIN_BUILD="$SERVER_BUILD"
+            TAGS=""
           fi
           OUT="${BINARY}-v${BIN_VER}-${GOOS}-${GOARCH}"
           go build \
             -trimpath \
+            -tags="${TAGS}" \
             -ldflags="-s -w \
               -X github.com/bobmcallan/satellites/internal/verb.Version=v${BIN_VER} \
               -X github.com/bobmcallan/satellites/internal/verb.Commit=${BUILD_SHA} \

@@ -8,9 +8,11 @@
 //	code symbol <name>   print the exact source slice for a symbol
 //
 // CLI-only, NO MCP: these are commands run via Bash, reading/writing the
-// per-repo index. The index store + schema are language-neutral; THIS spike
-// ships a Go-only extractor, and order:2 (sty_380a116d) swaps in CGo-free WASM
-// tree-sitter for any language behind the same seam. See internal/codeindex.
+// per-repo index. The index store + schema are language-neutral; symbols are
+// extracted by language — Go via go/ast, every other language via the CGo-free
+// pure-Go gotreesitter runtime (sty_380a116d). `code index` is incremental:
+// only files whose content changed since the last run are re-parsed. See
+// internal/codeindex.
 package cli
 
 import (
@@ -42,16 +44,18 @@ after large changes), then ` + "`code search`" + ` / ` + "`code symbol`" + ` to 
 	}
 
 	var indexConfig string
+	var indexFull bool
 	indexCmd := &cobra.Command{
 		Use:   "index",
 		Short: "Build or refresh the repo symbol index (.satellites/index.db)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, dbPath := resolveCodeIndex(indexConfig)
-			return runCodeIndex(cmd.OutOrStdout(), repoRoot, dbPath)
+			return runCodeIndex(cmd.OutOrStdout(), repoRoot, dbPath, indexFull)
 		},
 	}
 	indexCmd.Flags().StringVar(&indexConfig, "config", "", "Path to satellites.toml (resolves repo root; defaults to walk-up from CWD).")
+	indexCmd.Flags().BoolVar(&indexFull, "full", false, "Re-parse every file, ignoring the incremental content-hash cache.")
 	code.AddCommand(indexCmd)
 
 	var searchConfig string
@@ -98,22 +102,23 @@ func resolveCodeIndex(configArg string) (repoRoot, dbPath string) {
 	return repoRoot, filepath.Join(repoRoot, defaultIndexDB)
 }
 
-func runCodeIndex(out io.Writer, repoRoot, dbPath string) error {
-	syms, filesParsed, parseErrors, err := codeindex.ExtractRepo(repoRoot)
-	if err != nil {
-		return fmt.Errorf("code index: walk %s: %w", repoRoot, err)
-	}
+func runCodeIndex(out io.Writer, repoRoot, dbPath string, full bool) error {
 	store, err := codeindex.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("code index: %w", err)
 	}
 	defer store.Close()
-	if err := store.Replace(syms); err != nil {
+	stats, err := codeindex.IndexRepo(store, repoRoot, full)
+	if err != nil {
 		return fmt.Errorf("code index: %w", err)
 	}
-	fmt.Fprintf(out, "indexed %d symbols from %d files → %s\n", len(syms), filesParsed, dbPath)
-	if parseErrors > 0 {
-		fmt.Fprintf(out, "(%d file(s) skipped on parse error)\n", parseErrors)
+	fmt.Fprintf(out, "indexed %d symbols (%d file(s) parsed, %d unchanged) → %s\n",
+		stats.TotalSymbols, stats.FilesParsed, stats.Unchanged, dbPath)
+	if stats.Deleted > 0 {
+		fmt.Fprintf(out, "(%d deleted file(s) pruned)\n", stats.Deleted)
+	}
+	if stats.ParseErrors > 0 {
+		fmt.Fprintf(out, "(%d file(s) skipped on parse error)\n", stats.ParseErrors)
 	}
 	return nil
 }

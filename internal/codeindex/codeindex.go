@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -92,9 +93,15 @@ CREATE TABLE IF NOT EXISTS symbols (
     end_byte   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file);
 CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
     name, signature, kind,
     content='symbols', content_rowid='id'
+);
+CREATE TABLE IF NOT EXISTS files (
+    file       TEXT PRIMARY KEY,
+    sha256     TEXT NOT NULL,
+    indexed_at TEXT NOT NULL
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("codeindex: migrate: %w", err)
@@ -118,6 +125,12 @@ func (s *Store) Replace(syms []Symbol) error {
 	if _, err := tx.Exec(`DELETE FROM symbols`); err != nil {
 		return fmt.Errorf("codeindex: clear: %w", err)
 	}
+	// A whole-repo Replace invalidates the per-file content-hash cache: clear it
+	// so a later incremental IndexRepo re-parses from a clean slate rather than
+	// trusting stale hashes for rows it did not write.
+	if _, err := tx.Exec(`DELETE FROM files`); err != nil {
+		return fmt.Errorf("codeindex: clear files: %w", err)
+	}
 	stmt, err := tx.Prepare(`INSERT INTO symbols
 		(name, kind, signature, file, start_line, end_line, start_byte, end_byte)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -133,6 +146,102 @@ func (s *Store) Replace(syms []Symbol) error {
 	}
 	// Rebuild the FTS index from the content table in one pass (external-content
 	// FTS5 idiom — no per-row triggers, correct for a build-once index).
+	if _, err := tx.Exec(`INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild')`); err != nil {
+		return fmt.Errorf("codeindex: fts rebuild: %w", err)
+	}
+	return tx.Commit()
+}
+
+// FileSymbols is one file's parse result for an incremental Reconcile: the
+// repo-relative path, its content hash, and the symbols extracted from it.
+type FileSymbols struct {
+	File string
+	Sha  string
+	Syms []Symbol
+}
+
+// LoadFileHashes returns the stored content hash for every indexed file — the
+// cache the incremental re-index consults to skip files whose content is
+// unchanged since the last run.
+func (s *Store) LoadFileHashes() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT file, sha256 FROM files`)
+	if err != nil {
+		return nil, fmt.Errorf("codeindex: load file hashes: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var file, sha string
+		if err := rows.Scan(&file, &sha); err != nil {
+			return nil, err
+		}
+		out[file] = sha
+	}
+	return out, rows.Err()
+}
+
+// Reconcile applies an incremental index update in one transaction: each changed
+// file's symbols are replaced and its hash recorded; each deleted file's symbols
+// and hash are removed; then the FTS mirror is rebuilt. A failed reconcile rolls
+// back, never leaving a half-updated index. A no-op (nothing changed or deleted)
+// returns without touching the database.
+func (s *Store) Reconcile(changed []FileSymbols, deleted []string) error {
+	if len(changed) == 0 && len(deleted) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	delSyms, err := tx.Prepare(`DELETE FROM symbols WHERE file = ?`)
+	if err != nil {
+		return err
+	}
+	defer delSyms.Close()
+	insSym, err := tx.Prepare(`INSERT INTO symbols
+		(name, kind, signature, file, start_line, end_line, start_byte, end_byte)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer insSym.Close()
+	upFile, err := tx.Prepare(`INSERT INTO files (file, sha256, indexed_at) VALUES (?, ?, ?)
+		ON CONFLICT(file) DO UPDATE SET sha256 = excluded.sha256, indexed_at = excluded.indexed_at`)
+	if err != nil {
+		return err
+	}
+	defer upFile.Close()
+	delFile, err := tx.Prepare(`DELETE FROM files WHERE file = ?`)
+	if err != nil {
+		return err
+	}
+	defer delFile.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, f := range changed {
+		if _, err := delSyms.Exec(f.File); err != nil {
+			return fmt.Errorf("codeindex: clear %s: %w", f.File, err)
+		}
+		for _, sym := range f.Syms {
+			if _, err := insSym.Exec(sym.Name, sym.Kind, sym.Signature, sym.File,
+				sym.StartLine, sym.EndLine, sym.StartByte, sym.EndByte); err != nil {
+				return fmt.Errorf("codeindex: insert %s: %w", sym.Name, err)
+			}
+		}
+		if _, err := upFile.Exec(f.File, f.Sha, now); err != nil {
+			return fmt.Errorf("codeindex: record %s: %w", f.File, err)
+		}
+	}
+	for _, d := range deleted {
+		if _, err := delSyms.Exec(d); err != nil {
+			return fmt.Errorf("codeindex: prune symbols %s: %w", d, err)
+		}
+		if _, err := delFile.Exec(d); err != nil {
+			return fmt.Errorf("codeindex: prune file %s: %w", d, err)
+		}
+	}
 	if _, err := tx.Exec(`INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild')`); err != nil {
 		return fmt.Errorf("codeindex: fts rebuild: %w", err)
 	}

@@ -6,62 +6,8 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 )
-
-// skipDirs are directories never walked: VCS metadata, the satellites working
-// tree (its own index.db lives here), and vendored / dependency trees whose
-// symbols are noise for discovering THIS repo's code.
-var skipDirs = map[string]bool{
-	".git":         true,
-	".satellites":  true,
-	"vendor":       true,
-	"node_modules": true,
-}
-
-// ExtractRepo walks root and extracts top-level symbols from every Go file,
-// returning them with repo-relative, forward-slashed paths. Parse errors on a
-// single file are skipped (best-effort over a repo that may not fully compile),
-// not fatal — the count of files that failed to parse is returned for honest
-// reporting. This is the spike's Go-only extractor; order:2 replaces it with a
-// language-dispatching WASM tree-sitter extractor behind the same return shape.
-func ExtractRepo(root string) (syms []Symbol, filesParsed, parseErrors int, err error) {
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		src, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil // unreadable file — skip, not fatal
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
-		}
-		rel = filepath.ToSlash(rel)
-		fileSyms, perr := extractGoFile(rel, src)
-		if perr != nil {
-			parseErrors++
-			return nil
-		}
-		filesParsed++
-		syms = append(syms, fileSyms...)
-		return nil
-	})
-	return syms, filesParsed, parseErrors, walkErr
-}
 
 // extractGoFile parses one Go source file and returns its top-level symbols. The
 // repo-relative path is carried in for the File field; byte/line offsets are

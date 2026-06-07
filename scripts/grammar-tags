@@ -1,0 +1,26 @@
+# Build tags selecting the gotreesitter grammar subset embedded in the satellites
+# CLI (the `code index` symbol extractor — epic:code-index, sty_380a116d).
+#
+# Single source of truth, consumed by BOTH the Makefile and the release workflow
+# so the local and shipped binaries embed the same languages. `grammar_subset`
+# turns on selective embedding; each `grammar_subset_<lang>` adds one grammar.
+# Adding a language = add its tag here (no other file changes). Languages NOT
+# listed are simply unrecognised by `code index` (they degrade to "no symbols",
+# never a crash). The full 206-grammar set is the default build (no tags) and
+# costs ~+28 MB; this curated set keeps the binary small.
+#
+# Lines starting with # are comments; the build joins the rest into one -tags arg.
+grammar_subset
+grammar_subset_go
+grammar_subset_python
+grammar_subset_javascript
+grammar_subset_typescript
+grammar_subset_tsx
+grammar_subset_rust
+grammar_subset_java
+grammar_subset_ruby
+grammar_subset_c
+grammar_subset_cpp
+grammar_subset_c_sharp
+grammar_subset_php
+grammar_subset_bash

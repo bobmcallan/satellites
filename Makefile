@@ -12,6 +12,12 @@ COMMIT         := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown
 
 VERB_PKG := github.com/bobmcallan/satellites/internal/verb
 
+# Grammar subset embedded in the CLI `code index` symbol extractor. Sourced from
+# scripts/grammar-tags (shared with the release workflow); comments stripped and
+# joined into one space-separated -tags argument. CLI only — the server has no
+# code index, so it builds tag-free.
+GRAMMAR_TAGS := $(shell grep -v '^\#' scripts/grammar-tags | tr '\n' ' ')
+
 CLI_LDFLAGS    := -s -w \
   -X $(VERB_PKG).Version=v$(CLI_VERSION) \
   -X $(VERB_PKG).Commit=$(COMMIT) \
@@ -26,7 +32,7 @@ SERVER_LDFLAGS := -s -w \
 .PHONY: build vet test test-integration migrate-up migrate-down migrate-status version
 
 build:
-	go build -trimpath -ldflags="$(CLI_LDFLAGS)"    -o bin/satellites        ./cmd/satellites
+	go build -trimpath -tags="$(GRAMMAR_TAGS)" -ldflags="$(CLI_LDFLAGS)" -o bin/satellites        ./cmd/satellites
 	go build -trimpath -ldflags="$(SERVER_LDFLAGS)" -o bin/satellites-server ./cmd/satellites-server
 
 version:

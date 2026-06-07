@@ -29,7 +29,7 @@ func TestRunCodeIndexThenSearchAndSymbol(t *testing.T) {
 	root, dbPath := writeCodeRepo(t)
 
 	var idxOut bytes.Buffer
-	if err := runCodeIndex(&idxOut, root, dbPath); err != nil {
+	if err := runCodeIndex(&idxOut, root, dbPath, false); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 	if !strings.Contains(idxOut.String(), "indexed") {
@@ -61,7 +61,7 @@ func TestRunCodeIndexThenSearchAndSymbol(t *testing.T) {
 func TestRunCodeSearch_NoMatch(t *testing.T) {
 	root, dbPath := writeCodeRepo(t)
 	var idx bytes.Buffer
-	if err := runCodeIndex(&idx, root, dbPath); err != nil {
+	if err := runCodeIndex(&idx, root, dbPath, false); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 	var out bytes.Buffer
@@ -76,7 +76,7 @@ func TestRunCodeSearch_NoMatch(t *testing.T) {
 func TestRunCodeSymbol_NotFound(t *testing.T) {
 	root, dbPath := writeCodeRepo(t)
 	var idx bytes.Buffer
-	if err := runCodeIndex(&idx, root, dbPath); err != nil {
+	if err := runCodeIndex(&idx, root, dbPath, false); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 	var out bytes.Buffer
