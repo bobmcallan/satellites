@@ -18,6 +18,15 @@
           }
         ],
         "matcher": "mcp__satellites__document_get"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook codenudge",
+            "type": "command"
+          }
+        ],
+        "matcher": "Read"
       }
     ],
     "UserPromptSubmit": [
