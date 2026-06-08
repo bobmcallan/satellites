@@ -97,7 +97,7 @@ func oauthCallbackHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
 		// Provision per-user state (personal workspace). Best-effort —
 		// a failure must not block login.
 		if cfg.ProvisionLogin != nil {
-			if err := cfg.ProvisionLogin(r.Context(), u.ID, u.DisplayName); err != nil {
+			if err := cfg.ProvisionLogin(r.Context(), u.ID, u.Email, u.DisplayName); err != nil {
 				arbor.ErrorCtx(r.Context(), "oauth: provision login", "user_id", u.ID, "err", err)
 			}
 		}

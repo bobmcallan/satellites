@@ -21,6 +21,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
+	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/live"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
@@ -79,6 +80,9 @@ func main() {
 	// and backfilled by migration 0028.
 	wsStore := workspace.New(sqlDB)
 	verb.SetWorkspaceStore(wsStore)
+
+	invStore := invitation.New(sqlDB)
+	verb.SetInvitationStore(invStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
 	ledgerStore := ledger.New(sqlDB)
@@ -447,8 +451,12 @@ func main() {
 		OAuthServer: oauthServer,
 		Live:        liveHub,
 		LiveScope:   liveScope,
-		ProvisionLogin: func(ctx context.Context, userID, displayName string) error {
-			_, err := wsStore.EnsurePersonalWorkspace(ctx, userID, displayName, time.Now().UTC())
+		ProvisionLogin: func(ctx context.Context, userID, email, displayName string) error {
+			if _, err := wsStore.EnsurePersonalWorkspace(ctx, userID, displayName, time.Now().UTC()); err != nil {
+				return err
+			}
+			// Claim any pending invitations for this verified email.
+			_, err := invStore.ClaimForEmail(ctx, email, userID, time.Now().UTC())
 			return err
 		},
 	})

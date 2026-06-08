@@ -54,10 +54,11 @@ type Config struct {
 // every topic, others only their workspaces' topics. See cmd/satellites-server.
 type LiveScoper func(ctx context.Context, userID string) (live.Scope, error)
 
-// LoginProvisioner provisions per-user state on login (currently the user's
-// personal workspace). Best-effort: a failure is logged, not surfaced to the
-// user, so a provisioning hiccup never blocks sign-in.
-type LoginProvisioner func(ctx context.Context, userID, displayName string) error
+// LoginProvisioner provisions per-user state on login: the user's personal
+// workspace, and claiming any pending email invitations for their verified
+// email. Best-effort: a failure is logged, not surfaced to the user, so a
+// provisioning hiccup never blocks sign-in.
+type LoginProvisioner func(ctx context.Context, userID, email, displayName string) error
 
 // Build returns the configured root handler.
 func Build(cfg Config) http.Handler {
