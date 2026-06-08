@@ -8,12 +8,16 @@ import (
 	"time"
 )
 
-// Role values for a Member.
+// Role values for a Member. The GitHub-aligned workspace role set
+// (epic:user-admin): owner (the creator, exactly one per workspace) >
+// admin (manages members/projects/roles) > member (belongs to the
+// workspace; project access is governed per-project). The legacy
+// reviewer/viewer roles were retired and folded to member by migration
+// 0027 — project-level read/write now carries that distinction.
 const (
-	RoleAdmin    = "admin"
-	RoleMember   = "member"
-	RoleReviewer = "reviewer"
-	RoleViewer   = "viewer"
+	RoleOwner  = "owner"
+	RoleAdmin  = "admin"
+	RoleMember = "member"
 )
 
 // ErrInvalidRole is returned when an unknown role string is supplied.
@@ -32,10 +36,11 @@ type Member struct {
 	AddedBy     string    `json:"added_by,omitempty"`
 }
 
-// IsValidRole reports whether r is one of the four recognised roles.
+// IsValidRole reports whether r is one of the recognised workspace
+// roles (owner|admin|member).
 func IsValidRole(r string) bool {
 	switch r {
-	case RoleAdmin, RoleMember, RoleReviewer, RoleViewer:
+	case RoleOwner, RoleAdmin, RoleMember:
 		return true
 	}
 	return false
