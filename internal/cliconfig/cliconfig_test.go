@@ -23,6 +23,38 @@ func TestResolveWorkDir(t *testing.T) {
 	}
 }
 
+func TestResolveDataDirStores(t *testing.T) {
+	// Default: state.db + index.db share <repo>/.satellites, beside each other —
+	// state.db is NOT under work/ any more.
+	if got, want := (Config{}).ResolveDataDir("/repo"), filepath.Join("/repo", ".satellites"); got != want {
+		t.Errorf("default data dir = %q, want %q", got, want)
+	}
+	if got, want := (Config{}).ResolveStateDB("/repo"), filepath.Join("/repo", ".satellites", "state.db"); got != want {
+		t.Errorf("default state.db = %q, want %q (must not be under work/)", got, want)
+	}
+	if got, want := (Config{}).ResolveIndexDB("/repo"), filepath.Join("/repo", ".satellites", "index.db"); got != want {
+		t.Errorf("default index.db = %q, want %q", got, want)
+	}
+
+	// A data_dir override relocates BOTH stores together.
+	c := Config{DataDir: "var/sat"}
+	if got, want := c.ResolveStateDB("/repo"), filepath.Join("/repo", "var", "sat", "state.db"); got != want {
+		t.Errorf("data_dir state.db = %q, want %q", got, want)
+	}
+	if got, want := c.ResolveIndexDB("/repo"), filepath.Join("/repo", "var", "sat", "index.db"); got != want {
+		t.Errorf("data_dir index.db = %q, want %q", got, want)
+	}
+	// Absolute data_dir is used verbatim.
+	if got, want := (Config{DataDir: "/abs/data"}).ResolveStateDB("/repo"), filepath.Join("/abs/data", "state.db"); got != want {
+		t.Errorf("absolute data_dir state.db = %q, want %q", got, want)
+	}
+
+	// An explicit state_db override still wins over data_dir (the escape hatch).
+	if got, want := (Config{DataDir: "/abs/data", StateDB: "custom/s.db"}).ResolveStateDB("/repo"), filepath.Join("/repo", "custom", "s.db"); got != want {
+		t.Errorf("state_db override = %q, want %q", got, want)
+	}
+}
+
 func TestLoad_ExplicitPath(t *testing.T) {
 	dir := t.TempDir()
 	// Isolate the credential store under a temp XDG dir.

@@ -44,7 +44,7 @@ evidence) without breaking the reader.
 ## What "active engagement" means (sty_2b6cd041)
 
 The door no longer trusts `engagement.json` presence. It reads the engagement
-**store** (`.satellites/work/state.db`, `internal/workstate`) keyed by the
+**store** (`.satellites/state.db`, `internal/workstate`) keyed by the
 PreToolUse **`session_id`**, and treats an engagement as **active** only when, for
 that session, it is:
 

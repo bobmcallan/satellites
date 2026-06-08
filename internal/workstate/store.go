@@ -5,7 +5,7 @@
 // so the two core questions — what is each agent working on, and is it
 // progressing — are answerable as queries.
 //
-// The store is per-repo, lives at <repo>/.satellites/work/state.db by default
+// The store is per-repo, lives at <repo>/.satellites/state.db by default
 // (resolved via cliconfig.ResolveStateDB; override-only state_db key), and is
 // self-initializing: Open creates the file and migrates the schema, so a fresh
 // repo needs no setup step. The driver is pure-Go (modernc.org/sqlite) so the

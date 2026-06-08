@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/spf13/cobra"
 )
@@ -87,8 +88,10 @@ func assessCodeNudge(cwd, target string) (nudge bool, msg string) {
 	if !codeindex.IsIndexable(filepath.ToSlash(rel)) {
 		return false, "" // not a source file an extractor handles
 	}
-	// An index must exist — else `code search` has nothing to offer.
-	if _, err := os.Stat(filepath.Join(root, defaultIndexDB)); err != nil {
+	// An index must exist — else `code search` has nothing to offer. Resolve its
+	// path through the shared data-dir config so a data_dir override is honoured.
+	cfg, _, _ := cliconfig.Load(filepath.Join(root, ".satellites", "satellites.toml"))
+	if _, err := os.Stat(cfg.ResolveIndexDB(root)); err != nil {
 		return false, ""
 	}
 	info, err := os.Stat(abs)

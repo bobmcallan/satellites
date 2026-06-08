@@ -41,7 +41,7 @@ func init() {
 		Short: "Read + record the durable QA-evidence trail (gate runs + CI outcomes) per story",
 		Long: `evidence is the out-of-band QA trail for a story: the gate runs captured
 automatically by the reviewer loop and the CI outcomes recorded here. It reads
-from / writes to the per-repo store (.satellites/work/state.db) and, for CI, the
+from / writes to the per-repo store (.satellites/state.db) and, for CI, the
 server ledger — never the executor's turn.`,
 	}
 

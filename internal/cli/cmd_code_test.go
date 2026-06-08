@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 )
 
 const codeSampleGo = `package sample
@@ -22,7 +24,7 @@ func writeCodeRepo(t *testing.T) (root, dbPath string) {
 	if err := os.WriteFile(filepath.Join(root, "sample.go"), []byte(codeSampleGo), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return root, filepath.Join(root, defaultIndexDB)
+	return root, cliconfig.Config{}.ResolveIndexDB(root)
 }
 
 func TestRunCodeIndexThenSearchAndSymbol(t *testing.T) {

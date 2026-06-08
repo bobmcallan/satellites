@@ -88,7 +88,7 @@ finished story then leaves no leftover that could authorise later edits.`,
 		Use:   "status",
 		Short: "Show the open engagements recorded in this repo's event store",
 		Long: `status renders the open engagements from the per-repo engagement event
-store (.satellites/work/state.db by default, or satellites.toml state_db) — what
+store (.satellites/state.db by default, or satellites.toml state_db) — what
 each session is working on, its phase, and whether its lease is fresh. It opens
 the store read-only and self-initialises an empty one if none exists.`,
 		Args: cobra.NoArgs,
@@ -122,7 +122,7 @@ retried next run; the server ledger stays the authority.`,
 }
 
 // resolveStateDB returns the per-repo engagement event-store path, honouring an
-// optional satellites.toml state_db (default .satellites/work/state.db). Mirrors
+// optional satellites.toml state_db (default .satellites/state.db). Mirrors
 // resolveWorkContext: an unconfigured repo falls back to a CWD-rooted default.
 func resolveStateDB(configArg string) string {
 	cfg, path, err := cliconfig.Load(configArg)

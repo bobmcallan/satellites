@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/workstate"
 )
 
@@ -27,8 +28,11 @@ func accessTestRepo(t *testing.T) string {
 	return repo
 }
 
+// storePath is the engagement store the access hook actually reads — the
+// resolved state.db (now <repo>/.satellites/state.db, beside index.db), so the
+// test seeds where stateDBForRoot looks.
 func storePath(repo string) string {
-	return filepath.Join(repo, ".satellites", "work", "state.db")
+	return cliconfig.Config{}.ResolveStateDB(repo)
 }
 
 func jsonReader(t *testing.T, v any) *bytes.Reader {

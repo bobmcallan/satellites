@@ -146,7 +146,8 @@ func runInit(out io.Writer, repoRoot string) error {
 const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`satellites auth`" + ` to add credentials.
 # server_url = "https://your-satellites-server"
 # project_id = "proj_..."
-# work_dir = ".satellites/work"   # where the START-door engagement state lives (default; optional)
+# data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
+# work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
 ` + ungatedDirsBlock
 
 // ungatedDirsBlock documents + seeds the START-door exemption knob. The door

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 )
 
 // TestRunWorkInit_EngagesAndFlipsGate: before init the store-based door denies;
@@ -15,7 +17,7 @@ import (
 func TestRunWorkInit_EngagesAndFlipsGate(t *testing.T) {
 	repo := writeRepo(t, true, "") // configured, no engagement yet
 	workDir := filepath.Join(repo, ".satellites", "work")
-	stateDB := filepath.Join(workDir, "state.db")
+	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
 	// Precondition: the door denies before engagement.
@@ -51,7 +53,7 @@ func TestRunWorkInit_EngagesAndFlipsGate(t *testing.T) {
 func TestRunWorkInit_RequiresStory(t *testing.T) {
 	repo := t.TempDir()
 	workDir := filepath.Join(repo, ".satellites", "work")
-	stateDB := filepath.Join(workDir, "state.db")
+	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "   ", "", "sess1", true, time.Now().UTC()); err == nil {
 		t.Errorf("empty story id should error")
 	}
@@ -63,7 +65,7 @@ func TestRunWorkInit_RequiresStory(t *testing.T) {
 func TestRunWorkInit_SingleOpenPerSession(t *testing.T) {
 	repo := writeRepo(t, true, "")
 	workDir := filepath.Join(repo, ".satellites", "work")
-	stateDB := filepath.Join(workDir, "state.db")
+	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
 	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_aaa", "in_progress", "sess1", true, now); err != nil {
@@ -91,7 +93,7 @@ func TestRunWorkInit_SingleOpenPerSession(t *testing.T) {
 func TestRunWorkClose_ClearsLegacyFile(t *testing.T) {
 	repo := writeRepo(t, true, "")
 	workDir := filepath.Join(repo, ".satellites", "work")
-	stateDB := filepath.Join(workDir, "state.db")
+	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
 	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_ccc", "in_progress", "sess1", true, now); err != nil {

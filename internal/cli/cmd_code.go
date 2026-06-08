@@ -18,19 +18,12 @@ package cli
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/codeindex"
 	"github.com/spf13/cobra"
 )
-
-// DefaultIndexDB is the per-repo symbol index location — beside the other
-// .satellites/ working state, gitignored like state.db (runtime-rebuilt, not a
-// committed artifact). Not configurable: unlike state_db there is no override
-// key, because the index is disposable local intelligence.
-const defaultIndexDB = ".satellites/index.db"
 
 func init() {
 	code := &cobra.Command{
@@ -90,16 +83,18 @@ after large changes), then ` + "`code search`" + ` / ` + "`code symbol`" + ` to 
 }
 
 // resolveCodeIndex returns the repo root (walked for indexing, joined for source
-// slices) and the index.db path beside the other .satellites/ state. Mirrors
-// resolveStateDB: an unconfigured repo falls back to a CWD-rooted default.
+// slices) and the index.db path under the shared data dir (<data_dir>/index.db,
+// default <repo>/.satellites/index.db). Mirrors resolveStateDB: an unconfigured
+// repo falls back to a CWD-rooted default, and a data_dir override relocates the
+// index alongside state.db.
 func resolveCodeIndex(configArg string) (repoRoot, dbPath string) {
-	_, path, err := cliconfig.Load(configArg)
+	cfg, path, err := cliconfig.Load(configArg)
 	if err != nil || strings.TrimSpace(path) == "" {
 		repoRoot = cwdOrDot()
 	} else {
 		repoRoot = cliconfig.RepoRootFromConfigPath(path)
 	}
-	return repoRoot, filepath.Join(repoRoot, defaultIndexDB)
+	return repoRoot, cfg.ResolveIndexDB(repoRoot)
 }
 
 func runCodeIndex(out io.Writer, repoRoot, dbPath string, full bool) error {

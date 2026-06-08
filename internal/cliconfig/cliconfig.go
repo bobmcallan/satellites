@@ -52,11 +52,20 @@ type Config struct {
 	// resolve through ResolveWorkDir so they always agree.
 	WorkDir string `toml:"work_dir"`
 
-	// StateDB overrides where the per-repo engagement event store (SQLite)
-	// lives. NOT required in the toml — empty means the default
-	// <repo>/.satellites/work/state.db (zero-config out of the box). A relative
-	// value resolves against the repo root; absolute is used verbatim. The store
-	// self-initializes on open, so no setup step is needed. Override-only.
+	// DataDir is the single home for the client's per-repo data stores —
+	// state.db (engagement cache) and index.db (code symbol index). NOT required
+	// in the toml — empty means the default <repo>/.satellites. A relative value
+	// resolves against the repo root; absolute is used verbatim. Both stores
+	// resolve under it (ResolveStateDB / ResolveIndexDB), so a custom data_dir
+	// relocates them together. Per-story working state stays under
+	// .satellites/work (WorkDir), independent of this.
+	DataDir string `toml:"data_dir"`
+
+	// StateDB is a per-store OVERRIDE for the engagement event store (SQLite).
+	// NOT required in the toml — empty means <data_dir>/state.db (default
+	// <repo>/.satellites/state.db, zero-config). A relative value resolves against
+	// the repo root; absolute is used verbatim. The store self-initializes on
+	// open. Prefer data_dir; this override exists for the rare split layout.
 	StateDB string `toml:"state_db"`
 
 	// UngatedDirs lists paths the START-door (`satellites hook gate`) will NOT
@@ -139,22 +148,22 @@ func (c Config) ResolveWorkDir(repoRoot string) string {
 	return filepath.Join(repoRoot, p)
 }
 
-// DefaultStateDB is the per-repo engagement event-store location when state_db
-// is unset — repo-relative, alongside the other .satellites/work working state.
-const DefaultStateDB = ".satellites/work/state.db"
+// DefaultDataDir is where the client's per-repo data stores (state.db, index.db)
+// live when data_dir is unset — the repo's .satellites/ directory, beside the
+// committed substrate (documents/skills/principles). Both global caches share
+// this home; per-story working state stays under .satellites/work (DefaultWorkDir).
+const DefaultDataDir = ".satellites"
 
-// ResolveStateDB is the ONE authoritative computation of where the engagement
-// event store (SQLite) lives, shared by every reader/writer so they never
-// disagree. Mirrors ResolveWorkDir/ResolveLogDir: an explicit state_db wins
-// (repo-relative or absolute); otherwise it defaults to
-// <repo>/.satellites/work/state.db. A relative value resolves against the repo
-// root — the directory that HOLDS .satellites/ — never the process CWD. The
-// zero-value Config resolves to the default, so an unconfigured repo still
-// lands a working path (zero-config).
-func (c Config) ResolveStateDB(repoRoot string) string {
-	p := strings.TrimSpace(c.StateDB)
+// ResolveDataDir is the ONE authoritative computation of the directory holding
+// the client's per-repo data stores. An explicit data_dir wins (repo-relative or
+// absolute); otherwise it defaults to <repo>/.satellites. Mirrors
+// ResolveWorkDir/ResolveLogDir: a relative value resolves against the repo root —
+// the directory that HOLDS .satellites/ — never the process CWD. The zero-value
+// Config resolves to the default (zero-config).
+func (c Config) ResolveDataDir(repoRoot string) string {
+	p := strings.TrimSpace(c.DataDir)
 	if p == "" {
-		p = DefaultStateDB
+		p = DefaultDataDir
 	}
 	if filepath.IsAbs(p) {
 		return p
@@ -163,6 +172,40 @@ func (c Config) ResolveStateDB(repoRoot string) string {
 		repoRoot = "."
 	}
 	return filepath.Join(repoRoot, p)
+}
+
+// DefaultStateDB is the engagement event-store location when neither state_db nor
+// data_dir is set — <repo>/.satellites/state.db, beside index.db. Used as the
+// fallback by readers that cannot load the config (e.g. the START-door hook).
+const DefaultStateDB = ".satellites/state.db"
+
+// ResolveStateDB is the ONE authoritative computation of where the engagement
+// event store (SQLite) lives, shared by every reader/writer so they never
+// disagree. An explicit state_db wins (repo-relative or absolute) as a per-store
+// override; otherwise the store defaults to <data_dir>/state.db — i.e.
+// <repo>/.satellites/state.db, beside index.db. A relative value resolves against
+// the repo root — the directory that HOLDS .satellites/ — never the process CWD.
+// The zero-value Config resolves to the default, so an unconfigured repo still
+// lands a working path (zero-config).
+func (c Config) ResolveStateDB(repoRoot string) string {
+	if p := strings.TrimSpace(c.StateDB); p != "" {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		if strings.TrimSpace(repoRoot) == "" {
+			repoRoot = "."
+		}
+		return filepath.Join(repoRoot, p)
+	}
+	return filepath.Join(c.ResolveDataDir(repoRoot), "state.db")
+}
+
+// ResolveIndexDB is the authoritative computation of where the code symbol index
+// (SQLite) lives: <data_dir>/index.db — <repo>/.satellites/index.db by default,
+// beside state.db. Resolving through data_dir means a custom data_dir relocates
+// both stores together.
+func (c Config) ResolveIndexDB(repoRoot string) string {
+	return filepath.Join(c.ResolveDataDir(repoRoot), "index.db")
 }
 
 // RepoRootFromConfigPath derives the repo root (the directory holding
