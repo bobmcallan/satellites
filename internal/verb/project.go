@@ -1,9 +1,10 @@
 // Project verbs — V5's per-engagement domain surface, bound to the
 // workspace minted in PR 1.
 //
-// workspace_id defaults to the system default workspace (see
-// workspace.SeedDefault) when not supplied. owner_user_id falls back
-// to auth.FromContext(ctx) the same way workspace verbs do.
+// workspace_id defaults to the caller's personal workspace
+// (epic:user-admin — the shared default was retired) when not supplied.
+// owner_user_id falls back to auth.FromContext(ctx) the same way
+// workspace verbs do.
 
 package verb
 
@@ -116,16 +117,21 @@ func invokeProjectCreate(ctx context.Context, raw json.RawMessage) (json.RawMess
 	}
 	wsID := strings.TrimSpace(req.WorkspaceID)
 	if wsID == "" {
-		// Fall back to the default workspace. Same boot-seeded singleton
-		// that workspace_list returns when nothing else has been minted.
+		// Fall back to the caller's personal workspace (epic:user-admin —
+		// the shared default was retired in sty_3a54bf42). Requires a
+		// caller identity to resolve "my workspace".
 		if workspaceStore == nil {
 			return nil, fmt.Errorf("project_create: workspace_id required (workspace store not configured)")
 		}
-		def, err := workspaceStore.GetDefault(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("project_create: default workspace lookup: %w", err)
+		uid := callerUserID(ctx)
+		if uid == "" {
+			return nil, fmt.Errorf("project_create: workspace_id required (no caller identity to resolve a personal workspace)")
 		}
-		wsID = def.ID
+		pw, err := workspaceStore.GetPersonalForUser(ctx, uid)
+		if err != nil {
+			return nil, fmt.Errorf("project_create: personal workspace lookup: %w", err)
+		}
+		wsID = pw.ID
 	}
 	p, err := projectStore.Create(ctx, project.CreateInput{
 		WorkspaceID: wsID,

@@ -44,11 +44,20 @@ type Config struct {
 	// main (which may import substrate stores) so this transport package stays
 	// free of substrate-domain imports per the layering guard.
 	LiveScope LiveScoper
+	// ProvisionLogin runs on every successful OAuth login to provision
+	// per-user state (the personal workspace, epic:user-admin). Injected from
+	// main so this package keeps clear of substrate stores; nil is a no-op.
+	ProvisionLogin LoginProvisioner
 }
 
 // LiveScoper resolves the SSE topic-scope for a session user — admins see
 // every topic, others only their workspaces' topics. See cmd/satellites-server.
 type LiveScoper func(ctx context.Context, userID string) (live.Scope, error)
+
+// LoginProvisioner provisions per-user state on login (currently the user's
+// personal workspace). Best-effort: a failure is logged, not surfaced to the
+// user, so a provisioning hiccup never blocks sign-in.
+type LoginProvisioner func(ctx context.Context, userID, displayName string) error
 
 // Build returns the configured root handler.
 func Build(cfg Config) http.Handler {

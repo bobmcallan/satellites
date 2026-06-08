@@ -3,6 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 // Dev-mode credentials. Predictable by construction — anyone reading
@@ -43,6 +46,17 @@ func (s *Store) DevSeed(ctx context.Context) error {
 	}
 	if err := s.SetPassword(ctx, user.ID, DevUserPassword); err != nil {
 		return fmt.Errorf("devseed: user password: %w", err)
+	}
+
+	// Personal workspace per user (epic:user-admin, sty_3a54bf42) — the
+	// shared boot default was retired, so the dev accounts each own one.
+	ws := workspace.New(s.DB)
+	now := time.Now().UTC()
+	if _, err := ws.EnsurePersonalWorkspace(ctx, admin.ID, "Dev Admin", now); err != nil {
+		return fmt.Errorf("devseed: admin personal workspace: %w", err)
+	}
+	if _, err := ws.EnsurePersonalWorkspace(ctx, user.ID, "Dev User", now); err != nil {
+		return fmt.Errorf("devseed: user personal workspace: %w", err)
 	}
 
 	return nil

@@ -73,15 +73,11 @@ func main() {
 	store := auth.New(sqlDB)
 	verb.SetAuthStore(store)
 
-	// Workspace store + boot-time default-workspace seed. The first
-	// boot mints a NULL-owner workspace named "default"; subsequent
-	// boots are no-ops.
+	// Workspace store. The shared boot-seeded default was retired in favour
+	// of a personal workspace per user (epic:user-admin, sty_3a54bf42);
+	// personal workspaces are minted on first login (ProvisionLogin below)
+	// and backfilled by migration 0028.
 	wsStore := workspace.New(sqlDB)
-	defaultWs, err := workspace.SeedDefault(context.Background(), wsStore, time.Now().UTC())
-	if err != nil {
-		arbor.Fatal("workspace: seed default", "err", err)
-	}
-	arbor.Info("workspace default ready", "id", defaultWs.ID, "name", defaultWs.Name)
 	verb.SetWorkspaceStore(wsStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
@@ -451,6 +447,10 @@ func main() {
 		OAuthServer: oauthServer,
 		Live:        liveHub,
 		LiveScope:   liveScope,
+		ProvisionLogin: func(ctx context.Context, userID, displayName string) error {
+			_, err := wsStore.EnsurePersonalWorkspace(ctx, userID, displayName, time.Now().UTC())
+			return err
+		},
 	})
 
 	arbor.Info("satellites-server listening", "addr", cfg.Addr)

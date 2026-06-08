@@ -94,6 +94,14 @@ func oauthCallbackHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
 			return
 		}
 
+		// Provision per-user state (personal workspace). Best-effort —
+		// a failure must not block login.
+		if cfg.ProvisionLogin != nil {
+			if err := cfg.ProvisionLogin(r.Context(), u.ID, u.DisplayName); err != nil {
+				arbor.ErrorCtx(r.Context(), "oauth: provision login", "user_id", u.ID, "err", err)
+			}
+		}
+
 		cfg.Sessions.Issue(w, u.ID)
 		arbor.InfoCtx(r.Context(), "oauth: login", "provider", p.Name, "user_id", u.ID, "role", string(u.Role))
 		if dest := completeMCPSessionIfPresent(w, r, cfg, u.ID); dest != "" {

@@ -42,7 +42,7 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 func TestExposedVerbsDoNotIncludeCLIOnlyVerbs(t *testing.T) {
 	deny := []string{
 		"variable_get", "variable_set", "variable_list", "variable_delete",
-		"workspace_create", "workspace_list", "workspace_get", "workspace_delete",
+		"workspace_create", "workspace_list", "workspace_get", "workspace_delete", "workspace_personal",
 		"workspace_member_add", "workspace_member_remove", "workspace_member_list", "workspace_member_update",
 		"ledger_append", "ledger_list",
 		"system_seed_set", "system_seed_list", "system_seed_delete",

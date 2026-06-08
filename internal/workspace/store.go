@@ -159,6 +159,77 @@ func (s *Store) SetDefault(ctx context.Context, id string, now time.Time) (Works
 	return s.GetByID(ctx, id)
 }
 
+// GetPersonalForUser returns the user's personal workspace (the one
+// flagged is_personal that they own), or ErrNotFound. This is the
+// deterministic "my workspace" resolver (epic:user-admin, sty_3a54bf42):
+// the workspaces_one_personal_per_owner unique index guarantees at most
+// one such row per owner.
+func (s *Store) GetPersonalForUser(ctx context.Context, userID string) (Workspace, error) {
+	if userID == "" {
+		return Workspace{}, ErrNotFound
+	}
+	row := s.DB.QueryRowContext(ctx, `
+        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
+        FROM workspaces
+        WHERE owner_user_id = $1 AND is_personal = TRUE
+        LIMIT 1
+    `, userID)
+	return scanWorkspace(row)
+}
+
+// EnsurePersonalWorkspace returns the user's existing personal workspace,
+// or mints one (owner=user, role owner) when none exists. Idempotent —
+// re-login does not create duplicates (the unique index would reject a
+// second personal row anyway). name seeds a fresh workspace's display
+// name; it is ignored when one already exists.
+func (s *Store) EnsurePersonalWorkspace(ctx context.Context, userID, name string, now time.Time) (Workspace, error) {
+	if userID == "" {
+		return Workspace{}, fmt.Errorf("workspace: user_id required")
+	}
+	if w, err := s.GetPersonalForUser(ctx, userID); err == nil {
+		return w, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return Workspace{}, err
+	}
+	if name == "" {
+		name = "Personal"
+	}
+	now = now.UTC()
+	id := NewID()
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO workspaces (id, name, owner_user_id, status, is_default, is_personal, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, FALSE, TRUE, $5, $5)
+    `, id, name, userID, StatusActive, now); err != nil {
+		return Workspace{}, fmt.Errorf("workspace: insert personal: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+        INSERT INTO workspace_members (workspace_id, user_id, role, added_at, added_by)
+        VALUES ($1, $2, 'owner', $3, $2)
+        ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'owner'
+    `, id, userID, now); err != nil {
+		return Workspace{}, fmt.Errorf("workspace: seed personal owner membership: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Workspace{}, fmt.Errorf("workspace: commit: %w", err)
+	}
+	return Workspace{
+		ID:          id,
+		Name:        name,
+		OwnerUserID: userID,
+		Status:      StatusActive,
+		IsDefault:   false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
+}
+
 // rowScanner is the common surface of *sql.Row and *sql.Rows we Scan
 // against. Avoids duplicating the column list in two helpers.
 type rowScanner interface {

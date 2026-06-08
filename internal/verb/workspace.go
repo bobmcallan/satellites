@@ -26,8 +26,7 @@ import (
 var workspaceStore *workspace.Store
 
 // SetWorkspaceStore wires the server's workspace.Store into the verb
-// package. Called by cmd/satellites-server on boot, after migrations
-// and the workspace.SeedDefault call.
+// package. Called by cmd/satellites-server on boot, after migrations.
 func SetWorkspaceStore(s *workspace.Store) { workspaceStore = s }
 
 // WorkspaceCreateRequest is the input to workspace_create.
@@ -67,6 +66,11 @@ func init() {
 		Name:        "workspace_set_default",
 		Description: "Flip the is_default flag onto the given workspace, clearing it from any prior default.",
 		Invoke:      invokeWorkspaceSetDefault,
+	})
+	Register(&Verb{
+		Name:        "workspace_personal",
+		Description: "Return the caller's personal workspace (the deterministic \"my workspace\").",
+		Invoke:      invokeWorkspacePersonal,
 	})
 }
 
@@ -139,6 +143,21 @@ func invokeWorkspaceSetDefault(ctx context.Context, raw json.RawMessage) (json.R
 		return nil, fmt.Errorf("workspace_set_default: id required")
 	}
 	w, err := workspaceStore.SetDefault(ctx, req.ID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(w)
+}
+
+func invokeWorkspacePersonal(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+	if workspaceStore == nil {
+		return nil, fmt.Errorf("workspace_personal: store not configured")
+	}
+	uid := callerUserID(ctx)
+	if uid == "" {
+		return nil, fmt.Errorf("workspace_personal: no caller identity")
+	}
+	w, err := workspaceStore.GetPersonalForUser(ctx, uid)
 	if err != nil {
 		return nil, err
 	}
