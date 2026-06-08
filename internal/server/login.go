@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 )
 
@@ -106,6 +107,16 @@ func handleLoginPost(w http.ResponseWriter, r *http.Request, cfg Config) {
 		}
 		http.Error(w, "login error", http.StatusInternalServerError)
 		return
+	}
+
+	// Same post-auth provisioning as the OAuth path (sty_480dba9b): the
+	// satellites account is the email, so a basic-auth login also provisions
+	// the personal workspace and claims pending invitations. Best-effort —
+	// never block login.
+	if cfg.ProvisionLogin != nil {
+		if err := cfg.ProvisionLogin(r.Context(), u.ID, u.Email, u.DisplayName); err != nil {
+			arbor.ErrorCtx(r.Context(), "login: provision", "user_id", u.ID, "err", err)
+		}
 	}
 
 	cfg.Sessions.Issue(w, u.ID)

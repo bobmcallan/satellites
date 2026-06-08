@@ -174,10 +174,40 @@ func (s *Store) UpsertOAuthUser(ctx context.Context, provider, sub, email, displ
 		return nil, fmt.Errorf("auth: oauth update: %w", err)
 	}
 
-	// No row for (provider, sub) yet. Insert. The unique index on email
-	// means a pre-existing email-only user (e.g. dev-seeded admin@dev)
-	// blocks insert — we surface that as a clean error rather than
-	// silently linking, which would be a confusing identity merge.
+	// No row for (provider, sub). The satellites account is keyed by the
+	// verified email (sty_480dba9b): link this OAuth credential onto an
+	// existing email-only account when one exists, rather than failing on the
+	// unique-email constraint. info.Email is provider-verified (google/github
+	// FetchInfo reject unverified emails), so the link is safe; admin promotion
+	// stays env-driven (wantAdmin from SATELLITES_ADMIN_EMAILS) and is never
+	// inferred from the act of linking.
+	linkRow := s.DB.QueryRowContext(ctx, `
+        UPDATE users
+           SET oauth_provider = $1,
+               oauth_sub      = $2,
+               display_name   = COALESCE(NULLIF($3, ''), display_name),
+               role           = CASE WHEN $4 THEN 'admin' ELSE role END
+         WHERE email = $5 AND oauth_provider IS NULL
+        RETURNING id, email, display_name, role, created_at
+    `, provider, sub, displayName, wantAdmin, email)
+	var linked User
+	if err := linkRow.Scan(&linked.ID, &linked.Email, &linked.DisplayName, &linked.Role, &linked.CreatedAt); err == nil {
+		return &linked, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("auth: oauth link: %w", err)
+	}
+
+	// The email exists but is already bound to a different OAuth identity —
+	// a genuine conflict, surfaced rather than silently re-pointed.
+	var existingID string
+	switch err := s.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE email = $1`, email).Scan(&existingID); {
+	case err == nil:
+		return nil, fmt.Errorf("auth: email %q is already linked to a different sign-in identity", email)
+	case !errors.Is(err, sql.ErrNoRows):
+		return nil, fmt.Errorf("auth: oauth email check: %w", err)
+	}
+
+	// Brand-new account.
 	role := RoleUser
 	if wantAdmin {
 		role = RoleAdmin

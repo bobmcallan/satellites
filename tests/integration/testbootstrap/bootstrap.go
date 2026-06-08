@@ -20,7 +20,9 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/server"
+	"github.com/bobmcallan/satellites/internal/workspace"
 	_ "github.com/lib/pq"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -124,9 +126,20 @@ func SetUpWithServer(t *testing.T) *ServerEnv {
 		t.Fatalf("dev seed: %v", err)
 	}
 
+	// Mirror the production post-auth provisioning (personal workspace + invite
+	// claim) so login paths behave as they do on the server (sty_480dba9b).
+	wsStore := workspace.New(base.DB)
+	invStore := invitation.New(base.DB)
 	handler := server.Build(server.Config{
 		Store:   store,
 		DevMode: true,
+		ProvisionLogin: func(ctx context.Context, userID, email, displayName string) error {
+			if _, err := wsStore.EnsurePersonalWorkspace(ctx, userID, displayName, time.Now().UTC()); err != nil {
+				return err
+			}
+			_, err := invStore.ClaimForEmail(ctx, email, userID, time.Now().UTC())
+			return err
+		},
 	})
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
