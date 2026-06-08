@@ -65,12 +65,12 @@ func fakeProvider(t *testing.T, name string, info auth.ProviderUserInfo) *auth.P
 // bootOAuthServer wires a satellites-server with a single fake provider
 // and returns an httptest URL plus the auth.Store + state mint helper.
 // Cleanup is registered on t.
-func bootOAuthServer(t *testing.T, provider *auth.Provider, adminEmails []string) (string, *auth.Store, *auth.MemStateStore) {
+func bootOAuthServer(t *testing.T, provider *auth.Provider, adminEmails []string) (string, *auth.Store, auth.StateStore) {
 	t.Helper()
 	env := testbootstrap.SetUp(t)
 	store := auth.New(env.DB)
 
-	states := auth.NewStateStore(0)
+	states := auth.NewPGStateStore(env.DB, 0)
 	set := &auth.ProviderSet{}
 	switch provider.Name {
 	case "github":
@@ -208,7 +208,7 @@ func TestOAuth_Callback_Idempotent(t *testing.T) {
 	_ = srvURL
 	env := testbootstrap.SetUp(t)
 	store = auth.New(env.DB)
-	states = auth.NewStateStore(0)
+	states = auth.NewPGStateStore(env.DB, 0)
 	handler := server.Build(server.Config{
 		Store:       store,
 		Sessions:    auth.NewSessions([]byte("k")),
@@ -249,9 +249,9 @@ func TestOAuth_Callback_Idempotent(t *testing.T) {
 // i.e. the state must be looked up from the DB, not from the process
 // memory of whichever machine handled /login.
 //
-// Before the fix (in-memory StateStore in main.go) this test fails with
-// 400 invalid state. Keep this test in place even if MemStateStore is
-// later deleted: it guards the production wiring.
+// With the old in-memory StateStore (since removed in sty_38effee9) this
+// test failed with 400 invalid state. It guards the production wiring:
+// PGStateStore must be the only StateStore.
 func TestOAuth_Callback_StateSurvivesAcrossInstances(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 	store := auth.New(env.DB)

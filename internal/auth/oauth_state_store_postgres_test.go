@@ -13,48 +13,29 @@ import (
 // TestPGStateStore_SurvivesProcessBoundary is the regression test for
 // the Fly "invalid state" outage: two PGStateStore instances bound to
 // the same DB act like two satellites-server processes. Minting on
-// store A and consuming on store B must succeed.
-//
-// The companion sub-test asserts that MemStateStore *cannot* round-trip
-// across instances — pinning the failure mode the old prod wiring had.
+// store A and consuming on store B must succeed. (The in-memory store
+// that could NOT round-trip across instances — the original failure
+// mode — was removed in sty_38effee9, so it is no longer pinned here.)
 func TestPGStateStore_SurvivesProcessBoundary(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 
-	t.Run("pg_states_survive", func(t *testing.T) {
-		instanceA := auth.NewPGStateStore(env.DB, time.Minute)
-		instanceB := auth.NewPGStateStore(env.DB, time.Minute)
+	instanceA := auth.NewPGStateStore(env.DB, time.Minute)
+	instanceB := auth.NewPGStateStore(env.DB, time.Minute)
 
-		id, err := instanceA.Mint()
-		if err != nil {
-			t.Fatalf("mint on instance A: %v", err)
-		}
-		if err := instanceB.Consume(id); err != nil {
-			t.Fatalf("consume on instance B: %v — state did not survive process boundary", err)
-		}
-		// Replay must still fail on either instance.
-		if err := instanceA.Consume(id); err == nil {
-			t.Fatal("replay on A should fail")
-		}
-		if err := instanceB.Consume(id); err == nil {
-			t.Fatal("replay on B should fail")
-		}
-	})
-
-	t.Run("mem_states_do_not_survive_pins_failure_mode", func(t *testing.T) {
-		instanceA := auth.NewStateStore(time.Minute)
-		instanceB := auth.NewStateStore(time.Minute)
-
-		id, err := instanceA.Mint()
-		if err != nil {
-			t.Fatal(err)
-		}
-		// This MUST fail — that's the bug. If it ever starts passing,
-		// someone has accidentally made MemStateStore durable and the
-		// regression net needs revisiting.
-		if err := instanceB.Consume(id); err == nil {
-			t.Fatal("MemStateStore unexpectedly shared state across instances — failure mode no longer pinned")
-		}
-	})
+	id, err := instanceA.Mint()
+	if err != nil {
+		t.Fatalf("mint on instance A: %v", err)
+	}
+	if err := instanceB.Consume(id); err != nil {
+		t.Fatalf("consume on instance B: %v — state did not survive process boundary", err)
+	}
+	// Replay must still fail on either instance.
+	if err := instanceA.Consume(id); err == nil {
+		t.Fatal("replay on A should fail")
+	}
+	if err := instanceB.Consume(id); err == nil {
+		t.Fatal("replay on B should fail")
+	}
 }
 
 // TestPGStateStore_Expired verifies a state past expires_at is rejected

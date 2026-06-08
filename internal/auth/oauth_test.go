@@ -2,50 +2,12 @@ package auth
 
 import (
 	"testing"
-	"time"
 )
 
-func TestStateStore_MintConsume_RoundTrip(t *testing.T) {
-	s := NewStateStore(0) // 0 -> default 10m
-	id, err := s.Mint()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id == "" {
-		t.Fatal("empty id")
-	}
-	if err := s.Consume(id); err != nil {
-		t.Fatalf("first consume: %v", err)
-	}
-	if err := s.Consume(id); err == nil {
-		t.Fatal("second consume should fail (replay)")
-	}
-}
-
-func TestStateStore_Consume_EmptyOrUnknown(t *testing.T) {
-	s := NewStateStore(time.Minute)
-	if err := s.Consume(""); err == nil {
-		t.Error("empty id should fail")
-	}
-	if err := s.Consume("never-minted"); err == nil {
-		t.Error("unknown id should fail")
-	}
-}
-
-func TestStateStore_Consume_Expired(t *testing.T) {
-	s := NewStateStore(time.Millisecond)
-	fixed := time.Now()
-	s.now = func() time.Time { return fixed }
-	id, err := s.Mint()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Advance virtual clock past the TTL.
-	s.now = func() time.Time { return fixed.Add(time.Second) }
-	if err := s.Consume(id); err == nil {
-		t.Fatal("expired state should fail")
-	}
-}
+// StateStore round-trip / replay / expiry / empty-or-unknown coverage lives
+// in the PGStateStore integration tests (oauth_state_store_postgres_test.go);
+// the in-memory MemStateStore those unit tests exercised was removed as a
+// rolling-deploy footgun (sty_38effee9).
 
 func TestBuildProviderSet_DisabledWhenCredsMissing(t *testing.T) {
 	set := BuildProviderSet(OAuthConfig{

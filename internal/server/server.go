@@ -23,7 +23,10 @@ import (
 // passed in so tests can substitute fakes without rebuilding from real
 // credentials. OAuthStates is the CSRF state registry shared across
 // provider start/callback handlers — long-lived, safe for concurrent
-// use.
+// use. It is caller-supplied: production wires auth.NewPGStateStore so
+// state survives Fly machine recycle / rolling deploys (sty_38effee9).
+// OAuth routes register only when Providers is set, so a caller that
+// uses neither may leave it nil.
 type Config struct {
 	Store       *auth.Store
 	Sessions    *auth.Sessions
@@ -51,9 +54,6 @@ type LiveScoper func(ctx context.Context, userID string) (live.Scope, error)
 func Build(cfg Config) http.Handler {
 	if cfg.Sessions == nil {
 		cfg.Sessions = auth.NewSessions(nil)
-	}
-	if cfg.OAuthStates == nil {
-		cfg.OAuthStates = auth.NewStateStore(0)
 	}
 	mux := http.NewServeMux()
 

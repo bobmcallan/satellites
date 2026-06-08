@@ -2,13 +2,7 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"errors"
-	"fmt"
 	"strings"
-	"sync"
-	"time"
 
 	"golang.org/x/oauth2"
 )
@@ -134,66 +128,12 @@ func ParseAdminEmails(raw string) []string {
 // StateStore is the OAuth CSRF state registry. /oauth/<provider>/login
 // mints a state and writes it; /oauth/<provider>/callback consumes it.
 //
-// Production uses PGStateStore so state survives Fly machine recycle,
-// rolling deploys, and scale-out across instances. MemStateStore is a
-// process-local implementation retained for tests and dev runs.
+// The only implementation is PGStateStore, so state survives Fly machine
+// recycle, rolling deploys, and scale-out across instances — the in-memory
+// store that caused the "invalid state" outage on rolling deploys was
+// removed (sty_38effee9). A test that genuinely needs an in-process fake
+// declares a small stub against this interface.
 type StateStore interface {
 	Mint() (string, error)
 	Consume(id string) error
-}
-
-// MemStateStore is the in-memory StateStore implementation. State is
-// pruned lazily on each Consume; the map is unbounded between sweeps
-// (acceptable for tests and single-process dev — not for prod).
-type MemStateStore struct {
-	mu   sync.Mutex
-	byID map[string]time.Time
-	ttl  time.Duration
-	now  func() time.Time
-}
-
-// NewStateStore returns an in-memory StateStore with the given TTL. 10
-// minutes is the conventional default. Prefer NewPGStateStore in any
-// multi-process or restart-prone deployment — see oauth_state_store_postgres.go.
-func NewStateStore(ttl time.Duration) *MemStateStore {
-	if ttl <= 0 {
-		ttl = 10 * time.Minute
-	}
-	return &MemStateStore{
-		byID: make(map[string]time.Time),
-		ttl:  ttl,
-		now:  time.Now,
-	}
-}
-
-// Mint generates a random state token, records its expiry, returns it.
-func (s *MemStateStore) Mint() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("oauth: rng: %w", err)
-	}
-	id := base64.RawURLEncoding.EncodeToString(buf)
-	s.mu.Lock()
-	s.byID[id] = s.now().Add(s.ttl)
-	s.mu.Unlock()
-	return id, nil
-}
-
-// Consume returns nil iff id is present and not expired; the row is
-// deleted so a replay fails. Returns an error otherwise.
-func (s *MemStateStore) Consume(id string) error {
-	if id == "" {
-		return errors.New("oauth: empty state")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	exp, ok := s.byID[id]
-	if !ok {
-		return errors.New("oauth: unknown state")
-	}
-	delete(s.byID, id)
-	if s.now().After(exp) {
-		return errors.New("oauth: expired state")
-	}
-	return nil
 }
