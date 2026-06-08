@@ -107,6 +107,7 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("/docs/mcp", docsMCPHandler(cfg))
 	mux.HandleFunc("/settings/api-keys", apiKeysHandler(cfg))
 	mux.HandleFunc("/settings/system-kv", systemKVHandler(cfg))
+	mux.HandleFunc("/settings/people", adminPeopleHandler(cfg))
 	mux.HandleFunc("/projects", projectsHandler(cfg))
 	// Live story-list refetch fragment (sty_8f69be8b) — more specific than
 	// /projects/ so it wins under Go 1.22 pattern precedence.

@@ -42,7 +42,23 @@ type ProjectMemberRemoveRequest struct {
 	UserID    string `json:"user_id"`
 }
 
+// ProjectAccessRequest is the input to project_access.
+type ProjectAccessRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+// ProjectAccessResponse reports the caller's effective project role.
+type ProjectAccessResponse struct {
+	ProjectID string `json:"project_id"`
+	Role      string `json:"role"` // admin|write|read|"" (none)
+}
+
 func init() {
+	Register(&Verb{
+		Name:        "project_access",
+		Description: "Return the caller's effective role on a project (admin|write|read|none).",
+		Invoke:      invokeProjectAccess,
+	})
 	Register(&Verb{
 		Name:        "project_member_add",
 		Description: "Add a user to a project at the given role (read|write|admin); upserts.",
@@ -76,6 +92,22 @@ func requireProjectAdmin(ctx context.Context, projectID, verbName string) error 
 		return fmt.Errorf("%s: %w: project admin required for %s", verbName, ErrForbidden, projectID)
 	}
 	return nil
+}
+
+func invokeProjectAccess(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var req ProjectAccessRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_access: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) == "" {
+		return nil, fmt.Errorf("project_access: project_id required")
+	}
+	return json.Marshal(ProjectAccessResponse{
+		ProjectID: req.ProjectID,
+		Role:      effectiveProjectRole(ctx, req.ProjectID),
+	})
 }
 
 func invokeProjectMemberAdd(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

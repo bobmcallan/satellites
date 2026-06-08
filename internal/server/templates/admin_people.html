@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/help" class="nav-item" data-nav="help">HELP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-field="admin-people" x-data="{ inviteOpen: false, createOpen: false, pjInviteOpen: false }">
+
+  {{if .FlashError}}<p class="error" data-field="people-error">{{.FlashError}}</p>{{end}}
+
+  <!-- Workspace members -->
+  <section class="panel" data-section="ws-members">
+    <div class="panel-header">
+      <h2>people · {{.WorkspaceName}}</h2>
+      {{if .IsWorkspaceAdmin}}<button type="button" class="btn primary" @click="inviteOpen = !inviteOpen" data-action="ws-invite-open">INVITE TO WORKSPACE</button>{{end}}
+    </div>
+
+    {{if .IsWorkspaceAdmin}}
+    <form method="POST" action="/settings/people" class="form-row" data-form="ws-invite" x-show="inviteOpen" x-cloak>
+      <input type="hidden" name="action" value="ws_invite">
+      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+      <input type="email" name="email" placeholder="person@example.com" required data-field="ws-invite-email">
+      <select name="role" data-field="ws-invite-role">
+        {{range .WorkspaceRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      <button type="submit" class="btn primary" data-action="ws-invite-submit">SEND INVITE</button>
+    </form>
+    {{end}}
+
+    <table class="panel-table" data-field="ws-members-table">
+      <thead><tr><th>MEMBER</th><th>ROLE</th>{{if .IsWorkspaceAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Members}}
+        <tr data-field="member-row">
+          <td data-field="member-email">{{if .Email}}{{.Email}}{{else}}{{.UserID}}{{end}}</td>
+          <td data-field="member-role">{{.Role}}</td>
+          {{if $.IsWorkspaceAdmin}}
+          <td>
+            {{if ne .Role "owner"}}
+            {{$mrole := .Role}}
+            <form method="POST" action="/settings/people" class="inline-form" data-form="ws-member-role">
+              <input type="hidden" name="action" value="ws_member_role">
+              <input type="hidden" name="workspace_id" value="{{$.WorkspaceID}}">
+              <input type="hidden" name="user_id" value="{{.UserID}}">
+              <select name="role" onchange="this.form.submit()" data-field="ws-role-select">
+                {{range $.WorkspaceRoles}}<option value="{{.}}"{{if eq . $mrole}} selected{{end}}>{{.}}</option>{{end}}
+              </select>
+            </form>
+            <form method="POST" action="/settings/people" class="inline-form" data-form="ws-member-remove">
+              <input type="hidden" name="action" value="ws_member_remove">
+              <input type="hidden" name="workspace_id" value="{{$.WorkspaceID}}">
+              <input type="hidden" name="user_id" value="{{.UserID}}">
+              <button type="submit" class="btn danger" data-action="ws-member-remove">REMOVE</button>
+            </form>
+            {{end}}
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Projects -->
+  <section class="panel" data-section="ws-projects">
+    <div class="panel-header">
+      <h2>projects</h2>
+      {{if .IsWorkspaceAdmin}}<button type="button" class="btn primary" @click="createOpen = !createOpen" data-action="create-project-open">NEW PROJECT</button>{{end}}
+    </div>
+
+    {{if .IsWorkspaceAdmin}}
+    <form method="POST" action="/settings/people" class="form-row" data-form="create-project" x-show="createOpen" x-cloak>
+      <input type="hidden" name="action" value="create_project">
+      <input type="text" name="name" placeholder="project name" required data-field="create-project-name">
+      <input type="text" name="description" placeholder="description (optional)">
+      <button type="submit" class="btn primary" data-action="create-project-submit">CREATE</button>
+    </form>
+    {{end}}
+
+    <table class="panel-table" data-field="projects-table">
+      <thead><tr><th>PROJECT</th><th>MANAGE</th></tr></thead>
+      <tbody>
+        {{range .Projects}}
+        <tr data-field="project-row">
+          <td>{{.Name}}</td>
+          <td><a href="/settings/people?project_id={{.ID}}" class="btn secondary" data-action="project-open" data-field="project-open-{{.ID}}">MANAGE ACCESS</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Pending workspace invitations -->
+  {{if .Invitations}}
+  <section class="panel" data-section="ws-invites">
+    <div class="panel-header"><h2>pending invitations</h2></div>
+    <table class="panel-table" data-field="ws-invites-table">
+      <thead><tr><th>EMAIL</th><th>ROLE</th>{{if .IsWorkspaceAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Invitations}}
+        <tr data-field="invite-row">
+          <td data-field="invite-email">{{.Email}}</td>
+          <td>{{.Role}}</td>
+          {{if $.IsWorkspaceAdmin}}
+          <td>
+            <form method="POST" action="/settings/people" class="inline-form" data-form="invite-revoke">
+              <input type="hidden" name="action" value="invite_revoke">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" class="btn danger" data-action="invite-revoke">CANCEL</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <!-- Selected project access -->
+  {{if .SelectedProjectID}}
+  <section class="panel" data-section="pj-members">
+    <div class="panel-header">
+      <h2>access · {{.SelectedProjectName}}</h2>
+      {{if .IsProjectAdmin}}<button type="button" class="btn primary" @click="pjInviteOpen = !pjInviteOpen" data-action="pj-invite-open">INVITE TO PROJECT</button>{{end}}
+    </div>
+
+    {{if .IsProjectAdmin}}
+    <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite" x-show="pjInviteOpen" x-cloak>
+      <input type="hidden" name="action" value="pj_invite">
+      <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
+      <input type="email" name="email" placeholder="person@example.com" required data-field="pj-invite-email">
+      <select name="role" data-field="pj-invite-role">
+        {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      <button type="submit" class="btn primary" data-action="pj-invite-submit">SEND INVITE</button>
+    </form>
+    {{end}}
+
+    <table class="panel-table" data-field="pj-members-table">
+      <thead><tr><th>MEMBER</th><th>ACCESS</th>{{if .IsProjectAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
+      <tbody>
+        {{range .ProjectMembers}}
+        <tr data-field="pj-member-row">
+          <td data-field="pj-member-email">{{if .Email}}{{.Email}}{{else}}{{.UserID}}{{end}}</td>
+          <td data-field="pj-member-role">{{.Role}}</td>
+          {{if $.IsProjectAdmin}}
+          {{$prole := .Role}}
+          <td>
+            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-role">
+              <input type="hidden" name="action" value="pj_member_role">
+              <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
+              <input type="hidden" name="user_id" value="{{.UserID}}">
+              <select name="role" onchange="this.form.submit()" data-field="pj-role-select">
+                {{range $.ProjectRoles}}<option value="{{.}}"{{if eq . $prole}} selected{{end}}>{{.}}</option>{{end}}
+              </select>
+            </form>
+            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-remove">
+              <input type="hidden" name="action" value="pj_member_remove">
+              <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
+              <input type="hidden" name="user_id" value="{{.UserID}}">
+              <button type="submit" class="btn danger" data-action="pj-member-remove">REMOVE</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{else}}
+        <tr><td colspan="3" class="empty" data-field="pj-members-empty">No explicit members. Workspace owners/admins have implicit admin access.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    {{if .ProjectInvitations}}
+    <table class="panel-table" data-field="pj-invites-table">
+      <thead><tr><th>PENDING EMAIL</th><th>ACCESS</th>{{if .IsProjectAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
+      <tbody>
+        {{range .ProjectInvitations}}
+        <tr data-field="pj-invite-row">
+          <td data-field="pj-invite-email">{{.Email}}</td>
+          <td>{{.Role}}</td>
+          {{if $.IsProjectAdmin}}
+          <td>
+            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-invite-revoke">
+              <input type="hidden" name="action" value="invite_revoke">
+              <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" class="btn danger" data-action="pj-invite-revoke">CANCEL</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+
+    <p><a href="/settings/people" class="btn secondary" data-action="people-back">← BACK TO WORKSPACE</a></p>
+  </section>
+  {{end}}
+
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
