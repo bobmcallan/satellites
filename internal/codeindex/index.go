@@ -56,7 +56,7 @@ func IndexRepo(store *Store, root string, full bool) (IndexStats, error) {
 			return nil
 		}
 		rel := relSlash(root, path)
-		if !isIndexable(rel) {
+		if !IsIndexable(rel) {
 			return nil // no extractor for this path — never read it
 		}
 		src, readErr := os.ReadFile(path)
@@ -73,7 +73,7 @@ func IndexRepo(store *Store, root string, full bool) (IndexStats, error) {
 		}
 		syms, recognized, perr := extractFile(rel, src)
 		if !recognized {
-			delete(seen, rel) // detection disagreed with isIndexable — don't cache
+			delete(seen, rel) // detection disagreed with IsIndexable — don't cache
 			return nil
 		}
 		if perr != nil {
@@ -125,7 +125,7 @@ func ExtractRepo(root string) (syms []Symbol, filesParsed, parseErrors int, err 
 			return nil
 		}
 		rel := relSlash(root, path)
-		if !isIndexable(rel) {
+		if !IsIndexable(rel) {
 			return nil
 		}
 		src, readErr := os.ReadFile(path)
@@ -159,9 +159,9 @@ func extractFile(rel string, src []byte) (syms []Symbol, recognized bool, err er
 	return extractTSFile(rel, src)
 }
 
-// isIndexable reports whether some extractor handles this path, by extension
+// IsIndexable reports whether some extractor handles this path, by extension
 // only (no read): Go, or any language whose grammar is embedded in this build.
-func isIndexable(rel string) bool {
+func IsIndexable(rel string) bool {
 	if strings.HasSuffix(rel, ".go") {
 		return true
 	}

@@ -19,22 +19,24 @@ Fetch everything else only when a task needs it — **do not preload.**
 ## First-time setup (once per repo)
 
 `document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
-and follow it — shell client: `satellites install` then `satellites auth`; write
-the TOML; `project_match` the git remote for `project_id`.
+and follow it — `satellites install`, `satellites auth`, write the TOML,
+`project_match` the git remote for `project_id`.
 
-## Skill sync (session start)
+## Session start
 
-Materialise the substrate's skills with the client: **`satellites skill sync`**.
-One pull-only pass reconciles every scope the repo can see — system + workspace +
-project — into `.claude/skills/<name>/SKILL.md` by identity stamp (install /
-update / skip; never clobbering an operator-edited or operator-authored skill).
-This is the client's job — do **not** hand-reconcile by listing + writing files.
+- **Skills:** `satellites skill sync` — one pull-only pass materialises every
+  scope (system/workspace/project) into `.claude/skills/<name>/SKILL.md` by
+  identity stamp (never clobbering operator-authored skills). The client's job —
+  do **not** hand-reconcile by listing + writing files.
+- **Code index:** for an indexable repo, `satellites code index` (incremental),
+  then prefer `satellites code search <q>` / `satellites code symbol <name>` over
+  Read/Grep for code discovery — exact `file:line` + slices, far fewer tokens.
+  See the `satellites-code-search` skill (Grep still wins for non-symbol text).
 
 ## On demand — do NOT load eagerly
 
-- **Principles** — `document_list {tags:["principles:global"]}` (and the
-  `principles:workspace` / `principles:project` layers). Fetch only when a
-  task's correctness depends on them, never at startup.
+- **Principles** — `document_list {tags:["principles:global"]}` (+ the
+  `principles:workspace` / `principles:project` layers). Fetch only when a task's
+  correctness depends on them, never at startup.
 - **Reference** — `satellites_mcp_reference_dispatch` (CLI dispatch surface),
-  `satellites_mcp_reference_documents` (upsert modes + list shapes). Fetch the
-  one whose contract you need.
+  `satellites_mcp_reference_documents` (upsert modes + list shapes).

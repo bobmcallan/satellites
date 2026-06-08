@@ -222,6 +222,9 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	if !commandUnderEvent(t, s, "UserPromptSubmit", "", promptCommand) {
 		t.Errorf("prompt reminder hook (UserPromptSubmit → %s) not installed", promptCommand)
 	}
+	if !commandUnderEvent(t, s, "PreToolUse", codeNudgeMatcher, codeNudgeCommand) {
+		t.Errorf("code-search nudge hook (PreToolUse %s → %s) not installed", codeNudgeMatcher, codeNudgeCommand)
+	}
 
 	// Idempotent: a second init adds nothing and reports all present.
 	var out2 bytes.Buffer
@@ -232,8 +235,8 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	var doc map[string]any
 	_ = json.Unmarshal(s2, &doc)
 	hooks := doc["hooks"].(map[string]any)
-	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 2 { // door + access
-		t.Errorf("PreToolUse has %d entries after re-init, want 2 (door + access)", len(pre))
+	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 3 { // door + access + code-nudge
+		t.Errorf("PreToolUse has %d entries after re-init, want 3 (door + access + code-nudge)", len(pre))
 	}
 	if ups, _ := hooks["UserPromptSubmit"].([]any); len(ups) != 1 {
 		t.Errorf("UserPromptSubmit has %d entries after re-init, want 1", len(ups))

@@ -34,6 +34,12 @@ const (
 	accessMatcher = "mcp__satellites__document_get"
 	accessCommand = "satellites hook access"
 	promptCommand = "satellites hook prompt"
+
+	// The code-search adoption nudge (sty_f52f4b9d, epic:code-index). PreToolUse
+	// on Read: ADVISORY (no `|| exit 2`) — it suggests `satellites code
+	// symbol`/`search` for large indexed source files and must never block a Read.
+	codeNudgeMatcher = "Read"
+	codeNudgeCommand = "satellites hook codenudge"
 )
 
 // installedHook describes one hook init merges into .claude/settings.json.
@@ -49,6 +55,7 @@ type installedHook struct {
 var hooksToInstall = []installedHook{
 	{"PreToolUse", hookMatcher, hookCommand, ".claude/settings.json (PreToolUse START-door hook)"},
 	{"PreToolUse", accessMatcher, accessCommand, ".claude/settings.json (PreToolUse story-access reminder)"},
+	{"PreToolUse", codeNudgeMatcher, codeNudgeCommand, ".claude/settings.json (PreToolUse code-search nudge)"},
 	{"UserPromptSubmit", "", promptCommand, ".claude/settings.json (UserPromptSubmit story-access reminder)"},
 }
 
