@@ -80,6 +80,9 @@ func invokeWorkspaceMemberAdd(ctx context.Context, raw json.RawMessage) (json.Ra
 	if strings.TrimSpace(req.Role) == "" {
 		return nil, fmt.Errorf("workspace_member_add: role required")
 	}
+	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
+		return nil, fmt.Errorf("workspace_member_add: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
+	}
 	addedBy := callerUserID(ctx)
 	if err := workspaceStore.AddMember(ctx, req.WorkspaceID, req.UserID, req.Role, addedBy, time.Now().UTC()); err != nil {
 		if errors.Is(err, workspace.ErrInvalidRole) {
@@ -110,6 +113,9 @@ func invokeWorkspaceMemberList(ctx context.Context, raw json.RawMessage) (json.R
 	if strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("workspace_member_list: workspace_id required")
 	}
+	if authStore != nil && !isWorkspaceMember(ctx, req.WorkspaceID) {
+		return nil, fmt.Errorf("workspace_member_list: %w: not a member of workspace %s", ErrForbidden, req.WorkspaceID)
+	}
 	ms, err := workspaceStore.ListMembers(ctx, req.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -135,6 +141,9 @@ func invokeWorkspaceMemberUpdateRole(ctx context.Context, raw json.RawMessage) (
 	}
 	if strings.TrimSpace(req.Role) == "" {
 		return nil, fmt.Errorf("workspace_member_update_role: role required")
+	}
+	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
+		return nil, fmt.Errorf("workspace_member_update_role: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
 	}
 	if err := workspaceStore.UpdateRole(ctx, req.WorkspaceID, req.UserID, req.Role, time.Now().UTC()); err != nil {
 		if errors.Is(err, workspace.ErrInvalidRole) {
@@ -162,6 +171,9 @@ func invokeWorkspaceMemberRemove(ctx context.Context, raw json.RawMessage) (json
 	}
 	if strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.UserID) == "" {
 		return nil, fmt.Errorf("workspace_member_remove: workspace_id and user_id required")
+	}
+	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
+		return nil, fmt.Errorf("workspace_member_remove: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
 	}
 	if err := workspaceStore.RemoveMember(ctx, req.WorkspaceID, req.UserID); err != nil {
 		if errors.Is(err, workspace.ErrMemberNotFound) {

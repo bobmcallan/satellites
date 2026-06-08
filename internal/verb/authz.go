@@ -167,6 +167,20 @@ func callerIsGlobalAdmin(ctx context.Context) bool {
 	return u != nil && u.Role == auth.RoleAdmin
 }
 
+// isWorkspaceMember reports whether the caller is a global admin or any member
+// of wsID. Gates read-only workspace surfaces (e.g. the member roster).
+func isWorkspaceMember(ctx context.Context, wsID string) bool {
+	if callerIsGlobalAdmin(ctx) {
+		return true
+	}
+	u := auth.FromContext(ctx)
+	if u == nil || workspaceStore == nil || wsID == "" {
+		return false
+	}
+	_, err := workspaceStore.GetRole(ctx, wsID, u.ID)
+	return err == nil
+}
+
 // canListWorkspaceProjects reports whether the caller may list the projects of
 // wsID: a global admin (any workspace), or any member of wsID. A non-admin
 // caller must name a workspace they belong to (no unbounded cross-workspace

@@ -1,0 +1,202 @@
+// Project membership verbs — epic:user-admin (sty_3dbd53f0), mirroring the
+// workspace_member_* surface. A project admin (or workspace owner/admin, or
+// global admin — all fold in via effectiveProjectRole) curates a project's
+// member list. CLI + portal handlers only; kept off the MCP surface per
+// no-new-mcp-verbs.
+
+package verb
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/bobmcallan/satellites/internal/project"
+)
+
+type ProjectMemberAddRequest struct {
+	ProjectID string `json:"project_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+}
+
+type ProjectMemberListRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type ProjectMemberListResponse struct {
+	Members []project.Member `json:"members"`
+}
+
+type ProjectMemberUpdateRequest struct {
+	ProjectID string `json:"project_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+}
+
+type ProjectMemberRemoveRequest struct {
+	ProjectID string `json:"project_id"`
+	UserID    string `json:"user_id"`
+}
+
+func init() {
+	Register(&Verb{
+		Name:        "project_member_add",
+		Description: "Add a user to a project at the given role (read|write|admin); upserts.",
+		Invoke:      invokeProjectMemberAdd,
+	})
+	Register(&Verb{
+		Name:        "project_member_list",
+		Description: "List members of a project, oldest-first.",
+		Invoke:      invokeProjectMemberList,
+	})
+	Register(&Verb{
+		Name:        "project_member_update_role",
+		Description: "Change a member's role on a project.",
+		Invoke:      invokeProjectMemberUpdateRole,
+	})
+	Register(&Verb{
+		Name:        "project_member_remove",
+		Description: "Remove a member from a project.",
+		Invoke:      invokeProjectMemberRemove,
+	})
+}
+
+// requireProjectAdmin gates a project-member mutation: the caller must be a
+// project admin (which folds in workspace owner/admin + global admin). CLI-local
+// callers (no auth wiring) bypass.
+func requireProjectAdmin(ctx context.Context, projectID, verbName string) error {
+	if authStore == nil {
+		return nil
+	}
+	if !effectiveProjectRoleAtLeast(ctx, projectID, project.RoleAdmin) {
+		return fmt.Errorf("%s: %w: project admin required for %s", verbName, ErrForbidden, projectID)
+	}
+	return nil
+}
+
+func invokeProjectMemberAdd(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if projectStore == nil {
+		return nil, fmt.Errorf("project_member_add: store not configured")
+	}
+	var req ProjectMemberAddRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_member_add: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) == "" || strings.TrimSpace(req.UserID) == "" {
+		return nil, fmt.Errorf("project_member_add: project_id and user_id required")
+	}
+	if strings.TrimSpace(req.Role) == "" {
+		return nil, fmt.Errorf("project_member_add: role required")
+	}
+	if err := requireProjectAdmin(ctx, req.ProjectID, "project_member_add"); err != nil {
+		return nil, err
+	}
+	addedBy := callerUserID(ctx)
+	if err := projectStore.AddMember(ctx, req.ProjectID, req.UserID, req.Role, addedBy, time.Now().UTC()); err != nil {
+		if errors.Is(err, project.ErrInvalidRole) {
+			return nil, fmt.Errorf("project_member_add: invalid_role")
+		}
+		return nil, err
+	}
+	role, err := projectStore.GetRole(ctx, req.ProjectID, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(project.Member{
+		ProjectID: req.ProjectID, UserID: req.UserID, Role: role,
+		AddedAt: time.Now().UTC(), AddedBy: addedBy,
+	})
+}
+
+func invokeProjectMemberList(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if projectStore == nil {
+		return nil, fmt.Errorf("project_member_list: store not configured")
+	}
+	var req ProjectMemberListRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_member_list: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) == "" {
+		return nil, fmt.Errorf("project_member_list: project_id required")
+	}
+	// Any project member (≥ read) may see the roster.
+	if authStore != nil && !effectiveProjectRoleAtLeast(ctx, req.ProjectID, project.RoleRead) {
+		return nil, fmt.Errorf("project_member_list: %w: no access to project %s", ErrForbidden, req.ProjectID)
+	}
+	ms, err := projectStore.ListMembers(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if ms == nil {
+		ms = []project.Member{}
+	}
+	return json.Marshal(ProjectMemberListResponse{Members: ms})
+}
+
+func invokeProjectMemberUpdateRole(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if projectStore == nil {
+		return nil, fmt.Errorf("project_member_update_role: store not configured")
+	}
+	var req ProjectMemberUpdateRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_member_update_role: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) == "" || strings.TrimSpace(req.UserID) == "" {
+		return nil, fmt.Errorf("project_member_update_role: project_id and user_id required")
+	}
+	if strings.TrimSpace(req.Role) == "" {
+		return nil, fmt.Errorf("project_member_update_role: role required")
+	}
+	if err := requireProjectAdmin(ctx, req.ProjectID, "project_member_update_role"); err != nil {
+		return nil, err
+	}
+	if err := projectStore.UpdateRole(ctx, req.ProjectID, req.UserID, req.Role, time.Now().UTC()); err != nil {
+		if errors.Is(err, project.ErrInvalidRole) {
+			return nil, fmt.Errorf("project_member_update_role: invalid_role")
+		}
+		if errors.Is(err, project.ErrMemberNotFound) {
+			return nil, fmt.Errorf("project_member_update_role: member_not_found")
+		}
+		return nil, err
+	}
+	return json.Marshal(map[string]string{
+		"project_id": req.ProjectID, "user_id": req.UserID, "role": req.Role,
+	})
+}
+
+func invokeProjectMemberRemove(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if projectStore == nil {
+		return nil, fmt.Errorf("project_member_remove: store not configured")
+	}
+	var req ProjectMemberRemoveRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("project_member_remove: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) == "" || strings.TrimSpace(req.UserID) == "" {
+		return nil, fmt.Errorf("project_member_remove: project_id and user_id required")
+	}
+	if err := requireProjectAdmin(ctx, req.ProjectID, "project_member_remove"); err != nil {
+		return nil, err
+	}
+	if err := projectStore.RemoveMember(ctx, req.ProjectID, req.UserID); err != nil {
+		if errors.Is(err, project.ErrMemberNotFound) {
+			return nil, fmt.Errorf("project_member_remove: member_not_found")
+		}
+		return nil, err
+	}
+	return json.Marshal(map[string]string{
+		"project_id": req.ProjectID, "user_id": req.UserID, "removed": "true",
+	})
+}
