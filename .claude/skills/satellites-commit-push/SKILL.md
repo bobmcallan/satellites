@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":3,"hash":"1cc20ba5df01fecc35d1f164f73c8488f7ab8d70d88a83c06ed6db842c132796"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":4,"hash":"f2de2fbee3d58ffd6384e8afc9a03a0276d11e4882cdfb1cbb063d81128e859a"} satellites-sync:end -->
 ---
 name: satellites-commit-push
 type: skill
@@ -57,32 +57,59 @@ supplies its own checkpoint skill.
 3. **Analyse + format** — `git branch --show-current`, `git diff --cached --stat`,
    `git log --oneline -5` for style. If `go.mod` exists: `gofmt -s -w . && git add -u`.
 
-4. **Bump `.version` — MANDATORY on every commit.** `.version` is per-binary
-   (`satellites.version` / `satellites-server.version`). Bump the patch of the
-   binary(ies) the change touches — **CLI** (`internal/cli`, `cmd/satellites`),
-   **server** (`internal/{verb,server,mcpserver,document,…}`,
-   `cmd/satellites-server`, `config/documents/` embedded seeds), or both
-   (`config/documents/` is embedded in both). Update the matching `*.build`
-   timestamp. `git add .version`. Never skip — the release tag derives from
-   `satellites.version`.
+4. **Bump `.version` — MANDATORY on every commit.** `.version` is per-binary:
+   `satellites.version` = the **CLI**, `satellites-server.version` = the
+   **server**. Bump the patch of the binary(ies) the change touches.
 
-5. **Commit + push**
+   The release gate's **CLIENT_PATHS** (`.github/workflows/release.yml`) are the
+   authoritative definition of "client-affecting" → bump **`satellites.version`**:
 
-   ```bash
-   git commit -m "type(scope): message" && git push
+   ```
+   internal/cli/  cmd/satellites/  internal/verb/  internal/workstate/  internal/workflow/  internal/audit/
    ```
 
-6. **Watch CI** (`.github/workflows/`: test → release → deploy). `test` runs on
-   push; `release` tags `v<satellites.version>` (skips if the tag exists);
-   `deploy` runs on `test` success and redeploys the server.
+   - **CLI / client** (any CLIENT_PATH above) → bump `satellites.version`.
+     NOTE `internal/verb` IS a client path (compiled into the CLI) — a verb
+     change needs a `satellites.version` bump, not just a server bump.
+   - **server-only** (`internal/server`, `internal/mcpserver`,
+     `internal/document`, `cmd/satellites-server`, other non-client packages) →
+     bump `satellites-server.version`.
+   - **both** — code compiled into BOTH binaries bumps both versions:
+     `config/documents/` embedded seeds, and `internal/verb` (the server runs
+     verbs AND the CLI dispatches them in-process). When in doubt, bump both.
+
+   Update the matching `*.build` timestamp. `git add .version`. Never skip — the
+   release tag derives from `satellites.version`, and a CLIENT_PATH change with
+   no bump FAILS the release workflow.
+
+5. **Commit, gate the release locally, then push.**
 
    ```bash
-   gh run list --commit "$(git rev-parse HEAD)" --workflow test --json databaseId --jq '.[0].databaseId'
-   gh run watch <id> --exit-status
+   git commit -m "type(scope): message"
+   .satellites/satellites release check
+   git push
+   ```
+
+   `release check` mirrors the CI release gate locally: if a
+   CLIENT_PATH changed since the released `v<satellites.version>` tag and
+   `satellites.version` was not bumped, it **BLOCKS** — go back to step 4, bump
+   it (`git commit --amend` or a follow-up commit), and re-run. Catching it here
+   avoids a post-push red release.
+
+6. **Watch CI** (`.github/workflows/`: test → release → deploy) — three
+   **separate** workflows. Check ALL THREE conclusions, especially **release**:
+   it does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
+   `satellites.version` bump, and that red is invisible if you
+   only watch `test` + `deploy`.
+
+   ```bash
+   HEAD=$(git rev-parse HEAD)
+   gh run list --commit "$HEAD" --json workflowName,status,conclusion --jq '.[] | "\(.workflowName): \(.status) \(.conclusion)"'
+   gh run watch <test-run-id> --exit-status
    ```
 
    On failure, surface the failing step (`gh run view <id> --log-failed`) and
-   stop — do not amend or retry unless asked. On success, report the run + the
+   stop — do not amend or retry unless asked. On success, report the runs + the
    release tag.
 
 ## Why it is a checkpoint
