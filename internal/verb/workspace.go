@@ -103,6 +103,27 @@ func invokeWorkspaceList(ctx context.Context, _ json.RawMessage) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	// Identity-aware (epic:user-admin, sty_14cf17e3): the all-workspaces listing
+	// is global-admin-gated. A non-admin authenticated caller sees only the
+	// workspaces they belong to; CLI-local (no authStore) keeps the full list.
+	if authStore != nil && !callerIsGlobalAdmin(ctx) {
+		caller := callerUserID(ctx)
+		mine := map[string]bool{}
+		if caller != "" {
+			if ids, err := workspaceStore.ListWorkspaceIDsForUser(ctx, caller); err == nil {
+				for _, id := range ids {
+					mine[id] = true
+				}
+			}
+		}
+		filtered := ws[:0]
+		for _, w := range ws {
+			if mine[w.ID] {
+				filtered = append(filtered, w)
+			}
+		}
+		ws = filtered
+	}
 	if ws == nil {
 		ws = []workspace.Workspace{}
 	}

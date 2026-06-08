@@ -24,6 +24,15 @@
 
   {{if .FlashError}}<p class="error" data-field="people-error">{{.FlashError}}</p>{{end}}
 
+  {{if .IsGlobalAdmin}}
+  <section class="panel" data-section="ws-selector">
+    <div class="panel-header"><h2>workspace (global admin)</h2></div>
+    <select data-field="ws-selector" onchange="window.location='/settings/people?workspace_id='+encodeURIComponent(this.value)">
+      {{range .AllWorkspaces}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}} · {{.ID}}</option>{{end}}
+    </select>
+  </section>
+  {{end}}
+
   <!-- Workspace members -->
   <section class="panel" data-section="ws-members">
     <div class="panel-header">
@@ -87,6 +96,7 @@
     {{if .IsWorkspaceAdmin}}
     <form method="POST" action="/settings/people" class="form-row" data-form="create-project" x-show="createOpen" x-cloak>
       <input type="hidden" name="action" value="create_project">
+      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
       <input type="text" name="name" placeholder="project name" required data-field="create-project-name">
       <input type="text" name="description" placeholder="description (optional)">
       <button type="submit" class="btn primary" data-action="create-project-submit">CREATE</button>
@@ -99,7 +109,7 @@
         {{range .Projects}}
         <tr data-field="project-row">
           <td>{{.Name}}</td>
-          <td><a href="/settings/people?project_id={{.ID}}" class="btn secondary" data-action="project-open" data-field="project-open-{{.ID}}">MANAGE ACCESS</a></td>
+          <td><a href="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{.ID}}" class="btn secondary" data-action="project-open" data-field="project-open-{{.ID}}">MANAGE ACCESS</a></td>
         </tr>
         {{end}}
       </tbody>
@@ -144,6 +154,7 @@
     {{if .IsProjectAdmin}}
     <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite" x-show="pjInviteOpen" x-cloak>
       <input type="hidden" name="action" value="pj_invite">
+      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
       <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
       <input type="email" name="email" placeholder="person@example.com" required data-field="pj-invite-email">
       <select name="role" data-field="pj-invite-role">
@@ -163,7 +174,7 @@
           {{if $.IsProjectAdmin}}
           {{$prole := .Role}}
           <td>
-            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-role">
+            <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-role">
               <input type="hidden" name="action" value="pj_member_role">
               <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
               <input type="hidden" name="user_id" value="{{.UserID}}">
@@ -171,7 +182,7 @@
                 {{range $.ProjectRoles}}<option value="{{.}}"{{if eq . $prole}} selected{{end}}>{{.}}</option>{{end}}
               </select>
             </form>
-            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-remove">
+            <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-remove">
               <input type="hidden" name="action" value="pj_member_remove">
               <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
               <input type="hidden" name="user_id" value="{{.UserID}}">
@@ -196,7 +207,7 @@
           <td>{{.Role}}</td>
           {{if $.IsProjectAdmin}}
           <td>
-            <form method="POST" action="/settings/people?project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-invite-revoke">
+            <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-invite-revoke">
               <input type="hidden" name="action" value="invite_revoke">
               <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
               <input type="hidden" name="id" value="{{.ID}}">
@@ -210,7 +221,7 @@
     </table>
     {{end}}
 
-    <p><a href="/settings/people" class="btn secondary" data-action="people-back">← BACK TO WORKSPACE</a></p>
+    <p><a href="/settings/people?workspace_id={{.WorkspaceID}}" class="btn secondary" data-action="people-back">← BACK TO WORKSPACE</a></p>
   </section>
   {{end}}
 

@@ -7,9 +7,21 @@ import (
 	"net/http"
 	"net/url"
 
+	"sort"
+
 	"github.com/bobmcallan/satellites/internal/arbor"
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
+
+func sortWorkspaceRows(rows []peopleWorkspaceRow) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].ID < rows[j].ID
+	})
+}
 
 var adminPeopleTmpl = template.Must(template.ParseFS(assets,
 	"templates/admin_people.html", "templates/_user_menu.html"))
@@ -29,6 +41,8 @@ type adminPeopleData struct {
 	WorkspaceID      string
 	WorkspaceName    string
 	IsWorkspaceAdmin bool
+	IsGlobalAdmin    bool
+	AllWorkspaces    []peopleWorkspaceRow
 	Members          []peopleMemberRow
 	Projects         []peopleProjectRow
 	Invitations      []peopleInviteRow
@@ -55,6 +69,12 @@ type peopleProjectRow struct {
 	Name string
 }
 
+type peopleWorkspaceRow struct {
+	ID       string
+	Name     string
+	Selected bool
+}
+
 type peopleInviteRow struct {
 	ID    string
 	Email string
@@ -71,7 +91,7 @@ func adminPeopleHandler(cfg Config) http.HandlerFunc {
 		ctx := withSessionUser(r.Context(), cfg, userID)
 		switch r.Method {
 		case http.MethodGet:
-			renderAdminPeople(w, ctx, cfg, userID, r.URL.Query().Get("project_id"), "")
+			renderAdminPeople(w, ctx, cfg, userID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("project_id"), "")
 		case http.MethodPost:
 			handleAdminPeoplePost(w, r.WithContext(ctx), cfg, userID)
 		default:
@@ -82,11 +102,12 @@ func adminPeopleHandler(cfg Config) http.HandlerFunc {
 
 func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, userID string) {
 	if err := r.ParseForm(); err != nil {
-		renderAdminPeople(w, r.Context(), cfg, userID, "", "bad form")
+		renderAdminPeople(w, r.Context(), cfg, userID, "", "", "bad form")
 		return
 	}
 	ctx := r.Context()
 	projectID := r.FormValue("project_id")
+	wsID := r.FormValue("workspace_id")
 	action := r.FormValue("action")
 
 	dispatch := func(verbName string, req any) error {
@@ -102,6 +123,7 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 			Name:        r.FormValue("name"),
 			Description: r.FormValue("description"),
 			GitURL:      r.FormValue("git_url"),
+			WorkspaceID: wsID, // land in the selected workspace, not the personal one
 		})
 		projectID = "" // stay on the workspace view
 	case "ws_invite":
@@ -133,23 +155,30 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 	case "invite_revoke":
 		err = dispatch("invitation_revoke", verb.InvitationRevokeRequest{ID: r.FormValue("id")})
 	default:
-		renderAdminPeople(w, ctx, cfg, userID, projectID, "unknown action")
+		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, "unknown action")
 		return
 	}
 
 	if err != nil {
 		arbor.WarnCtx(ctx, "admin_people: action", "action", action, "user_id", userID, "err", err)
-		renderAdminPeople(w, ctx, cfg, userID, projectID, err.Error())
+		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, err.Error())
 		return
 	}
-	dest := "/settings/people"
+	q := url.Values{}
+	if wsID != "" {
+		q.Set("workspace_id", wsID)
+	}
 	if projectID != "" {
-		dest += "?project_id=" + url.QueryEscape(projectID)
+		q.Set("project_id", projectID)
+	}
+	dest := "/settings/people"
+	if e := q.Encode(); e != "" {
+		dest += "?" + e
 	}
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, userID, projectID, flashErr string) {
+func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, userID, requestedWS, projectID, flashErr string) {
 	data := adminPeopleData{
 		Title:          "people · satellites",
 		ActiveNav:      "people",
@@ -166,10 +195,24 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 			data.UserEmail = u.Email
 			data.UserName = u.DisplayName
 			data.UserAvatar = avatarLetter(u.DisplayName, u.Email)
+			data.IsGlobalAdmin = u.Role == auth.RoleAdmin
 		}
 	}
 
-	// Resolve the viewer's personal workspace ("my workspace").
+	// The workspaces the caller may operate (global admin → all; else their
+	// own). Backs the selector (shown only to a global admin) and resolves the
+	// selected workspace's name.
+	nameMap := map[string]string{}
+	if raw, err := verb.Dispatch(ctx, "workspace_list", nil); err == nil {
+		var resp verb.WorkspaceListResponse
+		if json.Unmarshal(raw, &resp) == nil {
+			for _, ws := range resp.Workspaces {
+				nameMap[ws.ID] = ws.Name
+			}
+		}
+	}
+
+	// Default to the viewer's personal workspace.
 	if raw, err := verb.Dispatch(ctx, "workspace_personal", nil); err == nil {
 		var ws struct {
 			ID   string `json:"id"`
@@ -180,6 +223,30 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 			data.WorkspaceName = ws.Name
 		}
 	}
+
+	// Honour ?workspace_id when the caller may see it: a global admin (any) or a
+	// member of it (in nameMap). Admin powers there are still gated by
+	// IsWorkspaceAdmin below.
+	if requestedWS != "" && requestedWS != data.WorkspaceID && (data.IsGlobalAdmin || nameMap[requestedWS] != "") {
+		data.WorkspaceID = requestedWS
+		if n, ok := nameMap[requestedWS]; ok {
+			data.WorkspaceName = n
+		}
+	}
+
+	// Selector options (global admin only).
+	if data.IsGlobalAdmin {
+		for id, name := range nameMap {
+			data.AllWorkspaces = append(data.AllWorkspaces, peopleWorkspaceRow{
+				ID: id, Name: name, Selected: id == data.WorkspaceID,
+			})
+		}
+		sortWorkspaceRows(data.AllWorkspaces)
+	}
+
+	// A global admin wields workspace-admin powers on any workspace, even
+	// without a membership row there.
+	data.IsWorkspaceAdmin = data.IsGlobalAdmin
 
 	if data.WorkspaceID != "" {
 		// Workspace members — the viewer's role here decides IsWorkspaceAdmin.
