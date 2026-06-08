@@ -166,15 +166,16 @@ type DocumentDeleteResponse struct {
 // at 200. cursor is opaque base64 returned in the previous page's
 // next_cursor; pass empty to fetch the first page.
 type DocumentListRequest struct {
-	Type        string   `json:"type,omitempty"`
-	Scope       string   `json:"scope,omitempty"`
-	WorkspaceID string   `json:"workspace_id,omitempty"`
-	ProjectID   string   `json:"project_id,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Status      string   `json:"status,omitempty"`
-	NamePrefix  string   `json:"name_prefix,omitempty"`
-	Limit       int      `json:"limit,omitempty"`
-	Cursor      string   `json:"cursor,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Scope        string   `json:"scope,omitempty"`
+	WorkspaceID  string   `json:"workspace_id,omitempty"`
+	ProjectID    string   `json:"project_id,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Status       string   `json:"status,omitempty"`
+	NamePrefix   string   `json:"name_prefix,omitempty"`
+	NameContains string   `json:"name_contains,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
+	Cursor       string   `json:"cursor,omitempty"`
 	// Effective overlays the caller's user-scope override rows onto the
 	// requested-scope list, shadowing same-named rows (user wins), so the
 	// result is the post-cascade effective set (sty_cbeeb452). Single merged
@@ -196,13 +197,14 @@ type DocumentListResponse struct {
 // document_list for "page N of M"-style indicators and total-row
 // counters in the portal.
 type DocumentCountRequest struct {
-	Type        string   `json:"type,omitempty"`
-	Scope       string   `json:"scope,omitempty"`
-	WorkspaceID string   `json:"workspace_id,omitempty"`
-	ProjectID   string   `json:"project_id,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Status      string   `json:"status,omitempty"`
-	NamePrefix  string   `json:"name_prefix,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Scope        string   `json:"scope,omitempty"`
+	WorkspaceID  string   `json:"workspace_id,omitempty"`
+	ProjectID    string   `json:"project_id,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Status       string   `json:"status,omitempty"`
+	NamePrefix   string   `json:"name_prefix,omitempty"`
+	NameContains string   `json:"name_contains,omitempty"`
 }
 
 // DocumentCountResponse is the count for a filter — a single int wire
@@ -271,13 +273,14 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		// requested-scope list.
 	}
 	res, err := documentStore.List(ctx, document.ListFilter{
-		Type:        req.Type,
-		Scope:       document.Scope(req.Scope),
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Tags:        req.Tags,
-		Status:      req.Status,
-		NamePrefix:  req.NamePrefix,
+		Type:         req.Type,
+		Scope:        document.Scope(req.Scope),
+		WorkspaceID:  req.WorkspaceID,
+		ProjectID:    req.ProjectID,
+		Tags:         req.Tags,
+		Status:       req.Status,
+		NamePrefix:   req.NamePrefix,
+		NameContains: req.NameContains,
 	}, document.ListOptions{
 		Limit:  req.Limit,
 		Cursor: req.Cursor,
@@ -300,24 +303,26 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 func effectiveList(ctx context.Context, req DocumentListRequest, userID string) (json.RawMessage, error) {
 	const effectiveLimit = 200 // store List caps at 200; config sets are small
 	base, err := documentStore.List(ctx, document.ListFilter{
-		Type:        req.Type,
-		Scope:       document.Scope(req.Scope),
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Tags:        req.Tags,
-		Status:      req.Status,
-		NamePrefix:  req.NamePrefix,
+		Type:         req.Type,
+		Scope:        document.Scope(req.Scope),
+		WorkspaceID:  req.WorkspaceID,
+		ProjectID:    req.ProjectID,
+		Tags:         req.Tags,
+		Status:       req.Status,
+		NamePrefix:   req.NamePrefix,
+		NameContains: req.NameContains,
 	}, document.ListOptions{Limit: effectiveLimit})
 	if err != nil {
 		return nil, err
 	}
 	overrides, err := documentStore.List(ctx, document.ListFilter{
-		Type:       req.Type,
-		Scope:      document.ScopeUser,
-		UserID:     userID,
-		Tags:       req.Tags,
-		Status:     req.Status,
-		NamePrefix: req.NamePrefix,
+		Type:         req.Type,
+		Scope:        document.ScopeUser,
+		UserID:       userID,
+		Tags:         req.Tags,
+		Status:       req.Status,
+		NamePrefix:   req.NamePrefix,
+		NameContains: req.NameContains,
 	}, document.ListOptions{Limit: effectiveLimit})
 	if err != nil {
 		return nil, err
@@ -352,13 +357,14 @@ func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMess
 		}
 	}
 	n, err := documentStore.Count(ctx, document.ListFilter{
-		Type:        req.Type,
-		Scope:       document.Scope(req.Scope),
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Tags:        req.Tags,
-		Status:      req.Status,
-		NamePrefix:  req.NamePrefix,
+		Type:         req.Type,
+		Scope:        document.Scope(req.Scope),
+		WorkspaceID:  req.WorkspaceID,
+		ProjectID:    req.ProjectID,
+		Tags:         req.Tags,
+		Status:       req.Status,
+		NamePrefix:   req.NamePrefix,
+		NameContains: req.NameContains,
 	})
 	if err != nil {
 		return nil, err
@@ -585,6 +591,14 @@ func requireScopeKey(scope, wsID, pjID string) error {
 	case "workspace":
 		if strings.TrimSpace(wsID) == "" {
 			return fmt.Errorf("document_list: %w: workspace scope requires workspace_id", ErrBadRequest)
+		}
+	case "all":
+		// scope=all cross-lists system + the caller's workspace (+ project)
+		// in one query; workspace_id is the scope key that bounds it and is
+		// authorized against membership. project_id is optional — when given
+		// it adds the project branch to the OR. (sty_2eccc1ea)
+		if strings.TrimSpace(wsID) == "" {
+			return fmt.Errorf("document_list: %w: all scope requires workspace_id", ErrBadRequest)
 		}
 	}
 	return nil

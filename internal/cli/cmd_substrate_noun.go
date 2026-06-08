@@ -66,12 +66,13 @@ type docGetView struct {
 // document_list. Field names track internal/verb.DocumentListRequest;
 // the local declaration keeps the import surface narrow.
 type docListRequest struct {
-	Type        string   `json:"type,omitempty"`
-	Scope       string   `json:"scope,omitempty"`
-	WorkspaceID string   `json:"workspace_id,omitempty"`
-	ProjectID   string   `json:"project_id,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Limit       int      `json:"limit,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Scope        string   `json:"scope,omitempty"`
+	WorkspaceID  string   `json:"workspace_id,omitempty"`
+	ProjectID    string   `json:"project_id,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	NameContains string   `json:"name_contains,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
 	// Effective overlays the caller's user-scope overrides onto the listed
 	// set (sty_cbeeb452) — the skill index uses it so a user's overridden
 	// workflow/gate skill resolves for that user.
@@ -81,9 +82,11 @@ type docListRequest struct {
 // newSubstrateListCmd builds a `<noun> list` cobra command.
 func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 	var (
-		scopeArg string
-		wsArg    string
-		pjArg    string
+		scopeArg        string
+		wsArg           string
+		pjArg           string
+		nameContainsArg string
+		tagsArg         []string
 	)
 	cmd := &cobra.Command{
 		Use:   cfg.Use,
@@ -91,14 +94,17 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 		Long:  cfg.Short + "\n\nThin shell over the document_list MCP verb.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+			tags := append([]string(nil), tagsArg...)
 			// Default scope: with NO scope/workspace/project flag, list the
 			// caller's EFFECTIVE set — system + the configured project — not an
 			// unscoped all-projects list (which leaks other projects' rows into
 			// a configured repo; sty_de7e2008). An explicit --scope keeps the
 			// single-scope behaviour. Only engages when a project is configured;
-			// an unconfigured caller falls back to the unscoped list.
+			// an unconfigured caller falls back to the unscoped list. The
+			// --tags / --name-contains filters thread through so the default
+			// listing honours them too.
 			if scopeArg == "" && wsArg == "" && pjArg == "" {
-				if items, ok, err := callerScopedList(ctx, cfg); err != nil {
+				if items, ok, err := callerScopedList(ctx, cfg, nameContainsArg, tags); err != nil {
 					return err
 				} else if ok {
 					renderNounList(cmd.OutOrStdout(), filterByTagPrefix(items, cfg.FilterTagPrefix))
@@ -106,17 +112,28 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 				}
 			}
 
-			req := docListRequest{
-				Type:        cfg.FilterType,
-				Scope:       scopeArg,
-				WorkspaceID: wsArg,
-				ProjectID:   pjArg,
-				Limit:       200,
+			// --scope all with no explicit keys: resolve workspace+project from
+			// config so the cross-scope flag is ergonomic in a configured repo
+			// (the verb requires workspace_id as the all-scope authorization key).
+			if scopeArg == "all" && wsArg == "" {
+				if pj, ws, ok := resolveCallerScopeKeys(ctx, cfg); ok {
+					wsArg, pjArg = ws, pj
+				}
 			}
-			if cfg.FilterTagPrefix != "" && scopeArg != "" {
+
+			req := docListRequest{
+				Type:         cfg.FilterType,
+				Scope:        scopeArg,
+				WorkspaceID:  wsArg,
+				ProjectID:    pjArg,
+				Tags:         tags,
+				NameContains: nameContainsArg,
+				Limit:        200,
+			}
+			if cfg.FilterTagPrefix != "" && scopeArg != "" && scopeArg != "all" {
 				// Substrate tag-contains is AND across the slice; a scoped
 				// principles listing maps to the matching tag value.
-				req.Tags = []string{cfg.FilterTagPrefix + scopeArg}
+				req.Tags = append(req.Tags, cfg.FilterTagPrefix+scopeArg)
 			}
 			raw, err := json.Marshal(req)
 			if err != nil {
@@ -135,9 +152,11 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&scopeArg, "scope", "", "Filter by scope (system / workspace / project)")
-	cmd.Flags().StringVar(&wsArg, "workspace", "", "Filter by workspace_id (required when scope=workspace or scope=project)")
+	cmd.Flags().StringVar(&scopeArg, "scope", "", "Filter by scope (system / workspace / project / all)")
+	cmd.Flags().StringVar(&wsArg, "workspace", "", "Filter by workspace_id (required when scope=workspace / project / all)")
 	cmd.Flags().StringVar(&pjArg, "project", "", "Filter by project_id (required when scope=project)")
+	cmd.Flags().StringSliceVar(&tagsArg, "tags", nil, "Filter by tags (comma-separated; AND across the set)")
+	cmd.Flags().StringVar(&nameContainsArg, "name-contains", "", "Filter to rows whose name contains this substring")
 	return cmd
 }
 
@@ -197,18 +216,13 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 // tag-filtered principle noun, and only when a project is configured. Returns
 // ok=false to signal the caller to fall back to the plain unscoped list rather
 // than fail (an unconfigured or unresolvable caller still gets a listing).
-func callerScopedList(ctx context.Context, cfg substrateNounConfig) ([]nounListItem, bool, error) {
+func callerScopedList(ctx context.Context, cfg substrateNounConfig, nameContains string, tags []string) ([]nounListItem, bool, error) {
 	if cfg.FilterTagPrefix != "" {
 		return nil, false, nil // principle listing keeps its tag-scoped behaviour
 	}
-	conf, _, err := cliconfig.Load(*cfg.ConfigArg)
-	if err != nil || strings.TrimSpace(conf.ProjectID) == "" {
-		return nil, false, nil // unconfigured — fall back to the unscoped list
-	}
-	projectID := strings.TrimSpace(conf.ProjectID)
-	wsID, err := listResolveWorkspaceID(ctx, cfg, projectID)
-	if err != nil {
-		return nil, false, nil // cannot resolve — fall back rather than fail
+	projectID, wsID, ok := resolveCallerScopeKeys(ctx, cfg)
+	if !ok {
+		return nil, false, nil // unconfigured / unresolvable — fall back to the unscoped list
 	}
 	list := func(req docListRequest) ([]nounListItem, error) {
 		raw, mErr := json.Marshal(req)
@@ -225,15 +239,32 @@ func callerScopedList(ctx context.Context, cfg substrateNounConfig) ([]nounListI
 		}
 		return parsed.Items, nil
 	}
-	sys, err := list(docListRequest{Type: cfg.FilterType, Scope: "system", Limit: 200})
+	sys, err := list(docListRequest{Type: cfg.FilterType, Scope: "system", Tags: tags, NameContains: nameContains, Limit: 200})
 	if err != nil {
 		return nil, false, err
 	}
-	proj, err := list(docListRequest{Type: cfg.FilterType, Scope: "project", WorkspaceID: wsID, ProjectID: projectID, Limit: 200})
+	proj, err := list(docListRequest{Type: cfg.FilterType, Scope: "project", WorkspaceID: wsID, ProjectID: projectID, Tags: tags, NameContains: nameContains, Limit: 200})
 	if err != nil {
 		return nil, false, err
 	}
 	return append(sys, proj...), true, nil
+}
+
+// resolveCallerScopeKeys returns the configured project_id and its workspace_id
+// for the current repo, or ok=false when unconfigured / unresolvable (callers
+// fall back rather than fail). Shared by the default caller-scoped listing and
+// the --scope all key resolution.
+func resolveCallerScopeKeys(ctx context.Context, cfg substrateNounConfig) (projectID, wsID string, ok bool) {
+	conf, _, err := cliconfig.Load(*cfg.ConfigArg)
+	if err != nil || strings.TrimSpace(conf.ProjectID) == "" {
+		return "", "", false
+	}
+	projectID = strings.TrimSpace(conf.ProjectID)
+	wsID, err = listResolveWorkspaceID(ctx, cfg, projectID)
+	if err != nil {
+		return "", "", false
+	}
+	return projectID, wsID, true
 }
 
 // listResolveWorkspaceID resolves a project's workspace_id via project_get,
@@ -294,9 +325,9 @@ func renderNounList(out interface{ Write(p []byte) (int, error) }, items []nounL
 		return
 	}
 	const layout = "2006-01-02 15:04 UTC"
-	fmt.Fprintf(out, "%-40s  %-10s  %7s  %s\n", "NAME", "SCOPE", "VERSION", "UPDATED")
+	fmt.Fprintf(out, "%-40s  %-10s  %7s  %-22s  %s\n", "NAME", "SCOPE", "VERSION", "UPDATED", "TAGS")
 	for _, it := range items {
-		fmt.Fprintf(out, "%-40s  %-10s  %7d  %s\n", truncate(it.Name, 40), it.Scope, it.LatestVersion, it.UpdatedAt.UTC().Format(layout))
+		fmt.Fprintf(out, "%-40s  %-10s  %7d  %-22s  %s\n", truncate(it.Name, 40), it.Scope, it.LatestVersion, it.UpdatedAt.UTC().Format(layout), strings.Join(it.Tags, ","))
 	}
 }
 

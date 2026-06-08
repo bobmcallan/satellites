@@ -137,6 +137,21 @@ func TestDocumentList_FilterAndPagination(t *testing.T) {
 		assertIDs(t, resp.Items, []string{a2.ID})
 	})
 
+	t.Run("name_contains=et matches a substring across names", func(t *testing.T) {
+		// "et" is a substring of beta + zeta (not a prefix of either).
+		resp := list(t, verb.DocumentListRequest{Type: "story", NameContains: "et"})
+		assertIDs(t, resp.Items, []string{a2.ID, b3.ID})
+	})
+
+	t.Run("name_contains is distinct from name_prefix", func(t *testing.T) {
+		// No name starts with "et", so name_prefix returns nothing while
+		// name_contains finds the substring matches — they are different filters.
+		pref := list(t, verb.DocumentListRequest{Type: "story", NamePrefix: "et"})
+		assertIDs(t, pref.Items, nil)
+		sub := list(t, verb.DocumentListRequest{Type: "story", NameContains: "et"})
+		assertIDs(t, sub.Items, []string{a2.ID, b3.ID})
+	})
+
 	t.Run("type=document hides stories", func(t *testing.T) {
 		resp := list(t, verb.DocumentListRequest{Type: "document"})
 		for _, d := range resp.Items {
@@ -378,6 +393,113 @@ func TestDocumentList_ExcludesTombstones(t *testing.T) {
 	if n != 1 {
 		t.Errorf("Count default = %d, want 1 (live row only)", n)
 	}
+}
+
+// TestDocumentList_ScopeAll covers sty_2eccc1ea AC#2: scope:"all"
+// cross-lists system + workspace + project rows in one call, with cursor
+// pagination preserved. The three seed rows share a "zz-" name prefix so a
+// name_contains filter isolates them from any bootstrap-seeded system rows.
+func TestDocumentList_ScopeAll(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	docStore := document.New(env.DB)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetDocumentStore(docStore)
+	verb.SetLedgerStore(ledger.New(env.DB))
+	t.Cleanup(func() {
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetDocumentStore(nil)
+		verb.SetLedgerStore(nil)
+	})
+
+	ws, err := wsStore.Create(ctx, "", "scopeall-ws", now)
+	if err != nil {
+		t.Fatalf("ws: %v", err)
+	}
+	pj, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "scopeall-pj"}, now)
+	if err != nil {
+		t.Fatalf("pj: %v", err)
+	}
+
+	seed := func(key document.Key, when time.Time) document.Document {
+		d, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key: key, Type: "document", Body: "b", CreatedBy: "test", ViaInternalSeed: true,
+		}, when)
+		if err != nil {
+			t.Fatalf("seed %s: %v", key.Name, err)
+		}
+		return d
+	}
+	sysDoc := seed(document.Key{Scope: document.ScopeSystem, Name: "zz-sys"}, now.Add(1*time.Minute))
+	wsDoc := seed(document.Key{Scope: document.ScopeWorkspace, WorkspaceID: ws.ID, Name: "zz-ws"}, now.Add(2*time.Minute))
+	pjDoc := seed(document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: "zz-proj"}, now.Add(3*time.Minute))
+
+	list := func(t *testing.T, req verb.DocumentListRequest) verb.DocumentListResponse {
+		t.Helper()
+		body, _ := json.Marshal(req)
+		raw, err := verb.Dispatch(ctx, "document_list", body)
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		var resp verb.DocumentListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	t.Run("scope=all crosses system+workspace+project", func(t *testing.T) {
+		resp := list(t, verb.DocumentListRequest{
+			Type: "document", Scope: "all", WorkspaceID: ws.ID, ProjectID: pj.ID, NameContains: "zz-",
+		})
+		assertIDs(t, resp.Items, []string{sysDoc.ID, wsDoc.ID, pjDoc.ID})
+	})
+
+	t.Run("scope=project sees only the project row", func(t *testing.T) {
+		resp := list(t, verb.DocumentListRequest{
+			Type: "document", Scope: "project", WorkspaceID: ws.ID, ProjectID: pj.ID, NameContains: "zz-",
+		})
+		assertIDs(t, resp.Items, []string{pjDoc.ID})
+	})
+
+	t.Run("scope=all requires workspace_id", func(t *testing.T) {
+		body, _ := json.Marshal(verb.DocumentListRequest{Type: "document", Scope: "all", NameContains: "zz-"})
+		if _, err := verb.Dispatch(ctx, "document_list", body); err == nil {
+			t.Fatalf("scope=all without workspace_id should error")
+		}
+	})
+
+	t.Run("scope=all cursor pagination yields each row exactly once", func(t *testing.T) {
+		seen := map[string]bool{}
+		cursor := ""
+		for i := 0; i < 10; i++ {
+			resp := list(t, verb.DocumentListRequest{
+				Type: "document", Scope: "all", WorkspaceID: ws.ID, ProjectID: pj.ID,
+				NameContains: "zz-", Limit: 1, Cursor: cursor,
+			})
+			for _, d := range resp.Items {
+				if seen[d.ID] {
+					t.Errorf("duplicate id %s across pages", d.ID)
+				}
+				seen[d.ID] = true
+			}
+			if resp.NextCursor == "" {
+				break
+			}
+			cursor = resp.NextCursor
+		}
+		for _, id := range []string{sysDoc.ID, wsDoc.ID, pjDoc.ID} {
+			if !seen[id] {
+				t.Errorf("scope=all pagination missed %s", id)
+			}
+		}
+	})
 }
 
 func assertIDs(t *testing.T, got []document.Document, want []string) {

@@ -616,14 +616,52 @@ func (s *Store) HardDelete(ctx context.Context, id string) error {
 // ListFilter is the input shape for List. Every field is optional;
 // Status/Type="all" or "" disables that predicate.
 type ListFilter struct {
-	Type        string   // "" or "all" → no filter; "document" / "story" → equality
-	Scope       Scope    // "" → no filter
-	WorkspaceID string   // "" → no filter
-	ProjectID   string   // "" → no filter
-	UserID      string   // "" → no filter; set with Scope=user to list a caller's overrides
-	Tags        []string // empty → no filter; non-empty → AND filter via @>
-	Status      string   // "" or "all" → no filter
-	NamePrefix  string   // "" → no filter; non-empty → name ILIKE prefix||'%'
+	Type         string   // "" or "all" → no filter; "document" / "story" → equality
+	Scope        Scope    // "" → no filter; "all" → cross-scope OR (system + ws + project)
+	WorkspaceID  string   // "" → no filter
+	ProjectID    string   // "" → no filter
+	UserID       string   // "" → no filter; set with Scope=user to list a caller's overrides
+	Tags         []string // empty → no filter; non-empty → AND filter via @>
+	Status       string   // "" or "all" → no filter
+	NamePrefix   string   // "" → no filter; non-empty → name ILIKE prefix||'%'
+	NameContains string   // "" → no filter; non-empty → name ILIKE '%'||x||'%' (substring, distinct from NamePrefix)
+}
+
+// scopeAll is the sentinel Scope that cross-lists system + the caller's
+// workspace + the caller's project in one query, rather than a single-scope
+// equality. WorkspaceID/ProjectID supply the OR branches when present.
+const scopeAll = Scope("all")
+
+// addScopePredicate writes the scope filter via the supplied closures. For the
+// normal case it's a single equality (plus standalone workspace_id/project_id
+// equalities); for scopeAll it's one OR across system + the provided workspace
+// + the provided project, so the standalone WorkspaceID/ProjectID equalities
+// are folded into the OR rather than added separately. `add` appends a single
+// `pred`/value (one `?`); `ph` registers a value and returns its `$N`
+// placeholder so a multi-arg OR can be assembled by hand.
+func (f ListFilter) addScopePredicate(add func(string, any), ph func(any) string, appendPred func(string)) {
+	if f.Scope != scopeAll {
+		if f.Scope != "" {
+			add("scope = ?", string(f.Scope))
+		}
+		if f.WorkspaceID != "" {
+			add("workspace_id = ?", f.WorkspaceID)
+		}
+		if f.ProjectID != "" {
+			add("project_id = ?", f.ProjectID)
+		}
+		return
+	}
+	// scope="all": system rows always, plus the workspace/project rows the
+	// caller named. Built as a single OR so cursor pagination stays one query.
+	branches := []string{"scope = 'system'"}
+	if f.WorkspaceID != "" {
+		branches = append(branches, fmt.Sprintf("(scope = 'workspace' AND workspace_id = %s)", ph(f.WorkspaceID)))
+	}
+	if f.ProjectID != "" {
+		branches = append(branches, fmt.Sprintf("(scope = 'project' AND project_id = %s)", ph(f.ProjectID)))
+	}
+	appendPred("(" + strings.Join(branches, " OR ") + ")")
 }
 
 // ListOptions controls pagination. Limit defaults to 50, capped at 200.
@@ -664,19 +702,16 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 		args = append(args, v)
 		preds = append(preds, strings.Replace(pred, "?", fmt.Sprintf("$%d", len(args)), 1))
 	}
+	ph := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	appendPred := func(pred string) { preds = append(preds, pred) }
 
 	if f.Type != "" && f.Type != "all" {
 		add("type = ?", f.Type)
 	}
-	if f.Scope != "" {
-		add("scope = ?", string(f.Scope))
-	}
-	if f.WorkspaceID != "" {
-		add("workspace_id = ?", f.WorkspaceID)
-	}
-	if f.ProjectID != "" {
-		add("project_id = ?", f.ProjectID)
-	}
+	f.addScopePredicate(add, ph, appendPred)
 	if f.UserID != "" {
 		add("user_id = ?", f.UserID)
 	}
@@ -697,6 +732,9 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	}
 	if f.NamePrefix != "" {
 		add("name ILIKE ?", f.NamePrefix+"%")
+	}
+	if f.NameContains != "" {
+		add("name ILIKE ?", "%"+f.NameContains+"%")
 	}
 
 	if opts.Cursor != "" {
@@ -755,19 +793,16 @@ func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
 		args = append(args, v)
 		preds = append(preds, strings.Replace(pred, "?", fmt.Sprintf("$%d", len(args)), 1))
 	}
+	ph := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	appendPred := func(pred string) { preds = append(preds, pred) }
 
 	if f.Type != "" && f.Type != "all" {
 		add("type = ?", f.Type)
 	}
-	if f.Scope != "" {
-		add("scope = ?", string(f.Scope))
-	}
-	if f.WorkspaceID != "" {
-		add("workspace_id = ?", f.WorkspaceID)
-	}
-	if f.ProjectID != "" {
-		add("project_id = ?", f.ProjectID)
-	}
+	f.addScopePredicate(add, ph, appendPred)
 	if f.UserID != "" {
 		add("user_id = ?", f.UserID)
 	}
@@ -786,6 +821,9 @@ func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
 	}
 	if f.NamePrefix != "" {
 		add("name ILIKE ?", f.NamePrefix+"%")
+	}
+	if f.NameContains != "" {
+		add("name ILIKE ?", "%"+f.NameContains+"%")
 	}
 
 	q := "SELECT COUNT(*) FROM documents"
