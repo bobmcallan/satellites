@@ -79,6 +79,7 @@ so the `satellites surface check` gate stays green ([[broken-windows]]):
 | Command | Owns | State |
 | ------- | ---- | ----- |
 | `satellites version` | Print the binary's build info. A non-release build reports a git-derived `0.0.0-dev+<sha>` version (never bare `dev`). | DONE. |
+| `satellites status` | Read-only health/identity over the `system_status` MCP verb — server version/commit/build, substrate DB reachability (ok + latency), process uptime, and the local CLI build for a quick skew check; `--json` for the raw response. `system_status` is the sanctioned introspection exception to [[no-new-mcp-verbs]]. | DONE. |
 | `satellites exec <verb>` | Direct verb dispatch — JSON in, JSON out, byte-identical to the MCP call. The single execution path. | DONE. |
 | `satellites seed` | Push file-based seeds to the substrate. | DONE. |
 | `satellites story review` | Run a story's reviewer gate client-side (`claude -p` against the worktree); the reviewer enacts the status transition. | DONE. |

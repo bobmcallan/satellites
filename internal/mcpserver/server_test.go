@@ -42,6 +42,7 @@ func TestServerConstructs(t *testing.T) {
 //     project_match
 //   - API-key minting (in-band auth for MCP-only agents):
 //     apikey_create, apikey_list, apikey_revoke
+//   - Introspection (sanctioned no-new-mcp-verbs exception): system_status
 //
 // If this test fails, the MCP server has grown or shrunk its surface —
 // confirm intent and update both this test and exposedVerbs in server.go.
@@ -66,6 +67,7 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 		"changelog_list":   true,
 		"changelog_update": true,
 		"changelog_delete": true,
+		"system_status":    true,
 	}
 	if len(tools) != len(want) {
 		names := make([]string, 0, len(tools))

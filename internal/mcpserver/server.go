@@ -67,6 +67,7 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"changelog_list":   typedSchema[verb.ChangelogListRequest](),
 	"changelog_update": typedSchema[verb.ChangelogUpdateRequest](),
 	"changelog_delete": typedSchema[verb.ChangelogDeleteRequest](),
+	"system_status":    typedSchema[verb.SystemStatusRequest](),
 }
 
 // typedSchema generates a JSON Schema from a Go request struct and
@@ -169,6 +170,10 @@ var orientationInstructions = string(documents.MCPLoadContextMarkdown())
 //     revoke caller-owned keys. Membership on the target workspace
 //     is verified before minting. Closes the auth_bootstrap gap that
 //     used to force an out-of-band `auth login` shell-out.
+//   - system_status: read-only health/identity (server version/commit/
+//     build, substrate DB reachability, uptime). A sanctioned exception
+//     to no-new-mcp-verbs (introspection, not substrate CRUD, no
+//     document_* equivalent); see that principle (sty_a847fd3f).
 //
 // Stories are documents with type='story' post-unification (sty_0dd71f79);
 // there are no story_* verbs on the surface. The CLI offers no typed
@@ -194,6 +199,7 @@ var exposedVerbs = []string{
 	"changelog_list",
 	"changelog_update",
 	"changelog_delete",
+	"system_status",
 }
 
 // New returns a configured *mcpserver.MCPServer exposing the verbs in

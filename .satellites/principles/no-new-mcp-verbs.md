@@ -15,8 +15,14 @@ existing verbs; it does not extend the surface.
   `document_delete` verbs.
 - Client-side ergonomics — listings, materialisation, comparison
   against a local cache, sync — ship as `satellites` CLI subcommands.
-- Bootstrap verbs (`project_match`, `apikey_create`) are the lone
+- Bootstrap verbs (`project_match`, `apikey_create`) are a sanctioned
   exception. They exist because no client can call MCP without them.
+- `system_status` is a sanctioned exception too: read-only health/identity
+  (server version/commit/build, substrate DB reachability, process uptime).
+  It is introspection, not substrate CRUD, and has no `document_*`
+  equivalent — a client genuinely cannot ask "who are you, are you healthy?"
+  by composing the existing verbs. Exceptions are named here, not invented
+  per-story; widening this list is itself a reviewed decision.
 
 ## What this rules out
 
