@@ -11,6 +11,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
@@ -28,14 +29,17 @@ func TestDocumentUserScope(t *testing.T) {
 	docStore := document.New(env.DB)
 	authStore := auth.New(env.DB)
 	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
 
 	verb.SetDocumentStore(docStore)
 	verb.SetAuthStore(authStore)
 	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
 	t.Cleanup(func() {
 		verb.SetDocumentStore(nil)
 		verb.SetAuthStore(nil)
 		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
 	})
 
 	if _, err := env.DB.Exec(`TRUNCATE api_keys, users, workspace_members RESTART IDENTITY CASCADE`); err != nil {
@@ -69,6 +73,12 @@ func TestDocumentUserScope(t *testing.T) {
 	}
 	if _, err := env.DB.Exec(`INSERT INTO projects (id, workspace_id, name) VALUES ($1, $2, 'p')`, "proj_user", ws.ID); err != nil {
 		t.Fatalf("seed project: %v", err)
+	}
+	// Under project-scoped RBAC (sty_c96cc77f) workspace membership no longer
+	// implies project access, so the non-admin user needs an explicit project
+	// read grant to read proj_user. (admin is a global admin → implicit admin.)
+	if err := pjStore.AddMember(context.Background(), "proj_user", user.ID, project.RoleRead, admin.ID, time.Now()); err != nil {
+		t.Fatalf("grant user project read: %v", err)
 	}
 
 	// Seed the three layers for name "cfg": system + project + admin's user

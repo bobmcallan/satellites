@@ -117,15 +117,15 @@ func TestAuthorizeListScope_Stub(t *testing.T) {
 	defer func() { authStore = prev }()
 
 	authStore = &auth.Store{}
-	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1"); err == nil || !errors.Is(err, ErrUnauthorized) {
+	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1", "proj_1"); err == nil || !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("project scope without a bearer should be ErrUnauthorized, got %v", err)
 	}
-	if err := authorizeListScope(context.Background(), document.ScopeSystem, ""); err != nil {
+	if err := authorizeListScope(context.Background(), document.ScopeSystem, "", ""); err != nil {
 		t.Errorf("system scope needs no bearer, got %v", err)
 	}
 
 	authStore = nil
-	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1"); err != nil {
+	if err := authorizeListScope(context.Background(), document.ScopeProject, "wksp_1", "proj_1"); err != nil {
 		t.Errorf("in-process (no authStore) must skip the check, got %v", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 type ctxKey struct{}
 type apiKeyRoleCtxKey struct{}
+type apiKeyProjectCtxKey struct{}
 type transportCtxKey struct{}
 
 // Transport identifies how a verb call entered the process. It keeps
@@ -71,6 +72,22 @@ func APIKeyRoleFromContext(ctx context.Context) APIKeyRole {
 	return r
 }
 
+// WithAPIKeyProject stamps the api-key's bound project_id onto ctx.
+// Middleware sets this on the api-key auth path so the project-role
+// resolver (effectiveProjectRole) can map an executor/runner key onto
+// `write` for the project it is bound to (epic:user-admin, sty_c96cc77f).
+// Empty when the key is unbound or for JWT / CLI-local callers.
+func WithAPIKeyProject(ctx context.Context, projectID string) context.Context {
+	return context.WithValue(ctx, apiKeyProjectCtxKey{}, projectID)
+}
+
+// APIKeyProjectFromContext returns the api-key's bound project_id, or ""
+// when none is set.
+func APIKeyProjectFromContext(ctx context.Context) string {
+	p, _ := ctx.Value(apiKeyProjectCtxKey{}).(string)
+	return p
+}
+
 // SetJWTSecret installs the OAuth access-token signing secret on the
 // Store. Once set, Middleware accepts JWT bearer tokens minted by the
 // OAuth Authorization Server in addition to api-keys.
@@ -128,7 +145,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		}
 
 		// api-key path.
-		u, role, err := s.ValidateKeyWithRole(r.Context(), token)
+		u, role, keyProject, err := s.ValidateKeyWithRole(r.Context(), token)
 		if err != nil {
 			if errors.Is(err, ErrInvalidKey) {
 				setWWWAuthenticate(w, r)
@@ -142,6 +159,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 
 		ctx := WithUser(r.Context(), u)
 		ctx = WithAPIKeyRole(ctx, role)
+		ctx = WithAPIKeyProject(ctx, keyProject)
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	})

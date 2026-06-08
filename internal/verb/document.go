@@ -25,6 +25,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
@@ -262,7 +263,7 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err := requireScopeKey(req.Scope, req.WorkspaceID, req.ProjectID); err != nil {
 		return nil, err
 	}
-	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID); err != nil {
+	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID, req.ProjectID); err != nil {
 		return nil, err
 	}
 	if req.Effective {
@@ -355,6 +356,9 @@ func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMess
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return nil, fmt.Errorf("document_count: %w: %v", ErrBadRequest, err)
 		}
+	}
+	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID, req.ProjectID); err != nil {
+		return nil, err
 	}
 	n, err := documentStore.Count(ctx, document.ListFilter{
 		Type:         req.Type,
@@ -558,6 +562,12 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 		// auth shouldn't fail closed. Server boot always wires it.
 		return nil
 	}
+	// Project scope: enforce the project capability matrix (≥ read) via the
+	// effective-role resolver, replacing the workspace-membership shortcut
+	// (epic:user-admin, sty_c96cc77f).
+	if key.Scope == document.ScopeProject {
+		return enforceProjectScope(ctx, key.WorkspaceID, key.ProjectID, "document_get", project.RoleRead)
+	}
 	wsID := key.WorkspaceID
 	if wsID == "" {
 		return fmt.Errorf("document_get: %w: %s scope requires workspace_id", ErrBadRequest, key.Scope)
@@ -610,13 +620,11 @@ func requireScopeKey(scope, wsID, pjID string) error {
 // the workspace the list is bound to. In-process invocations (no authStore
 // wired) skip the check, exactly like authorizeRead.
 //
-// STUB (sty_2fa6f087): a per-PROJECT role gate is not built yet. It needs
-// workspace/project user roles plus the api-key→project binding that
-// auth.Store.ValidateKeyWithRole stores but does not yet surface onto the
-// request context. Until that lands, a workspace member may list any project
-// under that workspace; this function is the single place the project-role
-// check will be added.
-func authorizeListScope(ctx context.Context, scope document.Scope, wsID string) error {
+// For project scope it now enforces the project capability matrix (≥ read)
+// via effectiveProjectRole — the per-PROJECT role gate the sty_2fa6f087 STUB
+// anticipated (epic:user-admin, sty_c96cc77f). Workspace + all scope keep the
+// workspace-membership check.
+func authorizeListScope(ctx context.Context, scope document.Scope, wsID, pjID string) error {
 	if authStore == nil {
 		return nil
 	}
@@ -634,6 +642,9 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID string) 
 	}
 	if workspaceStore == nil {
 		return nil
+	}
+	if scope == document.ScopeProject {
+		return enforceProjectScope(ctx, wsID, pjID, "document_list", project.RoleRead)
 	}
 	if wsID == "" {
 		return fmt.Errorf("document_list: %w: %s scope requires workspace_id", ErrBadRequest, scope)
@@ -1079,6 +1090,10 @@ func authorizeWrite(ctx context.Context, key document.Key) error {
 	}
 	if workspaceStore == nil {
 		return nil
+	}
+	// Project scope: enforce the project capability matrix (≥ write).
+	if key.Scope == document.ScopeProject {
+		return enforceProjectScope(ctx, key.WorkspaceID, key.ProjectID, "document write", project.RoleWrite)
 	}
 	if key.WorkspaceID == "" {
 		return fmt.Errorf("document write: %w: %s scope requires workspace_id", ErrBadRequest, key.Scope)

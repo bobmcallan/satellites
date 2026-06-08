@@ -328,32 +328,34 @@ func (s *Store) issueWithRaw(ctx context.Context, id, userID, projectID, agentNa
 // ValidateKeyWithRole, which returns both. Keeping the plain shape
 // stable means existing call sites continue to compile.
 func (s *Store) ValidateKey(ctx context.Context, rawKey string) (*User, error) {
-	u, _, err := s.ValidateKeyWithRole(ctx, rawKey)
+	u, _, _, err := s.ValidateKeyWithRole(ctx, rawKey)
 	return u, err
 }
 
 // ValidateKeyWithRole is the role-aware counterpart to ValidateKey.
-// Used by the HTTP middleware so the api-key's role can be stamped
-// onto the request context for the verb layer.
-func (s *Store) ValidateKeyWithRole(ctx context.Context, rawKey string) (*User, APIKeyRole, error) {
+// Used by the HTTP middleware so the api-key's role and bound project
+// can be stamped onto the request context for the verb layer. The
+// project_id (epic:user-admin, sty_c96cc77f) is "" for an unbound key.
+func (s *Store) ValidateKeyWithRole(ctx context.Context, rawKey string) (*User, APIKeyRole, string, error) {
 	hash := HashKey(rawKey)
 	var u User
 	var role string
+	var projectID sql.NullString
 	err := s.DB.QueryRowContext(ctx, `
-        SELECT u.id, u.email, u.display_name, u.role, u.created_at, k.role
+        SELECT u.id, u.email, u.display_name, u.role, u.created_at, k.role, k.project_id
           FROM api_keys k
           JOIN users u ON u.id = k.user_id
          WHERE k.key_hash = $1
            AND k.revoked_at IS NULL
            AND (k.expires_at IS NULL OR k.expires_at > now())
-    `, hash).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt, &role)
+    `, hash).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt, &role, &projectID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, "", ErrInvalidKey
+		return nil, "", "", ErrInvalidKey
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return &u, APIKeyRole(role), nil
+	return &u, APIKeyRole(role), projectID.String, nil
 }
 
 // RevokeKey sets revoked_at on the api-key matching the given id.

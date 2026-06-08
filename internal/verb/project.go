@@ -133,6 +133,12 @@ func invokeProjectCreate(ctx context.Context, raw json.RawMessage) (json.RawMess
 		}
 		wsID = pw.ID
 	}
+	// Only a workspace owner/admin (or global admin) may create a project in
+	// the target workspace (epic:user-admin, sty_c96cc77f). CLI-local callers
+	// (no auth wiring) bypass.
+	if authStore != nil && !canManageWorkspace(ctx, wsID) {
+		return nil, fmt.Errorf("project_create: %w: not an admin of workspace %s", ErrForbidden, wsID)
+	}
 	p, err := projectStore.Create(ctx, project.CreateInput{
 		WorkspaceID: wsID,
 		Name:        req.Name,
@@ -160,6 +166,9 @@ func invokeProjectList(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 	}
 	wsID := strings.TrimSpace(req.WorkspaceID)
+	if authStore != nil && !canListWorkspaceProjects(ctx, wsID) {
+		return nil, fmt.Errorf("project_list: %w: not authorized to list workspace %q projects", ErrForbidden, wsID)
+	}
 	ps, err := projectStore.ListByWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
@@ -190,6 +199,9 @@ func invokeProjectGet(ctx context.Context, raw json.RawMessage) (json.RawMessage
 	if strings.TrimSpace(req.ID) == "" {
 		return nil, fmt.Errorf("project_get: id required")
 	}
+	if authStore != nil && !effectiveProjectRoleAtLeast(ctx, req.ID, project.RoleRead) {
+		return nil, fmt.Errorf("project_get: %w: no read access to project %s", ErrForbidden, req.ID)
+	}
 	p, err := projectStore.GetByID(ctx, req.ID)
 	if err != nil {
 		return nil, err
@@ -213,6 +225,9 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 	}
 	if strings.TrimSpace(req.ID) == "" {
 		return nil, fmt.Errorf("project_update: id required")
+	}
+	if authStore != nil && !effectiveProjectRoleAtLeast(ctx, req.ID, project.RoleAdmin) {
+		return nil, fmt.Errorf("project_update: %w: project admin required for %s", ErrForbidden, req.ID)
 	}
 	p, err := projectStore.Update(ctx, req.ID, project.UpdateInput{
 		Name:        req.Name,
