@@ -15,6 +15,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
+	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/chromedp"
 )
 
@@ -99,6 +100,16 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	bctx, cancelRun := context.WithTimeout(browserCtx, 60*time.Second)
 	t.Cleanup(cancelRun)
 
+	// Grant clipboard write so the col-id copy's navigator.clipboard.writeText
+	// resolves under headless (no permission prompt). The copy is still driven
+	// by a real CDP click below, which supplies the user activation the
+	// clipboard API requires — sty_b7ba18b3.
+	if err := chromedp.Run(bctx, browser.GrantPermissions(
+		[]browser.PermissionType{browser.PermissionTypeClipboardSanitizedWrite, browser.PermissionTypeClipboardReadWrite},
+	)); err != nil {
+		t.Fatalf("grant clipboard permission: %v", err)
+	}
+
 	// Login + navigate to the project detail page.
 	if err := chromedp.Run(bctx,
 		chromedp.Navigate(env.ServerURL+"/login"),
@@ -182,17 +193,18 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 		t.Errorf("counter chip under default filter: got %q want contains '3 / 4'", counterText)
 	}
 
-	// AC 5: typing tags:area:portal narrows to two matching rows + adds
-	// a user-set chip. Set the value directly + dispatch input rather
-	// than chromedp.SendKeys to skip the per-character reactive churn
-	// that races with the row-level x-show re-eval.
-	if err := setStorySearch(bctx, "tags:area:portal"); err != nil {
-		t.Fatalf("set search value: %v", err)
-	}
+	// AC 5: filter to tags:area:portal — narrows to two matching rows + adds
+	// a user-set chip. Commit via navigation (?stories_q=) rather than a
+	// client-only setStorySearch: the count indicator is server-authoritative
+	// (filtered/total, correct across all pages — sty_1bd0098a / sty_47234d6e),
+	// so it only moves on a committed query. The server renders exactly the
+	// filtered rows; the chip seeds from the URL query on init.
 	if err := chromedp.Run(bctx,
+		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID+"?stories_q=tags%3Aarea%3Aportal"),
 		chromedp.WaitVisible(`[data-field="panel-stories-chip-tags-area:portal"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
 	); err != nil {
-		t.Fatalf("apply tag filter: %v", err)
+		t.Fatalf("apply tag filter (navigation): %v", err)
 	}
 	// Alpine 3.15.12 batches x-show updates — the chip x-for produces
 	// its element before every row's x-show effect re-runs. Sleep so
@@ -294,14 +306,14 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	//     is reachable — we don't read the clipboard back (headless
 	//     permission gate), but the flash UI is the user-facing
 	//     contract from the AC.
-	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
-		const cells = document.querySelectorAll('td.col-id[data-field="story-id-copy"]');
-		for (const c of cells) {
-			const row = c.closest('tr.story-row');
-			if (row && row.offsetParent !== null) { c.click(); return row.dataset.id || true; }
-		}
-		return null;
-	})()`, nil)); err != nil {
+	// Real CDP click (not JS .click()) so the browser registers the user
+	// activation navigator.clipboard.writeText requires; with the granted
+	// clipboard permission the writeText resolves and the flash fires. Sleep
+	// lets the async clipboard promise's .then(flash) run before we read.
+	if err := chromedp.Run(bctx,
+		chromedp.Click(`td.col-id[data-field="story-id-copy"]`, chromedp.ByQuery),
+		chromedp.Sleep(150*time.Millisecond),
+	); err != nil {
 		t.Fatalf("click col-id: %v", err)
 	}
 	var copiedFlash struct {
@@ -483,14 +495,16 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 
 	// Bug 1a: type order:title — verify rows ordered alphabetically.
 	// alpha → beta → delta → gamma is the ASCII title sort.
-	if err := setStorySearch(bctx, "order:title"); err != nil {
-		t.Fatalf("set order:title: %v", err)
-	}
+	// Server-authoritative: the prior chip-x committed a tag filter, so the
+	// DOM holds only those rows. Commit order:title via navigation so the
+	// server returns and sorts the full set (sty_1bd0098a) rather than
+	// client-previewing over the narrowed DOM — sty_b7ba18b3.
 	if err := chromedp.Run(bctx,
+		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID+"?stories_q=order%3Atitle"),
 		chromedp.WaitVisible(`[data-field="panel-stories-chip-order-title"]`, chromedp.ByQuery),
 		chromedp.Sleep(150*time.Millisecond),
 	); err != nil {
-		t.Fatalf("wait order chip: %v", err)
+		t.Fatalf("order:title via navigation: %v", err)
 	}
 	titlesOrdered, err := orderedVisibleTitles(bctx)
 	if err != nil {
@@ -638,11 +652,16 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	// and clicking the X must drop the chip + clear the search input.
 	// Unknown order fields still produce a structural order chip so the
 	// user can dismiss them; applyStoryOrder no-ops on unknown fields.
+	// Reset to the clean page via navigation rather than the clear-all button:
+	// after the prior chip-x the panel has no user chips, so clear-all is
+	// hidden and chromedp.Click would block until the context deadline (the
+	// 63s timeout this story fixes) — sty_b7ba18b3.
 	if err := chromedp.Run(bctx,
-		chromedp.Click(`[data-action="panel-stories-clear-all"]`, chromedp.ByQuery),
+		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
+		chromedp.WaitVisible(`[data-field="panel-stories-chip-status-open"]`, chromedp.ByQuery),
 		chromedp.Sleep(100*time.Millisecond),
 	); err != nil {
-		t.Fatalf("clear pre-typo: %v", err)
+		t.Fatalf("reset before order:order typo test: %v", err)
 	}
 	if err := setStorySearch(bctx, "order:order"); err != nil {
 		t.Fatalf("set order:order: %v", err)

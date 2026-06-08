@@ -19,7 +19,6 @@ story-backed capture of a failure that cannot be fixed in the moment.
 
 | check_id | story_id | reason |
 | --- | --- | --- |
-| TestNav_DisabledLinks_DoNotNavigate | sty_b7ba18b3 | portal chromedp UI — flaky/red under WSL headless |
-| TestStoryPanel_FilterBugs | sty_b7ba18b3 | portal chromedp UI — flaky/timeout under WSL headless |
-| TestStoryPanelOrder | sty_b7ba18b3 | portal UI order/free-text-fallthrough — red under WSL |
-| TestProjectDetailPanel_Chromedp | sty_b7ba18b3 | portal chromedp UI — flaky/red under WSL headless |
+<!-- empty: the four portal chromedp UI checks were resolved by sty_b7ba18b3
+     (test modernization to the server-authoritative model). The register is
+     clear; add a row only as a deliberate, story-backed quarantine. -->

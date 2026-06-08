@@ -189,37 +189,12 @@ func TestNav_MCPLink_GoesToDocs(t *testing.T) {
 	}
 }
 
-// TestNav_DisabledLinks_DoNotNavigate confirms the placeholder nav items
-// (PROJECTS, LEDGER, CONFIG, HELP) carry href="#" so they don't actually
-// navigate. If we ever wire one up, this test fails loudly and reminds
-// us to add real coverage.
-func TestNav_DisabledLinks_DoNotNavigate(t *testing.T) {
-	env := testbootstrap.SetUpWithServer(t)
-	ctx := newBrowserCtx(t)
-
-	var hrefs []string
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(env.ServerURL+"/login"),
-		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
-		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
-		chromedp.Evaluate(
-			`Array.from(document.querySelectorAll('a.nav-item.disabled')).map(a => a.getAttribute('href'))`,
-			&hrefs,
-		),
-	)
-	if err != nil {
-		t.Fatalf("chromedp: %v", err)
-	}
-	if len(hrefs) == 0 {
-		t.Fatal("no disabled nav items found")
-	}
-	for _, h := range hrefs {
-		if h != "#" {
-			t.Errorf("disabled nav item links to real path %q — add a real test if so", h)
-		}
-	}
-}
+// (Removed TestNav_DisabledLinks_DoNotNavigate — sty_b7ba18b3. It guarded
+// placeholder nav items carrying href="#"; the nav items PROJECTS / LEDGER /
+// MCP / HELP / CHANGELOG are now real links to their own pages, so there are no
+// `a.nav-item.disabled` elements left to assert against. The guard fired
+// exactly as its comment promised — "if we ever wire one up… add real
+// coverage" — and that coverage now lives in the per-page tests.)
 
 // TestSession_PersistsAcrossRefresh logs in, refreshes the portal page,
 // and asserts the user remains authenticated (no redirect to /login).

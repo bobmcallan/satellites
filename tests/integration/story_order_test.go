@@ -219,7 +219,12 @@ func TestStoryPanelOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown order value falls through to free text", func(t *testing.T) {
+	t.Run("unknown order value renders an order chip (no-op sort)", func(t *testing.T) {
+		// Any order:<v> is structurally a valid order token: the chip
+		// renders so the operator can see and dismiss it, and the sort
+		// no-ops when the field is neither a known column nor a tag present
+		// on any row. This matches order:epic-order / order:order and the
+		// server grammar (story_filter.go) — sty_b7ba18b3 operator decision.
 		if err := chromedp.Run(bctx,
 			chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
 			chromedp.WaitVisible(`[data-field="panel-stories-chip-status-open"]`, chromedp.ByQuery),
@@ -229,17 +234,20 @@ func TestStoryPanelOrder(t *testing.T) {
 		if err := setStorySearch(bctx, "order:bogus"); err != nil {
 			t.Fatalf("set: %v", err)
 		}
-		// Order chip must NOT render — unknown values fall through to
-		// free text. The search chip might appear instead.
-		var orderChipPresent bool
+		// The order chip renders; it must NOT fall through to a search chip.
 		if err := chromedp.Run(bctx,
-			chromedp.Sleep(100*time.Millisecond),
-			chromedp.Evaluate(`!!document.querySelector('[data-field="panel-stories-chip-order-bogus"]')`, &orderChipPresent),
+			chromedp.WaitVisible(`[data-field="panel-stories-chip-order-bogus"]`, chromedp.ByQuery),
 		); err != nil {
-			t.Fatalf("probe order chip: %v", err)
+			t.Fatalf("order:bogus order chip never rendered: %v", err)
 		}
-		if orderChipPresent {
-			t.Error("order:bogus should NOT produce an order chip — unknown value falls through")
+		var searchChipPresent bool
+		if err := chromedp.Run(bctx,
+			chromedp.Evaluate(`!!document.querySelector('[data-field="panel-stories-chip-search-order:bogus"]')`, &searchChipPresent),
+		); err != nil {
+			t.Fatalf("probe search chip: %v", err)
+		}
+		if searchChipPresent {
+			t.Error("order:bogus fell through to a search chip — it should render as an order chip")
 		}
 	})
 }
