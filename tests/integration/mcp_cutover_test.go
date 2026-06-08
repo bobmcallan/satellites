@@ -77,6 +77,7 @@ func TestMCPCutover(t *testing.T) {
 			"project_match", "project_create", "project_list", "project_get", "project_update",
 			"apikey_create", "apikey_list", "apikey_revoke",
 			"changelog_add", "changelog_list", "changelog_update", "changelog_delete",
+			"system_status",
 		}
 		if len(tools) != len(want) {
 			t.Fatalf("expected %d tools, got %d: %v", len(want), len(tools), tools)
