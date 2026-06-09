@@ -111,6 +111,19 @@ supplies its own checkpoint skill.
    stop — do not amend or retry unless asked. On success, report the runs + the
    release tag.
 
+7. **Record the CI outcomes into the QA-evidence trail.** Once the three
+   workflows have concluded, capture each stage so the durable trail reflects the
+   deploy, not just the reviewer gates (`evidence audit` then sees the ship):
+
+   ```bash
+   scripts/record-ci-evidence.sh   # story id from HEAD's sty_… trailer; idempotent
+   ```
+
+   It writes a `ci_result` row per stage (test/release/deploy) via
+   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm
+   with `satellites evidence show <story>`. (Local recording — no CI secret; an
+   in-workflow variant is tracked as a follow-up.)
+
 ## Why it is a checkpoint
 
 Reviewers judge the latest pushed commit, not the local tree. A change that is

@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":4,"hash":"f2de2fbee3d58ffd6384e8afc9a03a0276d11e4882cdfb1cbb063d81128e859a"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":5,"hash":"80d635f0826ad58648c0b571d5ff2fdb9f5d34190fe3b4018f2eaaad9a12a700"} satellites-sync:end -->
 ---
 name: satellites-commit-push
 type: skill
@@ -111,6 +111,19 @@ supplies its own checkpoint skill.
    On failure, surface the failing step (`gh run view <id> --log-failed`) and
    stop — do not amend or retry unless asked. On success, report the runs + the
    release tag.
+
+7. **Record the CI outcomes into the QA-evidence trail.** Once the three
+   workflows have concluded, capture each stage so the durable trail reflects the
+   deploy, not just the reviewer gates (`evidence audit` then sees the ship):
+
+   ```bash
+   scripts/record-ci-evidence.sh   # story id from HEAD's sty_… trailer; idempotent
+   ```
+
+   It writes a `ci_result` row per stage (test/release/deploy) via
+   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm
+   with `satellites evidence show <story>`. (Local recording — no CI secret; an
+   in-workflow variant is tracked as a follow-up.)
 
 ## Why it is a checkpoint
 
