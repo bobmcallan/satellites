@@ -272,3 +272,26 @@ func renderMarkdown(md string) template.HTML {
 	}
 	return template.HTML(buf.String())
 }
+
+// unescapeLiteralNewlines repairs a body whose newlines/tabs were stored as
+// literal backslash escape sequences (e.g. a caller that JSON-escaped the body,
+// so it reaches the store as the two characters backslash-n rather than a
+// newline — sty_0633bcf5). Without this, markdown headings/lists never form and
+// the body renders as one run-on line. No-op when no escape sequence is present,
+// so a clean body is untouched.
+func unescapeLiteralNewlines(s string) string {
+	if !strings.Contains(s, `\n`) && !strings.Contains(s, `\t`) {
+		return s
+	}
+	s = strings.ReplaceAll(s, `\r\n`, "\n")
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\t`, "\t")
+	return s
+}
+
+// renderStoryMarkdown renders a story body/ACs to safe HTML, first repairing
+// literal-escape-sequence newlines (sty_0633bcf5) so escaped bodies read the
+// same as clean ones.
+func renderStoryMarkdown(md string) template.HTML {
+	return renderMarkdown(unescapeLiteralNewlines(md))
+}

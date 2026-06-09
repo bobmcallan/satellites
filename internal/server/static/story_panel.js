@@ -331,6 +331,18 @@
                     const url = new URL(window.location.href);
                     const seed = url.searchParams.get('stories_q');
                     if (seed) { this.query = seed; }
+                    // Deep-link from the deprecated standalone story page
+                    // (sty_0633bcf5): ?story=<id> expands that row on load.
+                    const story = url.searchParams.get('story');
+                    if (story) {
+                        this.expanded = story;
+                        this.$nextTick(() => {
+                            const host = this.$root || this.$el;
+                            const sel = (window.CSS && CSS.escape) ? CSS.escape(story) : story;
+                            const row = host && host.querySelector('tr.story-detail[data-detail-for="' + sel + '"]');
+                            if (row && row.scrollIntoView) { row.scrollIntoView({ block: 'center' }); }
+                        });
+                    }
                 } catch (e) { /* URL ctor unavailable — best effort */ }
                 const root = this.$root || this.$el;
                 // Capture original DOM order BEFORE any applyStoryOrder

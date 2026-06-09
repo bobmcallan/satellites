@@ -116,11 +116,15 @@ func TestStoryDetailWorkflowProjectIsolation(t *testing.T) {
 
 	sessions := auth.NewSessions([]byte("iso-test-secret"))
 	handler := server.Build(server.Config{Store: authStore, Sessions: sessions, DevMode: true})
+	// The standalone full page is deprecated (sty_0633bcf5) — it now redirects.
+	// The workflow resolution it exercised lives on in the trace fragment, which
+	// renders the resolved workflow name, so the project-isolation assertions
+	// read that.
 	getStoryBody := func(t *testing.T, storyID string) string {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		sessions.Issue(rec, "usr_dev_admin")
-		req := httptest.NewRequest(http.MethodGet, "/stories/"+storyID, nil)
+		req := httptest.NewRequest(http.MethodGet, "/stories/"+storyID+"/trace.fragment", nil)
 		for _, c := range rec.Result().Cookies() {
 			req.AddCookie(c)
 		}
@@ -128,7 +132,7 @@ func TestStoryDetailWorkflowProjectIsolation(t *testing.T) {
 		handler.ServeHTTP(out, req)
 		body, _ := io.ReadAll(out.Result().Body)
 		if out.Code != http.StatusOK {
-			t.Fatalf("GET /stories/%s: status %d, body=%s", storyID, out.Code, body)
+			t.Fatalf("GET /stories/%s/trace.fragment: status %d, body=%s", storyID, out.Code, body)
 		}
 		return string(body)
 	}
@@ -291,16 +295,35 @@ func TestStoryDetailQAView(t *testing.T) {
 		return rec.Result().Cookies()
 	}
 
-	t.Run("static view reconciles declared workflow against the ledger", func(t *testing.T) {
+	t.Run("deprecated standalone page redirects; trace fragment reconciles workflow×ledger", func(t *testing.T) {
+		// sty_0633bcf5: the standalone full page is deprecated — GET /stories/{id}
+		// 302-redirects to the project-detail inline panel deep link.
 		req := httptest.NewRequest(http.MethodGet, "/stories/"+storyID, nil)
 		for _, c := range sessionCookies() {
 			req.AddCookie(c)
 		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		body, _ := io.ReadAll(rec.Result().Body)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status %d, body=%s", rec.Code, body)
+		if rec.Code != http.StatusFound {
+			body, _ := io.ReadAll(rec.Result().Body)
+			t.Fatalf("GET /stories/%s: status %d, want 302; body=%s", storyID, rec.Code, body)
+		}
+		loc := rec.Result().Header.Get("Location")
+		if !strings.Contains(loc, "/projects/"+pj.ID) || !strings.Contains(loc, "story="+storyID) {
+			t.Errorf("redirect Location = %q, want contains /projects/%s and story=%s", loc, pj.ID, storyID)
+		}
+
+		// The reconciled declared-workflow × ledger view now lives in the trace
+		// fragment the inline panel lazy-loads.
+		freq := httptest.NewRequest(http.MethodGet, "/stories/"+storyID+"/trace.fragment", nil)
+		for _, c := range sessionCookies() {
+			freq.AddCookie(c)
+		}
+		frec := httptest.NewRecorder()
+		handler.ServeHTTP(frec, freq)
+		body, _ := io.ReadAll(frec.Result().Body)
+		if frec.Code != http.StatusOK {
+			t.Fatalf("trace.fragment status %d, body=%s", frec.Code, body)
 		}
 		s := string(body)
 		for _, want := range []string{
@@ -312,7 +335,7 @@ func TestStoryDetailQAView(t *testing.T) {
 			`data-table="process-trace"`,
 		} {
 			if !strings.Contains(s, want) {
-				t.Errorf("view missing %q", want)
+				t.Errorf("trace fragment missing %q", want)
 			}
 		}
 	})

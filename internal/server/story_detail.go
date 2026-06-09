@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -101,29 +102,22 @@ func storyDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		data, err := buildStoryDetail(ctx, storyID)
-		if err != nil {
-			arbor.WarnCtx(ctx, "story_detail: build", "id", storyID, "err", err)
+		// The standalone story page is deprecated (sty_0633bcf5): the
+		// project-detail inline panel is the single canonical story view.
+		// Redirect to it with the story deep-linked open. The trace/ledger
+		// fragment routes are registered more specifically and still served
+		// directly, so this only affects the full-page view.
+		story, err := dispatchStoryMeta(ctx, storyID)
+		if err != nil || strings.TrimSpace(story.ProjectID) == "" {
+			if err != nil {
+				arbor.WarnCtx(ctx, "story_detail: redirect resolve", "id", storyID, "err", err)
+			}
 			http.NotFound(w, r)
 			return
 		}
-		data.Title = data.StoryTitle + " · stories · satellites"
-		data.ActiveNav = "projects"
-		data.FooterName = footerName
-		data.FooterEmail = footerEmail
-		data.Version = versionString()
-		if cfg.Store != nil && cfg.Store.DB != nil {
-			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
-				data.UserEmail = u.Email
-				data.UserName = u.DisplayName
-				data.UserAvatar = avatarLetter(u.DisplayName, u.Email)
-			}
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := storyDetailTmpl.Execute(w, data); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+		http.Redirect(w, r,
+			"/projects/"+url.PathEscape(story.ProjectID)+"?story="+url.QueryEscape(storyID),
+			http.StatusFound)
 	}
 }
 

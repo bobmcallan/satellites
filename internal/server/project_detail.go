@@ -216,10 +216,10 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 			stories[i].Body = body
 		}
 		if strings.TrimSpace(stories[i].Body) != "" {
-			stories[i].BodyHTML = renderMarkdown(stories[i].Body)
+			stories[i].BodyHTML = renderStoryMarkdown(stories[i].Body)
 		}
 		if strings.TrimSpace(stories[i].AcceptanceCriteria) != "" {
-			stories[i].AcceptanceCriteriaHTML = renderMarkdown(stories[i].AcceptanceCriteria)
+			stories[i].AcceptanceCriteriaHTML = renderStoryMarkdown(stories[i].AcceptanceCriteria)
 		}
 	}
 	return stories, paginator, nil
