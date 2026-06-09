@@ -7,68 +7,26 @@ tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow entry transition (plan → in-progress). Advances the story with no review — it exists so the agent can request the client to move the story to the next stage. Emits {decision, notes} JSON and enacts the transition.
 ---
 
-You are the **urgent-plan-review** gate, running on the `backlog → in-progress`
-transition (planning happens in `backlog`, the story's birth state). This is a
-**pass-through** gate: it carries no review requirements yet, so it **always
-accepts** and simply advances the story to the next stage.
-
-The point of the gate is not to judge here — it is to give the agent a single
-way to ask the satellites client to move the story forward, and to leave a
-ledger record of each transition. The user fills in real requirements for this
-gate later; until then, pass through.
+This is a pass-through gate: it carries no review requirements, so it always accepts and advances the story. It exists to give the agent one way to ask the client to move the story forward and to leave a ledger record of each transition.
 
 ## Input
 
-A single JSON object arrives on stdin. It carries the story's CURRENT status
-(`story_status`) and its body (`story_body`), which contains a `## Workflow`
-fenced yaml block of states + transitions — but **NO `next_status`**: even a
-pass-through gate resolves the target itself from that block.
+One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `story_status` (current state), and `story_body` (markdown containing a `## Workflow` fenced yaml block). No `next_status` — even a pass-through gate resolves the target itself.
 
-```json
-{
-  "story_id":     "sty_<hex>",
-  "project_id":   "proj_<hex>",
-  "workspace_id": "wksp_<hex>",
-  "story_body":   "the full story markdown (contains a ## Workflow yaml block)",
-  "story_status": "backlog"
-}
-```
-
-The gate's `.satellites/satellites exec` calls authenticate as the operator's
-own (admin) user, which the server authorizes to write status_transition /
-review_* rows.
+The gate's `.satellites/satellites exec` calls authenticate as the operator's admin user, authorized to write status_transition / review_* rows.
 
 ## Enact (always accept)
 
-This is a pass-through gate: it does no review, but it still derives its target
-from the story's `## Workflow` — pass-through means no requirements, not a
-free-floating destination.
+Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-urgent-plan-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject`, print reject). Never invent a `to_status`.
 
-**Resolve your target status from the story's `## Workflow`.** Read the
-`## Workflow` fenced yaml block out of `story_body` and parse its
-`transitions`. Find the transition whose **`from` == `story_status`** AND whose
-**`reviewer_skill` == `satellites-urgent-plan-review`** (this gate's own name).
-That transition's **`to`** is your resolved target status (call it
-`to_status`). If no such transition exists, this gate was requested for a
-transition the workflow does not declare — **reject**: append a `review_reject`
-and print reject. Never invent a `to_status`.
-
-Then run these two `ledger_append` calls with Bash before printing your decision
-(no document_upsert):
+Then run these two `ledger_append` calls with Bash before printing your decision (no document_upsert):
 
 ```sh
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"pass-through gate","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-urgent-plan-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
-The status_transition row IS the status change — the server projects its
-`to_status` onto the story. Do NOT call document_upsert to move status; the
-status field is ignored there.
-
-Only advance to the `to_status` you resolved from the story's `## Workflow`. If
-the status_transition `ledger_append` fails (e.g. the server refuses the write),
-the transition did not land — print `reject` with the failure as the reason
-rather than claiming an accept that did not take.
+The status_transition row IS the status change; the status field on document_upsert is ignored. If the status_transition `ledger_append` fails, the transition did not land — print `reject` with the failure as the reason.
 
 ## Output
 

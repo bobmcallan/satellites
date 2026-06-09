@@ -6,32 +6,13 @@ tags: [principles:project, principles:always]
 
 # Agent goals
 
-An executing agent has one goal: drive a story to `done`.
+Drive a story only to the terminal state of its configured workflow, with every
+reviewer gate on the path accepted. Status is the sole proof of done — not "code
+written", "tests pass locally", or "looks finished".
 
-A story is done when its status reaches the terminal state of the
-project's configured workflow, with every reviewer gate on the path
-accepted. Nothing else is done — not "code written", not "tests pass
-locally", not "looks finished". The status is the truth.
-
-## The agent
-
-1. Reads the story and the workflow its type is configured with — the
-   workflow skill names the states, transitions, and gates.
-2. Does the work the current state calls for.
-3. Requests review at each gated transition. On accept the status
-   advances; on reject it reads the notes, fixes, and requests again.
-4. Repeats to the terminal state.
-
-## The agent does not
-
-- Patch status to skip a gate.
-- Declare done without the reviewer's accept.
-- Invent process the project did not configure.
-
-## Stop conditions
-
-Stop and hand back to the operator when a gap blocks the loop: a
-malformed config, a missing gate skill, a reviewer asking for a
-decision only a human can make. Surface the gap; do not work around it.
+Do not patch status to skip a gate, declare done without a reviewer accept, or
+invent process the project did not configure. When a gap blocks the loop (bad
+config, missing gate skill, a human-only decision), surface it and stop; never
+work around it.
 
 See [[process-as-configuration]], [[reviewer-process]].

@@ -9,73 +9,24 @@ description: The lifecycle a `fix`/`refactor`/`bug`/`infrastructure` story follo
 
 # Fix workflow
 
-This skill is the **process** for a `fix` (and `refactor` / `bug` /
-`infrastructure`) story. When asked to implement one, you read it and follow
-it: the story is the goal, this workflow is the loop you run to reach it.
+The process for a `fix` / `refactor` / `bug` / `infrastructure` story. The story is the goal; this is the loop.
 
-## The story is the contract; the plan is the loop
+1. `document_get` the story; read its acceptance criteria.
+2. Before starting, `document_upsert` two sections into the story body:
+   - **`## Workflow`** — the fenced ```yaml block below, copied verbatim. Later gates parse the story's copy.
+   - **The plan** — Purpose / Approach / numbered Acceptance criteria.
+3. Request each gated transition: `satellites story status_transition <story-id> --skill <gate>`. The plan-review accept IS your go-ahead to start.
+4. Do the work; commit at each checkpoint.
+5. Request the next gate until `done`.
 
-The story is the one self-describing artifact the reviewer reads. At planning
-you record BOTH the matched workflow and the plan into the story body, so every
-later gate judges against the story alone.
+A rejected gate (or a missing/mismatched `## Workflow`) returns notes; fix and request again. Only reviewers advance status — never hand-patch it.
 
-1. Read the story (`document_get`) and its acceptance criteria — the goal.
-2. **Record the contract into the story body** (`document_upsert` on the story
-   id). Two sections:
-   - **`## Workflow`** — copy this skill's states + transitions (the fenced
-     ```yaml block at the foot of this skill) verbatim into the story. This
-     pins the workflow the later gates follow; plan-review validates it against
-     this skill once, and done-review then follows what the story records
-     rather than re-resolving.
-   - **The plan** — Purpose / Approach / numbered Acceptance criteria. The plan
-     is the loop you will run.
-3. Request the entry gate: `.satellites/satellites story status_transition <story-id>`.
-   **`satellites-story-plan-review`'s accept IS the approval of your plan** —
-   the go-ahead to start, advancing the story `backlog → in_progress`. There
-   is no separate operator sign-off.
-4. Do the work the plan describes; commit at each checkpoint.
-5. Request the completion gate; `satellites-story-done-review`'s accept moves
-   the story to `done`.
-
-Record the contract first, gate-approve it, then execute. A rejected plan (or a
-missing/mismatched `## Workflow`) returns with notes; fix and request again.
-Never hand-patch status — only reviewers advance it.
-
-### Satellites-client changes need the full loop
-
-A change to the satellites client/server is invisible to the gate until it is
-built, locally tested, `/commit-push`ed, carried through CI
-(test → release → deploy), and `.satellites/satellites` (or the installed
-client) is refreshed to the new release. The gate runs the LOCAL binary, so a
-client change you have not shipped + refreshed will not be seen.
-
-**Merging is NOT releasing.** The release tag is `v<satellites.version>`; a push
-that does not bump `satellites.version` in `.version` computes an existing tag
-and the release is skipped — your client code reaches `main` but no release, no
-client (sty_5a97504a). So the explicit step is: **bump `.version`
-(`satellites.version`)** as part of any client-affecting change, then
-`satellites update` + (if hooks changed) re-run `satellites init`. CI now FAILS
-loudly when client paths changed without a version bump, rather than skipping
-silently.
-
-Build → test → **bump `.version`** → commit-push → watch CI (test → release →
-deploy) → `satellites update` → then drive the gate.
+A client/server change is invisible to the gate until it is built, tested, committed, pushed through CI (test → release → deploy), and the client refreshed; the gate runs the local binary, so an unshipped change is not seen. Merging is not releasing — bump the client version so CI cuts a release, then refresh the client before driving the gate.
 
 ## Transitions
 
-Two reviewer gates, one per transition — both reviewer-enacted, so the loop
-never depends on an executor patching status (the role gate forbids that —
-only reviewers advance status).
-
-- `backlog → in_progress` — `satellites-story-plan-review` checks the story
-  has a sound, executable plan before an executor starts; it enacts the
-  transition on accept.
-- `in_progress → done` — `satellites-story-done-review` verifies the change
-  against the acceptance criteria.
-
-States and transitions live in the fenced ```yaml block below. Free text
-around it is for human readers — the parser only reads what's inside the
-block.
+- `backlog → in_progress` — `satellites-story-plan-review` accepts the plan.
+- `in_progress → done` — `satellites-story-done-review` verifies against the acceptance criteria.
 
 ```yaml
 states:

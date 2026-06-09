@@ -9,10 +9,9 @@ description: Design a story's ## Workflow from its requirement in isolated conte
 
 # Workflow design
 
-You are a workflow-design subagent. Your ONLY job: given a story's requirement,
-the available skills, and the fail-closed-gate principle, propose the `## Workflow`
-state machine(s) appropriate to that requirement. You design the lifecycle; the
-operator chooses. You do not implement the story.
+Given a story's requirement, the available skills, and the fail-closed-gate
+principle, propose the `## Workflow` state machine(s) for that requirement. You
+design the lifecycle; the operator chooses. Do not implement the story.
 
 ## Input (on stdin, JSON)
 
@@ -29,14 +28,14 @@ operator chooses. You do not implement the story.
 
 - **Use only the gate skills provided.** Every gated transition's `reviewer_skill`
   MUST be one of `available_gate_skills[].name`. Never invent a skill name.
-- **Sound lifecycle.** There must be an entry (initial) state, at least one terminal
-  state (no outgoing edge), and — unless the work is trivial — an editable working
-  phase between them (begin → work → end). No cycle that can never terminate.
+- **Sound lifecycle.** An entry (initial) state, at least one terminal state (no
+  outgoing edge), and — unless the work is trivial — an editable working phase
+  between them (begin → work → end). No cycle that can never terminate.
 - **Simplest fit.** Prefer the fewest states that serve the requirement. Reuse a
-  canonical shape (e.g. the fix/feature lifecycle from `available_workflow_skills`)
-  when it fits; deviate only when the requirement needs it, and say why in the rationale.
-- **Gate where it matters** (per the fail-closed-gate principle): a transition that
-  needs verification is gated; a deliberate fast path may be ungated. Justify each.
+  canonical shape from `available_workflow_skills` when it fits; deviate only when
+  needed, and say why in the rationale.
+- **Gate where it matters** (per the fail-closed-gate principle): gate a transition
+  that needs verification; a deliberate fast path may be ungated. Justify each.
 
 ## Output
 
