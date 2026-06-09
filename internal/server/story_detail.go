@@ -129,7 +129,7 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 		StoryType:     story.Category,
 		CurrentStatus: story.Status,
 	}
-	wf, err := resolveWorkflowForStory(ctx, story.Category)
+	wf, err := resolveWorkflowForStory(ctx, story)
 	if err != nil || wf == nil {
 		if err != nil {
 			arbor.WarnCtx(ctx, "story_detail: resolve workflow", "type", story.Category, "err", err)
@@ -177,12 +177,16 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// storyMeta is the minimal story projection the view needs.
+// storyMeta is the minimal story projection the view needs. ProjectID +
+// WorkspaceID bound the workflow resolver to the story's OWN project so a
+// kind:workflow skill from another project can never be selected (sty_68379c96).
 type storyMeta struct {
-	ID       string
-	Title    string
-	Status   string
-	Category string
+	ID          string
+	Title       string
+	Status      string
+	Category    string
+	ProjectID   string
+	WorkspaceID string
 }
 
 func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
@@ -199,10 +203,12 @@ func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
 		return storyMeta{}, fmt.Errorf("document %s is not a story", id)
 	}
 	return storyMeta{
-		ID:       resp.Document.ID,
-		Title:    resp.Document.Name,
-		Status:   resp.Document.Status,
-		Category: resp.Document.Category,
+		ID:          resp.Document.ID,
+		Title:       resp.Document.Name,
+		Status:      resp.Document.Status,
+		Category:    resp.Document.Category,
+		ProjectID:   resp.Document.ProjectID,
+		WorkspaceID: resp.Document.WorkspaceID,
 	}, nil
 }
 
@@ -211,11 +217,24 @@ func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
 // overridden workflow wins for that viewer — sty_cbeeb452). Returns nil (no
 // error) when no workflow governs the type.
 //
+// Selection is bounded to the story's OWN project (sty_68379c96; cf.
+// cross-project skill leak sty_2fa6f087): a candidate skill is eligible only
+// when it is visible to the story's project — a system-scoped workflow (applies
+// everywhere), the viewer's own user-scope override, the story's workspace, or
+// the story's project. A project- or workspace-scoped kind:workflow skill owned
+// by a DIFFERENT project/workspace can never be selected, even when its
+// applies_to overlaps and it sorts first by created_at. The bound is applied to
+// the RESULT rows, not the query: a Scope:"all" query would newly require the
+// viewer to be a workspace member (authorizeListScope), which is stricter than
+// the page's existing visibility (the id-addressed document_get this view rides
+// on performs no membership check) and would silently blank the trace for a
+// non-member who can otherwise open the story.
+//
 // Observability only (see principle process-as-configuration, "the boundary"):
 // this parses a workflow purely to RENDER the story-detail view. It decides
 // and advances nothing — gating authority lives in the gate skill, never here.
-func resolveWorkflowForStory(ctx context.Context, storyType string) (*workflow.Workflow, error) {
-	storyType = strings.TrimSpace(storyType)
+func resolveWorkflowForStory(ctx context.Context, story storyMeta) (*workflow.Workflow, error) {
+	storyType := strings.TrimSpace(story.Category)
 	if storyType == "" {
 		return nil, nil
 	}
@@ -229,6 +248,22 @@ func resolveWorkflowForStory(ctx context.Context, storyType string) (*workflow.W
 		return nil, err
 	}
 	for _, d := range resp.Items {
+		// Project-isolation bound: skip a workflow that belongs to another
+		// project/workspace so the view never borrows it (sty_68379c96).
+		switch string(d.Scope) {
+		case "system", "user":
+			// system applies everywhere; a user row is the caller's own override.
+		case "workspace":
+			if story.WorkspaceID == "" || d.WorkspaceID != story.WorkspaceID {
+				continue
+			}
+		case "project":
+			if story.ProjectID == "" || d.ProjectID != story.ProjectID {
+				continue
+			}
+		default:
+			continue
+		}
 		getBody, _ := json.Marshal(verb.DocumentGetRequest{ID: d.ID})
 		graw, gErr := verb.Dispatch(ctx, "document_get", getBody)
 		if gErr != nil {

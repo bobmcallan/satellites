@@ -36,6 +36,164 @@ const testWorkflowSkill = "---\n" +
 	"  - {from: in_progress, to: done, reviewer_skill: \"satellites-story-done-review\"}\n" +
 	"```\n"
 
+// fixWorkflowBody builds a kind:workflow skill (applies_to:[fix]) whose
+// frontmatter name is `name` — the name the process-trace view renders, so a
+// test can tell which workflow resolved.
+func fixWorkflowBody(name string) string {
+	return "---\n" +
+		"name: " + name + "\n" +
+		"kind: workflow\n" +
+		"applies_to: [fix]\n" +
+		"description: test workflow\n" +
+		"---\n" +
+		"# test workflow\n\n" +
+		"```yaml\n" +
+		"states: [backlog, in_progress, done]\n" +
+		"transitions:\n" +
+		"  - {from: backlog, to: in_progress, reviewer_skill: \"satellites-story-plan-review\"}\n" +
+		"  - {from: in_progress, to: done, reviewer_skill: \"satellites-story-done-review\"}\n" +
+		"```\n"
+}
+
+// TestStoryDetailWorkflowProjectIsolation is the multi-project regression for
+// sty_68379c96: the story-detail PROCESS trace must resolve the story's OWN
+// project's kind:workflow skill, never another project's — even when the other
+// project's workflow has an overlapping applies_to and sorts first by
+// created_at (the pre-fix resolver listed skills with no project filter and
+// returned the first applies_to match in created_at DESC order, so the newer
+// foreign workflow won). It also pins the cascade: a workspace-scoped workflow
+// still resolves for a project that has no project-scoped one of its own.
+func TestStoryDetailWorkflowProjectIsolation(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	authStore := auth.New(env.DB)
+	if err := authStore.DevSeed(context.Background()); err != nil {
+		t.Fatalf("dev seed: %v", err)
+	}
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	docStore := document.New(env.DB)
+	ledStore := ledger.New(env.DB)
+	verb.SetAuthStore(authStore)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetDocumentStore(docStore)
+	verb.SetLedgerStore(ledStore)
+	t.Cleanup(func() {
+		verb.SetAuthStore(nil)
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetDocumentStore(nil)
+		verb.SetLedgerStore(nil)
+	})
+
+	ctx := context.Background()
+	t0 := time.Now().UTC()
+
+	// in_progress fix story in the given project; returns its id.
+	newFixStory := func(t *testing.T, projectID, name string) string {
+		t.Helper()
+		fixCat := "fix"
+		createReq, _ := json.Marshal(verb.DocumentUpsertRequest{
+			Type: "story", ProjectID: projectID, Name: name, Category: &fixCat,
+		})
+		createRaw, err := verb.Dispatch(ctx, "document_upsert", createReq)
+		if err != nil {
+			t.Fatalf("create story %q: %v", name, err)
+		}
+		var created verb.DocumentUpsertResponse
+		if err := json.Unmarshal(createRaw, &created); err != nil {
+			t.Fatalf("decode story %q: %v", name, err)
+		}
+		inProgress := "in_progress"
+		patchReq, _ := json.Marshal(verb.DocumentUpsertRequest{ID: created.Document.ID, Status: &inProgress})
+		if _, err := verb.Dispatch(ctx, "document_upsert", patchReq); err != nil {
+			t.Fatalf("patch story %q: %v", name, err)
+		}
+		return created.Document.ID
+	}
+
+	sessions := auth.NewSessions([]byte("iso-test-secret"))
+	handler := server.Build(server.Config{Store: authStore, Sessions: sessions, DevMode: true})
+	getStoryBody := func(t *testing.T, storyID string) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		sessions.Issue(rec, "usr_dev_admin")
+		req := httptest.NewRequest(http.MethodGet, "/stories/"+storyID, nil)
+		for _, c := range rec.Result().Cookies() {
+			req.AddCookie(c)
+		}
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		body, _ := io.ReadAll(out.Result().Body)
+		if out.Code != http.StatusOK {
+			t.Fatalf("GET /stories/%s: status %d, body=%s", storyID, out.Code, body)
+		}
+		return string(body)
+	}
+
+	t.Run("a fix story resolves its own project's workflow, never another project's", func(t *testing.T) {
+		ws, err := wsStore.Create(ctx, "", "iso-ws", t0)
+		if err != nil {
+			t.Fatalf("create workspace: %v", err)
+		}
+		pjA, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "project-a"}, t0)
+		if err != nil {
+			t.Fatalf("create project A: %v", err)
+		}
+		pjB, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "project-b"}, t0)
+		if err != nil {
+			t.Fatalf("create project B: %v", err)
+		}
+		// A's workflow first, B's LATER so B sorts first under created_at DESC:
+		// the pre-fix resolver would pick B for a story in A.
+		if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key:  document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pjA.ID, Name: "a-fix-workflow"},
+			Type: document.TypeSkill, Body: fixWorkflowBody("a-fix-workflow"),
+		}, t0); err != nil {
+			t.Fatalf("seed A workflow: %v", err)
+		}
+		if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key:  document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pjB.ID, Name: "b-fix-workflow"},
+			Type: document.TypeSkill, Body: fixWorkflowBody("b-fix-workflow"),
+		}, t0.Add(time.Minute)); err != nil {
+			t.Fatalf("seed B workflow: %v", err)
+		}
+
+		body := getStoryBody(t, newFixStory(t, pjA.ID, "story in A"))
+		if !strings.Contains(body, "a-fix-workflow") {
+			t.Errorf("story in project A did not resolve its own workflow (a-fix-workflow)")
+		}
+		if strings.Contains(body, "b-fix-workflow") {
+			t.Errorf("story in project A leaked project B's workflow (b-fix-workflow)")
+		}
+	})
+
+	t.Run("cascade: a workspace-scoped workflow resolves when the project has none", func(t *testing.T) {
+		ws2, err := wsStore.Create(ctx, "", "iso-ws2", t0)
+		if err != nil {
+			t.Fatalf("create workspace 2: %v", err)
+		}
+		pjC, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws2.ID, Name: "project-c"}, t0)
+		if err != nil {
+			t.Fatalf("create project C: %v", err)
+		}
+		// Workspace-scoped (no project_id) — visible to every project in ws2.
+		if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key:  document.Key{Scope: document.ScopeWorkspace, WorkspaceID: ws2.ID, Name: "shared-fix-workflow"},
+			Type: document.TypeSkill, Body: fixWorkflowBody("shared-fix-workflow"),
+		}, t0); err != nil {
+			t.Fatalf("seed workspace workflow: %v", err)
+		}
+
+		body := getStoryBody(t, newFixStory(t, pjC.ID, "story in C"))
+		if !strings.Contains(body, "shared-fix-workflow") {
+			t.Errorf("story in project C did not resolve the workspace-scoped workflow (cascade broken)")
+		}
+	})
+}
+
 // TestStoryDetailQAView exercises sty_0915e1b7: the per-story QA process view
 // (declared workflow × actual ledger) and the SSE realtime stream, end-to-end
 // over the real server handler + Postgres.
