@@ -26,12 +26,12 @@ type fcHeight struct {
 // TestFormControlStyle_UniformHeight pins sty_332acf5d: every form
 // control on a page renders at the system `--control-height`. Walks
 // inputs, selects, textareas, and `.btn` buttons inside form-shaped
-// containers (forms, story-panel, bulk-action bar) and asserts
-// pixel-identical computed heights.
+// containers (forms, settings rows, login) and asserts pixel-identical
+// computed heights.
 //
-// The screenshot regression was the bulk-bar `done` dropdown sitting
-// shorter than the adjacent `apply to selection` button. This test
-// captures that case directly via the bulk-bar selector list.
+// Note: the project_detail bulk-action bar this test once covered was
+// removed when status became display-only (epic:dynamic-workflow-status
+// order:2); the remaining pages still pin the shared --control-height.
 func TestFormControlStyle_UniformHeight(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
 
@@ -128,23 +128,6 @@ func TestFormControlStyle_UniformHeight(t *testing.T) {
 		}
 		t.Logf("[%s] %d form controls all at height %s", label, len(got), ref)
 	}
-
-	t.Run("project_detail with bulk-bar visible", func(t *testing.T) {
-		if err := chromedp.Run(bctx,
-			chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
-			chromedp.WaitVisible(`[data-field="stories-table"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`.panel-search`, chromedp.ByQuery),
-			chromedp.Click(`input[data-field="story-row-select"]`, chromedp.ByQuery),
-			chromedp.WaitVisible(`[data-field="story-bulk-bar"]`, chromedp.ByQuery),
-		); err != nil {
-			t.Fatalf("nav + select: %v", err)
-		}
-		assertUniformHeight(t, "project_detail", []string{
-			`.panel-search`,
-			`.story-bulk-bar select`,
-			`.story-bulk-bar button.btn`,
-		})
-	})
 
 	t.Run("system-kv edit row + add-kv row", func(t *testing.T) {
 		if _, err := varStore.SeedSystem(bgCtx, "form-style.test.kv", "1", now); err != nil {

@@ -660,28 +660,12 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   color: #c8c8c8;
 }
 
-.story-status-controls { display: flex; flex-direction: column; gap: 0.4rem; }
-.status-button-group { display: inline-flex; flex-wrap: wrap; gap: 0; }
-button.status-button {
-  background: #0a0a0a;
-  color: #e0e0e0;
-  border: 1px solid #333;
-  height: var(--control-height);
-  padding: 0 0.8rem;
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1;
-  cursor: pointer;
-  margin: 0 -1px 0 0;
-}
-button.status-button:hover:not([disabled]) { color: #fff; border-color: #555; }
-button.status-button:focus-visible { outline: 2px solid #4ade80; outline-offset: 1px; z-index: 1; }
-button.status-button[disabled] {
-  background: #e0e0e0;
-  color: #0a0a0a;
-  border-color: #e0e0e0;
-  cursor: default;
-}
+/* Status is display-only (epic:dynamic-workflow-status order:2): the read-only
+   current status + the live activity ("being worked now") indicator that
+   replaced the editable status panel. */
+.story-status-readonly { display: flex; flex-direction: column; gap: 0.4rem; }
+.status-readonly-row { display: inline-flex; align-items: center; gap: 0.6rem; }
+.status-pill-lg { font-size: 0.85rem; padding: 0.2rem 0.6rem; }
 
 .muted { color: #666; }
 .crumb-link { color: #888; text-decoration: none; }
@@ -699,39 +683,38 @@ button.status-button[disabled] {
   border: 0;
 }
 
-.panel-table .col-select { width: 2rem; }
-.story-row-select { cursor: pointer; }
-
-.story-bulk-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0 0 0.6rem;
-  padding: 0.5rem 0.7rem;
-  background: #0a0a0a;
-  border: 1px solid #333;
-  border-radius: 3px;
-  font-size: 0.78rem;
+/* Live activity ("being worked now") indicator — order:1 signal, order:2 UI.
+   Idle by default (dim); .is-active lights it. The compact row dot sits beside
+   the status pill; the detail-panel indicator carries a working/idle label. */
+.activity-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #333;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  flex: none;
 }
-.story-bulk-count {
-  color: #4ade80;
-  letter-spacing: 0.05em;
-}
-.story-bulk-target-label {
-  color: #888;
+.activity-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
+  color: #666;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
 }
-/* Bulk-bar select — only background is variant; height and chrome
-   come from the shared element-level rule so it lines up with the
-   `apply to selection` button to its right. */
-.story-bulk-target { background: #050505; }
-.story-bulk-result {
-  color: #d0d0d0;
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
+.activity-indicator .activity-dot { margin-left: 0; }
+.activity-indicator.is-active { color: #4ade80; }
+.activity-dot.is-active,
+.activity-indicator.is-active .activity-dot {
+  background: #4ade80;
+  box-shadow: 0 0 4px #4ade80;
+  animation: activity-pulse 1.6s ease-in-out infinite;
+}
+@keyframes activity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .panel-paginator {

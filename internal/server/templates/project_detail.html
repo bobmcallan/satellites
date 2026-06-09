@@ -82,39 +82,9 @@
       </div>
 
       {{if .Stories}}
-      <div class="story-bulk-bar"
-           x-show="selectedIDs.size > 0"
-           x-cloak
-           data-field="story-bulk-bar">
-        <span class="story-bulk-count" data-field="story-bulk-count" x-text="selectedIDs.size + ' selected'"></span>
-        <label class="story-bulk-target-label">set status to
-          <select x-model="bulkTarget" class="story-bulk-target" data-field="story-bulk-target">
-            <option value="backlog">backlog</option>
-            <option value="ready">ready</option>
-            <option value="in_progress">in_progress</option>
-            <option value="review">review</option>
-            <option value="done">done</option>
-            <option value="cancelled">cancelled</option>
-          </select>
-        </label>
-        <button type="button"
-                class="btn primary story-bulk-apply"
-                data-field="story-bulk-apply"
-                :disabled="bulkBusy"
-                @click="applySelectionStatus">apply to selection</button>
-        <button type="button"
-                class="btn secondary story-bulk-clear"
-                data-field="story-bulk-clear"
-                @click="clearSelection">clear</button>
-        <span class="story-bulk-result"
-              data-field="story-bulk-result"
-              x-show="bulkResultText"
-              x-text="bulkResultText"></span>
-      </div>
       <table class="panel-table panel-table-stories" data-field="stories-table">
         <thead>
           <tr>
-            <th class="col-select"><span class="visually-hidden">select</span></th>
             <th class="col-id">id</th>
             <th class="col-title">title</th>
             <th class="col-status">status</th>
@@ -179,13 +149,6 @@
               :class="rowClass($el)"
               @click="toggleRow"
               data-field="story-row">
-            <td class="col-select" @click.stop>
-              <input type="checkbox"
-                     class="story-row-select"
-                     data-field="story-row-select"
-                     :checked="isSelected('{{.ID}}')"
-                     @change="toggleRowSelection('{{.ID}}', $event)" />
-            </td>
             <td class="col-id"
                 @click.stop="copyStoryID('{{.ID}}', $event)"
                 title="Copy story id to clipboard"
@@ -203,7 +166,7 @@
               </div>
               {{end}}
             </td>
-            <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
+            <td class="col-status"><code class="status-pill">{{.Status}}</code><span class="activity-dot" data-activity-for="{{.ID}}" title="" aria-hidden="true"></span></td>
             <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
             <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
           </tr>
@@ -212,24 +175,25 @@
               x-show="isExpanded($el)"
               x-cloak
               data-field="story-detail">
-            <td colspan="6">
+            <td colspan="5">
               {{/* sty_762730ad: tabbed inline panel (Description/ACs · Progress ·
                    Ledger/Log) with readable markdown content; Progress + Ledger
                    lazy-load on first open. Per-row Alpine scope nested inside the
                    storyPanel root. */}}
               <div class="story-detail-flat" x-data="{ tab: 'description', loaded: {} }">
-                <section class="story-detail-block story-status-controls" data-story-status="{{.ID}}" data-field="story-status-buttons">
+                {{/* epic:dynamic-workflow-status order:2: status is DISPLAY-ONLY here.
+                     The editable button grid + portal status-write are removed — status
+                     moves only through reviewer gates. Shown: the real status + a live
+                     activity ("being worked now") indicator fed by the order:1
+                     activity:<id> SSE topic + /api/stories/{id}/activity endpoint. */}}
+                <section class="story-detail-block story-status-readonly" data-story-status="{{.ID}}" data-field="story-status">
                   <h4>status</h4>
-                  <div class="status-button-group">
-                    {{$id := .ID}}{{$cur := .Status}}
-                    {{range $s := list "backlog" "ready" "in_progress" "review" "done" "cancelled"}}
-                    <button type="button"
-                            class="status-button"
-                            data-status-target="{{$s}}"
-                            data-field="story-status-button-{{$s}}"
-                            {{if eq $cur $s}}disabled aria-pressed="true"{{end}}
-                            @click.stop="applyRowStatus('{{$id}}', '{{$s}}')">{{$s}}</button>
-                    {{end}}
+                  <div class="status-readonly-row">
+                    <code class="status-pill status-pill-lg" data-field="story-status-value">{{.Status}}</code>
+                    <span class="activity-indicator" data-activity-for="{{.ID}}" data-field="story-activity" title="">
+                      <span class="activity-dot"></span>
+                      <span class="activity-label" data-field="story-activity-label">idle</span>
+                    </span>
                   </div>
                 </section>
 

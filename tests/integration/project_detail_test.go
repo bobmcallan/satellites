@@ -144,21 +144,33 @@ func TestProjectDetailPanel(t *testing.T) {
 			`data-field="stories-table"`,
 			`data-field="story-row"`,
 			`data-field="story-detail"`,
-			`data-field="story-status-buttons"`,
+			`data-field="story-status"`,
+			`data-field="story-status-value"`,
+			`data-field="story-activity"`,
+			`data-activity-for=`,
 			`data-field="story-description"`,
 			`data-field="story-acceptance"`,
-			`data-field="story-bulk-bar"`,
-			`data-field="story-bulk-target"`,
-			`data-field="story-bulk-apply"`,
-			`data-field="story-bulk-clear"`,
-			`data-field="story-row-select"`,
-			`class="col-select"`,
 			"wired story", "other story",
 			"area:portal", "epic:test", "area:other",
 			bodyA,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing %q", want)
+			}
+		}
+		// Status is display-only (epic:dynamic-workflow-status order:2): the
+		// editable status panel, the bulk status-set bar, and the selection
+		// column are gone — no status-write control may leak onto the page.
+		for _, gone := range []string{
+			`data-field="story-status-buttons"`,
+			`story-bulk-bar`,
+			`status-button`,
+			`class="col-select"`,
+			`applyRowStatus`,
+			`/api/stories/` + storyA.Document.ID + `/status`,
+		} {
+			if strings.Contains(body, gone) {
+				t.Errorf("status-write control %q leaked into display-only page", gone)
 			}
 		}
 		// No create/edit/delete forms leak onto the page.
@@ -172,68 +184,29 @@ func TestProjectDetailPanel(t *testing.T) {
 		}
 	})
 
-	t.Run("status buttons render one per enum value", func(t *testing.T) {
-		_, body := get(t, "/projects/"+pj.ID)
-		for _, want := range []string{
-			`data-field="story-status-button-backlog"`,
-			`data-field="story-status-button-ready"`,
-			`data-field="story-status-button-in_progress"`,
-			`data-field="story-status-button-review"`,
-			`data-field="story-status-button-done"`,
-			`data-field="story-status-button-cancelled"`,
-		} {
-			if !strings.Contains(body, want) {
-				t.Errorf("body missing %q", want)
-			}
-		}
-	})
-
-	t.Run("status POST round-trips through document_upsert", func(t *testing.T) {
-		payload := bytes.NewReader([]byte(`{"status":"ready"}`))
-		req := authedRequest(http.MethodPost, "/api/stories/"+storyA.Document.ID+"/status", payload)
+	t.Run("status is display-only — no write route, read-only status + activity shown", func(t *testing.T) {
+		// The portal status-write route was removed (order:2): a POST to the
+		// old endpoint must NOT succeed (route gone). Status moves only through
+		// reviewer gates now.
+		req := authedRequest(http.MethodPost, "/api/stories/"+storyA.Document.ID+"/status",
+			bytes.NewReader([]byte(`{"status":"ready"}`)))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			body, _ := io.ReadAll(rec.Result().Body)
-			t.Fatalf("status POST: code=%d body=%s", rec.Code, string(body))
+		if rec.Code == http.StatusOK {
+			t.Fatalf("POST /api/stories/{id}/status returned 200 — the status-write route should be gone")
 		}
 
-		// Verify the new status survives a re-render.
-		_, body := get(t, "/projects/"+pj.ID)
-		want := `<tr class="story-row"
-              data-id="` + storyA.Document.ID + `"
-              data-status="ready"`
-		if !strings.Contains(body, want) {
-			t.Errorf("story row did not pick up new status; body excerpt missing %q", want)
+		// The live activity endpoint (order:1) is wired and read-only: with no
+		// engagement events the story reads inactive.
+		areq := authedRequest(http.MethodGet, "/api/stories/"+storyA.Document.ID+"/activity", nil)
+		arec := httptest.NewRecorder()
+		handler.ServeHTTP(arec, areq)
+		if arec.Code != http.StatusOK {
+			t.Fatalf("GET activity: code=%d", arec.Code)
 		}
-	})
-
-	t.Run("bulk status fan-out POSTs both round-trip", func(t *testing.T) {
-		// Mirrors the client-side Promise.all that storyPanel.applySelectionStatus
-		// issues: one POST per selected id, all hitting /api/stories/{id}/status.
-		for _, id := range []string{storyA.Document.ID, storyB.Document.ID} {
-			payload := bytes.NewReader([]byte(`{"status":"done"}`))
-			req := authedRequest(http.MethodPost, "/api/stories/"+id+"/status", payload)
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				body, _ := io.ReadAll(rec.Result().Body)
-				t.Fatalf("bulk POST id=%s: code=%d body=%s", id, rec.Code, string(body))
-			}
-		}
-
-		// Verify both rows pick up the new status on re-render. Query
-		// status:all — the default view now filters status:open server-side
-		// (sty_47234d6e), so done rows are (correctly) absent from it.
-		_, body := get(t, "/projects/"+pj.ID+"?stories_q=status:all")
-		for _, id := range []string{storyA.Document.ID, storyB.Document.ID} {
-			want := `data-id="` + id + `"
-              data-status="done"`
-			if !strings.Contains(body, want) {
-				t.Errorf("bulk apply did not flip %s to done; body excerpt missing %q", id, want)
-			}
+		if !strings.Contains(arec.Body.String(), `"active":false`) {
+			t.Errorf("activity for a story with no engagement should be inactive; got %s", arec.Body.String())
 		}
 	})
 
