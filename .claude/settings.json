@@ -29,6 +29,16 @@
         "matcher": "Read"
       }
     ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "satellites code index",
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

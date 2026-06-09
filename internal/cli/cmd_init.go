@@ -83,6 +83,10 @@ func init() {
   - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
     code symbol index is refreshed deterministically each session.
 
+Author NEW skills as files under .satellites/skills/ and push them with
+` + "`satellites skill upload`" + ` (review-gated). The .claude/skills/ tree is
+sync-owned (` + "`satellites skill sync`" + ` pulls into it) — never hand-write there.
+
 Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
 		Args: cobra.NoArgs,

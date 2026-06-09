@@ -24,12 +24,13 @@ and follow it — `satellites install`, `satellites auth`, write the TOML,
 
 ## Session start
 
-- **Skills:** `satellites skill sync` — one pull-only pass materialises every
-  scope (system/workspace/project) into `.claude/skills/<name>/SKILL.md` by
-  identity stamp (never clobbering operator-authored skills). The client's job —
-  do **not** hand-reconcile by listing + writing files.
-- **Code index:** for an indexable repo, `satellites code index` (incremental),
-  then prefer `satellites code search <q>` / `satellites code symbol <name>` over
+- **Skills:** `satellites skill sync` pulls every scope into
+  `.claude/skills/<name>/SKILL.md` (stamp-reconciled, never clobbers operator
+  skills) — don't hand-reconcile. Author a NEW skill as a file in
+  `.satellites/skills/`, then `satellites skill upload` (review-gated); never
+  hand-write into `.claude/skills/`.
+- **Code index:** for an indexable repo, `satellites code index`, then
+  prefer `satellites code search <q>` / `satellites code symbol <name>` over
   Read/Grep for code discovery — exact `file:line` + slices, far fewer tokens.
   See the `satellites-code-search` skill (Grep still wins for non-symbol text).
 
