@@ -128,6 +128,9 @@ main[data-page="story-detail"] {
   max-width: none;
   padding-inline: 5%;
 }
+@media (max-width: 768px) {
+  main[data-page="story-detail"] { padding-inline: 1%; }
+}
 @media (min-width: 1920px) {
   main[data-page="story-detail"] { padding-inline: 20%; }
 }
