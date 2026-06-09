@@ -146,8 +146,6 @@ func TestProjectDetailPanel(t *testing.T) {
 			`data-field="story-detail"`,
 			`data-field="story-status"`,
 			`data-field="story-status-value"`,
-			`data-field="story-activity"`,
-			`data-activity-for=`,
 			`data-status-rank=`,
 			`data-field="story-description"`,
 			`data-field="story-acceptance"`,
@@ -185,7 +183,7 @@ func TestProjectDetailPanel(t *testing.T) {
 		}
 	})
 
-	t.Run("status is display-only — no write route, read-only status + activity shown", func(t *testing.T) {
+	t.Run("status is display-only — no write route", func(t *testing.T) {
 		// The portal status-write route was removed (order:2): a POST to the
 		// old endpoint must NOT succeed (route gone). Status moves only through
 		// reviewer gates now.
@@ -196,18 +194,6 @@ func TestProjectDetailPanel(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		if rec.Code == http.StatusOK {
 			t.Fatalf("POST /api/stories/{id}/status returned 200 — the status-write route should be gone")
-		}
-
-		// The live activity endpoint (order:1) is wired and read-only: with no
-		// engagement events the story reads inactive.
-		areq := authedRequest(http.MethodGet, "/api/stories/"+storyA.Document.ID+"/activity", nil)
-		arec := httptest.NewRecorder()
-		handler.ServeHTTP(arec, areq)
-		if arec.Code != http.StatusOK {
-			t.Fatalf("GET activity: code=%d", arec.Code)
-		}
-		if !strings.Contains(arec.Body.String(), `"active":false`) {
-			t.Errorf("activity for a story with no engagement should be inactive; got %s", arec.Body.String())
 		}
 	})
 
