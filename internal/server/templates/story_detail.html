@@ -93,33 +93,7 @@
     </div>
 
     <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
-      <section class="panel" data-section="ledger-log">
-        <h2 class="section-heading">Ledger / Log</h2>
-        {{if .LedgerRows}}
-        <table class="ledger-table" data-table="ledger-log">
-          <thead>
-            <tr>
-              <th class="qa-col-when">when</th>
-              <th class="qa-col-gate">kind</th>
-              <th class="qa-col-gate">actor</th>
-              <th class="qa-col-notes">detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .LedgerRows}}
-            <tr class="qa-row" data-row="ledger-entry">
-              <td class="qa-col-when" data-field="ledger-when">{{.When}}</td>
-              <td class="qa-col-gate" data-field="ledger-kind"><code>{{.Kind}}</code></td>
-              <td class="qa-col-gate" data-field="ledger-actor">{{.Actor}}</td>
-              <td class="qa-col-notes" data-field="ledger-body">{{.Body}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-        {{else}}
-        <p class="empty" data-field="ledger-log">No ledger entries yet.</p>
-        {{end}}
-      </section>
+      {{template "story-ledger" .}}
     </div>
   </div>
 </main>
@@ -172,6 +146,39 @@
   });
 })();
 </script>
+
+{{/* story-ledger: the append-only ledger table. Shared (sty_762730ad) by the
+     standalone Ledger/Log tab and the /stories/{id}/ledger.fragment endpoint
+     the project-detail inline panel lazy-loads. */}}
+{{define "story-ledger"}}
+      <section class="panel" data-section="ledger-log">
+        <h2 class="section-heading">Ledger / Log</h2>
+        {{if .LedgerRows}}
+        <table class="ledger-table" data-table="ledger-log">
+          <thead>
+            <tr>
+              <th class="qa-col-when">when</th>
+              <th class="qa-col-gate">kind</th>
+              <th class="qa-col-gate">actor</th>
+              <th class="qa-col-notes">detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .LedgerRows}}
+            <tr class="qa-row" data-row="ledger-entry">
+              <td class="qa-col-when" data-field="ledger-when">{{.When}}</td>
+              <td class="qa-col-gate" data-field="ledger-kind"><code>{{.Kind}}</code></td>
+              <td class="qa-col-gate" data-field="ledger-actor">{{.Actor}}</td>
+              <td class="qa-col-notes" data-field="ledger-body">{{.Body}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p class="empty" data-field="ledger-log">No ledger entries yet.</p>
+        {{end}}
+      </section>
+{{end}}
 
 {{/* story-trace: the live region — status line + workflow/process-trace —
      rendered inline and standalone by storyTraceFragmentHandler for the SSE

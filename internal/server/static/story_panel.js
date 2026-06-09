@@ -24,6 +24,23 @@
 (function () {
     'use strict';
 
+    // loadStoryFragment lazy-loads a story sub-fragment (trace or ledger) into
+    // el on first tab open in the inline story panel (sty_762730ad). The fetched
+    // markup is plain HTML (no Alpine directives), so a direct innerHTML swap is
+    // safe. credentials:'same-origin' carries the session cookie.
+    window.loadStoryFragment = function (storyID, kind, el) {
+        if (!el) { return; }
+        var path = kind === 'ledger' ? '/ledger.fragment' : '/trace.fragment';
+        fetch('/stories/' + encodeURIComponent(storyID) + path,
+              { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.text() : null; })
+            .then(function (html) {
+                el.innerHTML = (html !== null && html !== '')
+                    ? html : '<p class="empty">nothing to show</p>';
+            })
+            .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
+    };
+
     // debounce coalesces a burst of calls into one trailing invocation after
     // ms of quiet — used so a flurry of SSE triggers yields a single refetch
     // (sty_8f69be8b).

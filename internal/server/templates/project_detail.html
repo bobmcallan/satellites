@@ -213,7 +213,11 @@
               x-cloak
               data-field="story-detail">
             <td colspan="6">
-              <div class="story-detail-flat">
+              {{/* sty_762730ad: tabbed inline panel (Description/ACs · Progress ·
+                   Ledger/Log) with readable markdown content; Progress + Ledger
+                   lazy-load on first open. Per-row Alpine scope nested inside the
+                   storyPanel root. */}}
+              <div class="story-detail-flat" x-data="{ tab: 'description', loaded: {} }">
                 <section class="story-detail-block story-status-controls" data-story-status="{{.ID}}" data-field="story-status-buttons">
                   <h4>status</h4>
                   <div class="status-button-group">
@@ -228,17 +232,40 @@
                     {{end}}
                   </div>
                 </section>
-                <section class="story-detail-block" data-field="story-description">
-                  <h4>description</h4>
-                  {{if .Body}}<pre class="story-detail-pre">{{.Body}}</pre>{{else}}<p class="empty">—</p>{{end}}
-                </section>
-                <section class="story-detail-block" data-field="story-acceptance">
-                  <h4>acceptance criteria</h4>
-                  {{if .AcceptanceCriteria}}<pre class="story-detail-pre">{{.AcceptanceCriteria}}</pre>{{else}}<p class="empty">—</p>{{end}}
-                </section>
+
+                <nav class="story-tabs" role="tablist" data-field="story-tabs">
+                  <button type="button" class="story-tab" role="tab" data-tab="description"
+                          :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
+                          @click.stop="tab='description'">Description / ACs</button>
+                  <button type="button" class="story-tab" role="tab" data-tab="progress"
+                          :class="tab==='progress' ? 'is-active' : ''" :aria-selected="tab==='progress' ? 'true' : 'false'"
+                          @click.stop="tab='progress'; if(!loaded.progress){ loaded.progress=true; window.loadStoryFragment('{{.ID}}','trace',$refs.progressPanel); }">Progress</button>
+                  <button type="button" class="story-tab" role="tab" data-tab="ledger"
+                          :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
+                          @click.stop="tab='ledger'; if(!loaded.ledger){ loaded.ledger=true; window.loadStoryFragment('{{.ID}}','ledger',$refs.ledgerPanel); }">Ledger / Log</button>
+                </nav>
+
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="tab==='description'">
+                  <section class="story-detail-block" data-field="story-description">
+                    <h4>description</h4>
+                    {{if .BodyHTML}}<div class="changelog-content" data-field="story-description-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+                  </section>
+                  <section class="story-detail-block" data-field="story-acceptance">
+                    <h4>acceptance criteria</h4>
+                    {{if .AcceptanceCriteriaHTML}}<div class="changelog-content" data-field="story-acceptance-body">{{.AcceptanceCriteriaHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+                  </section>
+                </div>
+
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="progress" x-show="tab==='progress'" x-cloak>
+                  <div class="story-detail-block" data-field="story-progress" x-ref="progressPanel"><p class="empty">Loading…</p></div>
+                </div>
+
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
+                  <div class="story-detail-block" data-field="story-ledger" x-ref="ledgerPanel"><p class="empty">Loading…</p></div>
+                </div>
+
                 <section class="story-detail-block" data-field="story-process">
-                  <h4>process</h4>
-                  <a class="story-process-link" href="/stories/{{.ID}}" data-field="story-process-link">view QA process trace →</a>
+                  <a class="story-process-link" href="/stories/{{.ID}}" data-field="story-process-link">open full story page →</a>
                 </section>
               </div>
             </td>

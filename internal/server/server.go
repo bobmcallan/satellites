@@ -118,6 +118,9 @@ func Build(cfg Config) http.Handler {
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE
 	// (/api/stories/{id}/events); the QA view now refetches off the shared bus.
 	mux.HandleFunc("GET /stories/{id}/trace.fragment", storyTraceFragmentHandler(cfg))
+	// Ledger fragment (sty_762730ad) — lazy-load target for the project-detail
+	// inline panel's Ledger/Log tab. More specific than /stories/ so it wins.
+	mux.HandleFunc("GET /stories/{id}/ledger.fragment", storyLedgerFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))

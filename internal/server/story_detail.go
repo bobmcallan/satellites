@@ -202,6 +202,36 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
+// storyLedgerFragmentHandler renders just the append-only ledger table for a
+// story — the lazy-load target the project-detail inline panel's Ledger/Log tab
+// fetches on first open (sty_762730ad). Read-only; reuses buildStoryDetail's
+// LedgerRows and the shared story-ledger template.
+func storyLedgerFragmentHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := cfg.Sessions.UserID(r)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := withSessionUser(r.Context(), cfg, userID)
+		storyID := strings.TrimSpace(r.PathValue("id"))
+		if storyID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := buildStoryDetail(ctx, storyID)
+		if err != nil {
+			arbor.WarnCtx(ctx, "story_ledger_fragment: build", "id", storyID, "err", err)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := storyDetailTmpl.ExecuteTemplate(w, "story-ledger", data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
 // storyMeta is the minimal story projection the view needs. ProjectID +
 // WorkspaceID bound the workflow resolver to the story's OWN project so a
 // kind:workflow skill from another project can never be selected (sty_68379c96).

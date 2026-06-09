@@ -64,12 +64,16 @@ type storyRow struct {
 	Title              string
 	Body               string
 	AcceptanceCriteria string
-	Status             string
-	Priority           string
-	Category           string
-	Tags               []string
-	UpdatedAt          time.Time
-	CreatedAt          time.Time
+	// Rendered-markdown projections for the readable expanded panel
+	// (sty_762730ad) — the same safe goldmark renderer the changelog uses.
+	BodyHTML               template.HTML
+	AcceptanceCriteriaHTML template.HTML
+	Status                 string
+	Priority               string
+	Category               string
+	Tags                   []string
+	UpdatedAt              time.Time
+	CreatedAt              time.Time
 }
 
 func projectDetailHandler(cfg Config) http.HandlerFunc {
@@ -202,13 +206,21 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 	}
 
 	// Per-story body fetch so the expanded row can render the description.
+	// Render the body + ACs as markdown for the readable expanded panel
+	// (sty_762730ad).
 	for i := range stories {
 		body, err := dispatchStoryBody(ctx, stories[i].ID)
 		if err != nil {
 			arbor.WarnCtx(ctx, "project_detail: story_body", "story_id", stories[i].ID, "err", err)
-			continue
+		} else {
+			stories[i].Body = body
 		}
-		stories[i].Body = body
+		if strings.TrimSpace(stories[i].Body) != "" {
+			stories[i].BodyHTML = renderMarkdown(stories[i].Body)
+		}
+		if strings.TrimSpace(stories[i].AcceptanceCriteria) != "" {
+			stories[i].AcceptanceCriteriaHTML = renderMarkdown(stories[i].AcceptanceCriteria)
+		}
 	}
 	return stories, paginator, nil
 }
