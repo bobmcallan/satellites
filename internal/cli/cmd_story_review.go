@@ -250,6 +250,17 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		}
 	}
 
+	// 8a. Refresh the local engagement so the next edit isn't blocked by the
+	// stale engage-time editability snapshot now that the reviewer advanced the
+	// status (sty_2c232fa4). No-op when this session has no live engagement for
+	// the story; best-effort (a refresh failure must not fail the review).
+	if observed != "" && observed != story.Status {
+		editable := resolveEditable(ctx, opts.ConfigPath, story.ID, observed)
+		if _, rErr := refreshEngagementPhase(store, resolveSession(""), story.ID, observed, editable, time.Now()); rErr != nil {
+			fmt.Fprintf(opts.Stderr, "warn: refresh engagement after transition: %v\n", rErr)
+		}
+	}
+
 	// 8b. Durable QA-evidence capture (sty_7d2e9847): record this gate run —
 	// skill, decision, reject reasons, from/to status — to the store as a
 	// durable, story-linked, queryable trail that survives the run. This closes

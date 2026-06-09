@@ -203,6 +203,29 @@ func resolveSession(flag string) string {
 	return "local"
 }
 
+// refreshEngagementPhase re-stamps the engaged (session, story) projection to a
+// new phase + editability after a reviewer-enacted transition, so the START-door
+// reads the just-advanced status instead of the stale engage-time snapshot
+// (sty_2c232fa4). It is a no-op unless a live engagement already exists for the
+// pair — it never fabricates one. The event carries a FRESH lease because the
+// projection upserts lease_until from the event (a zero would clear it).
+// Best-effort: any failure is returned for the caller to warn on, never fatal.
+func refreshEngagementPhase(store *workstate.Store, session, storyID, phase string, editable bool, now time.Time) (bool, error) {
+	if store == nil || strings.TrimSpace(session) == "" || strings.TrimSpace(storyID) == "" {
+		return false, nil
+	}
+	if _, ok, err := store.Current(session, storyID); err != nil || !ok {
+		return false, err
+	}
+	if _, err := store.Append(workstate.Event{
+		Session: session, Story: storyID, Phase: strings.TrimSpace(phase),
+		Kind: "phase", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, TS: now,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // resolveEditable best-effort decides whether the engaged story's current phase
 // permits edits, by fetching the story and asking its `## Workflow` (via
 // internal/workflow.IsEditable). It NEVER over-blocks: any failure (offline, no
