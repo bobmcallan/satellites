@@ -13,19 +13,14 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/verb"
+	"github.com/bobmcallan/satellites/internal/workflow"
 )
 
 var projectDetailTmpl = template.Must(
 	template.New("project_detail.html").Funcs(template.FuncMap{
 		"formatTime": formatRowTime,
-		"list":       templateList,
 	}).ParseFS(assets, "templates/project_detail.html", "templates/_user_menu.html"),
 )
-
-// templateList is a html/template helper that builds a []string for
-// range — used to enumerate the status enum inline in the template
-// instead of redeclaring it in Go and threading it through.
-func templateList(items ...string) []string { return items }
 
 type projectDetailData struct {
 	Title         string
@@ -69,11 +64,40 @@ type storyRow struct {
 	BodyHTML               template.HTML
 	AcceptanceCriteriaHTML template.HTML
 	Status                 string
-	Priority               string
-	Category               string
-	Tags                   []string
-	UpdatedAt              time.Time
-	CreatedAt              time.Time
+	// StatusRank is the index of Status within the story's OWN ## Workflow
+	// states (lifecycle order), or statusRankUnknown when the story carries no
+	// workflow block or its status is not one of the declared states. The portal
+	// sorts `order:status` by this rank so a custom lifecycle (integration_review,
+	// commit, …) orders by its real position rather than alphabetically
+	// (epic:dynamic-workflow-status order:3). Workflow-derived, never a hardcoded
+	// status enum.
+	StatusRank int
+	Priority   string
+	Category   string
+	Tags       []string
+	UpdatedAt  time.Time
+	CreatedAt  time.Time
+}
+
+// statusRankUnknown sorts unworkflowed / unknown-status rows to the end of a
+// status sort. Larger than any realistic workflow length.
+const statusRankUnknown = 1 << 30
+
+// statusRank resolves a row's workflow-ordered status position from its body's
+// ## Workflow block (internal/workflow is the single parser, also used by the
+// story-detail view). A missing/unparseable workflow or an off-workflow status
+// yields statusRankUnknown — the row sinks rather than guessing an order.
+func statusRank(body, status string) int {
+	wf, err := workflow.ParseBody([]byte(body))
+	if err != nil {
+		return statusRankUnknown
+	}
+	for i, s := range wf.States {
+		if s == status {
+			return i
+		}
+	}
+	return statusRankUnknown
 }
 
 func projectDetailHandler(cfg Config) http.HandlerFunc {
@@ -221,6 +245,9 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 		if strings.TrimSpace(stories[i].AcceptanceCriteria) != "" {
 			stories[i].AcceptanceCriteriaHTML = renderStoryMarkdown(stories[i].AcceptanceCriteria)
 		}
+		// Workflow-ordered status rank for `order:status` (order:3). The body is
+		// now loaded, so the row's own ## Workflow is parseable here.
+		stories[i].StatusRank = statusRank(stories[i].Body, stories[i].Status)
 	}
 	return stories, paginator, nil
 }

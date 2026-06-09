@@ -4,10 +4,14 @@
  * no task sub-table, no URL expand persistence.
  *
  * Token grammar parsed off `query`:
- *   status:<v[,v...]>     all|open|backlog|ready|in_progress|review|done|cancelled
- *                         (`open` = anything not done/cancelled —
- *                          `completed` and other non-canonical statuses
- *                          stay in open)
+ *   status:<v[,v...]>     `all`, `open`, or ANY status value — matched literally
+ *                         against each row's real status, so a custom workflow's
+ *                         states (e.g. integration_review) filter with no fixed
+ *                         enum. `open` = not in the TERMINAL set (done/cancelled,
+ *                         where every workflow ends); `all` clears the filter.
+ *                         The status vocabulary is whatever the stories'
+ *                         workflows use — never a hardcoded lifecycle
+ *                         (epic:dynamic-workflow-status).
  *   priority:<v[,v...]>   critical|high|medium|low|all
  *   category:<v[,v...]>   feature|bug|improvement|...
  *   tags:<v>              single tag; multiple tokens OR (union of matched rows)
@@ -174,6 +178,20 @@
                 const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
                 if (cmp === 0) { return a.idx - b.idx; }
                 return cmp;
+            }
+            // Status sorts by the server-supplied workflow rank (the status's
+            // position in the story's own ## Workflow), ascending = lifecycle
+            // order (first state → terminal), NOT alphabetically. Unranked rows
+            // (no workflow / off-workflow status) sink to the bottom. This is
+            // what makes a custom lifecycle (integration_review, commit, …) sort
+            // by its real position (epic:dynamic-workflow-status order:3).
+            if (field === 'status') {
+                const ar = parseInt(a.row.dataset.statusRank, 10);
+                const br = parseInt(b.row.dataset.statusRank, 10);
+                const arank = isNaN(ar) ? Number.MAX_SAFE_INTEGER : ar;
+                const brank = isNaN(br) ? Number.MAX_SAFE_INTEGER : br;
+                if (arank === brank) { return a.idx - b.idx; }
+                return arank - brank;
             }
             const aval = (a.row.dataset[field] || '').toLowerCase();
             const bval = (b.row.dataset[field] || '').toLowerCase();
