@@ -225,6 +225,9 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	if !commandUnderEvent(t, s, "PreToolUse", codeNudgeMatcher, codeNudgeCommand) {
 		t.Errorf("code-search nudge hook (PreToolUse %s → %s) not installed", codeNudgeMatcher, codeNudgeCommand)
 	}
+	if !commandUnderEvent(t, s, "SessionStart", "", sessionIndexCommand) {
+		t.Errorf("code-index refresh hook (SessionStart → %s) not installed", sessionIndexCommand)
+	}
 
 	// Idempotent: a second init adds nothing and reports all present.
 	var out2 bytes.Buffer
@@ -240,5 +243,8 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	}
 	if ups, _ := hooks["UserPromptSubmit"].([]any); len(ups) != 1 {
 		t.Errorf("UserPromptSubmit has %d entries after re-init, want 1", len(ups))
+	}
+	if ss, _ := hooks["SessionStart"].([]any); len(ss) != 1 {
+		t.Errorf("SessionStart has %d entries after re-init, want 1 (no duplicate)", len(ss))
 	}
 }

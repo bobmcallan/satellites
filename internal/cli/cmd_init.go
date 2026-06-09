@@ -1,8 +1,9 @@
 // `satellites init` — scaffold a repo for satellites and install the
 // harness-enforced START door (epic:hook-enforcement, story hook-install).
-// Idempotent: it ensures the .satellites/ directory, a satellites.toml, and
-// the PreToolUse hook in .claude/settings.json, reporting what it added versus
-// what was already present and never clobbering existing settings.
+// Idempotent: it ensures the .satellites/ directory, a satellites.toml, and the
+// harness hooks in .claude/settings.json (the PreToolUse START door + advisory
+// triggers and the SessionStart code-index refresh), reporting what it added
+// versus what was already present and never clobbering existing settings.
 
 package cli
 
@@ -40,6 +41,15 @@ const (
 	// symbol`/`search` for large indexed source files and must never block a Read.
 	codeNudgeMatcher = "Read"
 	codeNudgeCommand = "satellites hook codenudge"
+
+	// The deterministic code-index refresh (sty_a89da7e4, epic:code-index).
+	// SessionStart: builds/refreshes .satellites/index.db at the top of every
+	// session so the index is fresh WITHOUT the agent having to remember to run
+	// it (and without any CLAUDE.md prose). Incremental and cheap — a no-op-fast
+	// pass when nothing changed. ADVISORY: no `|| exit 2`, so an index hiccup can
+	// never block a session; the codenudge handler stays silent until this has
+	// produced an index for it to point at.
+	sessionIndexCommand = "satellites code index"
 )
 
 // installedHook describes one hook init merges into .claude/settings.json.
@@ -50,13 +60,14 @@ type installedHook struct {
 	label   string
 }
 
-// hooksToInstall is the set init ensures, idempotently: the START door plus the
-// advisory story-access triggers.
+// hooksToInstall is the set init ensures, idempotently: the START door, the
+// advisory story-access triggers, and the SessionStart code-index refresh.
 var hooksToInstall = []installedHook{
 	{"PreToolUse", hookMatcher, hookCommand, ".claude/settings.json (PreToolUse START-door hook)"},
 	{"PreToolUse", accessMatcher, accessCommand, ".claude/settings.json (PreToolUse story-access reminder)"},
 	{"PreToolUse", codeNudgeMatcher, codeNudgeCommand, ".claude/settings.json (PreToolUse code-search nudge)"},
 	{"UserPromptSubmit", "", promptCommand, ".claude/settings.json (UserPromptSubmit story-access reminder)"},
+	{"SessionStart", "", sessionIndexCommand, ".claude/settings.json (SessionStart code-index refresh)"},
 }
 
 func init() {
@@ -68,9 +79,11 @@ func init() {
 
   - the .satellites/ directory,
   - a satellites.toml (created if missing, left intact if present),
-  - the PreToolUse START-door hook in .claude/settings.json.
+  - the PreToolUse START-door + advisory hooks in .claude/settings.json,
+  - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
+    code symbol index is refreshed deterministically each session.
 
-Re-running is safe: existing files and settings are preserved and the hook is
+Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
