@@ -1295,3 +1295,38 @@ button.status-button[disabled] {
   flex-direction: column;
   gap: 1.5rem;
 }
+
+/* Tabbed expanded content (sty_fdcf8297): a tab strip over Description/ACs ·
+   Progress · Ledger/Log, in the portal's dark idiom. */
+.story-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #222;
+}
+.story-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: #888;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  border-radius: 3px 3px 0 0;
+  margin-bottom: -1px;
+}
+.story-tab:hover { color: #d8d8d8; }
+.story-tab.is-active {
+  color: #fff;
+  background: #111;
+  border-color: #222;
+  border-bottom: 1px solid #111;
+}
+.story-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}

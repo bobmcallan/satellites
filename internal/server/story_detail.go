@@ -55,6 +55,16 @@ type storyTraceRowView struct {
 	RejectCount int
 }
 
+// storyLedgerRowView is one append-only ledger entry for the Ledger/Log tab
+// (sty_fdcf8297): gate decisions, status transitions, and notes, rendered
+// readably as when/kind/actor/detail.
+type storyLedgerRowView struct {
+	When  string
+	Kind  string
+	Actor string
+	Body  string
+}
+
 type storyDetailData struct {
 	Title              string
 	StoryID            string
@@ -66,6 +76,7 @@ type storyDetailData struct {
 	Description        template.HTML
 	AcceptanceCriteria template.HTML
 	Rows               []storyTraceRowView
+	LedgerRows         []storyLedgerRowView
 	UserEmail          string
 	UserName           string
 	UserAvatar         string
@@ -139,6 +150,14 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 	if strings.TrimSpace(story.AcceptanceCriteria) != "" {
 		data.AcceptanceCriteria = renderMarkdown(story.AcceptanceCriteria)
 	}
+	// Fetch the ledger once, up front: it feeds BOTH the Ledger/Log tab (the raw
+	// append-only history) and the PROCESS-trace reconciliation below
+	// (sty_fdcf8297).
+	entries, lErr := dispatchStoryLedger(ctx, storyID, time.Time{})
+	if lErr != nil {
+		arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
+	}
+	data.LedgerRows = ledgerRows(entries)
 	wf, err := resolveWorkflowForStory(ctx, story)
 	if err != nil || wf == nil {
 		if err != nil {
@@ -146,10 +165,6 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 		}
 		data.NoWorkflow = true
 		return data, nil
-	}
-	entries, lErr := dispatchStoryLedger(ctx, storyID, time.Time{})
-	if lErr != nil {
-		arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
 	}
 	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
 	data.WorkflowName = trace.WorkflowName
@@ -355,6 +370,30 @@ func traceRows(trace processtrace.ProcessTrace) []storyTraceRowView {
 			row.When = "—"
 		}
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+// ledgerRows maps the raw ledger entries into the Ledger/Log tab view, newest
+// first so the most recent activity reads at the top (sty_fdcf8297).
+func ledgerRows(entries []processtrace.LedgerEntry) []storyLedgerRowView {
+	rows := make([]storyLedgerRowView, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		when := "—"
+		if !e.CreatedAt.IsZero() {
+			when = e.CreatedAt.UTC().Format("2006-01-02 15:04")
+		}
+		actor := strings.TrimSpace(e.Actor)
+		if actor == "" {
+			actor = "—"
+		}
+		rows = append(rows, storyLedgerRowView{
+			When:  when,
+			Kind:  e.Kind,
+			Actor: actor,
+			Body:  e.Body,
+		})
 	}
 	return rows
 }

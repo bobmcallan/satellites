@@ -21,51 +21,106 @@
   </nav>
 </header>
 
-<main data-page="story-detail" x-data="{ expanded: true }">
+<main data-page="story-detail" x-data="{ expanded: true, tab: 'description' }">
   <section class="changelog-intro" data-section="story-intro">
     <h2 class="section-heading">{{.StoryTitle}}</h2>
     <p class="changelog-lede">The declared process for this story, overlaid with what actually happened. Live — new gate decisions appear without reload.</p>
   </section>
 
-  {{/* Expanded header (sty_c04acfc7). The live region owns the status pill +
-       the live indicator, so they update on the SSE refetch without a reload.
-       The expand/collapse toggle lives here, but its Alpine state and the
-       x-show target (story-detail-body) sit OUTSIDE the swapped fragment, so a
-       refetch can never strand the binding. */}}
+  {{/* Expanded header (sty_c04acfc7, sty_fdcf8297). Always visible: the status
+       pill + the live indicator + the expand/collapse toggle. The status here
+       is mirrored from the Progress tab's live region on each SSE refetch (see
+       the page script), so it updates without a reload while the single live
+       region stays inside the Progress tab. */}}
   <div class="story-detail-header" data-section="story-header">
     <button type="button" class="story-expand-toggle" data-action="toggle-expand"
             :aria-expanded="expanded ? 'true' : 'false'" @click="expanded = !expanded">
       <span class="story-expand-caret" x-text="expanded ? '▾' : '▸'">▾</span>
       <span x-text="expanded ? 'Collapse' : 'Expand'">Collapse</span>
     </button>
-    {{/* The live region: refetched + swapped on a story-scoped SSE trigger
-         (sty_96cc0ade). Everything that moves — status pill, live indicator,
-         workflow, the process-trace table — lives in the story-trace template. */}}
-    <div class="story-detail-live" data-field="story-live-region">
-      {{template "story-trace" .}}
-    </div>
+    <p class="changelog-lede story-status-line" data-field="story-status-line">
+      <code data-field="story-id">{{.StoryID}}</code>
+      · type <code data-field="story-type">{{.StoryType}}</code>
+      · status <span class="story-status-pill" data-field="current-status" data-role="header-status">{{.CurrentStatus}}</span>
+      {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{end}}
+      <span class="story-live-indicator" data-field="live-indicator" data-state="live">live</span>
+    </p>
   </div>
 
-  {{/* Readable content (sty_c04acfc7): description + ACs rendered as markdown at
-       body size. Static (the body/ACs do not live-update), so it sits outside
-       the live region; expand/collapse toggles it. */}}
+  {{/* Tabbed expanded content (sty_fdcf8297): Description/ACs (default) ·
+       Progress (the live PROCESS trace) · Ledger/Log (the append-only ledger).
+       Tab state + the x-show panels live OUTSIDE the swapped live region, so a
+       refetch never strands a binding. */}}
   <div class="story-detail-body" data-section="story-body" x-show="expanded" x-cloak>
-    <section class="panel" data-section="description">
-      <h2 class="section-heading">Description</h2>
-      {{if .Description}}
-      <div class="changelog-content" data-field="story-description">{{.Description}}</div>
-      {{else}}
-      <p class="empty" data-field="story-description">No description.</p>
-      {{end}}
-    </section>
-    <section class="panel" data-section="acceptance-criteria">
-      <h2 class="section-heading">Acceptance criteria</h2>
-      {{if .AcceptanceCriteria}}
-      <div class="changelog-content" data-field="story-acceptance">{{.AcceptanceCriteria}}</div>
-      {{else}}
-      <p class="empty" data-field="story-acceptance">No acceptance criteria.</p>
-      {{end}}
-    </section>
+    <nav class="story-tabs" role="tablist" data-field="story-tabs">
+      <button type="button" class="story-tab" role="tab" data-tab="description"
+              :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
+              @click="tab='description'">Description / ACs</button>
+      <button type="button" class="story-tab" role="tab" data-tab="progress"
+              :class="tab==='progress' ? 'is-active' : ''" :aria-selected="tab==='progress' ? 'true' : 'false'"
+              @click="tab='progress'">Progress</button>
+      <button type="button" class="story-tab" role="tab" data-tab="ledger"
+              :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
+              @click="tab='ledger'">Ledger / Log</button>
+    </nav>
+
+    <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="tab==='description'">
+      <section class="panel" data-section="description">
+        <h2 class="section-heading">Description</h2>
+        {{if .Description}}
+        <div class="changelog-content" data-field="story-description">{{.Description}}</div>
+        {{else}}
+        <p class="empty" data-field="story-description">No description.</p>
+        {{end}}
+      </section>
+      <section class="panel" data-section="acceptance-criteria">
+        <h2 class="section-heading">Acceptance criteria</h2>
+        {{if .AcceptanceCriteria}}
+        <div class="changelog-content" data-field="story-acceptance">{{.AcceptanceCriteria}}</div>
+        {{else}}
+        <p class="empty" data-field="story-acceptance">No acceptance criteria.</p>
+        {{end}}
+      </section>
+    </div>
+
+    {{/* Progress tab: the live region — refetched + swapped on a story-scoped
+         SSE trigger (sty_96cc0ade). The PROCESS trace lives in the story-trace
+         template; the swap keeps it live. */}}
+    <div class="story-tabpanel" role="tabpanel" data-tabpanel="progress" x-show="tab==='progress'" x-cloak>
+      <div data-field="story-live-region">
+        {{template "story-trace" .}}
+      </div>
+    </div>
+
+    <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
+      <section class="panel" data-section="ledger-log">
+        <h2 class="section-heading">Ledger / Log</h2>
+        {{if .LedgerRows}}
+        <table class="ledger-table" data-table="ledger-log">
+          <thead>
+            <tr>
+              <th class="qa-col-when">when</th>
+              <th class="qa-col-gate">kind</th>
+              <th class="qa-col-gate">actor</th>
+              <th class="qa-col-notes">detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .LedgerRows}}
+            <tr class="qa-row" data-row="ledger-entry">
+              <td class="qa-col-when" data-field="ledger-when">{{.When}}</td>
+              <td class="qa-col-gate" data-field="ledger-kind"><code>{{.Kind}}</code></td>
+              <td class="qa-col-gate" data-field="ledger-actor">{{.Actor}}</td>
+              <td class="qa-col-notes" data-field="ledger-body">{{.Body}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{else}}
+        <p class="empty" data-field="ledger-log">No ledger entries yet.</p>
+        {{end}}
+      </section>
+    </div>
   </div>
 </main>
 
@@ -87,18 +142,32 @@
   var region = document.querySelector('[data-field="story-live-region"]');
   if (!region) return;
   var t = null;
+  // The live indicator + the header status pill live in the always-visible
+  // header (outside the swapped region), so the indicator persists across swaps
+  // and the header status is mirrored from the fresh fragment (sty_fdcf8297).
+  var indicator = document.querySelector('[data-field="live-indicator"]');
+  var headerStatus = document.querySelector('[data-role="header-status"]');
   window.live.on('story:' + storyID, function () {
-    // Flip the live indicator to "working" the moment gate activity fires; the
-    // fresh fragment that the refetch swaps in resets it to "live" (sty_c04acfc7).
-    var ind = region.querySelector('[data-field="live-indicator"]');
-    if (ind) { ind.dataset.state = 'working'; ind.textContent = 'working'; }
+    // Flip the indicator to "working" the moment gate activity fires; reset to
+    // "live" once the refetch lands.
+    if (indicator) { indicator.dataset.state = 'working'; indicator.textContent = 'working'; }
     if (t) { clearTimeout(t); }          // debounce a burst into one refetch
     t = setTimeout(function () {
       fetch('/stories/' + encodeURIComponent(storyID) + '/trace.fragment',
             { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.text() : null; })
-        .then(function (html) { if (html !== null) { region.innerHTML = html; } })
-        .catch(function () { /* transient — next trigger or reconnect retries */ });
+        .then(function (html) {
+          if (html !== null) {
+            region.innerHTML = html;
+            // Mirror the fresh status into the always-visible header pill.
+            var fresh = region.querySelector('[data-field="current-status"]');
+            if (fresh && headerStatus) { headerStatus.textContent = fresh.textContent; }
+          }
+          if (indicator) { indicator.dataset.state = 'live'; indicator.textContent = 'live'; }
+        })
+        .catch(function () {
+          if (indicator) { indicator.dataset.state = 'live'; indicator.textContent = 'live'; }
+        });
     }, 300);
   });
 })();
@@ -108,12 +177,11 @@
      rendered inline and standalone by storyTraceFragmentHandler for the SSE
      refetch (sty_96cc0ade). Markup lives here only; both paths share it. */}}
 {{define "story-trace"}}
-    <p class="changelog-lede story-status-line" data-field="story-status-line">
+    <p class="changelog-lede">
       <code data-field="story-id">{{.StoryID}}</code>
       · type <code data-field="story-type">{{.StoryType}}</code>
       · status <span class="story-status-pill" data-field="current-status">{{.CurrentStatus}}</span>
       {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{end}}
-      <span class="story-live-indicator" data-field="live-indicator" data-state="live">live</span>
     </p>
   {{if .NoWorkflow}}
   <section class="panel" data-section="no-workflow">
