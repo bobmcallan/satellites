@@ -126,6 +126,12 @@ type DocumentUpsertRequest struct {
 	Category           *string   `json:"category,omitempty"`
 	ParentID           *string   `json:"parent_id,omitempty"`
 	AcceptanceCriteria *string   `json:"acceptance_criteria,omitempty"`
+
+	// Headline is the caveman one-liner for a document/principle. Pointer-typed
+	// with the same leave-alone semantics as Tags: nil means "do not touch",
+	// non-nil applies (empty string clears). Stored as document-level metadata,
+	// not versioned with the body (epic:always-context).
+	Headline *string `json:"headline,omitempty"`
 }
 
 // DocumentUpsertResponse mirrors document_get's shape so callers can
@@ -769,6 +775,15 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	// which matches the patch semantics elsewhere in this surface.
 	if req.Tags != nil {
 		doc2, err := documentStore.SetDocumentTags(ctx, doc.ID, *req.Tags, time.Now().UTC())
+		if err != nil {
+			return nil, mapStoreError(err, "document_upsert")
+		}
+		doc = doc2
+	}
+	// Headline is document-level metadata too — apply only when the request
+	// carries it (nil = leave alone), the same patch semantics as tags.
+	if req.Headline != nil {
+		doc2, err := documentStore.SetDocumentHeadline(ctx, doc.ID, *req.Headline, time.Now().UTC())
 		if err != nil {
 			return nil, mapStoreError(err, "document_upsert")
 		}

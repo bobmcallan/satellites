@@ -93,6 +93,7 @@ type documentTarget struct {
 	Name      string   // resolved name (frontmatter override OR filename stem)
 	Type      string   // "document" | "skill" — frontmatter value, defaulted per-kind
 	Tags      []string // optional, from frontmatter
+	Headline  string   // optional caveman one-liner, from frontmatter
 	Body      string
 }
 
@@ -127,6 +128,7 @@ func init() {
 		ConfigArg: &configArg,
 		UserArg:   &userArg,
 	}))
+	docs.AddCommand(newDocumentIndexCmd(&configArg, &userArg))
 	register(docs)
 }
 
@@ -499,6 +501,7 @@ func classifyDocumentFile(filePath, kind, projectID string) documentTarget {
 		Name:      resolveName(filepath.Base(filePath), fm.Name),
 		Type:      docType,
 		Tags:      fm.Tags,
+		Headline:  strings.TrimSpace(fm.Headline),
 		Body:      storedBody,
 	}
 }
@@ -555,6 +558,12 @@ func marshalUpsertRequest(t documentTarget) (json.RawMessage, error) {
 	}
 	if t.Tags != nil {
 		payload["tags"] = t.Tags
+	}
+	// Send headline only when the frontmatter declared one — an omitted key
+	// leaves the stored value alone (matches the tag "leave alone" semantics).
+	// Story-2 generation fills it when absent; here we never clobber with "".
+	if t.Headline != "" {
+		payload["headline"] = t.Headline
 	}
 	return json.Marshal(payload)
 }

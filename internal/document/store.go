@@ -399,6 +399,48 @@ func tagsSettableForType(t string) bool {
 	return t == TypeDocument || t == TypeSkill
 }
 
+// SetDocumentHeadline writes the caveman one-line headline on a documents
+// row. Like SetDocumentTags, headline is document-level metadata (not
+// versioned with the body), so it is applied separately from the body
+// upsert. Re-applying the same headline is a no-op (no UPDATE, no
+// updated_at bump) to keep `satellites document upload` idempotent on the
+// row. Only 'document' rows carry an authored headline (skills keep their
+// own description; stories/tasks have no headline) — other types are
+// rejected (epic:always-context).
+func (s *Store) SetDocumentHeadline(ctx context.Context, id, headline string, now time.Time) (Document, error) {
+	now = now.UTC()
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Document{}, fmt.Errorf("document: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // commit path handles success
+
+	doc, err := lockDocumentByID(ctx, tx, id)
+	if err != nil {
+		return Document{}, err
+	}
+	if doc.Type != TypeDocument {
+		return Document{}, fmt.Errorf("document: SetDocumentHeadline: id=%s is type=%s, expected document", id, doc.Type)
+	}
+	if doc.Headline == headline {
+		if err := tx.Commit(); err != nil {
+			return Document{}, fmt.Errorf("document: commit: %w", err)
+		}
+		return doc, nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE documents SET headline = $1, updated_at = $2 WHERE id = $3
+    `, headline, now, id); err != nil {
+		return Document{}, fmt.Errorf("document: set headline: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Document{}, fmt.Errorf("document: commit: %w", err)
+	}
+	doc.Headline = headline
+	doc.UpdatedAt = now
+	return doc, nil
+}
+
 // stringSlicesEqualUnordered compares two string slices ignoring order
 // and duplicates — Postgres array equality semantics treat
 // `{a,b} = {b,a}` as true on `=`, but ARRAY[...] literals compare by
@@ -1023,6 +1065,7 @@ const selectDocumentColumns = `SELECT
     tags, status,
     COALESCE(priority,''), COALESCE(category,''),
     COALESCE(parent_id,''), acceptance_criteria,
+    COALESCE(headline,''),
     summary, summary_updated_at,
     created_at, updated_at`
 
@@ -1039,6 +1082,7 @@ func scanDocumentFull(rs rowScanner) (Document, error) {
 		&tags, &d.Status,
 		&d.Priority, &d.Category,
 		&d.ParentID, &d.AcceptanceCriteria,
+		&d.Headline,
 		&d.Summary, &summaryAt,
 		&d.CreatedAt, &d.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

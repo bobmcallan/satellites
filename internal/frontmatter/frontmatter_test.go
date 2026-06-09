@@ -38,6 +38,12 @@ func TestParse(t *testing.T) {
 			wantBody: "# Body\n",
 		},
 		{
+			name:     "headline field parsed",
+			input:    "---\nname: agent-goals\ntags: [principles:always]\nheadline: drive story to terminal state\n---\n# Body\n",
+			wantFM:   Frontmatter{Name: "agent-goals", Tags: []string{"principles:always"}, Headline: "drive story to terminal state"},
+			wantBody: "# Body\n",
+		},
+		{
 			name:     "CRLF line endings",
 			input:    "---\r\ntags: [principles:workspace]\r\n---\r\n# Body\r\n",
 			wantFM:   Frontmatter{Tags: []string{"principles:workspace"}},

@@ -27,9 +27,15 @@ type Frontmatter struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description"`
 	Type        string   `yaml:"type"`
-	Scope       string   `yaml:"scope"`
-	WorkspaceID string   `yaml:"workspace_id"`
-	ProjectID   string   `yaml:"project_id"`
+
+	// Headline is a terse, drift-free one-liner (caveman form) describing a
+	// document or principle. Authored here and stored on the row so the
+	// `satellites document index` listing stays context-cheap without loading
+	// bodies. Empty when unset (epic:always-context).
+	Headline    string `yaml:"headline"`
+	Scope       string `yaml:"scope"`
+	WorkspaceID string `yaml:"workspace_id"`
+	ProjectID   string `yaml:"project_id"`
 
 	// Skill dispatch contract (sty_3359cb48). Carried by type:skill sources
 	// so the dynamic index can dispatch off frontmatter without loading

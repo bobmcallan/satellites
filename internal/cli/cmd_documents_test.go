@@ -209,6 +209,40 @@ func TestMarshalUpsertRequest_ProjectScopeNoWorkspace(t *testing.T) {
 	}
 }
 
+// TestMarshalUpsertRequest_Headline covers the upsert half of the headline
+// round-trip: a frontmatter-declared headline is sent on the payload, and an
+// absent one is omitted entirely (so it never clobbers a stored value with "").
+func TestMarshalUpsertRequest_Headline(t *testing.T) {
+	withHeadline := documentTarget{
+		ProjectID: testProjectID,
+		Name:      "agent-goals",
+		Type:      "document",
+		Body:      "# body",
+		Headline:  "drive story to terminal state",
+	}
+	raw, err := marshalUpsertRequest(withHeadline)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if s := string(raw); !strings.Contains(s, `"headline":"drive story to terminal state"`) {
+		t.Errorf("payload missing headline: %s", s)
+	}
+
+	noHeadline := documentTarget{
+		ProjectID: testProjectID,
+		Name:      "glossary",
+		Type:      "document",
+		Body:      "# body",
+	}
+	raw, err = marshalUpsertRequest(noHeadline)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if s := string(raw); strings.Contains(s, "headline") {
+		t.Errorf("absent headline must be omitted (leave-alone), got: %s", s)
+	}
+}
+
 // flagged reports whether vs contains a violation whose path ends in
 // pathSuffix and whose rule equals want. Matching by suffix keeps the
 // assertions independent of the temp-dir absolute root.

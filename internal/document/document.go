@@ -87,6 +87,7 @@ type Document struct {
 	Category           string     `json:"category,omitempty"`
 	ParentID           string     `json:"parent_id,omitempty"`
 	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
+	Headline           string     `json:"headline,omitempty"`
 	Summary            string     `json:"summary,omitempty"`
 	SummaryUpdatedAt   *time.Time `json:"summary_updated_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
