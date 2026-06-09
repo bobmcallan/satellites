@@ -122,6 +122,36 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 		t.Fatalf("nav: %v", err)
 	}
 
+	// sty_589bb623: the projects page uses the global responsive margin ladder
+	// (no fixed max-width cap). On a standard-width viewport the content sits
+	// ~5% from each browser edge — assert paddingLeft ≈ 5% of the viewport and
+	// the cap is gone. (Guards against a regression to the old 1280px centered
+	// column.)
+	var margin struct {
+		MaxWidth string  `json:"maxWidth"`
+		Ratio    float64 `json:"ratio"`
+		VW       float64 `json:"vw"`
+	}
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(() => {
+		const m = document.querySelector('main');
+		const cs = getComputedStyle(m);
+		const vw = document.documentElement.clientWidth;
+		const pl = parseFloat(cs.paddingLeft) || 0;
+		return { maxWidth: cs.maxWidth, ratio: vw ? pl / vw : 0, vw: vw };
+	})()`, &margin)); err != nil {
+		t.Fatalf("read main margin: %v", err)
+	}
+	if margin.MaxWidth != "none" {
+		t.Errorf("projects main max-width = %q, want \"none\" (responsive ladder, no cap)", margin.MaxWidth)
+	}
+	// Only assert the 5% rung when the headless viewport is in the standard band
+	// (769–1919px); the ladder is 1% below and 20% above.
+	if margin.VW > 768 && margin.VW < 1920 {
+		if margin.Ratio < 0.03 || margin.Ratio > 0.08 {
+			t.Errorf("projects main side margin = %.3f of viewport (vw=%.0f), want ~0.05 (5%%)", margin.Ratio, margin.VW)
+		}
+	}
+
 	// Wait for Alpine to bind x-data + run the initial x-for so the
 	// default chip spans are in the DOM. This is the canary that
 	// regressed under the wrong <script> order (alpine.min.js before

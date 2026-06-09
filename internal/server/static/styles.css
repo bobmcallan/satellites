@@ -96,44 +96,22 @@ textarea { height: auto; min-height: var(--control-height); padding: 0.5rem 0.7r
   font-size: 0.6rem;
 }
 
-/* Page container: capped content width, centered, with fluid inline
-   padding that grows with the viewport but is bounded by clamp().
-   Step the cap up on very wide displays so 4K/5K monitors aren't
-   mostly empty gutter. */
+/* Page container: full-width with a responsive side-margin ladder (the portal
+   content standard — sty_589bb623). The content sits ~5% from each browser edge
+   on a standard screen, tightening to ~1% on mobile and widening to ~20% on
+   ultra-wide so big monitors aren't mostly empty gutter and small ones aren't
+   cramped. No fixed max-width cap — the margin is proportional, not centered. */
 main {
-  max-width: 1280px;
+  max-width: none;
   margin-inline: auto;
   padding-block: 2rem;
-  padding-inline: clamp(1rem, 5vw, 4rem);
+  padding-inline: 5%;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
-@media (min-width: 1920px) { main { max-width: 1600px; } }
-@media (min-width: 2560px) { main { max-width: 1920px; } }
-
-/* Content-heavy pages opt out of the readability cap on `main` so the
-   panel and its body fill the viewport (minus the clamp padding).
-   Release notes and audit logs are reference material — narrow
-   measure makes them harder to scan, not easier. */
-main[data-page="changelog"],
-main[data-page="ledger"] {
-  max-width: none;
-}
-
-/* Story-detail (sty_c04acfc7): responsive width — ~5% side margins normally,
-   widening to ~20% on ultra-wide so the content neither stretches edge-to-edge
-   nor stays narrow on big screens. Overrides the global centered max-width. */
-main[data-page="story-detail"] {
-  max-width: none;
-  padding-inline: 5%;
-}
-@media (max-width: 768px) {
-  main[data-page="story-detail"] { padding-inline: 1%; }
-}
-@media (min-width: 1920px) {
-  main[data-page="story-detail"] { padding-inline: 20%; }
-}
+@media (max-width: 768px)  { main { padding-inline: 1%; } }
+@media (min-width: 1920px) { main { padding-inline: 20%; } }
 
 .panel {
   background: #111;
