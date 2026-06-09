@@ -121,6 +121,17 @@ main[data-page="ledger"] {
   max-width: none;
 }
 
+/* Story-detail (sty_c04acfc7): responsive width — ~5% side margins normally,
+   widening to ~20% on ultra-wide so the content neither stretches edge-to-edge
+   nor stays narrow on big screens. Overrides the global centered max-width. */
+main[data-page="story-detail"] {
+  max-width: none;
+  padding-inline: 5%;
+}
+@media (min-width: 1920px) {
+  main[data-page="story-detail"] { padding-inline: 20%; }
+}
+
 .panel {
   background: #111;
   border: 1px solid #222;
@@ -1207,3 +1218,80 @@ button.status-button[disabled] {
   letter-spacing: 0.08em;
 }
 .ledger-id-list code { color: #ddd; font-family: ui-monospace, monospace; }
+
+/* Story-detail expandable view (sty_c04acfc7): a header bar carrying the live
+   region + an expand/collapse toggle, a live status indicator, and the readable
+   description/ACs body below. */
+.story-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.story-detail-live { flex: 1 1 auto; min-width: 0; }
+.story-expand-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #111;
+  border: 1px solid #222;
+  color: #d8d8d8;
+  border-radius: 3px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: 0.04em;
+}
+.story-expand-toggle:hover { background: #1a1a1a; color: #fff; }
+.story-expand-caret { color: #4ade80; }
+
+.story-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.story-status-pill {
+  display: inline-block;
+  background: #14271b;
+  border: 1px solid #2f5d40;
+  color: #4ade80;
+  border-radius: 999px;
+  padding: 0.05rem 0.6rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+.story-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #888;
+}
+.story-live-indicator::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: story-live-pulse 2s ease-in-out infinite;
+}
+.story-live-indicator[data-state="working"] { color: #f5c451; }
+.story-live-indicator[data-state="working"]::before {
+  background: #f5c451;
+  animation-duration: 0.8s;
+}
+@keyframes story-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.story-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}

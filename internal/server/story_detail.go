@@ -56,21 +56,23 @@ type storyTraceRowView struct {
 }
 
 type storyDetailData struct {
-	Title         string
-	StoryID       string
-	StoryTitle    string
-	StoryType     string
-	CurrentStatus string
-	WorkflowName  string
-	NoWorkflow    bool
-	Rows          []storyTraceRowView
-	UserEmail     string
-	UserName      string
-	UserAvatar    string
-	ActiveNav     string
-	FooterName    string
-	FooterEmail   string
-	Version       string
+	Title              string
+	StoryID            string
+	StoryTitle         string
+	StoryType          string
+	CurrentStatus      string
+	WorkflowName       string
+	NoWorkflow         bool
+	Description        template.HTML
+	AcceptanceCriteria template.HTML
+	Rows               []storyTraceRowView
+	UserEmail          string
+	UserName           string
+	UserAvatar         string
+	ActiveNav          string
+	FooterName         string
+	FooterEmail        string
+	Version            string
 }
 
 func storyDetailHandler(cfg Config) http.HandlerFunc {
@@ -129,6 +131,14 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 		StoryType:     story.Category,
 		CurrentStatus: story.Status,
 	}
+	// Render the story body + ACs as markdown for the readable expanded view
+	// (sty_c04acfc7), via the same safe goldmark renderer the changelog uses.
+	if strings.TrimSpace(story.Description) != "" {
+		data.Description = renderMarkdown(story.Description)
+	}
+	if strings.TrimSpace(story.AcceptanceCriteria) != "" {
+		data.AcceptanceCriteria = renderMarkdown(story.AcceptanceCriteria)
+	}
 	wf, err := resolveWorkflowForStory(ctx, story)
 	if err != nil || wf == nil {
 		if err != nil {
@@ -180,13 +190,17 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 // storyMeta is the minimal story projection the view needs. ProjectID +
 // WorkspaceID bound the workflow resolver to the story's OWN project so a
 // kind:workflow skill from another project can never be selected (sty_68379c96).
+// Description (the story body) + AcceptanceCriteria are the readable content the
+// expandable view renders as markdown (sty_c04acfc7).
 type storyMeta struct {
-	ID          string
-	Title       string
-	Status      string
-	Category    string
-	ProjectID   string
-	WorkspaceID string
+	ID                 string
+	Title              string
+	Status             string
+	Category           string
+	ProjectID          string
+	WorkspaceID        string
+	Description        string
+	AcceptanceCriteria string
 }
 
 func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
@@ -203,12 +217,14 @@ func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
 		return storyMeta{}, fmt.Errorf("document %s is not a story", id)
 	}
 	return storyMeta{
-		ID:          resp.Document.ID,
-		Title:       resp.Document.Name,
-		Status:      resp.Document.Status,
-		Category:    resp.Document.Category,
-		ProjectID:   resp.Document.ProjectID,
-		WorkspaceID: resp.Document.WorkspaceID,
+		ID:                 resp.Document.ID,
+		Title:              resp.Document.Name,
+		Status:             resp.Document.Status,
+		Category:           resp.Document.Category,
+		ProjectID:          resp.Document.ProjectID,
+		WorkspaceID:        resp.Document.WorkspaceID,
+		Description:        resp.RawBody,
+		AcceptanceCriteria: resp.Document.AcceptanceCriteria,
 	}, nil
 }
 

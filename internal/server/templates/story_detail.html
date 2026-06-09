@@ -21,17 +21,51 @@
   </nav>
 </header>
 
-<main data-page="story-detail">
+<main data-page="story-detail" x-data="{ expanded: true }">
   <section class="changelog-intro" data-section="story-intro">
     <h2 class="section-heading">{{.StoryTitle}}</h2>
     <p class="changelog-lede">The declared process for this story, overlaid with what actually happened. Live — new gate decisions appear without reload.</p>
   </section>
 
-  {{/* The live region: refetched + swapped on a story-scoped SSE trigger
-       (sty_96cc0ade). Everything that moves — status pill, workflow, the
-       process-trace table — lives in the story-trace template. */}}
-  <div data-field="story-live-region">
-    {{template "story-trace" .}}
+  {{/* Expanded header (sty_c04acfc7). The live region owns the status pill +
+       the live indicator, so they update on the SSE refetch without a reload.
+       The expand/collapse toggle lives here, but its Alpine state and the
+       x-show target (story-detail-body) sit OUTSIDE the swapped fragment, so a
+       refetch can never strand the binding. */}}
+  <div class="story-detail-header" data-section="story-header">
+    <button type="button" class="story-expand-toggle" data-action="toggle-expand"
+            :aria-expanded="expanded ? 'true' : 'false'" @click="expanded = !expanded">
+      <span class="story-expand-caret" x-text="expanded ? '▾' : '▸'">▾</span>
+      <span x-text="expanded ? 'Collapse' : 'Expand'">Collapse</span>
+    </button>
+    {{/* The live region: refetched + swapped on a story-scoped SSE trigger
+         (sty_96cc0ade). Everything that moves — status pill, live indicator,
+         workflow, the process-trace table — lives in the story-trace template. */}}
+    <div class="story-detail-live" data-field="story-live-region">
+      {{template "story-trace" .}}
+    </div>
+  </div>
+
+  {{/* Readable content (sty_c04acfc7): description + ACs rendered as markdown at
+       body size. Static (the body/ACs do not live-update), so it sits outside
+       the live region; expand/collapse toggles it. */}}
+  <div class="story-detail-body" data-section="story-body" x-show="expanded" x-cloak>
+    <section class="panel" data-section="description">
+      <h2 class="section-heading">Description</h2>
+      {{if .Description}}
+      <div class="changelog-content" data-field="story-description">{{.Description}}</div>
+      {{else}}
+      <p class="empty" data-field="story-description">No description.</p>
+      {{end}}
+    </section>
+    <section class="panel" data-section="acceptance-criteria">
+      <h2 class="section-heading">Acceptance criteria</h2>
+      {{if .AcceptanceCriteria}}
+      <div class="changelog-content" data-field="story-acceptance">{{.AcceptanceCriteria}}</div>
+      {{else}}
+      <p class="empty" data-field="story-acceptance">No acceptance criteria.</p>
+      {{end}}
+    </section>
   </div>
 </main>
 
@@ -54,6 +88,10 @@
   if (!region) return;
   var t = null;
   window.live.on('story:' + storyID, function () {
+    // Flip the live indicator to "working" the moment gate activity fires; the
+    // fresh fragment that the refetch swaps in resets it to "live" (sty_c04acfc7).
+    var ind = region.querySelector('[data-field="live-indicator"]');
+    if (ind) { ind.dataset.state = 'working'; ind.textContent = 'working'; }
     if (t) { clearTimeout(t); }          // debounce a burst into one refetch
     t = setTimeout(function () {
       fetch('/stories/' + encodeURIComponent(storyID) + '/trace.fragment',
@@ -70,11 +108,12 @@
      rendered inline and standalone by storyTraceFragmentHandler for the SSE
      refetch (sty_96cc0ade). Markup lives here only; both paths share it. */}}
 {{define "story-trace"}}
-    <p class="changelog-lede">
+    <p class="changelog-lede story-status-line" data-field="story-status-line">
       <code data-field="story-id">{{.StoryID}}</code>
       · type <code data-field="story-type">{{.StoryType}}</code>
       · status <span class="story-status-pill" data-field="current-status">{{.CurrentStatus}}</span>
       {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{end}}
+      <span class="story-live-indicator" data-field="live-indicator" data-state="live">live</span>
     </p>
   {{if .NoWorkflow}}
   <section class="panel" data-section="no-workflow">
