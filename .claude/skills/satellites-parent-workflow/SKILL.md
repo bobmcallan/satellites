@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_ef46b20c","version":2,"hash":"8d3aa615f71aec8cc0b8b6838a8e47a9b87a690e6284ecf18dcde6ea3d4ebe1e"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_ef46b20c","version":3,"hash":"e469205a622ef102dab51609ef1ca73079490fd052bf5341a15a56ed3966dd17"} satellites-sync:end -->
 ---
 name: satellites-parent-workflow
 type: skill
@@ -10,37 +10,17 @@ description: The lifecycle a `parent` (epic/anchor) story follows — backlog �
 
 # Parent (epic / anchor) workflow
 
-This skill is the **process** for a `parent` story — an epic anchor, or any
-story that groups children and carries no executable work of its own. Its
-"work" is not code: it is the fact that every child it groups has reached a
-terminal status. One gated transition closes the anchor once that holds.
+The process for a `parent` story — an anchor that groups children and carries no executable work of its own. Its "work" is that every child has reached a terminal status; one gated transition closes it.
 
-## The story is the contract
+1. `document_get` the anchor; confirm its body names the children it groups.
+2. `document_upsert` a **`## Workflow`** section: the fenced ```yaml block below, copied verbatim. There is no separate plan — the contract IS "every child is terminal".
+3. Request the close gate: `satellites story status_transition <story-id> --skill satellites-parent-close-review`. It assesses the children and, when every one is terminal, enacts `backlog → done`.
 
-An anchor records its workflow into its body like any other story:
-
-1. Read the anchor (`document_get`) and confirm its body names the children it
-   groups.
-2. Record the **`## Workflow`** section: copy this skill's states + transitions
-   (the fenced ```yaml block below) verbatim. There is no separate plan to
-   write — the anchor's contract IS "every child is terminal", and the close
-   gate checks exactly that.
-3. Request the close gate: `.satellites/satellites story status_transition <story-id>`.
-   `satellites-parent-close-review` assesses the children and, when every one is
-   terminal, enacts `backlog → done`.
-
-The anchor never patches its own status; the reviewer enacts it, like every
-transition. Never hand-patch status.
+Only reviewers advance status — never hand-patch it.
 
 ## Transitions
 
-One reviewer gate. The anchor sits in `backlog` until its children are done;
-`satellites-parent-close-review` is the only path to `done`. It is **not** a
-build/test gate — it assesses the children's statuses and the genuine-anchor
-guard (at least one child, every child terminal), nothing more.
-
-States and transitions live in the fenced ```yaml block below. Free text around
-it is for human readers — the parser only reads what's inside the block.
+- `backlog → done` — `satellites-parent-close-review`: at least one child, every child terminal. Not a build/test gate.
 
 ```yaml
 states:

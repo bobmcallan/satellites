@@ -167,7 +167,7 @@
               </div>
               {{end}}
             </td>
-            <td class="col-status"><code class="status-pill">{{.Status}}</code><span class="activity-dot" data-activity-for="{{.ID}}" title="" aria-hidden="true"></span></td>
+            <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
             <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
             <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
           </tr>
@@ -184,17 +184,11 @@
               <div class="story-detail-flat" x-data="{ tab: 'description', loaded: {} }">
                 {{/* epic:dynamic-workflow-status order:2: status is DISPLAY-ONLY here.
                      The editable button grid + portal status-write are removed — status
-                     moves only through reviewer gates. Shown: the real status + a live
-                     activity ("being worked now") indicator fed by the order:1
-                     activity:<id> SSE topic + /api/stories/{id}/activity endpoint. */}}
+                     moves only through reviewer gates. */}}
                 <section class="story-detail-block story-status-readonly" data-story-status="{{.ID}}" data-field="story-status">
                   <h4>status</h4>
                   <div class="status-readonly-row">
                     <code class="status-pill status-pill-lg" data-field="story-status-value">{{.Status}}</code>
-                    <span class="activity-indicator" data-activity-for="{{.ID}}" data-field="story-activity" title="">
-                      <span class="activity-dot"></span>
-                      <span class="activity-label" data-field="story-activity-label">idle</span>
-                    </span>
                   </div>
                 </section>
 

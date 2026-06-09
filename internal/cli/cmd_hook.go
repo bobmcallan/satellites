@@ -110,16 +110,8 @@ func runHookGate(in io.Reader, out io.Writer) error {
 
 	session := sessionKey(ev.SessionID, ev.ParentSessionID)
 	now := time.Now().UTC()
-	allow, reason, eng := gateOutcomeEng(start, session, ev.ToolInput.path(), now)
+	allow, reason, _ := gateOutcomeEng(start, session, ev.ToolInput.path(), now)
 	if allow {
-		// Real-time activity (epic:dynamic-workflow-status, order:1): on an
-		// allowed edit, a throttled touch keeps the portal's activity indicator
-		// lit while the agent is editing. Best-effort and only when the allow was
-		// granted by a concrete engagement (eng.Story set) — a boundary/ungated
-		// allow carries no engagement, so nothing to touch.
-		if root, ok := findSatellitesRepoRoot(start); ok {
-			touchEngagementActivity(root, filepath.Join(root, ".satellites", "satellites.toml"), session, eng, now)
-		}
 		return nil // no output → tool proceeds through normal permissioning
 	}
 	return emitGateDeny(out, reason)

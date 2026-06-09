@@ -661,8 +661,7 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 }
 
 /* Status is display-only (epic:dynamic-workflow-status order:2): the read-only
-   current status + the live activity ("being worked now") indicator that
-   replaced the editable status panel. */
+   current status that replaced the editable status panel. */
 .story-status-readonly { display: flex; flex-direction: column; gap: 0.4rem; }
 .status-readonly-row { display: inline-flex; align-items: center; gap: 0.6rem; }
 .status-pill-lg { font-size: 0.85rem; padding: 0.2rem 0.6rem; }
@@ -681,40 +680,6 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-/* Live activity ("being worked now") indicator — order:1 signal, order:2 UI.
-   Idle by default (dim); .is-active lights it. The compact row dot sits beside
-   the status pill; the detail-panel indicator carries a working/idle label. */
-.activity-dot {
-  display: inline-block;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: #333;
-  margin-left: 0.4rem;
-  vertical-align: middle;
-  flex: none;
-}
-.activity-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: #666;
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
-}
-.activity-indicator .activity-dot { margin-left: 0; }
-.activity-indicator.is-active { color: #4ade80; }
-.activity-dot.is-active,
-.activity-indicator.is-active .activity-dot {
-  background: #4ade80;
-  box-shadow: 0 0 4px #4ade80;
-  animation: activity-pulse 1.6s ease-in-out infinite;
-}
-@keyframes activity-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
 }
 
 .panel-paginator {

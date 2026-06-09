@@ -122,10 +122,6 @@ func Build(cfg Config) http.Handler {
 	// inline panel's Ledger/Log tab. More specific than /stories/ so it wins.
 	mux.HandleFunc("GET /stories/{id}/ledger.fragment", storyLedgerFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
-	// Live activity state (epic:dynamic-workflow-status, order:1). Status is
-	// display-only in the portal (order:2) — there is no status-write route; the
-	// lifecycle moves only through reviewer gates.
-	mux.HandleFunc("GET /api/stories/{id}/activity", storyActivityHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 
 	// SSE trigger bus (sty_b6e39eb8): one app-wide, per-user-scoped,

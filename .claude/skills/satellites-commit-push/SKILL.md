@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":5,"hash":"80d635f0826ad58648c0b571d5ff2fdb9f5d34190fe3b4018f2eaaad9a12a700"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":6,"hash":"c22f0822335997726ffd822f3dca72f6b8aa1849c8010556660beb83a8703149"} satellites-sync:end -->
 ---
 name: satellites-commit-push
 type: skill
@@ -10,43 +10,38 @@ description: Commit and push satellites at a story checkpoint — bump .version,
 
 # satellites-commit-push
 
-The process-owned commit + push checkpoint for **this repo**. It is a
-`capability` the executor runs — not a reviewer gate. Project-scoped: the
-`.version` bump and the Fly CI chain are satellites' own; a consumer project
-supplies its own checkpoint skill.
+Run at every natural checkpoint and before requesting review — reviewers judge the
+latest pushed commit, not the local tree. A change not committed + pushed +
+(where a binary changed) released is invisible to the gate.
 
 **No AI attribution** in commit messages (no "Claude", "AI", "automated",
 "assistant", "co-author"). Conventional commit format: `type(scope): description`.
 
 ## Routine
 
-1. **Technical-debt gate — pre-commit, fail closed** ([[satellites-technical-debt-review]],
-   [[broken-windows]]). Before anything else, run the gate:
+1. **Technical-debt gate — pre-commit, fail closed** ([[satellites-technical-debt-review]]):
 
    ```bash
    .satellites/satellites techdebt review
    ```
 
-   It runs build + unit + the integration tier and reconciles the failing checks
-   against the `technical-debt-register`. **Exit 0 (CLEAN)** → proceed. **Exit 1
-   (BLOCKED)** → there is a new red (or an unowned register row); **do not
-   commit**. Fix it, or file a tracking story and add an owned register row
-   (`| <check_id> | <story_id> | <reason> |`), `satellites document upload`, and
-   re-run. A STALE row on a complete run means a window closed — remove it (the
-   register only shrinks). "It was already broken" is not a pass.
+   **Exit 0 (CLEAN)** → proceed. **Exit 1 (BLOCKED)** → a new red or an unowned
+   register row; **do not commit**. Fix it, or file a tracking story and add an
+   owned register row (`| <check_id> | <story_id> | <reason> |`),
+   `satellites document upload`, and re-run. A STALE row on a complete run means a
+   window closed — remove it. "It was already broken" is not a pass.
 
 1b. **Command-surface drift gate — pre-commit, fail closed** when the change
-   touches the CLI ([[satellites-doc-drift-review]], [[broken-windows]]):
+   touches the CLI ([[satellites-doc-drift-review]]):
 
    ```bash
    .satellites/satellites surface check
    ```
 
-   It fails closed when a live `satellites` command is not named in the
-   `client-command-surface` doc. **Exit 0 (CLEAN)** → proceed. **Exit 1
-   (BLOCKED)** → an added/renamed command is undocumented; reconcile the doc in
-   this same change (`satellites document upload`) and re-run. Skip only when the
-   change does not touch `internal/cli` / `cmd/satellites`.
+   **Exit 0 (CLEAN)** → proceed. **Exit 1 (BLOCKED)** → an added/renamed command
+   is undocumented; reconcile the doc in this same change
+   (`satellites document upload`) and re-run. Skip only when the change does not
+   touch `internal/cli` / `cmd/satellites`.
 
 2. **Configure + stage**
 
@@ -69,18 +64,17 @@ supplies its own checkpoint skill.
    ```
 
    - **CLI / client** (any CLIENT_PATH above) → bump `satellites.version`.
-     NOTE `internal/verb` IS a client path (compiled into the CLI) — a verb
-     change needs a `satellites.version` bump, not just a server bump.
+     `internal/verb` IS a client path (compiled into the CLI) — a verb change needs
+     a `satellites.version` bump, not just a server bump.
    - **server-only** (`internal/server`, `internal/mcpserver`,
      `internal/document`, `cmd/satellites-server`, other non-client packages) →
      bump `satellites-server.version`.
    - **both** — code compiled into BOTH binaries bumps both versions:
-     `config/documents/` embedded seeds, and `internal/verb` (the server runs
-     verbs AND the CLI dispatches them in-process). When in doubt, bump both.
+     `config/documents/` embedded seeds, and `internal/verb`. When in doubt, bump both.
 
    Update the matching `*.build` timestamp. `git add .version`. Never skip — the
-   release tag derives from `satellites.version`, and a CLIENT_PATH change with
-   no bump FAILS the release workflow.
+   release tag derives from `satellites.version`, and a CLIENT_PATH change with no
+   bump FAILS the release workflow.
 
 5. **Commit, gate the release locally, then push.**
 
@@ -90,17 +84,16 @@ supplies its own checkpoint skill.
    git push
    ```
 
-   `release check` mirrors the CI release gate locally: if a
-   CLIENT_PATH changed since the released `v<satellites.version>` tag and
-   `satellites.version` was not bumped, it **BLOCKS** — go back to step 4, bump
-   it (`git commit --amend` or a follow-up commit), and re-run. Catching it here
-   avoids a post-push red release.
+   `release check` mirrors the CI release gate locally: if a CLIENT_PATH changed
+   since the released `v<satellites.version>` tag and `satellites.version` was not
+   bumped, it **BLOCKS** — go back to step 4, bump it (`git commit --amend` or a
+   follow-up commit), and re-run.
 
 6. **Watch CI** (`.github/workflows/`: test → release → deploy) — three
-   **separate** workflows. Check ALL THREE conclusions, especially **release**:
-   it does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
-   `satellites.version` bump, and that red is invisible if you
-   only watch `test` + `deploy`.
+   **separate** workflows. Check ALL THREE conclusions, especially **release**: it
+   does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
+   `satellites.version` bump, and that red is invisible if you only watch `test` +
+   `deploy`.
 
    ```bash
    HEAD=$(git rev-parse HEAD)
@@ -108,27 +101,16 @@ supplies its own checkpoint skill.
    gh run watch <test-run-id> --exit-status
    ```
 
-   On failure, surface the failing step (`gh run view <id> --log-failed`) and
-   stop — do not amend or retry unless asked. On success, report the runs + the
-   release tag.
+   On failure, surface the failing step (`gh run view <id> --log-failed`) and stop
+   — do not amend or retry unless asked. On success, report the runs + the release tag.
 
-7. **Record the CI outcomes into the QA-evidence trail.** Once the three
-   workflows have concluded, capture each stage so the durable trail reflects the
-   deploy, not just the reviewer gates (`evidence audit` then sees the ship):
+7. **Record the CI outcomes into the QA-evidence trail.** Once the three workflows
+   have concluded, capture each stage:
 
    ```bash
-   scripts/record-ci-evidence.sh   # story id from HEAD's sty_… trailer; idempotent
+   scripts/record-ci-evidence.sh   # story id from HEAD's commit trailer; idempotent
    ```
 
    It writes a `ci_result` row per stage (test/release/deploy) via
-   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm
-   with `satellites evidence show <story>`. (Local recording — no CI secret; an
-   in-workflow variant is tracked as a follow-up.)
-
-## Why it is a checkpoint
-
-Reviewers judge the latest pushed commit, not the local tree. A change that is
-not committed + pushed + (where a binary changed) released and the local
-`.satellites/satellites` refreshed is invisible to the gate — the most common
-cause of a false reject. See [[commit-push-after-each-story]],
-[[story-execution-process]].
+   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm with
+   `satellites evidence show <story>`.

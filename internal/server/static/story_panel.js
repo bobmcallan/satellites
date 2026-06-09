@@ -309,20 +309,10 @@
         } catch (e) { /* URL ctor or replaceState unavailable — best effort */ }
     }
 
-    // Mirrors the server's activityWindow (internal/server/story_activity.go).
-    // Used only to schedule a client-side decay recheck so an indicator goes
-    // idle when the pings stop; the server remains the source of truth.
-    var ACTIVITY_WINDOW_MS = 180000; // 3 minutes
-
     function storyPanel() {
         return {
             query: '',
             expanded: '',
-            // _activity tracks the live "being worked now" indicator per story
-            // id (epic:dynamic-workflow-status order:2). Status is DISPLAY-ONLY
-            // in the portal now — the editable status panel + bulk status-set
-            // were removed; the lifecycle moves only through reviewer gates.
-            _activity: null,
             // _originalRowOrder is the snapshot of story-row ids in
             // server-rendered order, captured once on init() so removing
             // the order chip can restore the table.
@@ -409,8 +399,6 @@
                             debounce(() => { this.liveRefresh(pid, root); }, 250));
                     }
                 }
-                // Bind the live activity indicators once the rows are painted.
-                this.$nextTick(() => { this._bindActivity(root); });
             },
 
             // liveRefresh refetches the CURRENT page's story-rows fragment
@@ -458,11 +446,6 @@
                 if (ind && !isNaN(page)) {
                     ind.textContent = 'page ' + page + (pageCount > 0 ? ' of ' + pageCount : '');
                 }
-
-                // Re-apply activity indicators to the freshly-rendered rows.
-                // Cached per-id state is re-applied without a refetch; only new
-                // ids fetch, and departed ids are torn down.
-                this._bindActivity(root);
             },
 
             // visibleRowCount returns the number of story rows currently
@@ -685,85 +668,6 @@
                 this.applyToServer();
             },
 
-            // ----- Live activity indicator (epic:dynamic-workflow-status order:2).
-            // Status is DISPLAY-ONLY in the portal; there is no status-write here.
-            // These methods light the "being worked now" dots/indicators from
-            // order:1's activity:<id> SSE topic + /api/stories/{id}/activity
-            // endpoint. Per-id state is cached so a tbody re-render re-applies
-            // without a refetch; only new ids fetch and departed ids tear down.
-
-            _bindActivity(root) {
-                const host = root || this.$root || this.$el;
-                if (!host) { return; }
-                if (!this._activity) { this._activity = Object.create(null); }
-                const present = new Set();
-                host.querySelectorAll('[data-activity-for]').forEach(el => {
-                    const id = el.getAttribute('data-activity-for');
-                    if (id) { present.add(id); }
-                });
-                Object.keys(this._activity).forEach(id => {
-                    if (!present.has(id)) { this._teardownActivity(id); }
-                });
-                present.forEach(id => {
-                    if (this._activity[id]) { this._applyActivity(host, id); }
-                    else { this._trackActivity(host, id); }
-                });
-            },
-
-            _applyActivity(host, id) {
-                const rec = this._activity && this._activity[id];
-                if (!rec || !host) { return; }
-                const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-                host.querySelectorAll('[data-activity-for="' + sel + '"]').forEach(el => {
-                    el.classList.toggle('is-active', !!rec.active);
-                    const label = el.querySelector('.activity-label');
-                    if (label) { label.textContent = rec.active ? 'working' : 'idle'; }
-                    if (el.hasAttribute('title')) {
-                        el.title = rec.active ? ('being worked' + (rec.since ? ' since ' + rec.since : '')) : '';
-                    }
-                });
-            },
-
-            _trackActivity(host, id) {
-                const rec = { off: null, timer: null, active: false, since: '' };
-                this._activity[id] = rec;
-                const self = this;
-                const refresh = async function () {
-                    let data;
-                    try {
-                        const resp = await fetch('/api/stories/' + encodeURIComponent(id) + '/activity',
-                            { credentials: 'same-origin' });
-                        if (!resp.ok) { return; }
-                        data = await resp.json();
-                    } catch (e) { return; }
-                    if (!self._activity || self._activity[id] !== rec) { return; } // torn down mid-flight
-                    rec.active = !!data.active;
-                    rec.since = data.since || '';
-                    self._applyActivity(self.$root || self.$el, id);
-                    if (rec.timer) { clearTimeout(rec.timer); rec.timer = null; }
-                    if (rec.active && rec.since) {
-                        const sinceMs = Date.parse(rec.since);
-                        if (!isNaN(sinceMs)) {
-                            // Recheck just past the freshness window so the dot
-                            // decays to idle when the pings stop.
-                            const delay = Math.max(1000, (sinceMs + ACTIVITY_WINDOW_MS + 2000) - Date.now());
-                            rec.timer = setTimeout(refresh, delay);
-                        }
-                    }
-                };
-                if (window.live && typeof window.live.on === 'function') {
-                    rec.off = window.live.on('activity:' + id, refresh);
-                }
-                refresh();
-            },
-
-            _teardownActivity(id) {
-                const rec = this._activity && this._activity[id];
-                if (!rec) { return; }
-                if (rec.timer) { clearTimeout(rec.timer); }
-                if (rec.off) { try { rec.off(); } catch (e) { /* ignore */ } }
-                delete this._activity[id];
-            },
         };
     }
 

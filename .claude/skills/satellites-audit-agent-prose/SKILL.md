@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_4dc59149","version":4,"hash":"1d1f23623c691a2e36b96f0dd714a88b84e775e80406bbaecba53b78c411c497"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_4dc59149","version":5,"hash":"3651fc272e890834c4ab2b81d85f07ea352a05d6568baf76b3ff82fa215ac6e9"} satellites-sync:end -->
 ---
 name: satellites-audit-agent-prose
 type: skill
@@ -9,11 +9,10 @@ description: Audit a prose artifact intended for an agent or operator (MCP load 
 
 # satellites-audit-agent-prose
 
-Prose shipped to an agent or operator is a contract: short, prescriptive, environment-agnostic, actionable on first read. This skill audits one or more files the user names and reports concrete fixes. It does not edit unless asked.
+Audit one or more prose files the user names and report concrete fixes. Do not
+edit unless asked.
 
 ## Invocation
-
-The user passes one or more file paths (typically markdown, but plain text or extracted strings are fine):
 
 ```
 /satellites-audit-agent-prose path/to/artifact.md [more/paths.md ...]
@@ -23,35 +22,63 @@ If no path is given, ask which file to audit. Do not guess. Do not walk the tree
 
 ## Procedure
 
-1. **Read each file in full.** Do not skim. If the file is over 500 lines, read it in chunks and audit each.
-2. **Run static checks** (below) on the body. Record every violation as `file:line · severity · rule · fix`.
-3. **Run the critique pass** (below) on bodies longer than two sentences. Skip for one-line strings unless static checks already flagged them.
-4. **Report** in the output format below. Lead with `block` findings, then `warn`, then critique verdicts. No padding, no "looks good" entries.
-5. **Stop.** Do not rewrite. If the user wants edits, they will ask.
+1. **Read each file in full.** If over 500 lines, read in chunks and audit each.
+2. **Run static checks** (below) on the body. Record every violation as
+   `file:line · severity · rule · fix`.
+3. **Run the critique pass** (below) on bodies longer than two sentences. Skip for
+   one-line strings unless static checks flagged them.
+4. **Report** in the output format below. Lead with `block`, then `warn`, then
+   critique verdicts. No "looks good" entries.
+5. **Stop.** Do not rewrite.
 
 ## Static checks — fail closed
 
 Each hit is a `block` unless noted.
 
-- **Host-repo coupling.** Reject literal phrases that assume the reader is inside the artifact's source repo: `this repo`, `this codebase`, `our codebase`, `our repo`, `in this project`, `here we`. The reader is in *their* environment, not yours.
-- **Hardcoded paths under the source repo.** Reject absolute paths (`/home/...`, `/Users/...`, `C:\\...`) and repo-internal source paths (`internal/...`, `cmd/...`, `pkg/...`, `src/...`) unless they appear inside a code fence as an *example* the reader will adapt.
-- **Rotting identifiers.** Reject *filled-in* values that rot: UUIDs, hex slugs of the form `[a-z]{2,5}_[0-9a-f]{6,}`, concrete ticket/epic refs (`epic:bootstrap-autonomy`, `JIRA-1234`, `#1234`), commit SHAs, version pins to in-flight builds. *Template* forms with angle-bracket placeholders inside (`epic:<slug>`, `story:<id>`, `project:<id>`) are fine — they document syntax, not state. If an identifier is needed, it must be a placeholder (`<workspace_id>`, `<ticket_id>`).
-- **Implementation-status narrative.** Reject `not yet wired`, `tracked under`, `until they land`, `stub until`, `TODO`, `for now`, `coming soon`, `currently`, `in progress`. If a behaviour isn't ready, the artifact must not describe it.
-- **Placeholder discipline.** Identifiers the reader supplies must appear in `<angle_brackets>` or `${BRACES}`. Literal example values that look real (e.g., `wsp_4f8c9b2a`) are `warn` — they get copy-pasted by mistake.
-- **Prescriptive verbs present.** The artifact body must open with imperative voice — a directive to the reader, not a description of the system. Accept any sentence-initial imperative: `MUST`, `Call`, `Read`, `Write`, `Run`, `Verify`, `Return`, `Pass`, `Reject`, `Complete`, `Treat`, `Resolve`, `Persist`, `Dispatch`, `Skip`, `Compare`, `Parse`, `Use`, `Scan`, `Check`, `Apply`, `Fetch`, `Install`, `Update`, etc. Check the first sentence of the body (skipping frontmatter, title, and any single intro paragraph). If the opening reads as background ("This document describes…", "The system supports…"), flag it.
+- **Host-repo coupling.** Reject phrases that assume the reader is inside the
+  artifact's source repo: `this repo`, `this codebase`, `our codebase`, `our repo`,
+  `in this project`, `here we`.
+- **Hardcoded paths under the source repo.** Reject absolute paths (`/home/...`,
+  `/Users/...`, `C:\\...`) and repo-internal source paths (`internal/...`,
+  `cmd/...`, `pkg/...`, `src/...`) unless inside a code fence as an example to adapt.
+- **Rotting identifiers.** Reject filled-in values that rot: UUIDs, hex slugs of
+  the form `[a-z]{2,5}_[0-9a-f]{6,}`, concrete ticket/epic refs
+  (`epic:bootstrap-autonomy`, `JIRA-1234`, `#1234`), commit SHAs, version pins to
+  in-flight builds. *Template* forms with angle-bracket placeholders inside
+  (`epic:<slug>`, `story:<id>`, `project:<id>`) are fine. If an identifier is
+  needed it must be a placeholder (`<workspace_id>`, `<ticket_id>`).
+- **Implementation-status narrative.** Reject `not yet wired`, `tracked under`,
+  `until they land`, `stub until`, `TODO`, `for now`, `coming soon`, `currently`,
+  `in progress`. If a behaviour isn't ready, the artifact must not describe it.
+- **Placeholder discipline.** Reader-supplied identifiers must appear in
+  `<angle_brackets>` or `${BRACES}`. Literal example values that look real (e.g.
+  `wsp_4f8c9b2a`) are `warn`.
+- **Prescriptive verbs present.** The body must open with imperative voice — a
+  directive, not a description (`MUST`, `Call`, `Read`, `Run`, `Verify`, `Return`,
+  `Reject`, `Use`, `Check`, etc.). Check the first sentence of the body (skipping
+  frontmatter, title, and any single intro paragraph). If it reads as background
+  ("This document describes…", "The system supports…"), flag it.
 - **Length budget by surface.**
-  - Markdown directive / load instruction: ≤ 150 lines, ≤ 1500 words. `warn` above, `block` at 2×. Multi-step bootstrap artifacts (frontmatter tag `kind:mcp-startup` or similar) get the full 150; single-concern directives should still aim for ≤ 100.
-  - Tool / function description string: ≤ 140 characters, single sentence, ends with a period.
+  - Markdown directive / load instruction: ≤ 150 lines, ≤ 1500 words. `warn` above,
+    `block` at 2×. Single-concern directives should aim for ≤ 100.
+  - Tool / function description string: ≤ 140 characters, single sentence, ends
+    with a period.
   - CLI short help: ≤ 60 characters, imperative mood, no terminal period.
   - CLI long help: ≤ 40 lines.
   - System prompt fragment: ≤ 80 lines per concern.
-- **Link / path validity.** Every relative path mentioned outside a code fence must exist on disk (relative to the file's directory or the working dir) or be a documented `<placeholder>`. Dead paths are `block`.
-- **Duplicate prose.** If two passages restate the same instruction, one is wrong. `warn` with both line numbers.
-- **First-person plural.** `we`, `us`, `our` referring to the authors of the artifact. The reader is the subject. `warn`.
+- **Link / path validity.** Every relative path outside a code fence must exist on
+  disk (relative to the file's dir or working dir) or be a `<placeholder>`. Dead
+  paths are `block`.
+- **Duplicate prose.** Two passages restating the same instruction → `warn` with
+  both line numbers.
+- **First-person plural.** `we`, `us`, `our` referring to the artifact's authors —
+  the reader is the subject. `warn`.
 
 ## Critique pass — structured reviewer prompt
 
-For each body that survives static checks, run this critique. Use the Agent tool (subagent_type=general-purpose) and paste the prompt verbatim along with the artifact body. The prompt is the contract.
+For each body that survives static checks, run this critique. Use the Agent tool
+(subagent_type=general-purpose) and paste this prompt verbatim with the artifact
+body:
 
 ```
 You are reviewing one prose artifact that will be shipped to a
@@ -95,22 +122,23 @@ Record each artifact's overall verdict in the report.
 - L<line> · warn  · <rule> · <fix>
 - critique: REVISE — <one-line summary of critique fixes>
 
-## <next file path>
-...
-
 ## Summary
 - N files audited · N block · N warn · N REVISE/REWRITE
 ```
 
-## Hard rules — non-negotiable
+## Hard rules
 
-- **No narrative in a directive.** A directive is a contract, not a design doc. If a sentence doesn't drive an action or state a load-bearing fact, cut it. *Load-bearing facts include*: ordering invariants ("the next step assumes the previous one ran"), ownership claims ("you are the sole writer of X"), error semantics ("treat that error as bootstrap drift"), and authority boundaries ("the CLI never mutates this file"). Keep those. Cut motivation, history, and "why this exists" prose.
-- **No live identifiers.** Story IDs, ticket numbers, commit SHAs, dated build versions — all rot. Use `<placeholders>`.
-- **No "implementation status" sections.** Either the behaviour ships, or the artifact omits it.
-- **No "in our system" framing.** Speak to the reader's environment, not yours.
-- **Short over thorough.** When in doubt, cut. Every paragraph in a load-time artifact is a tax on every future session that loads it.
+- **No narrative in a directive.** If a sentence doesn't drive an action or state a
+  load-bearing fact, cut it. Load-bearing facts to KEEP: ordering invariants,
+  ownership claims, error semantics, authority boundaries. Cut motivation, history,
+  "why this exists".
+- **No live identifiers** — use `<placeholders>`.
+- **No "implementation status" sections** — either the behaviour ships, or omit it.
+- **No "in our system" framing** — speak to the reader's environment.
+- **Short over thorough.** When in doubt, cut.
 
 ## When to skip a file
 
-- The path points to internal developer docs (ADRs, contributor READMEs, design notes, changelogs, test fixtures). Tell the user the file looks internal and ask whether to audit anyway.
-- The path doesn't exist. Surface the missing path; do not search for alternatives.
+- Internal developer docs (ADRs, contributor READMEs, design notes, changelogs,
+  test fixtures) — tell the user the file looks internal and ask whether to audit anyway.
+- A path that doesn't exist — surface the missing path; do not search for alternatives.
