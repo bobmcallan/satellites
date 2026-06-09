@@ -108,8 +108,18 @@ func runHookGate(in io.Reader, out io.Writer) error {
 		}
 	}
 
-	allow, reason := gateOutcome(start, sessionKey(ev.SessionID, ev.ParentSessionID), ev.ToolInput.path(), time.Now().UTC())
+	session := sessionKey(ev.SessionID, ev.ParentSessionID)
+	now := time.Now().UTC()
+	allow, reason, eng := gateOutcomeEng(start, session, ev.ToolInput.path(), now)
 	if allow {
+		// Real-time activity (epic:dynamic-workflow-status, order:1): on an
+		// allowed edit, a throttled touch keeps the portal's activity indicator
+		// lit while the agent is editing. Best-effort and only when the allow was
+		// granted by a concrete engagement (eng.Story set) — a boundary/ungated
+		// allow carries no engagement, so nothing to touch.
+		if root, ok := findSatellitesRepoRoot(start); ok {
+			touchEngagementActivity(root, filepath.Join(root, ".satellites", "satellites.toml"), session, eng, now)
+		}
 		return nil // no output → tool proceeds through normal permissioning
 	}
 	return emitGateDeny(out, reason)
@@ -122,9 +132,19 @@ func runHookGate(in io.Reader, out io.Writer) error {
 // non-editable phase is blocked. Fails closed when the repo is unconfigured or
 // the store is unreadable — the store is the authority, so uncertainty denies.
 func gateOutcome(start, session, target string, now time.Time) (allow bool, reason string) {
+	allow, reason, _ = gateOutcomeEng(start, session, target, now)
+	return allow, reason
+}
+
+// gateOutcomeEng is gateOutcome plus the matched engagement on allow — the
+// (session, story) row the START door opened on — so the caller can record a
+// real-time activity touch against it (epic:dynamic-workflow-status, order:1).
+// The engagement is the zero value on a deny and on a boundary/ungated allow
+// (no engagement consulted), and the touch helper no-ops on an empty story.
+func gateOutcomeEng(start, session, target string, now time.Time) (allow bool, reason string, eng workstate.Engagement) {
 	root, ok := findSatellitesRepoRoot(start)
 	if !ok {
-		return false, "satellites is not configured here (no .satellites/satellites.toml). Run `satellites init` to set up this repo, then `satellites work init <story>` to engage a story."
+		return false, "satellites is not configured here (no .satellites/satellites.toml). Run `satellites init` to set up this repo, then `satellites work init <story>` to engage a story.", workstate.Engagement{}
 	}
 	// Boundary rule (sty_11a6077c): the door governs the engaged PROJECT tree,
 	// not Claude's self-maintenance. An edit whose target resolves OUTSIDE the
@@ -135,18 +155,18 @@ func gateOutcome(start, session, target string, now time.Time) (allow bool, reas
 	if abs := absTargetPath(start, target); abs != "" {
 		cfg, _, _ := cliconfig.Load(filepath.Join(root, ".satellites", "satellites.toml"))
 		if pathIsUngated(abs, root, cfg.UngatedDirs) {
-			return true, ""
+			return true, "", workstate.Engagement{}
 		}
 	}
 	store, err := workstate.Open(stateDBForRoot(root))
 	if err != nil {
-		return false, "satellites engagement store unavailable — cannot verify an active engagement (fail closed). Run `satellites work init <story>` (and `satellites update` if the client is stale)."
+		return false, "satellites engagement store unavailable — cannot verify an active engagement (fail closed). Run `satellites work init <story>` (and `satellites update` if the client is stale).", workstate.Engagement{}
 	}
 	defer store.Close()
 
 	engs, err := store.LiveEngagement(session)
 	if err != nil {
-		return false, "satellites engagement store unreadable — blocking. Run `satellites work init <story>`."
+		return false, "satellites engagement store unreadable — blocking. Run `satellites work init <story>`.", workstate.Engagement{}
 	}
 
 	var sawEngagement, sawFresh bool
@@ -160,16 +180,16 @@ func gateOutcome(start, session, target string, now time.Time) (allow bool, reas
 		}
 		sawFresh = true
 		if e.Editable {
-			return true, "" // lease-fresh + editable → allow
+			return true, "", e // lease-fresh + editable → allow
 		}
 	}
 	switch {
 	case !sawEngagement:
-		return false, "No active engagement for this session. Run `satellites work init <story>` to engage a story's workflow before editing code."
+		return false, "No active engagement for this session. Run `satellites work init <story>` to engage a story's workflow before editing code.", workstate.Engagement{}
 	case !sawFresh:
-		return false, "Your engagement's lease has expired (stale). Re-engage with `satellites work init <story>` before editing."
+		return false, "Your engagement's lease has expired (stale). Re-engage with `satellites work init <story>` before editing.", workstate.Engagement{}
 	default:
-		return false, "The engaged story is not in an editable phase (e.g. backlog/done). Transition it to an editable status, or `satellites work init` the story you are actually working."
+		return false, "The engaged story is not in an editable phase (e.g. backlog/done). Transition it to an editable status, or `satellites work init` the story you are actually working.", workstate.Engagement{}
 	}
 }
 

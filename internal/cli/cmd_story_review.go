@@ -259,6 +259,10 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		if _, rErr := refreshEngagementPhase(store, resolveSession(""), story.ID, observed, editable, time.Now()); rErr != nil {
 			fmt.Fprintf(opts.Stderr, "warn: refresh engagement after transition: %v\n", rErr)
 		}
+		// Real-time activity (epic:dynamic-workflow-status, order:1): flush the
+		// phase-refresh engagement event so the portal sees the transition's
+		// activity immediately, not only on the next batch `work sync`.
+		realtimeEmitFn(ctx, opts.ConfigPath)
 	}
 
 	// 8b. Durable QA-evidence capture (sty_7d2e9847): record this gate run —

@@ -56,8 +56,15 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(configArg)
 			editable := resolveEditable(cmd.Context(), configArg, args[0], status)
-			return runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
-				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC())
+			if err := runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
+				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC()); err != nil {
+				return err
+			}
+			// Real-time activity (epic:dynamic-workflow-status, order:1): push the
+			// engage event to the server now so the portal lights up immediately,
+			// rather than waiting for the next batch `work sync`.
+			realtimeEmitFn(cmd.Context(), configArg)
+			return nil
 		},
 	}
 	initCmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (resolves repo root + work_dir; defaults to walk-up from CWD).")

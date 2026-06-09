@@ -122,6 +122,9 @@ func Build(cfg Config) http.Handler {
 	// inline panel's Ledger/Log tab. More specific than /stories/ so it wins.
 	mux.HandleFunc("GET /stories/{id}/ledger.fragment", storyLedgerFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
+	// Live activity state (epic:dynamic-workflow-status, order:1) — more specific
+	// than the /api/stories/ catch-all so it wins.
+	mux.HandleFunc("GET /api/stories/{id}/activity", storyActivityHandler(cfg))
 	mux.HandleFunc("/api/stories/", storyStatusHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 

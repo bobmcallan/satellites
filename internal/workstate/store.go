@@ -359,6 +359,35 @@ func (s *Store) SetLastFlushedSeq(seq int64) error {
 	return err
 }
 
+// ActivityTouchDue reports whether a real-time activity touch is due for
+// (session, story) — true when no touch has been recorded within `window` of
+// `now` — and records `now` as the latest touch when it returns true. It
+// throttles the high-frequency START door so an actively-edited story emits at
+// most one activity ping per window rather than one per edit. Best-effort: any
+// read/write error returns false (skip the touch) so the door never fails on it.
+func (s *Store) ActivityTouchDue(session, story string, now time.Time, window time.Duration) bool {
+	key := "activity_touch:" + session + ":" + story
+	var v string
+	switch err := s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&v); {
+	case err == nil:
+		if last := parseRFC3339(v); !last.IsZero() && now.Sub(last) < window {
+			return false
+		}
+	case err == sql.ErrNoRows:
+		// no prior touch — due
+	default:
+		return false
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, now.UTC().Format(time.RFC3339),
+	); err != nil {
+		return false
+	}
+	return true
+}
+
 // IsLeaseFresh reports whether the engagement's lease is still in the future at
 // now. A missing lease (zero) is treated as NOT fresh — a proper engagement
 // always carries a lease, so the absence is the stale/leftover case the door
