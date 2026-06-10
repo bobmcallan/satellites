@@ -7,7 +7,11 @@ tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow close transition (deploy → done). Advances the story with no review — it exists so the agent can request the client to move the story to the next stage. Emits {decision, notes} JSON and enacts the transition.
 ---
 
-This is a pass-through gate: it carries no review requirements, so it always accepts and closes the story. It exists to give the agent one way to ask the client to move the story forward and to leave a ledger record of each transition.
+Always accept and close the story: this gate carries no review requirements. Resolve the target state from the story's `## Workflow`, append the ledger rows that enact the move, then print the decision.
+
+## Naming
+
+On upload this skill is registered as `satellites-urgent-done-review` (the substrate prepends the `satellites-` prefix to the frontmatter `name`). That prefixed form is the value a story's `reviewer_skill` carries and the value you write into the `gate` payload field — use it exactly as written below.
 
 ## Input
 
@@ -17,7 +21,7 @@ The gate's `.satellites/satellites exec` calls authenticate as the operator's ad
 
 ## Enact (always accept)
 
-Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-urgent-done-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject`, print reject). Never invent a `to_status`.
+Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-urgent-done-review`; its `to` is your `to_status`. If no such transition exists, reject (append `review_reject`, print reject). Never invent a `to_status`.
 
 Then run these two `ledger_append` calls with Bash before printing your decision (no document_upsert):
 
@@ -27,6 +31,23 @@ Then run these two `ledger_append` calls with Bash before printing your decision
 ```
 
 The status_transition row IS the status change; the status field on document_upsert is ignored. If the status_transition `ledger_append` fails, the transition did not land — print `reject` with the failure as the reason.
+
+## Environment
+
+Runs as the urgent-workflow close gate, fired when a story reaches `deploy`. It mutates substrate by appending ledger rows as the operator's admin user; it reads the story body but uploads no documents.
+
+```yaml
+guardrails:
+  always:
+    - Resolve to_status only from a matching ## Workflow transition (from == story_status AND reviewer_skill == satellites-urgent-done-review).
+    - Append both review_accept and status_transition rows before printing accept.
+    - Treat a failed status_transition append as a non-transition — print reject with the failure as the reason.
+  ask_first: []
+  never:
+    - Invent, default, or guess a to_status when no matching transition exists — reject instead.
+    - Write document_upsert rows or any ledger kind beyond review_accept / review_reject / status_transition.
+    - Add review requirements or block the story — this gate is pass-through.
+```
 
 ## Output
 

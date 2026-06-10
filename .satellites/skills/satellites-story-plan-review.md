@@ -15,6 +15,25 @@ One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `sto
 
 The gate's `.satellites/satellites exec` calls authenticate as the operator's admin user, authorized to write status_transition / review_* rows. Read related rows with `.satellites/satellites exec document_get` / `ledger_list` when the body is not enough.
 
+## Environment & guardrails
+
+This gate runs as the operator's admin user and writes authoritative status changes. Its only write surface is `ledger_append`; all reads are `context review` / `document_get` / `ledger_list`.
+
+```yaml
+guardrails:
+  always:
+    - Resolve to_status only from the story's own ## Workflow transition matching (from == story_status AND reviewer_skill == satellites-story-plan-review).
+    - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
+    - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
+    - Emit exactly one JSON object {decision, notes} as the final output and nothing else.
+  ask_first: []
+  never:
+    - Never write a status_transition row on reject, or when no matching workflow transition exists.
+    - Never invent or default a to_status not named by a matching transition.
+    - Never write outside ledger_append (no document_upsert or other mutating exec).
+    - Never run the build or tests, or penalise the absence of code — this gate reviews the contract, not the work.
+```
+
 ## What to check
 
 ### 1. The embedded workflow

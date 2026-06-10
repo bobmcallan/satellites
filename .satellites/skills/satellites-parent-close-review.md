@@ -54,6 +54,26 @@ The status_transition row IS the status change; the status field on document_ups
 
 If the status_transition `ledger_append` fails, the transition did not land — print `reject` with the failure as the reason.
 
+## Environment
+
+Runs as a gate over the `.satellites` CLI, authenticated as the operator's admin user. It reads children via `document_list` and writes `review_accept` / `review_reject` / `status_transition` ledger rows — and only those — against the anchor `story_id` it was handed. It owns no host-repo state: no build, no tests, no files.
+
+```yaml
+guardrails:
+  always:
+    - Append every ledger row against the anchor story_id from the input — never against a child.
+    - Resolve to_status solely from the story's ## Workflow transition whose from == story_status AND reviewer_skill == satellites-parent-close-review.
+    - On accept, emit both a review_accept AND a status_transition row; the status_transition row is the status change.
+    - On reject, emit a review_reject row and no status_transition.
+    - Treat a failed status_transition ledger_append as a non-landed transition — print reject with the failure as the reason.
+  ask_first: []
+  never:
+    - Invent or guess a to_status when no matching ## Workflow transition exists — reject instead.
+    - Mutate, transition, re-judge, or append any row for a child story — children are read-only inputs.
+    - Call document_upsert, or run the build, tests, or any host-repo command.
+    - Accept vacuously over zero children, or over any non-terminal child.
+```
+
 ## Output
 
 After enacting, print exactly one JSON object and nothing else — no prose, no fence:

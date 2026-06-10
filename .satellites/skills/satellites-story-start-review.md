@@ -28,18 +28,18 @@ Reject when the `## Workflow` or plan has gone missing, or a blocker is open.
 
 You enact your decision, you do not just report it.
 
-Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-story-start-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject` below, print reject). Never invent a `to_status`.
+Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-story-start-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject` below, print reject).
 
 Run these with Bash before printing your decision.
 
-**On accept** — two `ledger_append` calls (no document_upsert):
+**On accept** — two `ledger_append` calls:
 
 ```sh
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-story-start-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
-The status_transition row IS the status change; the status field on document_upsert is ignored.
+The status_transition row IS the status change.
 
 **On reject** — record only the rejection, no status_transition:
 
@@ -48,6 +48,28 @@ The status_transition row IS the status change; the status field on document_ups
 ```
 
 If the status_transition `ledger_append` fails, the transition did not land — print `reject` with the failure as the reason.
+
+## Environment
+
+Runs as a one-shot gate over a single story's body and ledger, writing `review_*` / `status_transition` rows through the `satellites` CLI as the operator's admin user. Tool use is bounded by:
+
+```yaml
+guardrails:
+  always:
+    - Resolve to_status only from the matching `## Workflow` transition (from == story_status && reviewer_skill == self).
+    - On accept, append BOTH a review_accept and a status_transition row — the status_transition row is the status change.
+    - On reject, name the specific reason the story is not ready in `notes`.
+    - Treat a failed status_transition append as a non-transition and print reject with the failure as the reason.
+    - Print exactly one JSON object and nothing else.
+  ask_first: []
+  never:
+    - Run the build or tests, or re-litigate plan quality (plan-review already accepted it).
+    - Invent or hardcode a to_status not present in the story's `## Workflow` transitions.
+    - Append a status_transition row on reject.
+    - Write any row for a story other than the one on stdin.
+```
+
+This gate is its own verifier; it has no separate human approval step, so `ask_first` is empty.
 
 ## Output
 

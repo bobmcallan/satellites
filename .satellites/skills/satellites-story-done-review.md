@@ -18,12 +18,31 @@ The gate's `.satellites/satellites exec` calls authenticate as the operator's ad
 - Run the relevant build and tests. A criterion claiming a test exists is met only if that test runs and passes.
 - Use `git log` / `git diff` to confirm the change is committed, and the `.satellites/satellites` CLI to read related rows the criteria reference.
 
+## Environment
+
+You run in the story's worktree with admin-authenticated `.satellites/satellites exec` access. You are a **reviewer**: you observe the tree and run read-only checks against it, and your only writes are the named ledger rows below.
+
+```yaml
+guardrails:
+  always:
+    - Verify every acceptance criterion against the real tree — run the build and tests yourself.
+    - Fail closed: if a criterion cannot be verified, or build/tests cannot be run, reject.
+    - Judge the latest pushed commit; reject if the work is uncommitted/unpushed.
+    - Resolve to_status only from the story's ## Workflow transition whose reviewer_skill is this gate.
+  ask_first: []
+  never:
+    - Modify the working tree to make a criterion pass — no edits, commits, amends, stashes, resets, or any git/file mutation. Verification is read-only on code.
+    - Write anything except the named ledger_append rows (review_accept, review_reject, status_transition). No document_upsert, no other exec writes.
+    - Invent or guess a to_status that is not declared in the ## Workflow.
+    - Soft-pass an unverifiable criterion, or emit a status_transition on reject.
+```
+
 ## Decision rule
 
 - **accept** — every acceptance criterion is satisfied and verified; build and tests pass and you ran them yourself.
 - **reject** — any criterion is unmet, unverifiable, or the change is uncommitted/untested.
 
-**Fail closed.** If you cannot run the build or tests, or cannot otherwise verify a criterion for any reason, that is a reject ("build/tests could not be executed", with the reason named), never a soft pass. Reviewers judge the latest *pushed* commit — if the tree looks complete but the work was never committed, reject and say the executor must commit-push first.
+**Fail closed.** If you cannot run the build or tests, or cannot otherwise verify a criterion for any reason, that is a reject ("build/tests could not be executed", with the reason named), never a soft pass. Reviewers judge the latest *pushed* commit — if the tree looks complete but the work was never committed, reject and say the executor must commit-push first. Never alter the tree to close a gap; an unmet criterion is a reject, not a fixup.
 
 ## Enact
 
@@ -31,7 +50,7 @@ You enact your decision, you do not just report it.
 
 Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-story-done-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject` below, print reject). Never invent a `to_status`.
 
-Run these with Bash before printing your decision.
+Run these with Bash before printing your decision. These `ledger_append` calls are your **only** permitted writes — never run a `document_upsert`, any other `exec` write, or any git/file mutation of the tree.
 
 **On accept** — two `ledger_append` calls (no document_upsert):
 
