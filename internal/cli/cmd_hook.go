@@ -53,7 +53,7 @@ It fails closed: an unconfigured repo is denied, never allowed.`,
 			return runHookGate(cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
-	hookCmd.AddCommand(gate, newAccessCmd(), newPromptCmd(), newCodeNudgeCmd())
+	hookCmd.AddCommand(gate, newAccessCmd(), newPromptCmd(), newCodeNudgeCmd(), newHookContextCmd())
 	register(hookCmd)
 }
 

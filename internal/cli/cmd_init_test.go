@@ -228,6 +228,12 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	if !commandUnderEvent(t, s, "SessionStart", "", sessionIndexCommand) {
 		t.Errorf("code-index refresh hook (SessionStart → %s) not installed", sessionIndexCommand)
 	}
+	if !commandUnderEvent(t, s, "SessionStart", "", sessionContextCommand) {
+		t.Errorf("always-context inject hook (SessionStart → %s) not installed", sessionContextCommand)
+	}
+	if !commandUnderEvent(t, s, "PreToolUse", accessMatcher, sessionContextCommand) {
+		t.Errorf("always-context re-anchor hook (PreToolUse %s → %s) not installed", accessMatcher, sessionContextCommand)
+	}
 
 	// Idempotent: a second init adds nothing and reports all present.
 	var out2 bytes.Buffer
@@ -238,13 +244,13 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	var doc map[string]any
 	_ = json.Unmarshal(s2, &doc)
 	hooks := doc["hooks"].(map[string]any)
-	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 3 { // door + access + code-nudge
-		t.Errorf("PreToolUse has %d entries after re-init, want 3 (door + access + code-nudge)", len(pre))
+	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 4 { // door + access + code-nudge + always-context re-anchor
+		t.Errorf("PreToolUse has %d entries after re-init, want 4 (door + access + code-nudge + always-context)", len(pre))
 	}
 	if ups, _ := hooks["UserPromptSubmit"].([]any); len(ups) != 1 {
 		t.Errorf("UserPromptSubmit has %d entries after re-init, want 1", len(ups))
 	}
-	if ss, _ := hooks["SessionStart"].([]any); len(ss) != 1 {
-		t.Errorf("SessionStart has %d entries after re-init, want 1 (no duplicate)", len(ss))
+	if ss, _ := hooks["SessionStart"].([]any); len(ss) != 2 { // code-index + always-context
+		t.Errorf("SessionStart has %d entries after re-init, want 2 (code-index + always-context, no duplicate)", len(ss))
 	}
 }

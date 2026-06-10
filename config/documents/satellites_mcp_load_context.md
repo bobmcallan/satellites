@@ -10,7 +10,7 @@ tags: [kind:mcp-startup, v2]
 drive each transition with `satellites story status_transition --skill <gate>`.
 Fetch everything else only when a task needs it — **do not preload.**
 
-## Prefixes (resolve when one appears)
+## Prefixes
 
 `document:<scope>/<name>` → `document_get` · `project:<id>` → `project_get` ·
 `story:<id>` → `document_get` · `epic:<slug>` → `document_list {tags:["epic:<slug>"]}` ·
@@ -19,25 +19,23 @@ Fetch everything else only when a task needs it — **do not preload.**
 ## First-time setup (once per repo)
 
 `document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
-and follow it — `satellites install`, `satellites auth`, write the TOML,
-`project_match` the git remote for `project_id`.
+and follow it — install, auth, write the TOML, `project_match` for `project_id`.
 
 ## Session start
 
-- **Skills:** `satellites skill sync` pulls every scope into
-  `.claude/skills/<name>/SKILL.md` (stamp-reconciled, never clobbers operator
-  skills) — don't hand-reconcile. Author a NEW skill as a file in
-  `.satellites/skills/`, then `satellites skill upload` (review-gated); never
-  hand-write into `.claude/skills/`.
-- **Code index:** for an indexable repo, `satellites code index`, then
-  prefer `satellites code search <q>` / `satellites code symbol <name>` over
-  Read/Grep for code discovery — exact `file:line` + slices, far fewer tokens.
-  See the `satellites-code-search` skill (Grep still wins for non-symbol text).
+- **Skills:** `satellites skill sync` pulls every scope into `.claude/skills/`
+  (stamp-reconciled). Author a NEW skill in `.satellites/skills/`, then
+  `satellites skill upload` (review-gated); never hand-write `.claude/skills/`.
+- **Code index:** `satellites code index`, then prefer `satellites code
+  search`/`symbol` over Read/Grep (Grep wins for non-symbol text).
+- **Always-context:** the `satellites hook context` SessionStart hook injects the
+  resident set (`principles:always` docs/principles) + the index pointer, and
+  re-anchors it on each story `document_get` — pushed for you, don't fetch it.
 
-## On demand — do NOT load eagerly
+## On demand — do NOT preload
 
-- **Principles** — `document_list {tags:["principles:global"]}` (+ the
-  `principles:workspace` / `principles:project` layers). Fetch only when a task's
-  correctness depends on them, never at startup.
-- **Reference** — `satellites_mcp_reference_dispatch` (CLI dispatch surface),
-  `satellites_mcp_reference_documents` (upsert modes + list shapes).
+- **Index:** `satellites document index` lists every doc/principle (name, scope,
+  `always`, headline; no bodies). Scan it, `document_get` only what's needed.
+- **Principles:** non-resident layers via `document_list {tags:["principles:global"]}`
+  (+ `principles:workspace` / `principles:project`); `principles:always` injected.
+- **Reference:** `satellites_mcp_reference_dispatch`, `satellites_mcp_reference_documents`.

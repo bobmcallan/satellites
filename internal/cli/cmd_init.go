@@ -50,6 +50,14 @@ const (
 	// never block a session; the codenudge handler stays silent until this has
 	// produced an index for it to point at.
 	sessionIndexCommand = "satellites code index"
+
+	// The always-context injector (sty_a29e1845, epic:always-context).
+	// SessionStart: injects the always-flagged (principles:always) docs +
+	// principles and the standing `satellites document index` pointer, so the
+	// small resident set is in front of the agent every session WITHOUT any
+	// CLAUDE.md prose. ADVISORY: no `|| exit 2`, and the handler fails open, so
+	// a fetch hiccup never blocks a session.
+	sessionContextCommand = "satellites hook context"
 )
 
 // installedHook describes one hook init merges into .claude/settings.json.
@@ -66,8 +74,10 @@ var hooksToInstall = []installedHook{
 	{"PreToolUse", hookMatcher, hookCommand, ".claude/settings.json (PreToolUse START-door hook)"},
 	{"PreToolUse", accessMatcher, accessCommand, ".claude/settings.json (PreToolUse story-access reminder)"},
 	{"PreToolUse", codeNudgeMatcher, codeNudgeCommand, ".claude/settings.json (PreToolUse code-search nudge)"},
+	{"PreToolUse", accessMatcher, sessionContextCommand, ".claude/settings.json (PreToolUse always-context re-anchor on story fetch)"},
 	{"UserPromptSubmit", "", promptCommand, ".claude/settings.json (UserPromptSubmit story-access reminder)"},
 	{"SessionStart", "", sessionIndexCommand, ".claude/settings.json (SessionStart code-index refresh)"},
+	{"SessionStart", "", sessionContextCommand, ".claude/settings.json (SessionStart always-context inject)"},
 }
 
 func init() {
