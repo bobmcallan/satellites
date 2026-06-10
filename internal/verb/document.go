@@ -789,13 +789,6 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		}
 		doc = doc2
 	}
-	// Generate a caveman headline when the operator supplied none and none is
-	// stored yet (epic:always-context). Operator-supplied headlines win — the
-	// hook only fires on silence + empty. Best-effort + async: it never blocks
-	// or fails the upsert (see dispatchHeadlineRegen).
-	if shouldGenerateHeadline(req.Headline, doc.Type, doc.Headline) {
-		dispatchHeadlineRegen(ctx, doc.ID)
-	}
 	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
 }
 

@@ -250,6 +250,10 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 			return fmt.Errorf("%s: %w", t.Path, err)
 		}
 		fmt.Fprintf(out, "%s → %s (%s)\n", t.Path, label, summariseUploadResp(resp))
+		// Caveman headline (epic:always-context): for a document/principle with
+		// no stored headline, generate one client-side via claude -p and patch
+		// it in. Best-effort — never aborts the upload.
+		fillHeadlineIfEmpty(ctx, out, resp, t, "", configArg, userArg)
 	}
 	return nil
 }
