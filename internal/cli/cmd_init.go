@@ -157,6 +157,15 @@ func runInit(out io.Writer, repoRoot string) error {
 		return fmt.Errorf("init: stat %s: %w", tomlPath, statErr)
 	}
 
+	// 2b. Trunk workflow scaffold (epic:enforcement-surface, order:2): when the
+	//     repo has no kind:workflow source, write a minimal trunk workflow + its
+	//     gate skills into .satellites/skills/ so the START door enforces a real,
+	//     advanceable process instead of engage-only theatre. Operator-owned
+	//     source the operator edits + uploads — not a runtime default.
+	if err := scaffoldWorkflowIfAbsent(out, satDir); err != nil {
+		return err
+	}
+
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
 	settingsPath := filepath.Join(repoRoot, ".claude", "settings.json")
