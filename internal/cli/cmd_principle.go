@@ -37,5 +37,6 @@ func init() {
 		ConfigArg: &configArg,
 		UserArg:   &userArg,
 	}))
+	principle.AddCommand(newCorpusReviewCmd("principles", &configArg, &userArg))
 	register(principle)
 }

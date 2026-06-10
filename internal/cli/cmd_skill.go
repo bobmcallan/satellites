@@ -43,5 +43,6 @@ func init() {
 	}))
 	skill.AddCommand(newSkillSyncCmd(&configArg, &userArg))
 	skill.AddCommand(newSkillIndexCmd(&configArg, &userArg))
+	skill.AddCommand(newCorpusReviewCmd("skills", &configArg, &userArg))
 	register(skill)
 }
