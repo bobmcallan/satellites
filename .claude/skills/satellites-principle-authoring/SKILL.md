@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_6eb7e05d","version":1,"hash":"77a22fd74ea5c307b927e3a93ac09b70aaaefb9142e13da93e758530e82782a9"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_6eb7e05d","version":2,"hash":"2368ae559a784c946a17fed40c512aa977962e4df288a0facaaf025ac1cc99df"} satellites-sync:end -->
 ---
 name: satellites-principle-authoring
 type: skill
@@ -8,7 +8,7 @@ tags: [kind:capability, area:substrate]
 ---
 # satellites-principle-authoring
 
-Author or revise a satellites `principle`. Use when capturing a standing belief or constraint for the substrate. A principle is NOT a skill — do not give it the Spec/Verifier/Environment template; that is for procedures. Produce the refined principle into `.satellites/principles/<name>.md`, then run `principle-review` before upload.
+Author or revise a satellites `principle`. Use when capturing a standing belief or constraint for the substrate. A principle is NOT a skill — do not give it the Spec/Verifier/Environment template; that is for procedures. Produce the refined principle into `.satellites/principles/<name>.md`, then run `satellites-principle-review` before upload.
 
 ## Clarify the one belief
 
@@ -29,4 +29,4 @@ Keep the file minimal:
 
 ## Then review + ship
 
-Run `principle-review` and resolve every REVISE before upload. Keep it durable and repo-agnostic — a principle must read cleanly to someone outside any one repository.
+Run `satellites-principle-review` and resolve every REVISE before upload. Keep it durable and repo-agnostic — a principle must read cleanly to someone outside any one repository.
