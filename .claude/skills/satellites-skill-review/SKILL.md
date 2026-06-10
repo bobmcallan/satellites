@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_26f14ccf","version":2,"hash":"7c3905a30efcec756acec70282210bb78da26bc99008ea6af9b1afd25be4cb4a"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_26f14ccf","version":3,"hash":"ddc07d2cfa5b45537c4d7665c7503a3f806b550977265100db3ca906910fb668"} satellites-sync:end -->
 ---
 name: skill-review
 type: skill
@@ -23,5 +23,10 @@ Read the whole file, then answer each PASS / REVISE with one sentence of evidenc
 2. **Triggerable description.** Does the `description` say plainly when to use the skill? Flag a vague or narrative description.
 3. **Prescriptive.** Does the body open with and stay in imperative voice? Flag scene-setting.
 4. **Followable + agnostic.** Could an agent run it without guessing, in any repository? Flag ambiguity and host-repo coupling.
+5. **Spec — the contract is explicit.** Is the skill's goal + scope stated, not implied? Read it KIND-AWARE: a `workflow`'s spec IS its `## Workflow` states/transitions; a `gate`'s IS its decision rule; a `capability`/`function` needs an explicit purpose + the question its use answers. Flag a skill whose true goal an executor would have to guess.
+6. **Verifier — success is checked, not assumed.** Does the skill say how an executor KNOWS it worked — a gate to run, eval criteria stated upfront, a test, or an external/measurable signal — rather than trusting raw output? A `gate` IS the verifier (judge its decision rule). Flag generation with no verification path.
+7. **Environment + guardrails.** Does the skill declare its scope and an `always` / `ask-first` / `never` guardrail block bounding its tool use? Flag missing guardrails on a skill that acts on the repo or external services. (A pure read-only/advisory skill may state "no guardrails needed" and pass.)
 
 End with one verdict: SHIP / REVISE. Do not rewrite unless asked.
+
+Items 5–7 are kind-aware and advisory (this critique, not the CLI hard-block): name any missing applicable layer in a REVISE; do not demand a `## Workflow` of a capability, and do not block a skill that already encodes the layer in its own form.

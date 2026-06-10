@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_ef46b20c","version":3,"hash":"e469205a622ef102dab51609ef1ca73079490fd052bf5341a15a56ed3966dd17"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_ef46b20c","version":4,"hash":"c6fee7d0ff404ca8392132f49378a6492b64d188661b909eca0ea69757f14317"} satellites-sync:end -->
 ---
 name: satellites-parent-workflow
 type: skill
@@ -10,15 +10,13 @@ description: The lifecycle a `parent` (epic/anchor) story follows — backlog �
 
 # Parent (epic / anchor) workflow
 
-The process for a `parent` story — an anchor that groups children and carries no executable work of its own. Its "work" is that every child has reached a terminal status; one gated transition closes it.
-
 1. `document_get` the anchor; confirm its body names the children it groups.
-2. `document_upsert` a **`## Workflow`** section: the fenced ```yaml block below, copied verbatim. There is no separate plan — the contract IS "every child is terminal".
+2. `document_upsert` a **`## Workflow`** section: the fenced ```yaml block below (shown here under `## Workflow`), copied verbatim. There is no separate plan — the contract IS "every child is terminal".
 3. Request the close gate: `satellites story status_transition <story-id> --skill satellites-parent-close-review`. It assesses the children and, when every one is terminal, enacts `backlog → done`.
 
 Only reviewers advance status — never hand-patch it.
 
-## Transitions
+## Workflow
 
 - `backlog → done` — `satellites-parent-close-review`: at least one child, every child terminal. Not a build/test gate.
 
@@ -28,4 +26,19 @@ states:
   - done
 transitions:
   - {from: backlog, to: done, reviewer_skill: "satellites-parent-close-review"}
+```
+
+## Environment
+
+Runs against satellites story documents via `document_get`, `document_upsert`, and `status_transition`. State-mutating: it writes the `## Workflow` section and triggers a gated transition.
+
+```yaml
+guardrails:
+  always:
+    - route every status change through the reviewer skill (satellites-parent-close-review)
+    - copy the Workflow yaml block verbatim
+  ask_first: []
+  never:
+    - hand-patch story status
+    - upsert any plan or executable work onto a parent story
 ```

@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_1b3ca969","version":2,"hash":"ace078063f4a2c70156cb6cbb3e2a3b1fe86e6590ac157049d2359273b69b920"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_1b3ca969","version":3,"hash":"db564456923241113d5aae8892d33ede71344b915940830a50885d746f9aa124"} satellites-sync:end -->
 ---
 name: principle-review
 type: skill
@@ -23,5 +23,7 @@ Read the whole file, then answer each PASS / REVISE with one sentence of evidenc
 2. **Always-on, not situational.** A principle applies continuously; a one-time procedure is a skill and a fact is a document. Flag misplaced content.
 3. **Testable.** Could a reviewer point at an action and say "this violates it"? Flag a rule too vague to enforce.
 4. **Durable + agnostic.** Will it hold after current work lands, and read cleanly to someone outside this repository? Flag in-flight pins and host-repo coupling.
+5. **Not skill-shaped.** A principle is a belief, not a procedure — flag any `Spec` / `Verifier` / `Environment` scaffolding, numbered steps, or guardrail block. Those belong in a skill; here they mean the content is misclassified.
+6. **Residency tag intentional.** If the file carries `principles:always` it is injected into every session — flag it unless the belief genuinely must stay resident; if it lacks the tag, confirm it is fine to leave discoverable via the index. The tag is a deliberate choice, not a default.
 
 End with one verdict: SHIP / REVISE. Do not rewrite unless asked.

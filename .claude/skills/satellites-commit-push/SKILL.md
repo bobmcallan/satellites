@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":6,"hash":"c22f0822335997726ffd822f3dca72f6b8aa1849c8010556660beb83a8703149"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":7,"hash":"e6724e5dc83411d669a5fff67fc2733e476a2ed96243dfd701a59c2678042f3d"} satellites-sync:end -->
 ---
 name: satellites-commit-push
 type: skill
@@ -114,3 +114,33 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    It writes a `ci_result` row per stage (test/release/deploy) via
    `satellites evidence ci`, keyed to the story in the commit trailer. Confirm with
    `satellites evidence show <story>`.
+
+## Environment
+
+Runs inside the satellites repo working tree against its checked-out remote. It is
+host-coupled by design: it relies on `.satellites/satellites`, the per-binary
+`.version` files, and the release workflow's CLIENT_PATHS — it is not meant to run
+in an arbitrary repository. It pushes to the remote and thereby triggers the
+deploy workflow, so the bounds below apply to every run.
+
+```yaml
+guardrails:
+  always:
+    - Pass the techdebt and (when CLI touched) surface gates BEFORE committing — fail closed.
+    - Bump the correct per-binary .version on every commit and stage it.
+    - Run `release check` locally and confirm it is CLEAN before `git push`.
+    - Watch all THREE CI workflows (test, release, deploy) and confirm each conclusion.
+    - Use conventional-commit format with NO AI attribution (no Claude/AI/automated/assistant/co-author).
+    - Stop on any gate BLOCK or CI failure and report it.
+  ask_first:
+    - Amending, rewriting, or retrying a commit after a CI failure.
+    - `git push --force` / `--force-with-lease`, or any rewrite of already-pushed history.
+    - Committing despite a BLOCKED gate (only with an owned register row / tracking story).
+    - Reverting or rolling back a pushed change that already triggered deploy.
+  never:
+    - Force-push or rewrite pushed history without the operator's say-so.
+    - Bypass a gate with `--skip-review`, `--no-verify`, or by editing the gate output.
+    - Commit on a BLOCKED techdebt or surface gate.
+    - Push a CLIENT_PATH change without a matching `satellites.version` bump.
+    - Add AI attribution to a commit message.
+```
