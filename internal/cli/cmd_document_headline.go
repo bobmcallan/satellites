@@ -89,8 +89,17 @@ func generateHeadline(ctx context.Context, claudeBin, name, body string) string 
 	}
 	cctx, cancel := context.WithTimeout(ctx, headlineGenTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, bin, "-p", "--append-system-prompt", headlineSystemPrompt)
-	cmd.Stdin = strings.NewReader("name: " + name + "\n\n" + body)
+	// No tools — generation reads only the body on stdin, never the tree.
+	cmd := exec.CommandContext(cctx, bin, "-p", "--allowedTools", "", "--append-system-prompt", headlineSystemPrompt)
+	// Run from a neutral directory, NOT the repo: `claude -p` launched inside
+	// the project otherwise inherits its CLAUDE.md + session context and
+	// answers as a repo agent ("I'll generate the caveman headline…") instead
+	// of emitting the bare line. A temp cwd isolates it from that context.
+	cmd.Dir = os.TempDir()
+	// Lead with an explicit one-shot task so the user message is unambiguous
+	// even if any ambient context survives.
+	cmd.Stdin = strings.NewReader(
+		"Generate one caveman headline for the document below. Output ONLY the line.\n\nname: " + name + "\n\n" + body)
 	cmd.Env = os.Environ()
 	outBytes, err := cmd.Output()
 	if err != nil {
