@@ -30,9 +30,9 @@ func TestReviewContent_RottingRef(t *testing.T) {
 // TestReviewSkillForKind pins the kind→skill mapping the upload uses.
 func TestReviewSkillForKind(t *testing.T) {
 	cases := map[string]string{
-		"documents":  "document-review",
-		"skills":     "skill-review",
-		"principles": "principle-review",
+		"documents":  "satellites-document-review",
+		"skills":     "satellites-skill-review",
+		"principles": "satellites-principle-review",
 	}
 	for kind, want := range cases {
 		if got := reviewSkillForKind(kind); got != want {

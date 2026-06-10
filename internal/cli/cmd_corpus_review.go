@@ -129,7 +129,7 @@ func runCorpusReview(ctx context.Context, opts corpusReviewOpts) error {
 		return err
 	}
 
-	reviewSkill := reviewSkillForKind(opts.Kind)       // skill-review | principle-review
+	reviewSkill := reviewSkillForKind(opts.Kind)       // satellites-skill-review | satellites-principle-review
 	authoringSkill := authoringSkillForKind(opts.Kind) // satellites-skill-authoring | …-principle-authoring
 
 	eng := corpusReviewEngine{
@@ -303,8 +303,8 @@ func formatReviewSummary(kind string, dryRun bool, results []reviewResult) strin
 	return b.String()
 }
 
-// reviewSkillForKind lives in content_review.go (skills→skill-review,
-// principles→principle-review). authoringSkillForKind is its authoring twin:
+// reviewSkillForKind lives in content_review.go (skills→satellites-skill-review,
+// principles→satellites-principle-review). authoringSkillForKind is its authoring twin:
 // the system skill that drives the revise pass.
 func authoringSkillForKind(kind string) string {
 	return "satellites-" + strings.TrimSuffix(kind, "s") + "-authoring"

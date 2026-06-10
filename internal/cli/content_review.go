@@ -2,7 +2,7 @@
 // review (sty_f302bd8b). validateUpload checks an artifact's STRUCTURE;
 // reviewContent checks its CONTENT for drift-prone references that rot as the
 // referenced row closes or renames. The per-type review skills
-// (document-review / principle-review / skill-review) carry the conversational
+// (satellites-document-review / satellites-principle-review / satellites-skill-review) carry the conversational
 // maintainability critique the local agent runs; this Go check is the
 // mechanical block the CLI enforces before dispatching document_upsert,
 // overridable with --skip-review.
@@ -76,8 +76,11 @@ func reviewContent(body string) []reviewFinding {
 }
 
 // reviewSkillForKind maps an upload kind dir to the per-type review skill the
-// local agent runs for the maintainability critique. documents→document-review,
-// skills→skill-review, principles→principle-review.
+// local agent runs for the maintainability critique. All substrate-owned skills
+// carry the `satellites-` prefix (satellites-skill-naming): documents→
+// satellites-document-review, skills→satellites-skill-review, principles→
+// satellites-principle-review. The name must match the system seed's frontmatter
+// `name:` in config/documents/ — document_get resolves the review skill by it.
 func reviewSkillForKind(kind string) string {
-	return strings.TrimSuffix(kind, "s") + "-review"
+	return "satellites-" + strings.TrimSuffix(kind, "s") + "-review"
 }

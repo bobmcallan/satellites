@@ -16,8 +16,9 @@ import (
 )
 
 // TestReviewSkillCascadeOverride pins sty_f302bd8b AC4/AC6: a per-type review
-// skill ships as a system-scope baseline (document-review / principle-review /
-// skill-review), and a project OVERRIDES it by authoring a project-scope skill
+// skill ships as a system-scope baseline (satellites-document-review /
+// satellites-principle-review / satellites-skill-review), and a project OVERRIDES
+// it by authoring a project-scope skill
 // of the same name — config-over-code, the existing inherit cascade
 // (user > project > workspace > system). The override is "what runs for the
 // project"; removing it restores the inherited system baseline. No new
@@ -65,10 +66,10 @@ func TestReviewSkillCascadeOverride(t *testing.T) {
 
 	// Global baseline review skill at system scope + a project override of the
 	// same name (type:skill, as the real review skills are seeded).
-	if err := document.SeedSystemTyped(ctx, docStore, document.TypeSkill, "document-review", "system baseline review", "system:seed", now); err != nil {
+	if err := document.SeedSystemTyped(ctx, docStore, document.TypeSkill, "satellites-document-review", "system baseline review", "system:seed", now); err != nil {
 		t.Fatalf("seed system skill: %v", err)
 	}
-	projKey := document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: "proj_review", Name: "document-review"}
+	projKey := document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: "proj_review", Name: "satellites-document-review"}
 	if _, _, err := docStore.Upsert(ctx, document.UpsertInput{Key: projKey, Type: document.TypeSkill, Body: "project override review"}, now); err != nil {
 		t.Fatalf("upsert project skill: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestReviewSkillCascadeOverride(t *testing.T) {
 	get := func(t *testing.T) verb.DocumentGetResponse {
 		t.Helper()
 		raw, err := verb.Dispatch(ctxAdmin, "document_get", json.RawMessage(
-			`{"name":"document-review","scope":"project","workspace_id":"`+ws.ID+`","project_id":"proj_review","inherit":true}`))
+			`{"name":"satellites-document-review","scope":"project","workspace_id":"`+ws.ID+`","project_id":"proj_review","inherit":true}`))
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}

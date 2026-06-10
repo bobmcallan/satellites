@@ -1,11 +1,11 @@
 ---
-name: project-setup
+name: satellites-project-setup
 type: skill
 kind: capability
 scope: system
 tags: [kind:capability, area:process]
 ---
-# project-setup
+# satellites-project-setup
 
 Use this skill to define (or revise) a project's reviewer-gated workflow. Invoke it when a project has no workflow skill, or when an admin wants to change how stories move. You author the project-scoped skills from the admin's requirements and the repo's reality; this skill does not write them for you and bakes in no other project's conventions.
 

@@ -1,11 +1,11 @@
 ---
-name: principle-review
+name: satellites-principle-review
 type: skill
 kind: capability
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# principle-review
+# satellites-principle-review
 
 Review a `principle` file before `satellites principle upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the rule durable.
 

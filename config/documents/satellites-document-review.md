@@ -1,11 +1,11 @@
 ---
-name: document-review
+name: satellites-document-review
 type: skill
 kind: capability
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# document-review
+# satellites-document-review
 
 Review a `document` file before `satellites document upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the artifact maintainable.
 

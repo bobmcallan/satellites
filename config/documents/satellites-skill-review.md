@@ -1,11 +1,11 @@
 ---
-name: skill-review
+name: satellites-skill-review
 type: skill
 kind: capability
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# skill-review
+# satellites-skill-review
 
 Review a `skill` file before `satellites skill upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the process dispatchable.
 

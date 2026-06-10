@@ -100,6 +100,50 @@ func TestMCPStartupArtifactsUnderLineBudget(t *testing.T) {
 	}
 }
 
+// TestSkillSeedsCarrySatellitesPrefix enforces the satellites-skill-naming
+// principle at the source: every embedded skill seed (type:skill) must declare
+// a frontmatter name AND a filename stem that begin with `satellites-`. The
+// review-family seeds (skill-review/principle-review/document-review) and
+// project-setup historically lacked it, masked at materialise time by
+// skill sync's localSkillName auto-prefix (sty_705214ee). This guard fails the
+// build if an unprefixed skill seed reappears, so the inconsistency cannot
+// silently return. Non-skill artifacts (documents, reference prose) are exempt —
+// the prefix marks substrate-owned SKILLS.
+func TestSkillSeedsCarrySatellitesPrefix(t *testing.T) {
+	const artifactsDir = "."
+	entries, err := os.ReadDir(artifactsDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", artifactsDir, err)
+	}
+	typeRe := regexp.MustCompile(`(?m)^type:\s*(\S+)`)
+	nameRe := regexp.MustCompile(`(?m)^name:\s*(\S+)`)
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(artifactsDir, ent.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		tm := typeRe.FindStringSubmatch(string(raw))
+		if tm == nil || tm[1] != "skill" {
+			continue // only type:skill seeds are governed by the naming principle
+		}
+		if !strings.HasPrefix(ent.Name(), "satellites-") {
+			t.Errorf("%s · skill seed filename must start with `satellites-` (satellites-skill-naming)", ent.Name())
+		}
+		nm := nameRe.FindStringSubmatch(string(raw))
+		if nm == nil {
+			t.Errorf("%s · skill seed missing frontmatter `name:`", ent.Name())
+			continue
+		}
+		if !strings.HasPrefix(nm[1], "satellites-") {
+			t.Errorf("%s · skill seed frontmatter name %q must start with `satellites-` (satellites-skill-naming)", ent.Name(), nm[1])
+		}
+	}
+}
+
 // stripFencedCode returns body with every ```...``` block replaced by
 // equal-length whitespace. Preserves byte offsets so violation
 // locations still line up with the original file, while keeping the

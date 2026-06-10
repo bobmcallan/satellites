@@ -7,7 +7,7 @@ tags: [kind:capability, area:substrate]
 ---
 # satellites-skill-authoring
 
-Author or revise a satellites `skill` as configuration. Use when creating a new skill or reworking an existing one for the substrate. The external `skill-creator` may help draft prose; this skill defines the satellites target shape and gate. Produce the refined skill into `.satellites/skills/<name>.md`, then run `skill-review` before upload.
+Author or revise a satellites `skill` as configuration. Use when creating a new skill or reworking an existing one for the substrate. The external `skill-creator` may help draft prose; this skill defines the satellites target shape and gate. Produce the refined skill into `.satellites/skills/<name>.md`, then run `satellites-skill-review` before upload.
 
 ## Clarify first — never draft blind
 
@@ -38,4 +38,4 @@ A skill is built on Spec, Verifier, Environment — write each explicitly (kind-
 
 ## Then review + ship
 
-Run `skill-review` and resolve every REVISE before upload. The skill is configuration — keep it terse, prescriptive, and free of concrete substrate ids. Declare the guardrails as part of the Environment; a runtime hook consumes them. Keep this skill to authoring.
+Run `satellites-skill-review` and resolve every REVISE before upload. The skill is configuration — keep it terse, prescriptive, and free of concrete substrate ids. Declare the guardrails as part of the Environment; a runtime hook consumes them. Keep this skill to authoring.
