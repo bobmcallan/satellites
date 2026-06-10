@@ -272,6 +272,13 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID, req.ProjectID); err != nil {
 		return nil, err
 	}
+	// Skills/principles are off the MCP surface (epic:authoring-as-config): an
+	// explicit type=skill list is refused; principle-tagged rows are filtered
+	// from any mixed listing below. Non-MCP transports are unaffected.
+	transport := auth.TransportFromContext(ctx)
+	if mcpForbidsSkillList(transport, req.Type) {
+		return nil, fmt.Errorf("document_list: %w: %q is read client-side (`satellites skill sync` / `satellites document index`), not over MCP", ErrForbidden, "skill")
+	}
 	if req.Effective {
 		if userID := callerUserID(ctx); userID != "" {
 			return effectiveList(ctx, req, userID)
@@ -295,10 +302,11 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if res.Items == nil {
-		res.Items = []document.Document{}
+	items := filterMCPReadable(transport, res.Items)
+	if items == nil {
+		items = []document.Document{}
 	}
-	return json.Marshal(DocumentListResponse{Items: res.Items, NextCursor: res.NextCursor})
+	return json.Marshal(DocumentListResponse{Items: items, NextCursor: res.NextCursor})
 }
 
 // effectiveList returns the post-cascade effective set for a caller: the
@@ -350,6 +358,10 @@ func effectiveList(ctx context.Context, req DocumentListRequest, userID string) 
 		}
 		out = append(out, ov)
 	}
+	out = filterMCPReadable(auth.TransportFromContext(ctx), out)
+	if out == nil {
+		out = []document.Document{}
+	}
 	return json.Marshal(DocumentListResponse{Items: out})
 }
 
@@ -365,6 +377,9 @@ func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMess
 	}
 	if err := authorizeListScope(ctx, document.Scope(req.Scope), req.WorkspaceID, req.ProjectID); err != nil {
 		return nil, err
+	}
+	if mcpForbidsSkillList(auth.TransportFromContext(ctx), req.Type) {
+		return nil, fmt.Errorf("document_count: %w: %q is read client-side, not over MCP", ErrForbidden, "skill")
 	}
 	n, err := documentStore.Count(ctx, document.ListFilter{
 		Type:         req.Type,
@@ -399,6 +414,9 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		d, body, err := documentStore.GetByIDWithLatestBody(ctx, req.ID)
 		if err != nil {
 			return nil, mapStoreError(err, "document_get")
+		}
+		if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), d.Type, d.Tags) {
+			return nil, fmt.Errorf("document_get: %w: skills/principles are read client-side, not over MCP", ErrForbidden)
 		}
 		resp := DocumentGetResponse{
 			Document:      d,
@@ -441,6 +459,9 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 		res, lookupErr := documentStore.Get(ctx, key, opts)
 		if lookupErr == nil {
+			if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), res.Document.Type, res.Document.Tags) {
+				return nil, fmt.Errorf("document_get: %w: skills/principles are read client-side, not over MCP", ErrForbidden)
+			}
 			return marshalDocumentGet(ctx, res, key, opts, &req)
 		}
 		if !errors.Is(lookupErr, document.ErrNotFound) {
@@ -680,6 +701,57 @@ func mcpForbidsType(t auth.Transport, reqType string) bool {
 	default:
 		return true
 	}
+}
+
+// principleTagPrefix marks a document as a principle (a principles:* layer tag).
+// Principles are stored as type=document rows, so they are identified by tag,
+// not by a distinct type.
+const principleTagPrefix = "principles:"
+
+// mcpReadForbiddenDoc reports whether a fetched document must NOT be returned
+// over the MCP transport. Skills and principles are code-aware, client-owned
+// knowledge (epic:authoring-as-config): the agent reads them client-side (skill
+// sync, `satellites document index`, the always-context hook), so they are off
+// the MCP surface entirely — read as well as write. Stories, tasks, and plain
+// reference documents stay readable. Any non-MCP transport (CLI exec /
+// in-process / portal) passes.
+func mcpReadForbiddenDoc(t auth.Transport, docType string, tags []string) bool {
+	if t != auth.TransportMCP {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(docType), string(document.TypeSkill)) {
+		return true
+	}
+	for _, tag := range tags {
+		if strings.HasPrefix(strings.TrimSpace(tag), principleTagPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterMCPReadable drops skill/principle rows from a list result over the MCP
+// transport, so a mixed type=document listing still returns reference docs while
+// principles do not leak. A non-MCP transport returns the slice unchanged.
+func filterMCPReadable(t auth.Transport, items []document.Document) []document.Document {
+	if t != auth.TransportMCP {
+		return items
+	}
+	out := make([]document.Document, 0, len(items))
+	for _, d := range items {
+		if mcpReadForbiddenDoc(t, d.Type, d.Tags) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// mcpForbidsSkillList reports whether a list/count explicitly scoped to
+// type=skill arriving over MCP must be refused outright (rather than silently
+// returning an empty set) — the caller asked for skills, which are off MCP.
+func mcpForbidsSkillList(t auth.Transport, reqType string) bool {
+	return t == auth.TransportMCP && strings.EqualFold(strings.TrimSpace(reqType), string(document.TypeSkill))
 }
 
 func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
