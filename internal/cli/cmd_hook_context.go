@@ -139,12 +139,18 @@ type alwaysListItem struct {
 // open. The standing instruction is always present, even when no always docs
 // exist yet, so the pull-the-index discipline is taught from day one.
 func buildAlwaysContent(ctx context.Context, configPath, userID string) (string, bool, error) {
+	// Project scope needs the project (+ workspace) binding — resolve it from
+	// the config the same way `satellites document index` does, else the server
+	// refuses the list with "project scope requires project_id".
+	wsID, pjID := resolveSkillScopeBinding(ctx, configPath, userID, "", "")
 	listReq, err := json.Marshal(docListRequest{
-		Type:      "document",
-		Scope:     "project",
-		Tags:      []string{alwaysTag},
-		Limit:     50,
-		Effective: true,
+		Type:        "document",
+		Scope:       "project",
+		WorkspaceID: wsID,
+		ProjectID:   pjID,
+		Tags:        []string{alwaysTag},
+		Limit:       50,
+		Effective:   true,
 	})
 	if err != nil {
 		return "", false, err
@@ -162,7 +168,7 @@ func buildAlwaysContent(ctx context.Context, configPath, userID string) (string,
 
 	parts := make([]string, 0, len(listed.Items))
 	for _, it := range listed.Items {
-		body, gerr := fetchDocumentBody(ctx, it.Name, it.Scope, configPath, userID)
+		body, gerr := fetchDocumentBody(ctx, it.Name, it.Scope, wsID, pjID, configPath, userID)
 		if gerr != nil || strings.TrimSpace(body) == "" {
 			continue // skip an unreadable member rather than abort the whole inject
 		}
@@ -180,12 +186,21 @@ func buildAlwaysContent(ctx context.Context, configPath, userID string) (string,
 	return b.String(), truncated, nil
 }
 
-// fetchDocumentBody pulls one document's rendered body via document_get.
-func fetchDocumentBody(ctx context.Context, name, scope, configPath, userID string) (string, error) {
-	getReq, err := json.Marshal(struct {
-		Name  string `json:"name"`
-		Scope string `json:"scope,omitempty"`
-	}{Name: name, Scope: scope})
+// fetchDocumentBody pulls one document's rendered body via document_get. A
+// project/workspace-scoped member needs the binding too; a system member
+// ignores it.
+func fetchDocumentBody(ctx context.Context, name, scope, wsID, pjID, configPath, userID string) (string, error) {
+	req := struct {
+		Name        string `json:"name"`
+		Scope       string `json:"scope,omitempty"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		ProjectID   string `json:"project_id,omitempty"`
+	}{Name: name, Scope: scope}
+	if scope != "system" {
+		req.WorkspaceID = wsID
+		req.ProjectID = pjID
+	}
+	getReq, err := json.Marshal(req)
 	if err != nil {
 		return "", err
 	}
