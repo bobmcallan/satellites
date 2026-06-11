@@ -1,12 +1,13 @@
-<!-- satellites-sync:begin {"document_id":"doc_be9b60e2","version":2,"hash":"9dc4247143077233de1796027cdf3d0583075112ae9945b249ed26f6db4835c3"} satellites-sync:end -->
 ---
-name: document-review
+name: satellites-document-review
 type: skill
 kind: capability
+description: Review a document file before `satellites document upload` — strict reference/link checks plus a maintainability critique. Invoke when authoring or revising a substrate document, before uploading it.
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# document-review
+<!-- satellites-sync:begin {"document_id":"doc_db6978a1","version":2,"hash":"b64e68d8914bc1d1cbaddf353b6e6dafd4d64dec4c9b50693abe854e413dd6ab"} satellites-sync:end -->
+# satellites-document-review
 
 Review a `document` file before `satellites document upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the artifact maintainable.
 

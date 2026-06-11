@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_4732f444","version":6,"hash":"dfeb310ac0390dd509df33baa53da1a9975d45b03eddbdd4a57cf2140d7641cc"} satellites-sync:end -->
 ---
 name: satellites-technical-debt-review
 type: skill
@@ -7,6 +6,7 @@ when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
 description: The technical-debt pre-commit gate (broken-windows enforcement). Run before every commit — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. The commit-push routine names it; at commit the tree must be clean OR its debt must be a story.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_4732f444","version":6,"hash":"dfeb310ac0390dd509df33baa53da1a9975d45b03eddbdd4a57cf2140d7641cc"} satellites-sync:end -->
 
 # satellites-technical-debt-review
 

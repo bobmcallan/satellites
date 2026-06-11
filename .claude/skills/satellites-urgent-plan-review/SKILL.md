@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_d8565cd6","version":6,"hash":"cc01a906901c73534a8cb0768fbe428e686b2d45e0b1ebe6fa02dfa1f92558f1"} satellites-sync:end -->
 ---
 name: urgent-plan-review
 type: skill
@@ -7,6 +6,7 @@ when: status==backlog
 tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow entry transition (plan → in-progress). Resolves its target from the story's ## Workflow, always accepts, and enacts the status_transition. Emits {decision, notes} JSON.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_d8565cd6","version":6,"hash":"cc01a906901c73534a8cb0768fbe428e686b2d45e0b1ebe6fa02dfa1f92558f1"} satellites-sync:end -->
 
 ## Enact (always accept)
 

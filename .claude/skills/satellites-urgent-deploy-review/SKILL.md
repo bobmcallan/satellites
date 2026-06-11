@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_0d3e7b15","version":5,"hash":"d412e30d7e103178c43d7b4ac3bc66fd7fb0e60f7fc43e634f6334ec3fe16120"} satellites-sync:end -->
 ---
 name: urgent-deploy-review
 type: skill
@@ -7,6 +6,7 @@ when: status==in-progress
 tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow work-complete transition (in-progress → deploy). Advances the story with no review — it exists so the agent can request the client to move the story to the next stage. Emits {decision, notes} JSON and enacts the transition.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_0d3e7b15","version":5,"hash":"d412e30d7e103178c43d7b4ac3bc66fd7fb0e60f7fc43e634f6334ec3fe16120"} satellites-sync:end -->
 
 Always accept and advance the story. This gate carries no review requirements; it exists so the agent can request the next stage and leave a ledger record of each transition.
 

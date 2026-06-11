@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_2c9a7dd3","version":5,"hash":"ab0eaae2e5d96ee264ed0d4981932a376ef5cbdc4e7e7e6b7ce188fe49512fd9"} satellites-sync:end -->
 ---
 name: urgent-done-review
 type: skill
@@ -7,6 +6,7 @@ when: status==deploy
 tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow close transition (deploy → done). Advances the story with no review — it exists so the agent can request the client to move the story to the next stage. Emits {decision, notes} JSON and enacts the transition.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_2c9a7dd3","version":5,"hash":"ab0eaae2e5d96ee264ed0d4981932a376ef5cbdc4e7e7e6b7ce188fe49512fd9"} satellites-sync:end -->
 
 Always accept and close the story: this gate carries no review requirements. Resolve the target state from the story's `## Workflow`, append the ledger rows that enact the move, then print the decision.
 

@@ -1,11 +1,12 @@
-<!-- satellites-sync:begin {"document_id":"doc_6eb7e05d","version":2,"hash":"2368ae559a784c946a17fed40c512aa977962e4df288a0facaaf025ac1cc99df"} satellites-sync:end -->
 ---
 name: satellites-principle-authoring
 type: skill
 kind: capability
+description: Author or revise a satellites principle — a standing belief or constraint, not a procedure. Invoke when capturing a durable rule for the substrate; produce it into .satellites/principles/ and run satellites-principle-review before upload.
 scope: system
 tags: [kind:capability, area:substrate]
 ---
+<!-- satellites-sync:begin {"document_id":"doc_6eb7e05d","version":3,"hash":"4e805e64da4d291dbb4f0094e3a00a1f2c81680b36e7f37ba5f97744ee5dae2e"} satellites-sync:end -->
 # satellites-principle-authoring
 
 Author or revise a satellites `principle`. Use when capturing a standing belief or constraint for the substrate. A principle is NOT a skill — do not give it the Spec/Verifier/Environment template; that is for procedures. Produce the refined principle into `.satellites/principles/<name>.md`, then run `satellites-principle-review` before upload.

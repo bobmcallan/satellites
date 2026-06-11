@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_35fe7db9","version":2,"hash":"6795fab17f209a7ff4035609c906acc7801604c45e4b54609886275aa54499de"} satellites-sync:end -->
 ---
 name: satellites-context-conflict-review
 type: skill
@@ -8,6 +7,7 @@ when: review
 tags: [kind:capability]
 description: Semantic reviewer for the assembled delivered context — given the project principles, the skills index, and a story's ## Workflow, judge whether they CONFLICT (contradictory principles, a principle a skill or the workflow cannot honour, a required step that is not a gated transition) and emit findings as JSON. Invoked by `satellites context review --semantic`; the structural layer is order:3.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_35fe7db9","version":2,"hash":"6795fab17f209a7ff4035609c906acc7801604c45e4b54609886275aa54499de"} satellites-sync:end -->
 
 # Context-conflict review (semantic layer)
 

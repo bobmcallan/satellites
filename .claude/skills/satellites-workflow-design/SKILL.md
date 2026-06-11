@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_928f0d8d","version":2,"hash":"bdb15a0bc0da132b772d08880752a17c3ed6dbe7c1d3ee3253412513fa21dfd6"} satellites-sync:end -->
 ---
 name: satellites-workflow-design
 type: skill
@@ -7,6 +6,7 @@ when: planning
 tags: [kind:capability]
 description: Design a story's ## Workflow from its requirement in isolated context — propose candidate state machines (states + gated transitions) using only the available gate skills, each justified, fail-closed. Invoked by `satellites workflow design`; the agent authors the workflow, the operator chooses.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_928f0d8d","version":2,"hash":"bdb15a0bc0da132b772d08880752a17c3ed6dbe7c1d3ee3253412513fa21dfd6"} satellites-sync:end -->
 
 # Workflow design
 

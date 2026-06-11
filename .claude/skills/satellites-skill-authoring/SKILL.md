@@ -1,11 +1,12 @@
-<!-- satellites-sync:begin {"document_id":"doc_d0124e6d","version":2,"hash":"681d733be83163cd21967e7f3028567bb1061f3a48eafd1bd66776d5c59d75fd"} satellites-sync:end -->
 ---
 name: satellites-skill-authoring
 type: skill
 kind: capability
+description: Author or revise a satellites skill as configuration — defines the target shape (Spec/Verifier/Environment) and the review gate. Invoke when creating or reworking a substrate skill; produce it into .satellites/skills/ and run satellites-skill-review before upload.
 scope: system
 tags: [kind:capability, area:substrate]
 ---
+<!-- satellites-sync:begin {"document_id":"doc_d0124e6d","version":3,"hash":"2c8ac540a182fde2c9b33432bf50e27f65f6d0248dcdd6a85fe58e99b97d0339"} satellites-sync:end -->
 # satellites-skill-authoring
 
 Author or revise a satellites `skill` as configuration. Use when creating a new skill or reworking an existing one for the substrate. The external `skill-creator` may help draft prose; this skill defines the satellites target shape and gate. Produce the refined skill into `.satellites/skills/<name>.md`, then run `satellites-skill-review` before upload.

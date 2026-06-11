@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_68c91c5d","version":5,"hash":"cce195c0616053c1a3d7e3ce2aeea373ec30eaf66cb43dacd732b0ef0596a54c"} satellites-sync:end -->
 ---
 name: urgent-workflow
 type: skill
@@ -7,6 +6,7 @@ tags: [kind:workflow]
 applies_to: [urgent]
 description: The lifecycle an `urgent` story follows — backlog → in-progress → deploy → done, every edge reviewer-gated. A lean four-state fast path for work that must ship quickly WITHOUT skipping the gates. Invoke when implementing an `urgent` story; it IS the executor's process.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_68c91c5d","version":5,"hash":"cce195c0616053c1a3d7e3ce2aeea373ec30eaf66cb43dacd732b0ef0596a54c"} satellites-sync:end -->
 
 # Urgent workflow
 

@@ -1,12 +1,13 @@
-<!-- satellites-sync:begin {"document_id":"doc_1b3ca969","version":3,"hash":"db564456923241113d5aae8892d33ede71344b915940830a50885d746f9aa124"} satellites-sync:end -->
 ---
-name: principle-review
+name: satellites-principle-review
 type: skill
 kind: capability
+description: Review a principle file before `satellites principle upload` — strict reference checks plus a durability critique. Invoke after authoring or revising a principle, before uploading it.
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# principle-review
+<!-- satellites-sync:begin {"document_id":"doc_fd2dfcac","version":2,"hash":"1784c9c257df7377adccdaa6c6551dec6542b11ab11a2a8eadb533b8e22eb027"} satellites-sync:end -->
+# satellites-principle-review
 
 Review a `principle` file before `satellites principle upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the rule durable.
 

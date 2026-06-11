@@ -1,12 +1,13 @@
-<!-- satellites-sync:begin {"document_id":"doc_22e80e1c","version":4,"hash":"711614eb93fafc17e3f262e63008b42af5cd4222fd445e9e95a5cfb2def08e56"} satellites-sync:end -->
 ---
-name: project-setup
+name: satellites-project-setup
 type: skill
 kind: capability
+description: Define or revise a project's reviewer-gated workflow from the admin's requirements and the repo's reality. Invoke when a project has no workflow skill or wants to change how stories move; bakes in no other project's conventions.
 scope: system
 tags: [kind:capability, area:process]
 ---
-# project-setup
+<!-- satellites-sync:begin {"document_id":"doc_745c5f64","version":2,"hash":"2ddcba9f0542cd6290cdffdd9c354ec5b0c9a6949aaa133d16a24d90f7bd2d10"} satellites-sync:end -->
+# satellites-project-setup
 
 Use this skill to define (or revise) a project's reviewer-gated workflow. Invoke it when a project has no workflow skill, or when an admin wants to change how stories move. You author the project-scoped skills from the admin's requirements and the repo's reality; this skill does not write them for you and bakes in no other project's conventions.
 

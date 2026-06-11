@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":9,"hash":"da1c3ffb97dd4614b9bf7b022962fcde42232b0ef1e3240a8abcf8090310d011"} satellites-sync:end -->
 ---
 name: satellites-story-plan-review
 type: skill
@@ -7,6 +6,7 @@ when: status==backlog
 tags: [kind:gate]
 description: Gate skill for the entry-to-work transition (e.g. backlog → in_progress). Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":9,"hash":"da1c3ffb97dd4614b9bf7b022962fcde42232b0ef1e3240a8abcf8090310d011"} satellites-sync:end -->
 
 Decide whether the story is a sound contract — its workflow is correctly embedded and its plan is ready to execute. Gate the contract, not the work: do not run the build or tests, and do not penalise the absence of code.
 

@@ -1,12 +1,13 @@
-<!-- satellites-sync:begin {"document_id":"doc_26f14ccf","version":3,"hash":"ddc07d2cfa5b45537c4d7665c7503a3f806b550977265100db3ca906910fb668"} satellites-sync:end -->
 ---
-name: skill-review
+name: satellites-skill-review
 type: skill
 kind: capability
+description: Review a skill file before `satellites skill upload` — strict drift/link checks the CLI hard-blocks, plus a kind-aware maintainability critique (Spec/Verifier/Environment). Invoke after authoring or revising a skill, before uploading it.
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-# skill-review
+<!-- satellites-sync:begin {"document_id":"doc_38da610a","version":2,"hash":"6eaf6dee0a1740049d0a2d92a8866b159416890d82e3b3ad2d02d97fb8aa7f69"} satellites-sync:end -->
+# satellites-skill-review
 
 Review a `skill` file before `satellites skill upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the process dispatchable.
 

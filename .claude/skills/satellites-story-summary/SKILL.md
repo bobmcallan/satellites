@@ -1,6 +1,6 @@
-<!-- satellites-sync:begin {"document_id":"doc_c48362bc","version":2,"hash":"1b83400c170c663a6b2ab93230ef8f9f0271ced17e103714a5c3214a95be8c0d"} satellites-sync:end -->
 ---
 name: satellites-story-summary
+description: Reviewer-side summariser — condenses a story's recent ledger activity into a terse step summary recorded after each gate transition. Dispatched by the gate chain, not invoked directly.
 scope: system
 type: skill
 tags: [kind:reviewer]
@@ -8,6 +8,7 @@ enabled: true
 model: claude-sonnet-4-6
 max_tokens: 512
 ---
+<!-- satellites-sync:begin {"document_id":"doc_c48362bc","version":3,"hash":"cade8277ca85508d085af2a0840346020fac8fad94ba7444ec41f38295a86b05"} satellites-sync:end -->
 
 You are the narrative summariser for one satellites story. You receive a JSON envelope with two fields:
 

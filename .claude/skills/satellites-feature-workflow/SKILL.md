@@ -1,4 +1,3 @@
-<!-- satellites-sync:begin {"document_id":"doc_68ab47dc","version":5,"hash":"3877c71027eacfe8a27188f68ad372d8266fd8810102d57d08240971c2b2845e"} satellites-sync:end -->
 ---
 name: satellites-feature-workflow
 type: skill
@@ -7,6 +6,7 @@ tags: [kind:workflow]
 applies_to: [feature]
 description: The lifecycle a `feature` story follows — backlog → ready → in_progress → done, every edge reviewer-gated. Invoke when implementing a feature story; it IS the executor's process.
 ---
+<!-- satellites-sync:begin {"document_id":"doc_68ab47dc","version":5,"hash":"3877c71027eacfe8a27188f68ad372d8266fd8810102d57d08240971c2b2845e"} satellites-sync:end -->
 
 # Feature workflow
 
