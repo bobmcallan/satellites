@@ -34,7 +34,8 @@ For the agent and operator working a repository.
   story is picked up, the entry reviewer judges everything in one verdict —
   story shape, plan, acceptance criteria, the embedded `## Workflow`, and code
   grounding. Nothing unreviewed can progress; creation needs no second
-  mechanism.
+  mechanism. The standing rule is the `review-actions-not-intent` principle;
+  this contract only records where each write lands.
 - **Skills and principles ship only through the review-gated upload path**
   (`satellites skill|principle upload`), where the matching review skill runs
   before the write. Deletes of these artifacts are likewise client-side.
