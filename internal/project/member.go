@@ -47,7 +47,17 @@ type Member struct {
 	Role      string    `json:"role"`
 	AddedAt   time.Time `json:"added_at"`
 	AddedBy   string    `json:"added_by,omitempty"`
+	// Source distinguishes an explicit project_members row ("project") from a
+	// membership inherited from the workspace ("workspace" — owner/admin). Empty
+	// on rows read straight from project_members; set by the roster union.
+	Source string `json:"source,omitempty"`
 }
+
+// Membership sources for Member.Source.
+const (
+	SourceProject   = "project"
+	SourceWorkspace = "workspace"
+)
 
 // AddMember inserts or updates a project membership row. Role is
 // validated here so handlers can rely on substrate-level guarantees.

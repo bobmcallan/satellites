@@ -183,9 +183,12 @@
         {{range .ProjectMembers}}
         <tr data-field="pj-member-row">
           <td data-field="pj-member-email">{{if .Email}}{{.Email}}{{else}}{{.UserID}}{{end}}</td>
-          <td data-field="pj-member-role">{{.Role}}</td>
+          <td data-field="pj-member-role">{{.Role}}{{if eq .Source "workspace"}} <span class="badge" data-field="pj-member-via">via workspace</span>{{end}}</td>
           {{if $.IsProjectAdmin}}
           {{$prole := .Role}}
+          {{if eq .Source "workspace"}}
+          <td data-field="pj-member-implicit">—</td>
+          {{else}}
           <td>
             <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-role">
               <input type="hidden" name="action" value="pj_member_role">
@@ -202,6 +205,7 @@
               <button type="submit" class="btn danger" data-action="pj-member-remove">REMOVE</button>
             </form>
           </td>
+          {{end}}
           {{end}}
         </tr>
         {{else}}

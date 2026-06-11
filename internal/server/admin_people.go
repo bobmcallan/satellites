@@ -63,6 +63,7 @@ type peopleMemberRow struct {
 	Email  string
 	Name   string
 	Role   string
+	Source string // "project" (explicit) | "workspace" (inherited admin)
 }
 
 type peopleProjectRow struct {
@@ -328,7 +329,7 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 			var resp verb.ProjectMemberListResponse
 			if json.Unmarshal(raw, &resp) == nil {
 				for _, m := range resp.Members {
-					row := peopleMemberRow{UserID: m.UserID, Role: m.Role}
+					row := peopleMemberRow{UserID: m.UserID, Role: m.Role, Source: m.Source}
 					resolveUser(ctx, cfg, &row)
 					data.ProjectMembers = append(data.ProjectMembers, row)
 				}

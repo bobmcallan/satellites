@@ -127,6 +127,37 @@ func canInvite(ctx context.Context, scope, workspaceID, projectID string) (bool,
 	return false, nil
 }
 
+// alreadyMember reports whether userID already has effective membership of the
+// invite target: an explicit member row, or — for a project — a workspace
+// owner/admin who is implicitly a project admin. Used to make re-inviting an
+// existing member a no-op.
+func alreadyMember(ctx context.Context, scope, wsID, pjID, userID string) bool {
+	if userID == "" {
+		return false
+	}
+	switch scope {
+	case invitation.ScopeWorkspace:
+		if workspaceStore != nil && wsID != "" {
+			if _, err := workspaceStore.GetRole(ctx, wsID, userID); err == nil {
+				return true
+			}
+		}
+	case invitation.ScopeProject:
+		if projectStore != nil && pjID != "" {
+			if _, err := projectStore.GetRole(ctx, pjID, userID); err == nil {
+				return true
+			}
+		}
+		if workspaceStore != nil && wsID != "" {
+			if role, err := workspaceStore.GetRole(ctx, wsID, userID); err == nil &&
+				(role == workspace.RoleOwner || role == workspace.RoleAdmin) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func invokeInvitationCreate(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	if invitationStore == nil {
 		return nil, fmt.Errorf("invitation_create: store not configured")
@@ -182,6 +213,22 @@ func invokeInvitationCreate(ctx context.Context, raw json.RawMessage) (json.RawM
 		return json.Marshal(InvitationCreateResponse{Invitation: inv, RedeemPath: redeemPath(inv.Token)})
 	}
 
+	// Resolve the invitee up front: it drives both the dedup short-circuit and
+	// the immediate claim, and avoids a second lookup.
+	var invitee *auth.User
+	if authStore != nil {
+		if u, err := authStore.GetUserByEmail(ctx, req.Email); err == nil && u != nil {
+			invitee = u
+		}
+	}
+
+	// Dedup (sty_1c266e21): if the invitee already has effective access to the
+	// target (explicit member, or a workspace owner/admin who is implicitly a
+	// project admin), inviting is a no-op with a clear signal — no new row.
+	if invitee != nil && alreadyMember(ctx, req.Scope, wsID, pjID, invitee.ID) {
+		return json.Marshal(map[string]string{"status": "already_member", "email": invitee.Email})
+	}
+
 	inv, err := invitationStore.Create(ctx, invitation.CreateInput{
 		Email:       req.Email,
 		Scope:       req.Scope,
@@ -204,13 +251,11 @@ func invokeInvitationCreate(ctx context.Context, raw json.RawMessage) (json.RawM
 
 	// AC#4: if the invitee already has an account, claim immediately so they
 	// get access now (the invitation row stays for audit, marked accepted).
-	if authStore != nil {
-		if u, err := authStore.GetUserByEmail(ctx, inv.Email); err == nil && u != nil {
-			if _, err := invitationStore.ClaimForEmail(ctx, inv.Email, u.ID, time.Now().UTC()); err != nil {
-				return nil, fmt.Errorf("invitation_create: immediate claim: %w", err)
-			}
-			inv.Status = invitation.StatusAccepted
+	if invitee != nil {
+		if _, err := invitationStore.ClaimForEmail(ctx, inv.Email, invitee.ID, time.Now().UTC()); err != nil {
+			return nil, fmt.Errorf("invitation_create: immediate claim: %w", err)
 		}
+		inv.Status = invitation.StatusAccepted
 	}
 	return json.Marshal(inv)
 }

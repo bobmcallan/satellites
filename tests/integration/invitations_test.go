@@ -351,3 +351,102 @@ func TestInvitationLinkVerbs(t *testing.T) {
 		t.Fatal("unauthenticated redeem should be forbidden")
 	}
 }
+
+// TestInviteDedupAndAutoMember covers sty_1c266e21: workspace owners/admins
+// appear as implicit project members, and inviting an already-effective member
+// is an already_member no-op (no new invitation row).
+func TestInviteDedupAndAutoMember(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	ctx := context.Background()
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	authStore := auth.New(env.DB)
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	invStore := invitation.New(env.DB)
+	verb.SetAuthStore(authStore)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetInvitationStore(invStore)
+	t.Cleanup(func() {
+		verb.SetAuthStore(nil)
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetInvitationStore(nil)
+	})
+	mj := func(v any) []byte { b, _ := json.Marshal(v); return b }
+
+	owner, _ := authStore.CreateUser(ctx, "usr_dd_owner", "owner@dd.local", "Owner", auth.RoleUser)
+	member, _ := authStore.CreateUser(ctx, "usr_dd_member", "member@dd.local", "Member", auth.RoleUser)
+	ws, _ := wsStore.Create(ctx, owner.ID, "dd-ws", now) // owner is a workspace admin member
+	pj, _ := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "dd-pj"}, now)
+
+	listMembers := func() []project.Member {
+		raw, err := verb.Dispatch(authWithUser(ctx, owner), "project_member_list", mj(map[string]string{"project_id": pj.ID}))
+		if err != nil {
+			t.Fatalf("member list: %v", err)
+		}
+		var resp verb.ProjectMemberListResponse
+		_ = json.Unmarshal(raw, &resp)
+		return resp.Members
+	}
+	find := func(ms []project.Member, uid string) *project.Member {
+		for i := range ms {
+			if ms[i].UserID == uid {
+				return &ms[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("workspace admin appears as implicit member", func(t *testing.T) {
+		m := find(listMembers(), owner.ID)
+		if m == nil || m.Source != project.SourceWorkspace || m.Role != project.RoleAdmin {
+			t.Fatalf("workspace owner not an implicit admin member: %+v", listMembers())
+		}
+	})
+
+	t.Run("explicit member is source=project; owner stays implicit", func(t *testing.T) {
+		if err := pjStore.AddMember(ctx, pj.ID, member.ID, project.RoleWrite, owner.ID, now); err != nil {
+			t.Fatalf("add explicit: %v", err)
+		}
+		ms := listMembers()
+		if m := find(ms, member.ID); m == nil || m.Source != project.SourceProject {
+			t.Fatalf("explicit member wrong source: %+v", ms)
+		}
+		if o := find(ms, owner.ID); o == nil || o.Source != project.SourceWorkspace {
+			t.Fatalf("owner should remain implicit: %+v", ms)
+		}
+	})
+
+	t.Run("re-invite explicit member → already_member, no new invite", func(t *testing.T) {
+		raw, err := verb.Dispatch(authWithUser(ctx, owner), "invitation_create",
+			mj(map[string]string{"email": "member@dd.local", "scope": "project", "project_id": pj.ID, "role": "read"}))
+		if err != nil {
+			t.Fatalf("invite member: %v", err)
+		}
+		var resp map[string]string
+		_ = json.Unmarshal(raw, &resp)
+		if resp["status"] != "already_member" {
+			t.Fatalf("want already_member, got %s", raw)
+		}
+		invs, _ := invStore.List(ctx, invitation.ListInput{ProjectID: pj.ID, Status: "pending"})
+		if len(invs) != 0 {
+			t.Fatalf("dedup still created a pending invite: %+v", invs)
+		}
+	})
+
+	t.Run("invite a workspace admin to the project → already_member", func(t *testing.T) {
+		raw, err := verb.Dispatch(authWithUser(ctx, owner), "invitation_create",
+			mj(map[string]string{"email": "owner@dd.local", "scope": "project", "project_id": pj.ID, "role": "read"}))
+		if err != nil {
+			t.Fatalf("invite owner: %v", err)
+		}
+		var resp map[string]string
+		_ = json.Unmarshal(raw, &resp)
+		if resp["status"] != "already_member" {
+			t.Fatalf("want already_member for workspace admin, got %s", raw)
+		}
+	})
+}

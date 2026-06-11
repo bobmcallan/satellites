@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 type ProjectMemberAddRequest struct {
@@ -167,10 +168,57 @@ func invokeProjectMemberList(ctx context.Context, raw json.RawMessage) (json.Raw
 	if err != nil {
 		return nil, err
 	}
+	for i := range ms {
+		ms[i].Source = project.SourceProject
+	}
+	// Auto-member (sty_1c266e21): the project's workspace owners/admins administer
+	// it, so they appear in the roster as implicit members even without an
+	// explicit project_members row. Explicit rows win on conflict.
+	ms = append(ms, inheritedWorkspaceAdmins(ctx, req.ProjectID, ms)...)
 	if ms == nil {
 		ms = []project.Member{}
 	}
 	return json.Marshal(ProjectMemberListResponse{Members: ms})
+}
+
+// inheritedWorkspaceAdmins returns the project's workspace owners/admins as
+// implicit project members (role admin, source workspace), excluding any user
+// already present as an explicit member. Best-effort: an unwired store or a
+// lookup miss simply contributes nothing.
+func inheritedWorkspaceAdmins(ctx context.Context, projectID string, explicit []project.Member) []project.Member {
+	if projectStore == nil || workspaceStore == nil {
+		return nil
+	}
+	pj, err := projectStore.GetByID(ctx, projectID)
+	if err != nil || pj.WorkspaceID == "" {
+		return nil
+	}
+	wsMembers, err := workspaceStore.ListMembers(ctx, pj.WorkspaceID)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(explicit))
+	for _, m := range explicit {
+		seen[m.UserID] = true
+	}
+	var out []project.Member
+	for _, wm := range wsMembers {
+		if wm.Role != workspace.RoleOwner && wm.Role != workspace.RoleAdmin {
+			continue
+		}
+		if seen[wm.UserID] {
+			continue
+		}
+		seen[wm.UserID] = true
+		out = append(out, project.Member{
+			ProjectID: projectID,
+			UserID:    wm.UserID,
+			Role:      project.RoleAdmin,
+			AddedAt:   wm.AddedAt,
+			Source:    project.SourceWorkspace,
+		})
+	}
+	return out
 }
 
 func invokeProjectMemberUpdateRole(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
