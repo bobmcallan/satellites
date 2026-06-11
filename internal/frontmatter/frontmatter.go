@@ -52,11 +52,13 @@ type Frontmatter struct {
 var frontmatterDelim = []byte("---")
 
 // syncStampBegin / syncStampEnd bound the client-injected sync-identity
-// comment that a materialised .claude/skills/<name>/SKILL.md carries
-// ahead of its frontmatter (document_id/version/hash; see
+// comment that a materialised .claude/skills/<name>/SKILL.md carries —
+// on the line after its frontmatter close (current layout, so Claude
+// Code reads the frontmatter first) or, in legacy files, ahead of the
+// frontmatter (document_id/version/hash; see
 // internal/cli/cmd_skill_sync.go, which writes it). The block is local
 // bookkeeping, never part of the authored content — so any reader that
-// parses the authored frontmatter or body must see past it.
+// parses the authored frontmatter or body must see past both positions.
 var (
 	syncStampBegin = []byte("<!-- satellites-sync:begin")
 	syncStampEnd   = []byte("satellites-sync:end -->")
@@ -109,6 +111,9 @@ func Parse(raw []byte) (Frontmatter, []byte, error) {
 	yamlBlock := rest[:closeIdx]
 	body := rest[closeIdx+len(frontmatterDelim):]
 	body = trimLeadingNewline(body)
+	// A sync stamp on the line after the frontmatter close (the current
+	// materialised layout) is bookkeeping, not authored body.
+	body = StripSyncStamp(body)
 
 	var fm Frontmatter
 	if len(bytes.TrimSpace(yamlBlock)) > 0 {

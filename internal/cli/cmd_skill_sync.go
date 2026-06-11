@@ -49,10 +49,14 @@ const (
 	conflictForce  = "force"
 )
 
-// stampMarker delimits the injected sync-identity block at the top of a
-// materialised SKILL.md. The block sits above the authored body and is
-// excluded from the content hash, so the hash reflects only what the
-// substrate stores (sty_4b517016 contract).
+// stampMarker delimits the injected sync-identity block in a materialised
+// SKILL.md. The block sits on the line immediately after the frontmatter
+// close — frontmatter stays first so Claude Code reads the skill's real
+// description (sty_98bf2818); a body with no frontmatter falls back to
+// stamp-first. Either way the stamp is excluded from the content hash, so
+// the hash reflects only what the substrate stores (sty_4b517016 contract).
+// The legacy stamp-at-byte-0 layout is still recognised on read and
+// migrated on the next sync.
 const (
 	stampBegin = "<!-- satellites-sync:begin"
 	stampEnd   = "satellites-sync:end -->"
@@ -87,6 +91,7 @@ const (
 	actionConflict                         // edited stamped copy, OR unstamped copy of a substrate skill that differs — resolve, don't silently overwrite
 	actionLeaveUnstamped                   // unstamped local with NO substrate row — genuinely operator-authored, never touch
 	actionMatchUnstamped                   // unstamped local byte-identical to the substrate body — adopt it (stamp in place)
+	actionMigrate                          // stamped local copy, current + unedited, but legacy stamp-first layout — rewrite in the frontmatter-first layout
 )
 
 func (a syncAction) String() string {
@@ -105,6 +110,8 @@ func (a syncAction) String() string {
 		return "leave"
 	case actionMatchUnstamped:
 		return "adopt"
+	case actionMigrate:
+		return "migrate"
 	}
 	return "?"
 }
@@ -128,6 +135,8 @@ func (a syncAction) reason() string {
 		return "operator-authored (no substrate row) — not managed"
 	case actionMatchUnstamped:
 		return "unstamped local matched substrate — stamp adopted"
+	case actionMigrate:
+		return "legacy stamp-first layout — rewritten frontmatter-first"
 	}
 	return ""
 }
@@ -141,6 +150,7 @@ type localSkill struct {
 	Stamp     skillStamp
 	BodyHash  string // hash of on-disk authored body (stamp block stripped)
 	Malformed bool   // stamp block present but unparseable
+	Legacy    bool   // stamped in the legacy stamp-first layout — migrate on sync
 	Scope     string // frontmatter scope of the authored body ("" when project/unset)
 }
 
@@ -172,34 +182,89 @@ func stampBlock(s skillStamp) string {
 	return fmt.Sprintf("%s %s %s\n", stampBegin, string(b), strings.TrimPrefix(stampEnd, ""))
 }
 
-// splitStamp separates a materialised SKILL.md into its injected stamp (if
-// present + parseable) and the authored body beneath it. A file with no
-// stamp marker returns ok=false and the whole content as the authored body.
-func splitStamp(raw string) (stamp skillStamp, authored string, ok bool, malformed bool) {
-	i := strings.Index(raw, stampBegin)
-	if i != 0 {
-		// Stamp must be the very first bytes; anything else is unstamped.
-		return skillStamp{}, raw, false, false
+// splitAfterFrontmatter splits raw at the end of its YAML frontmatter
+// block: head is the frontmatter including the closing `---` line (with
+// its newline), body is everything after. found=false (head empty, body
+// = raw) when raw does not open with a frontmatter block.
+func splitAfterFrontmatter(raw string) (head, body string, found bool) {
+	if !strings.HasPrefix(raw, "---\n") && !strings.HasPrefix(raw, "---\r\n") {
+		return "", raw, false
 	}
-	end := strings.Index(raw, stampEnd)
+	offset := strings.IndexByte(raw, '\n') + 1
+	rest := raw[offset:]
+	for len(rest) > 0 {
+		lineEnd := strings.IndexByte(rest, '\n')
+		line := rest
+		if lineEnd >= 0 {
+			line = rest[:lineEnd]
+		}
+		if strings.TrimRight(line, "\r") == "---" {
+			if lineEnd < 0 {
+				return raw, "", true
+			}
+			return raw[:offset+lineEnd+1], rest[lineEnd+1:], true
+		}
+		if lineEnd < 0 {
+			break
+		}
+		offset += lineEnd + 1
+		rest = rest[lineEnd+1:]
+	}
+	return "", raw, false
+}
+
+// cutStamp parses a stamp block at the START of s, returning the parsed
+// stamp and the remainder (one following newline consumed). Caller
+// guarantees s begins with stampBegin. Unparseable JSON or a missing end
+// marker reports malformed.
+func cutStamp(s string) (stamp skillStamp, rest string, ok, malformed bool) {
+	end := strings.Index(s, stampEnd)
 	if end < 0 {
-		return skillStamp{}, raw, false, true
+		return skillStamp{}, s, false, true
 	}
-	jsonPart := strings.TrimSpace(raw[len(stampBegin):end])
-	authoredStart := end + len(stampEnd)
-	authored = strings.TrimPrefix(raw[authoredStart:], "\n")
+	jsonPart := strings.TrimSpace(s[len(stampBegin):end])
+	rest = strings.TrimPrefix(s[end+len(stampEnd):], "\n")
 	var st skillStamp
 	if err := json.Unmarshal([]byte(jsonPart), &st); err != nil || st.DocumentID == "" {
-		return skillStamp{}, authored, false, true
+		return skillStamp{}, rest, false, true
 	}
-	return st, authored, true, false
+	return st, rest, true, false
+}
+
+// splitStamp separates a materialised SKILL.md into its injected stamp (if
+// present + parseable) and the authored body around it. Two positions are
+// recognised: the line immediately after the frontmatter close (current
+// layout — frontmatter first so Claude Code reads the skill's description,
+// sty_98bf2818) and the very first byte (legacy layout, reported via
+// legacy so the reconcile migrates the file). A stamp string anywhere else
+// — e.g. quoted in a code fence — is NOT a stamp: position-anchored, no
+// false adoption. A file with no stamp returns ok=false and the whole
+// content as the authored body.
+func splitStamp(raw string) (stamp skillStamp, authored string, ok, malformed, legacy bool) {
+	if strings.HasPrefix(raw, stampBegin) {
+		st, rest, sok, smal := cutStamp(raw)
+		return st, rest, sok, smal, sok
+	}
+	head, body, found := splitAfterFrontmatter(raw)
+	if !found || !strings.HasPrefix(body, stampBegin) {
+		return skillStamp{}, raw, false, false, false
+	}
+	st, rest, sok, smal := cutStamp(body)
+	return st, head + rest, sok, smal, false
 }
 
 // materialise renders the on-disk SKILL.md content for a substrate skill:
-// the injected stamp block followed by the authored body.
+// the authored frontmatter first, the injected stamp block on the line
+// after its close, then the body — so Claude Code parses the frontmatter
+// (description, dispatch fields) while sync keeps its identity marker. A
+// body with no frontmatter degrades to stamp-first.
 func materialise(s substrateSkill) string {
 	stamp := skillStamp{DocumentID: s.DocumentID, Version: s.Version, Hash: hashBody(s.Body)}
-	return stampBlock(stamp) + s.Body
+	head, body, found := splitAfterFrontmatter(s.Body)
+	if !found {
+		return stampBlock(stamp) + s.Body
+	}
+	return head + stampBlock(stamp) + body
 }
 
 // reconcileAction decides what to do for one name given the substrate row
@@ -233,6 +298,11 @@ func reconcileAction(sub *substrateSkill, local *localSkill) syncAction {
 		if sub.Version > local.Stamp.Version {
 			return actionUpdate
 		}
+		if local.Legacy {
+			// Current + unedited, but in the legacy stamp-first layout that
+			// hides the frontmatter from Claude Code — rewrite in place.
+			return actionMigrate
+		}
 		return actionSkip
 	case sub == nil && local != nil:
 		if !local.Stamped {
@@ -257,11 +327,11 @@ func readLocalSkill(skillsRoot, name string) (*localSkill, error) {
 		}
 		return nil, err
 	}
-	stamp, authored, ok, malformed := splitStamp(string(raw))
+	stamp, authored, ok, malformed, legacy := splitStamp(string(raw))
 	// Hash the authored body whether or not it carries a stamp: a stamped
 	// file's hash detects operator edits; an unstamped file's hash lets the
 	// reconcile spot one that is byte-identical to the substrate (match).
-	ls := &localSkill{Name: name, Stamped: ok, Stamp: stamp, Malformed: malformed, BodyHash: hashBody(authored)}
+	ls := &localSkill{Name: name, Stamped: ok, Stamp: stamp, Malformed: malformed, Legacy: legacy, BodyHash: hashBody(authored)}
 	// Record the materialised skill's declared scope so the upload orphan
 	// check can tell a project-owned skill (which needs a .satellites/skills/
 	// source) from a system/workspace skill that sync legitimately
@@ -657,10 +727,11 @@ func backupSkill(skillsRoot, name string) (string, error) {
 // Skips, conflicts, and leaves are reported but make no change.
 func applySyncItem(skillsRoot string, item syncPlanItem) error {
 	switch item.Action {
-	case actionInstall, actionUpdate, actionMatchUnstamped:
+	case actionInstall, actionUpdate, actionMatchUnstamped, actionMigrate:
 		// install/update materialise the substrate copy; adopt (match) writes the
 		// SAME body plus the identity stamp so an unstamped-but-identical local
-		// becomes managed (no content change).
+		// becomes managed (no content change); migrate rewrites a legacy
+		// stamp-first file in the frontmatter-first layout (same content).
 		dir := filepath.Join(skillsRoot, item.Name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)

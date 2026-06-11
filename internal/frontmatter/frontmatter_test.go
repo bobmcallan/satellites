@@ -94,6 +94,25 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestParseStripsBodyStamp pins the sty_98bf2818 layout: a sync stamp on the
+// line after the frontmatter close (the current materialised SKILL.md form)
+// is bookkeeping — Parse exposes the frontmatter and a body with no stamp,
+// so gate dispatch and every other consumer see only authored content.
+func TestParseStripsBodyStamp(t *testing.T) {
+	const stamp = "<!-- satellites-sync:begin {\"document_id\":\"doc_x\",\"version\":2,\"hash\":\"deadbeef\"} satellites-sync:end -->"
+	raw := "---\nname: x\ndescription: real description\n---\n" + stamp + "\n# Body\n"
+	fm, body, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if fm.Name != "x" || fm.Description != "real description" {
+		t.Errorf("frontmatter not exposed: %+v", fm)
+	}
+	if string(body) != "# Body\n" {
+		t.Errorf("body must exclude the stamp: %q", body)
+	}
+}
+
 func TestStripSyncStamp(t *testing.T) {
 	const stamp = "<!-- satellites-sync:begin {\"document_id\":\"doc_x\",\"version\":2,\"hash\":\"deadbeef\"} satellites-sync:end -->"
 	cases := []struct {

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 )
 
 // TestResolveSkillsRoot_AnchorsToRepoNotCWD pins the sty_be65b4dd path fix:
@@ -83,9 +85,12 @@ func TestStampRoundTrip(t *testing.T) {
 	}
 	content := materialise(sub)
 
-	stamp, authored, ok, malformed := splitStamp(content)
+	stamp, authored, ok, malformed, legacy := splitStamp(content)
 	if !ok || malformed {
 		t.Fatalf("materialised file should be cleanly stamped: ok=%v malformed=%v", ok, malformed)
+	}
+	if legacy {
+		t.Error("freshly materialised file must use the frontmatter-first layout, not legacy")
 	}
 	if stamp.DocumentID != sub.DocumentID || stamp.Version != sub.Version {
 		t.Errorf("stamp identity = %+v, want doc_abc123/v4", stamp)
@@ -95,6 +100,93 @@ func TestStampRoundTrip(t *testing.T) {
 	}
 	if hashBody(authored) != stamp.Hash {
 		t.Errorf("hash of recovered body != stamped hash (would read as edited)")
+	}
+}
+
+// TestMaterialiseFrontmatterFirst pins the sty_98bf2818 layout contract: a
+// materialised SKILL.md begins with the authored YAML frontmatter (so Claude
+// Code reads the skill's real description), carries the sync stamp on the
+// line immediately after the frontmatter close, and parses cleanly — the
+// description is exposed and the stamp never leaks into the parsed body.
+func TestMaterialiseFrontmatterFirst(t *testing.T) {
+	sub := substrateSkill{
+		Name:       "fix-workflow",
+		DocumentID: "doc_abc123",
+		Version:    4,
+		Body:       "---\nname: fix-workflow\ndescription: the real description\n---\n# body\n",
+	}
+	content := materialise(sub)
+
+	if !strings.HasPrefix(content, "---\n") {
+		t.Fatalf("materialised file must start with frontmatter, got %q", content[:40])
+	}
+	lines := strings.Split(content, "\n")
+	stampLine := -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, stampBegin) {
+			stampLine = i
+			break
+		}
+	}
+	if stampLine < 0 {
+		t.Fatal("materialised file must carry the sync stamp")
+	}
+	if lines[stampLine-1] != "---" {
+		t.Errorf("stamp must sit on the line after the frontmatter close, found after %q", lines[stampLine-1])
+	}
+
+	fm, body, err := frontmatter.Parse([]byte(content))
+	if err != nil {
+		t.Fatalf("frontmatter.Parse on materialised file: %v", err)
+	}
+	if fm.Description != "the real description" {
+		t.Errorf("description not exposed: %q", fm.Description)
+	}
+	if strings.Contains(string(body), stampBegin) {
+		t.Errorf("stamp leaked into the parsed body: %q", body)
+	}
+
+	// A body with no frontmatter degrades to stamp-first and still round-trips.
+	bare := substrateSkill{Name: "bare", DocumentID: "doc_b", Version: 1, Body: "# no frontmatter\n"}
+	st, authored, ok, _, _ := splitStamp(materialise(bare))
+	if !ok || authored != bare.Body || st.DocumentID != "doc_b" {
+		t.Errorf("frontmatter-less body must still round-trip: ok=%v authored=%q", ok, authored)
+	}
+}
+
+// TestSplitStampLegacyMigrates pins the migration path: a legacy
+// (stamp-at-byte-0) file still reads as stamped with legacy=true, an
+// otherwise-current copy reconciles to migrate (one sync repairs it in
+// place), and a stamp string mentioned elsewhere — e.g. quoted in a code
+// fence — is NOT treated as a stamp.
+func TestSplitStampLegacyMigrates(t *testing.T) {
+	body := "---\nname: fix-workflow\n---\n# body\n"
+	stamp := skillStamp{DocumentID: "doc_abc123", Version: 4, Hash: hashBody(body)}
+	legacyContent := stampBlock(stamp) + body
+
+	st, authored, ok, malformed, legacy := splitStamp(legacyContent)
+	if !ok || malformed || !legacy {
+		t.Fatalf("legacy file must read stamped+legacy: ok=%v malformed=%v legacy=%v", ok, malformed, legacy)
+	}
+	if authored != body || st.Hash != hashBody(authored) {
+		t.Fatalf("legacy authored body not recovered: %q", authored)
+	}
+
+	sub := &substrateSkill{Name: "fix-workflow", DocumentID: "doc_abc123", Version: 4, Body: body}
+	local := &localSkill{Name: "satellites-fix-workflow", Stamped: true, Stamp: st, Legacy: true, BodyHash: hashBody(authored)}
+	if got := reconcileAction(sub, local); got != actionMigrate {
+		t.Errorf("current legacy-layout copy should migrate, got %v", got)
+	}
+	// The same copy in the current layout is simply current.
+	local.Legacy = false
+	if got := reconcileAction(sub, local); got != actionSkip {
+		t.Errorf("current-layout copy should skip, got %v", got)
+	}
+
+	// Stamp text inside the body (documentation/code fence) is not a stamp.
+	doc := "---\nname: doc\n---\nThe marker looks like:\n```\n" + stampBlock(stamp) + "```\n"
+	if _, _, ok, _, _ := splitStamp(doc); ok {
+		t.Error("a stamp string quoted in the body must not read as a stamp")
 	}
 }
 
@@ -317,7 +409,7 @@ func TestApplySyncItem_InstallThenRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("installed file missing: %v", err)
 	}
-	stamp, authored, ok, _ := splitStamp(string(raw))
+	stamp, authored, ok, _, _ := splitStamp(string(raw))
 	if !ok || stamp.DocumentID != "doc_fw" || authored != sub.Body {
 		t.Fatalf("installed file not correctly stamped: ok=%v stamp=%+v", ok, stamp)
 	}
@@ -378,7 +470,7 @@ func TestApplySyncItem_AdoptStampsUnstamped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read after adopt: %v", err)
 	}
-	stamp, authored, ok, _ := splitStamp(string(raw))
+	stamp, authored, ok, _, _ := splitStamp(string(raw))
 	if !ok || stamp.DocumentID != "doc_fw" {
 		t.Fatalf("adopted file must be stamped: ok=%v stamp=%+v", ok, stamp)
 	}
