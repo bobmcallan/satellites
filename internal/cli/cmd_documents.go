@@ -431,7 +431,13 @@ func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) 
 						}
 					}
 				}
-				configSkillNames[resolveName(filename, fm.Name)] = true
+				// Claim both name forms: sync materialises under the
+				// satellites-prefixed name, so an unprefixed source (e.g.
+				// urgent-workflow.md) must still own its prefixed local copy —
+				// while a hand-placed unprefixed local copy stays claimed too.
+				resolved := resolveName(filename, fm.Name)
+				configSkillNames[resolved] = true
+				configSkillNames[localSkillName(resolved)] = true
 			}
 			return nil
 		})
