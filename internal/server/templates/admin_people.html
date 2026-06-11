@@ -156,25 +156,28 @@
     {{end}}
 
     {{if .IsProjectAdmin}}
-    <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite" x-show="pjInviteOpen" x-cloak>
-      <input type="hidden" name="action" value="pj_invite">
-      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
-      <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
-      <input type="email" name="email" placeholder="person@example.com" required data-field="pj-invite-email">
-      <select name="role" data-field="pj-invite-role">
-        {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
-      </select>
-      <button type="submit" class="btn primary" data-action="pj-invite-submit">SEND INVITE</button>
-    </form>
-    <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite-link" x-show="pjInviteOpen" x-cloak>
-      <input type="hidden" name="action" value="pj_invite_link">
-      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
-      <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
-      <select name="role" data-field="pj-invite-link-role">
-        {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
-      </select>
-      <button type="submit" class="btn secondary" data-action="pj-invite-link-submit">GENERATE INVITE LINK</button>
-    </form>
+    <div class="invite-panel" data-section="pj-invite" x-show="pjInviteOpen" x-cloak>
+      <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite">
+        <input type="hidden" name="action" value="pj_invite">
+        <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+        <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
+        <input type="email" name="email" placeholder="person@example.com" required data-field="pj-invite-email">
+        <select name="role" data-field="pj-invite-role">
+          {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        <button type="submit" class="btn primary" data-action="pj-invite-submit">SEND INVITE</button>
+      </form>
+      <p class="invite-or" data-field="pj-invite-or">— OR SHARE A LINK —</p>
+      <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite-link">
+        <input type="hidden" name="action" value="pj_invite_link">
+        <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+        <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
+        <select name="role" data-field="pj-invite-link-role">
+          {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        <button type="submit" class="btn secondary" data-action="pj-invite-link-submit">GENERATE INVITE LINK</button>
+      </form>
+    </div>
     {{end}}
 
     <table class="panel-table" data-field="pj-members-table">
