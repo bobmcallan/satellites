@@ -20,8 +20,10 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		name        string
 		transitions int
 	}{
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-feature-workflow", "SKILL.md"), "satellites-feature-workflow", 3},
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-fix-workflow", "SKILL.md"), "satellites-fix-workflow", 2},
+		// The single repo workflow (sty_20d71a66): 3 forward gates + 3
+		// cancellation edges, every one reviewer-gated.
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 6},
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-parent-workflow", "SKILL.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)

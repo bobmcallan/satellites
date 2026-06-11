@@ -302,6 +302,7 @@ func resolveWorkflowForStory(ctx context.Context, story storyMeta) (*workflow.Wo
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, err
 	}
+	var cands []*workflow.Workflow
 	for _, d := range resp.Items {
 		// Project-isolation bound: skip a workflow that belongs to another
 		// project/workspace so the view never borrows it (sty_68379c96).
@@ -332,13 +333,33 @@ func resolveWorkflowForStory(ctx context.Context, story storyMeta) (*workflow.Wo
 		if pErr != nil || wf == nil {
 			continue // not a workflow skill (gate/capability skills have no states block)
 		}
+		cands = append(cands, wf)
+	}
+	return pickWorkflow(cands, storyType), nil
+}
+
+// pickWorkflow selects the workflow governing storyType from the candidates:
+// an exact applies_to category match wins; a workflow declaring "*" governs
+// any category as the fallback (sty_20d71a66 single-workflow) — so a repo
+// need not enumerate its categories to be fully governed. Nil when nothing
+// applies.
+func pickWorkflow(cands []*workflow.Workflow, storyType string) *workflow.Workflow {
+	var wildcard *workflow.Workflow
+	for _, wf := range cands {
 		for _, at := range wf.AppliesTo {
-			if strings.EqualFold(strings.TrimSpace(at), storyType) {
-				return wf, nil
+			switch strings.TrimSpace(at) {
+			case "*":
+				if wildcard == nil {
+					wildcard = wf
+				}
+			default:
+				if strings.EqualFold(strings.TrimSpace(at), storyType) {
+					return wf
+				}
 			}
 		}
 	}
-	return nil, nil
+	return wildcard
 }
 
 // dispatchStoryLedger reads a story's ledger via the ledger_list verb and maps

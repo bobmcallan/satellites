@@ -6,10 +6,12 @@ tags: ["principles:project", "principles:always"]
 
 How the agent drives a story to `done`.
 
-- **Run the `satellites-commit-push` checkpoint** at every natural checkpoint
-  (end of phase, end of meaningful change, before requesting review). It is the
-  single point where work becomes visible to other agents, reviewers, and the
-  build pipeline; skipping it makes the reviewer judge stale code.
+- **Run the checkpoint the governing workflow names** at every natural
+  checkpoint (end of phase, end of meaningful change, before requesting
+  review). The workflow definition — not this principle — owns which
+  checkpoint capability and gates run; the checkpoint is the single point
+  where work becomes visible to other agents, reviewers, and the build
+  pipeline, and skipping it makes the reviewer judge stale code.
 - **Do not stop unless blocked.** Read the workflow skill, do the work, edit the
   story body, request the reviewer gate; on reject, read the notes and iterate.
   You are blocked only when a rejection needs information you cannot infer (a
