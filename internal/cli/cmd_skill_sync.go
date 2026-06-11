@@ -295,6 +295,13 @@ func reconcileAction(sub *substrateSkill, local *localSkill) syncAction {
 			// Operator edited a materialised copy since it was stamped.
 			return actionConflict
 		}
+		if sub.DocumentID != "" && local.Stamp.DocumentID != "" && sub.DocumentID != local.Stamp.DocumentID {
+			// The name was re-homed to a different substrate row (e.g. a scope
+			// move re-seeds it under a new document id with a restarted version
+			// counter) — a version compare across different rows is meaningless;
+			// the unedited local copy must follow the new row.
+			return actionUpdate
+		}
 		if sub.Version > local.Stamp.Version {
 			return actionUpdate
 		}

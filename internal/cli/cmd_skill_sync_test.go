@@ -574,3 +574,29 @@ func TestPromptConflict_Choice(t *testing.T) {
 		t.Errorf("promptConflict(\"yes\") = %q, want local", got)
 	}
 }
+
+// TestReconcileActionRehomedRow pins the sty_7994564a re-home fix: a stamped,
+// unedited local whose stamp names a DIFFERENT substrate document id (the
+// name was re-seeded under a new row, e.g. a project→system scope move with a
+// restarted version counter) must update to the new row — a version compare
+// across rows is meaningless.
+func TestReconcileActionRehomedRow(t *testing.T) {
+	body := "---\nname: wf-design\n---\n# body\n"
+	sub := &substrateSkill{Name: "wf-design", DocumentID: "doc_new", Version: 1, Body: body}
+	local := &localSkill{
+		Name:    "satellites-wf-design",
+		Stamped: true,
+		Stamp:   skillStamp{DocumentID: "doc_old", Version: 3, Hash: hashBody(body)},
+		// unedited: on-disk hash equals the stamp hash
+		BodyHash: hashBody(body),
+	}
+	if got := reconcileAction(sub, local); got != actionUpdate {
+		t.Errorf("re-homed row must update, got %v", got)
+	}
+	// Same row, same version: still current.
+	local.Stamp.DocumentID = "doc_new"
+	local.Stamp.Version = 1
+	if got := reconcileAction(sub, local); got != actionSkip {
+		t.Errorf("same row current copy should skip, got %v", got)
+	}
+}
