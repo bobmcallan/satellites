@@ -38,7 +38,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get system_seed: %v", err)
 		}
-		if got.Body != body || got.EmbeddedHash != document.HashBodyAndTags(body, nil) {
+		if got.Body != body || got.EmbeddedHash != document.HashBodyAndTags(body, nil, "") {
 			t.Fatalf("system_seeds row mismatch: %+v", got)
 		}
 		mirror, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: name}, document.GetOptions{})
@@ -104,7 +104,7 @@ func TestSystemSeedReconcile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get after: %v", err)
 		}
-		if after.EmbeddedHash != document.HashBodyAndTags(body, nil) {
+		if after.EmbeddedHash != document.HashBodyAndTags(body, nil, "") {
 			t.Fatalf("hash not restored: %q", after.EmbeddedHash)
 		}
 		if !after.AppliedAt.After(before.AppliedAt) {
@@ -122,6 +122,57 @@ func TestSystemSeedReconcile(t *testing.T) {
 			t.Fatalf("expected one document version (body unchanged), got %d", len(mirror.Versions))
 		}
 	})
+}
+
+// TestSystemSeedHeadline pins the headline thread-through: a seed whose
+// frontmatter declares a headline lands it on the mirrored document row
+// (so the system-scope discovery index can show it), and a headline-only
+// change flips the embedded hash and re-applies without bumping the
+// document version (body unchanged → SeedSystem no-op).
+func TestSystemSeedHeadline(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	docs := document.New(env.DB)
+	sys := document.NewSystemSeedStore(env.DB)
+	ctx := context.Background()
+	name := "headline_test"
+	body := "a principle body."
+	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+
+	res, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeDocument, name, body, []string{"principles:global"}, "the one-line hook", "system:seed", now)
+	if err != nil {
+		t.Fatalf("reconcile with headline: %v", err)
+	}
+	if !res.Created {
+		t.Fatalf("expected Created=true, got %+v", res)
+	}
+	mirror, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: name}, document.GetOptions{})
+	if err != nil {
+		t.Fatalf("get mirror: %v", err)
+	}
+	if mirror.Document.Headline != "the one-line hook" {
+		t.Fatalf("headline not applied: %q", mirror.Document.Headline)
+	}
+
+	// Headline-only change: hash flips, headline re-applies, no new version.
+	res2, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeDocument, name, body, []string{"principles:global"}, "a sharper hook", "system:seed", now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("reconcile headline change: %v", err)
+	}
+	if !res2.Changed || res2.Created {
+		t.Fatalf("expected Changed=true Created=false, got %+v", res2)
+	}
+	mirror2, err := docs.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: name}, document.GetOptions{AllVersions: true})
+	if err != nil {
+		t.Fatalf("get mirror after headline change: %v", err)
+	}
+	if mirror2.Document.Headline != "a sharper hook" {
+		t.Fatalf("headline not re-applied: %q", mirror2.Document.Headline)
+	}
+	if len(mirror2.Versions) != 1 {
+		t.Fatalf("headline-only change must not bump document version, got %d versions", len(mirror2.Versions))
+	}
 }
 
 // TestPruneSystemSeeds covers sty_a1a74121 AC4: seed two artifacts, drop one

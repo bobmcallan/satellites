@@ -28,7 +28,7 @@ func TestSystemSeedReconcile_TypeSkill(t *testing.T) {
 	body := "# reviewer skill\n\nminimal rubric body.\n"
 	now := time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
 
-	res, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeSkill, name, body, nil, "system:seed", now)
+	res, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeSkill, name, body, nil, "", "system:seed", now)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestSystemSeedReconcile_TypeSkill(t *testing.T) {
 
 	// Body change appends a new version; type stays 'skill'.
 	body2 := body + "\nupdated rubric line.\n"
-	res2, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeSkill, name, body2, nil, "system:seed", now.Add(time.Hour))
+	res2, err := document.ReconcileSystemSeedTyped(ctx, sys, docs, document.TypeSkill, name, body2, nil, "", "system:seed", now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("reconcile v2: %v", err)
 	}

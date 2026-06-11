@@ -157,17 +157,20 @@ func HashBody(body string) string {
 }
 
 // HashBodyAndTags is the embedded-hash function used when an artifact
-// carries frontmatter-declared tags. The hash incorporates both the
-// body and the (sorted) tag set so a binary release that changes only
-// the tags still flips the hash and triggers re-application. Tags are
-// sorted before hashing so input order is not significant.
-func HashBodyAndTags(body string, tags []string) string {
+// carries frontmatter-declared tags and/or a headline. The hash
+// incorporates the body, the (sorted) tag set, and the headline so a
+// binary release that changes only the tags or only the headline still
+// flips the hash and triggers re-application. Tags are sorted before
+// hashing so input order is not significant.
+func HashBodyAndTags(body string, tags []string, headline string) string {
 	sorted := append([]string(nil), tags...)
 	sort.Strings(sorted)
 	h := sha256.New()
 	h.Write([]byte(body))
 	h.Write([]byte{0x1f}) // unit separator — disambiguates body from tag bytes
 	h.Write([]byte(strings.Join(sorted, "\x1f")))
+	h.Write([]byte{0x1f})
+	h.Write([]byte(headline))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -193,16 +196,19 @@ type ReconcileResult struct {
 // embedded skill artifacts. Pass nil/empty tags for artifacts that
 // have no frontmatter.
 func ReconcileSystemSeed(ctx context.Context, sys *SystemSeedStore, docs *Store, name, body string, tags []string, createdBy string, now time.Time) (ReconcileResult, error) {
-	return ReconcileSystemSeedTyped(ctx, sys, docs, TypeDocument, name, body, tags, createdBy, now)
+	return ReconcileSystemSeedTyped(ctx, sys, docs, TypeDocument, name, body, tags, "", createdBy, now)
 }
 
 // ReconcileSystemSeedTyped is the type-aware variant of
 // ReconcileSystemSeed. See SeedSystemTyped for the docType contract.
-func ReconcileSystemSeedTyped(ctx context.Context, sys *SystemSeedStore, docs *Store, docType, name, body string, tags []string, createdBy string, now time.Time) (ReconcileResult, error) {
+// headline, when non-empty, is applied to the mirrored document row the
+// same way tags are — a targeted update that surfaces the artifact in
+// the discovery index without touching body or version history.
+func ReconcileSystemSeedTyped(ctx context.Context, sys *SystemSeedStore, docs *Store, docType, name, body string, tags []string, headline, createdBy string, now time.Time) (ReconcileResult, error) {
 	if docType == "" {
 		docType = TypeDocument
 	}
-	hash := HashBodyAndTags(body, tags)
+	hash := HashBodyAndTags(body, tags, headline)
 	existing, err := sys.Get(ctx, name)
 	switch {
 	case err == nil && existing.EmbeddedHash == hash:
@@ -217,16 +223,23 @@ func ReconcileSystemSeedTyped(ctx context.Context, sys *SystemSeedStore, docs *S
 	if err := SeedSystemTyped(ctx, docs, docType, name, body, createdBy, now); err != nil {
 		return ReconcileResult{}, fmt.Errorf("system_seed: mirror to documents: %w", err)
 	}
-	// Apply tags after the document row exists. SetDocumentTags is a
-	// targeted update — it leaves body and version history alone, just
-	// flips the documents.tags array.
-	if tags != nil {
+	// Apply tags + headline after the document row exists. Both are
+	// targeted updates — they leave body and version history alone, just
+	// flipping the documents.tags array / headline column.
+	if tags != nil || headline != "" {
 		doc, lookupErr := docs.lookupDocument(ctx, Key{Scope: ScopeSystem, Name: name})
 		if lookupErr != nil {
 			return ReconcileResult{}, fmt.Errorf("system_seed: lookup after seed: %w", lookupErr)
 		}
-		if _, err := docs.SetDocumentTags(ctx, doc.ID, tags, now); err != nil {
-			return ReconcileResult{}, fmt.Errorf("system_seed: apply tags: %w", err)
+		if tags != nil {
+			if _, err := docs.SetDocumentTags(ctx, doc.ID, tags, now); err != nil {
+				return ReconcileResult{}, fmt.Errorf("system_seed: apply tags: %w", err)
+			}
+		}
+		if headline != "" {
+			if _, err := docs.SetDocumentHeadline(ctx, doc.ID, headline, now); err != nil {
+				return ReconcileResult{}, fmt.Errorf("system_seed: apply headline: %w", err)
+			}
 		}
 	}
 	return ReconcileResult{Name: name, Changed: true, Created: created}, nil

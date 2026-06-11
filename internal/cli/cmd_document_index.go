@@ -135,8 +135,13 @@ listing is bounded by a hard cap; truncation is reported on stderr.`,
 			}
 			// Bind project/workspace from --config when not passed, mirroring
 			// `skill index` — a bare invocation otherwise leaves project scope
-			// unbound and the server rejects it. Explicit flags win.
-			wsArg, pjArg = resolveSkillScopeBinding(ctx, *configArg, *userArg, wsArg, pjArg)
+			// unbound and the server rejects it. Explicit flags win. System
+			// scope takes no binding: system rows carry no workspace/project,
+			// and the store ANDs every supplied id, so a bound system query
+			// matches nothing.
+			if scopeArg != "system" {
+				wsArg, pjArg = resolveSkillScopeBinding(ctx, *configArg, *userArg, wsArg, pjArg)
+			}
 			index, truncated, err := buildDocumentIndex(ctx, dispatch, scopeArg, wsArg, pjArg)
 			if err != nil {
 				return err

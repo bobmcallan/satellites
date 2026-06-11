@@ -166,7 +166,7 @@ func main() {
 			storedBody = string(body)
 		}
 		keep[name] = true
-		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, storedBody, fm.Tags, "system:seed", time.Now().UTC())
+		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, storedBody, fm.Tags, fm.Headline, "system:seed", time.Now().UTC())
 		if err != nil {
 			arbor.Fatal("reconcile system seed", "name", name, "err", err)
 		}
