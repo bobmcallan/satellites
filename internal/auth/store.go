@@ -101,6 +101,7 @@ func generateRawKey() (string, error) {
 // CreateUser inserts a user idempotently on email; returns the user
 // row (existing or new).
 func (s *Store) CreateUser(ctx context.Context, id, email, displayName string, role Role) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return nil, fmt.Errorf("auth: email required")
 	}
@@ -118,7 +119,9 @@ func (s *Store) CreateUser(ctx context.Context, id, email, displayName string, r
 }
 
 // GetUserByEmail returns the user with the given email or sql.ErrNoRows.
+// Email is matched case-insensitively (rows are stored lower-cased).
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	var u User
 	if err := s.DB.QueryRowContext(ctx, `
         SELECT id, email, display_name, role, created_at
@@ -155,6 +158,9 @@ func (s *Store) UpsertOAuthUser(ctx context.Context, provider, sub, email, displ
 			break
 		}
 	}
+	// Normalise: every users.email write/lookup below uses the lower-cased
+	// form so the row is matchable case-insensitively (e.g. invitation claim).
+	email = emailLC
 
 	// Try update by (provider, sub). On hit, we're done.
 	row := s.DB.QueryRowContext(ctx, `

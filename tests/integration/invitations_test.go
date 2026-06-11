@@ -177,4 +177,33 @@ func TestInvitationVerbsAuthorization(t *testing.T) {
 			t.Fatalf("existing user not added: role=%q err=%v", role, err)
 		}
 	})
+
+	t.Run("existing user invited to project by mixed-case email is registered", func(t *testing.T) {
+		// Regression (sty_1a85bffd): the invite email and the user's stored
+		// email differ only by case. The immediate claim must still create the
+		// project_members row — previously users.email was stored verbatim and
+		// the lower-cased invite lookup missed, so the invitee was only added to
+		// the pending-invitations list and never registered as a member.
+		pj, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "iv-pj"}, now)
+		if err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		member, _ := authStore.CreateUser(ctx, "usr_iv_mc", "Mixed.Case@IV.Local", "Mixed", auth.RoleUser)
+		req, _ := json.Marshal(map[string]string{
+			"email": "Mixed.Case@IV.Local", "scope": "project", "project_id": pj.ID, "role": project.RoleWrite,
+		})
+		raw, err := verb.Dispatch(authWithUser(ctx, wsOwner), "invitation_create", req)
+		if err != nil {
+			t.Fatalf("invite existing to project: %v", err)
+		}
+		var inv invitation.Invitation
+		_ = json.Unmarshal(raw, &inv)
+		if inv.Status != invitation.StatusAccepted {
+			t.Fatalf("status = %q, want accepted (immediate claim)", inv.Status)
+		}
+		role, err := pjStore.GetRole(ctx, pj.ID, member.ID)
+		if err != nil || role != project.RoleWrite {
+			t.Fatalf("invited user not registered as project member: role=%q err=%v", role, err)
+		}
+	})
 }
