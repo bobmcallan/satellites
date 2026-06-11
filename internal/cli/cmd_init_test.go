@@ -219,6 +219,9 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	if !commandUnderEvent(t, s, "PreToolUse", accessMatcher, accessCommand) {
 		t.Errorf("access reminder hook (PreToolUse %s → %s) not installed", accessMatcher, accessCommand)
 	}
+	if !commandUnderEvent(t, s, "PreToolUse", commitGateMatcher, commitGateCommand) {
+		t.Errorf("commit-gate hook (PreToolUse %s → %s) not installed", commitGateMatcher, commitGateCommand)
+	}
 	if !commandUnderEvent(t, s, "UserPromptSubmit", "", promptCommand) {
 		t.Errorf("prompt reminder hook (UserPromptSubmit → %s) not installed", promptCommand)
 	}
@@ -244,8 +247,8 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	var doc map[string]any
 	_ = json.Unmarshal(s2, &doc)
 	hooks := doc["hooks"].(map[string]any)
-	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 4 { // door + access + code-nudge + always-context re-anchor
-		t.Errorf("PreToolUse has %d entries after re-init, want 4 (door + access + code-nudge + always-context)", len(pre))
+	if pre, _ := hooks["PreToolUse"].([]any); len(pre) != 5 { // door + commit-gate + access + code-nudge + always-context re-anchor
+		t.Errorf("PreToolUse has %d entries after re-init, want 5 (door + commit-gate + access + code-nudge + always-context)", len(pre))
 	}
 	if ups, _ := hooks["UserPromptSubmit"].([]any); len(ups) != 1 {
 		t.Errorf("UserPromptSubmit has %d entries after re-init, want 1", len(ups))

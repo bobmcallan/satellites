@@ -77,6 +77,14 @@ type Config struct {
 	// only the default boundary applies (sty_11a6077c).
 	UngatedDirs []string `toml:"ungated_dirs"`
 
+	// CommitGate sets how far the commit-gate (`satellites hook commitgate`,
+	// epic:enforcement-surface) reaches. "" / "push" (default) gates only
+	// `git push` — the share point; "commit" additionally gates `git commit`,
+	// so even local commits require a lease-fresh editable engagement. Read from
+	// the LOCAL toml (not the server) because the PreToolUse hook fires on every
+	// Bash and must be fast + offline-safe. See ResolveCommitGate.
+	CommitGate string `toml:"commit_gate"`
+
 	// Measure configures measure mode — the client's session observability.
 	// It is DEFAULT ON: an absent [measure] section means enabled + record.
 	Measure MeasureConfig `toml:"measure"`
@@ -146,6 +154,24 @@ func (c Config) ResolveWorkDir(repoRoot string) string {
 		repoRoot = "."
 	}
 	return filepath.Join(repoRoot, p)
+}
+
+// CommitGate knob values. CommitGatePush (the default) gates only `git push`;
+// CommitGateCommit additionally gates `git commit`.
+const (
+	CommitGatePush   = "push"
+	CommitGateCommit = "commit"
+)
+
+// ResolveCommitGate returns the normalised commit-gate reach: "commit" when the
+// toml sets commit_gate to that (gate commits too), else "push" (the default —
+// gate only the share point). Any unrecognised value falls back to the safe
+// default rather than erroring, so a typo never disables the push gate.
+func (c Config) ResolveCommitGate() string {
+	if strings.EqualFold(strings.TrimSpace(c.CommitGate), CommitGateCommit) {
+		return CommitGateCommit
+	}
+	return CommitGatePush
 }
 
 // DefaultDataDir is where the client's per-repo data stores (state.db, index.db)

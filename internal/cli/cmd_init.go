@@ -28,6 +28,15 @@ const (
 	hookMatcher = "Edit|Write|MultiEdit|NotebookEdit"
 	hookCommand = "satellites hook gate || exit 2"
 
+	// The commit door (sty_946fc605, epic:enforcement-surface). PreToolUse on
+	// Bash: blocks `git commit`/`git push` without a lease-fresh editable
+	// engagement, closing the leak where edits done via shell + a commit/push
+	// slip past the edit-only START door. Fails closed (`|| exit 2`) like the
+	// START door — a broken/absent client blocks the share rather than allowing
+	// it. The handler itself allows all non-git and read-only git Bash.
+	commitGateMatcher = "Bash"
+	commitGateCommand = "satellites hook commitgate || exit 2"
+
 	// The story-ACCESS trigger (sty_79af820a). PreToolUse on the satellites MCP
 	// story-fetch + UserPromptSubmit on a story id in the prompt. These are
 	// ADVISORY (no `|| exit 2`): a failure must not block a read, and the handler
@@ -72,6 +81,7 @@ type installedHook struct {
 // advisory story-access triggers, and the SessionStart code-index refresh.
 var hooksToInstall = []installedHook{
 	{"PreToolUse", hookMatcher, hookCommand, ".claude/settings.json (PreToolUse START-door hook)"},
+	{"PreToolUse", commitGateMatcher, commitGateCommand, ".claude/settings.json (PreToolUse commit-gate hook)"},
 	{"PreToolUse", accessMatcher, accessCommand, ".claude/settings.json (PreToolUse story-access reminder)"},
 	{"PreToolUse", codeNudgeMatcher, codeNudgeCommand, ".claude/settings.json (PreToolUse code-search nudge)"},
 	{"PreToolUse", accessMatcher, sessionContextCommand, ".claude/settings.json (PreToolUse always-context re-anchor on story fetch)"},

@@ -53,7 +53,7 @@ It fails closed: an unconfigured repo is denied, never allowed.`,
 			return runHookGate(cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
-	hookCmd.AddCommand(gate, newAccessCmd(), newPromptCmd(), newCodeNudgeCmd(), newHookContextCmd())
+	hookCmd.AddCommand(gate, newCommitGateCmd(), newAccessCmd(), newPromptCmd(), newCodeNudgeCmd(), newHookContextCmd())
 	register(hookCmd)
 }
 
@@ -68,11 +68,13 @@ type preToolUseInput struct {
 	ToolInput       toolInputPath `json:"tool_input"`
 }
 
-// toolInputPath is the subset of tool_input the gate needs: the edited path.
-// Edit/Write/MultiEdit carry file_path; NotebookEdit carries notebook_path.
+// toolInputPath is the subset of tool_input the hooks need. Edit/Write/MultiEdit
+// carry file_path; NotebookEdit carries notebook_path; Bash carries command (the
+// commit-gate reads it).
 type toolInputPath struct {
 	FilePath     string `json:"file_path"`
 	NotebookPath string `json:"notebook_path"`
+	Command      string `json:"command"`
 }
 
 // path returns the edited target path (file_path or notebook_path), or "".
