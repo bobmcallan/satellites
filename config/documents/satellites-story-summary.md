@@ -1,5 +1,6 @@
 ---
 name: satellites-story-summary
+description: Reviewer-side summariser — condenses a story's recent ledger activity into a terse step summary recorded after each gate transition. Dispatched by the gate chain, not invoked directly.
 scope: system
 type: skill
 tags: [kind:reviewer]
