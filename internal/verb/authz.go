@@ -62,14 +62,43 @@ func effectiveProjectRole(ctx context.Context, projectID string) string {
 	return effectiveProjectRoleWS(ctx, "", projectID)
 }
 
-// effectiveProjectRoleWS returns the caller's effective project role
-// (admin|write|read|"") as the max over every grant path. wsID, when
-// non-empty, is the project's known workspace (e.g. a document key's
-// workspace_id) — authoritative for the workspace owner/admin inheritance
+// effectiveProjectRoleWS is the caller's ACTUAL project role, capped by any
+// requested agent-role downscope on ctx (sty_3a1374b5). The cap can only
+// ATTENUATE: effective = min(actual, cap.Role), and a project outside
+// cap.Projects (when the list is non-empty) resolves to "". No cap ⇒ the actual
+// role, unchanged — so non-agent (human/session) callers are unaffected.
+func effectiveProjectRoleWS(ctx context.Context, wsID, projectID string) string {
+	actual := actualProjectRoleWS(ctx, wsID, projectID)
+	cap, ok := auth.AgentRoleFromContext(ctx)
+	if !ok {
+		return actual
+	}
+	if len(cap.Projects) > 0 && !sliceContains(cap.Projects, projectID) {
+		return "" // project outside the requested allow-list
+	}
+	if projectRoleRank(cap.Role) < projectRoleRank(actual) {
+		return cap.Role // min(actual, requested)
+	}
+	return actual
+}
+
+func sliceContains(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// actualProjectRoleWS returns the caller's effective project role
+// (admin|write|read|"") as the max over every grant path, BEFORE any agent-role
+// cap. wsID, when non-empty, is the project's known workspace (e.g. a document
+// key's workspace_id) — authoritative for the workspace owner/admin inheritance
 // check, so it works even when no projects row exists yet. When wsID is "",
 // the workspace is resolved from the project store. Defensive against unwired
 // stores (a missing store simply contributes no grant from that path).
-func effectiveProjectRoleWS(ctx context.Context, wsID, projectID string) string {
+func actualProjectRoleWS(ctx context.Context, wsID, projectID string) string {
 	if projectID == "" {
 		return ""
 	}
@@ -151,14 +180,24 @@ func canManageWorkspace(ctx context.Context, wsID string) bool {
 	if u == nil {
 		return false
 	}
-	if u.Role == auth.RoleAdmin {
-		return true
+	admin := u.Role == auth.RoleAdmin
+	if !admin && workspaceStore != nil && wsID != "" {
+		if role, err := workspaceStore.GetRole(ctx, wsID, u.ID); err == nil {
+			admin = role == workspace.RoleOwner || role == workspace.RoleAdmin
+		}
 	}
-	if workspaceStore == nil || wsID == "" {
+	if !admin {
 		return false
 	}
-	role, err := workspaceStore.GetRole(ctx, wsID, u.ID)
-	return err == nil && (role == workspace.RoleOwner || role == workspace.RoleAdmin)
+	// Honour an agent-role downscope (sty_3a1374b5): a session capped below admin,
+	// or scoped to specific projects, is not acting as a workspace manager — it
+	// cannot create projects or grant members.
+	if cap, ok := auth.AgentRoleFromContext(ctx); ok {
+		if projectRoleRank(cap.Role) < projectRoleRank(project.RoleAdmin) || len(cap.Projects) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // callerIsGlobalAdmin reports whether the caller is a global admin.

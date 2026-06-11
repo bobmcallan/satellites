@@ -14,6 +14,51 @@ type ctxKey struct{}
 type apiKeyRoleCtxKey struct{}
 type apiKeyProjectCtxKey struct{}
 type transportCtxKey struct{}
+type agentRoleCtxKey struct{}
+
+// AgentRoleCap is a requested DOWNSCOPE on the caller's session (sty_3a1374b5):
+// the caller asks its agent to operate at no more than Role, optionally
+// restricted to Projects (empty = every project). It can only ATTENUATE —
+// effectiveProjectRole takes min(actual, Role) and denies any project outside
+// Projects. Because it never escalates, it is safe to accept from a client
+// header without additional trust.
+type AgentRoleCap struct {
+	Role     string
+	Projects []string
+}
+
+// WithAgentRole stamps a requested downscope cap onto ctx.
+func WithAgentRole(ctx context.Context, cap AgentRoleCap) context.Context {
+	return context.WithValue(ctx, agentRoleCtxKey{}, cap)
+}
+
+// AgentRoleFromContext returns the requested cap and whether one was set.
+func AgentRoleFromContext(ctx context.Context) (AgentRoleCap, bool) {
+	c, ok := ctx.Value(agentRoleCtxKey{}).(AgentRoleCap)
+	return c, ok
+}
+
+// agentRoleFromHeader reads X-Satellites-Agent-Role (+ optional
+// X-Satellites-Agent-Projects, comma-separated) and stamps a cap on ctx when a
+// recognised role is present. A blank/unrecognised role leaves ctx unchanged
+// (no cap → full user). Header-asserted is safe: the cap only attenuates.
+func agentRoleFromHeader(ctx context.Context, r *http.Request) context.Context {
+	role := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Satellites-Agent-Role")))
+	switch role {
+	case "read", "write", "admin":
+	default:
+		return ctx
+	}
+	var projects []string
+	if p := strings.TrimSpace(r.Header.Get("X-Satellites-Agent-Projects")); p != "" {
+		for _, part := range strings.Split(p, ",") {
+			if s := strings.TrimSpace(part); s != "" {
+				projects = append(projects, s)
+			}
+		}
+	}
+	return WithAgentRole(ctx, AgentRoleCap{Role: role, Projects: projects})
+}
 
 // Transport identifies how a verb call entered the process. It keeps
 // operational content writes (document/skill/principle upsert) off the MCP
@@ -139,7 +184,9 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 					Email: claims.Email,
 				}
 			}
-			r = r.WithContext(WithUser(r.Context(), u))
+			ctx := WithUser(r.Context(), u)
+			ctx = agentRoleFromHeader(ctx, r)
+			r = r.WithContext(ctx)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -160,6 +207,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		ctx := WithUser(r.Context(), u)
 		ctx = WithAPIKeyRole(ctx, role)
 		ctx = WithAPIKeyProject(ctx, keyProject)
+		ctx = agentRoleFromHeader(ctx, r)
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	})
