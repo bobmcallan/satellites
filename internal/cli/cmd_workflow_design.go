@@ -218,11 +218,15 @@ func availableWorkflowSkills() []map[string]string {
 }
 
 // availableGateSkills returns the reviewer-gate skills (name + description) the
-// design agent may reference as reviewer_skill.
+// design agent may reference as reviewer_skill. Selection is by the declared
+// dispatch contract (frontmatter kind: gate), not the name — a capability that
+// happens to be named *-review (skill-review, document-review, …) is not a
+// gate and must not be offered, while every true gate (techdebt, doc-drift)
+// is offered regardless of naming (sty_c3f126cb atomicity).
 func availableGateSkills() []map[string]string {
 	var out []map[string]string
 	for _, s := range materialisedSkills() {
-		if !strings.Contains(s.name, "review") {
+		if s.kind != "gate" {
 			continue
 		}
 		out = append(out, map[string]string{"name": s.name, "description": s.description})

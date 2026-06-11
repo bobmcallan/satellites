@@ -25,6 +25,7 @@ Restate the goal back and get agreement. Only then draft.
 A skill is built on Spec, Verifier, Environment — write each explicitly (kind-aware):
 
 - **Spec** — the contract. For a `workflow`, the `## Workflow` states/transitions; for a `gate`, the decision rule; for a `capability`/`function`, the purpose + the clarified questions it answers. Imperative, minimal, repo-agnostic.
+  **Atomic:** a `gate` carries exactly ONE decision rule with one verdict. A non-gate skill never embeds a fail-closed check or verdict routine — it NAMES the gate skill to run and honours its verdict; the routine has one home, the gate.
 - **Verifier** — how success is checked, not assumed: a gate to run, eval criteria stated upfront, a test, or an external/measurable signal. Prefer verification over raw generation.
 - **Environment** — the scope it runs in, plus a guardrail block:
 

@@ -18,29 +18,17 @@ latest pushed commit, not the local tree. A change not committed + pushed +
 
 ## Routine
 
-1. **Technical-debt gate — pre-commit, fail closed** ([[satellites-technical-debt-review]]):
+1. **Run the pre-commit gates — each is its own atomic skill; this checkpoint
+   only names them and honours their verdicts.** A gate's routine, repair
+   semantics, and guardrails live in the gate skill — the single home; do not
+   restate or improvise them here.
 
-   ```bash
-   .satellites/satellites techdebt review
-   ```
-
-   **Exit 0 (CLEAN)** → proceed. **Exit 1 (BLOCKED)** → a new red or an unowned
-   register row; **do not commit**. Fix it, or file a tracking story and add an
-   owned register row (`| <check_id> | <story_id> | <reason> |`),
-   `satellites document upload`, and re-run. A STALE row on a complete run means a
-   window closed — remove it. "It was already broken" is not a pass.
-
-1b. **Command-surface drift gate — pre-commit, fail closed** when the change
-   touches the CLI ([[satellites-doc-drift-review]]):
-
-   ```bash
-   .satellites/satellites surface check
-   ```
-
-   **Exit 0 (CLEAN)** → proceed. **Exit 1 (BLOCKED)** → an added/renamed command
-   is undocumented; reconcile the doc in this same change
-   (`satellites document upload`) and re-run. Skip only when the change does not
-   touch `internal/cli` / `cmd/satellites`.
+   - **[[satellites-technical-debt-review]]** — always: `satellites techdebt
+     review`. Exit 0 → proceed; exit 1 → **do not commit**, resolve per the gate
+     skill, re-run.
+   - **[[satellites-doc-drift-review]]** — when the change touches the CLI
+     (`internal/cli`, `cmd/satellites`): `satellites surface check`. Exit 0 →
+     proceed; exit 1 → **do not commit**, resolve per the gate skill, re-run.
 
 2. **Configure + stage**
 

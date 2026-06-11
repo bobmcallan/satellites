@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,5 +82,45 @@ func TestProposalValidationViaReviewContextConflicts(t *testing.T) {
 	}
 	if !hasLifecycle {
 		t.Fatal("cyclic proposal should yield workflow-lifecycle")
+	}
+}
+
+// TestAvailableGateSkillsKindFiltered pins the sty_c3f126cb atomicity
+// contract: available_gate_skills is selected by the declared dispatch
+// contract (frontmatter kind: gate), not by name. A true gate without
+// "review" in its name is offered; a capability named *-review is not.
+func TestAvailableGateSkillsKindFiltered(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, kind, desc string) {
+		d := filepath.Join(dir, ".claude", "skills", name)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: " + name + "\ntype: skill\nkind: " + kind + "\ndescription: " + desc + "\n---\n# " + name + "\n"
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("techdebt-gate", "gate", "fail-closed pre-commit gate")
+	write("plan-review", "gate", "entry gate")
+	write("skill-review", "capability", "a capability that merely reviews artifacts")
+	write("commit-push", "capability", "checkpoint capability")
+
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	got := availableGateSkills()
+	names := map[string]bool{}
+	for _, g := range got {
+		names[g["name"]] = true
+	}
+	if !names["techdebt-gate"] || !names["plan-review"] {
+		t.Errorf("kind:gate skills must be offered, got %v", names)
+	}
+	if names["skill-review"] || names["commit-push"] {
+		t.Errorf("non-gate skills must not be offered, got %v", names)
 	}
 }
