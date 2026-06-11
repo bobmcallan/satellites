@@ -10,6 +10,7 @@ package project
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,19 @@ type Project struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 	SeedMD          string     `json:"seed_md,omitempty"`
 	SeedUpdatedAt   *time.Time `json:"seed_updated_at,omitempty"`
+	// NonRepo is DERIVED, never stored (operator decision, sty_88a76023): a
+	// project with no bound git remote IS a document-collection project. Set on
+	// create and on every read so consumers (agents, portal, tooling) get an
+	// explicit signal without re-deriving the rule.
+	NonRepo bool `json:"non_repo"`
+}
+
+// DeriveNonRepo reports whether a project is a document-collection project — it
+// has no bound git remote. The single source of the non_repo rule: a project
+// with an empty git_url_canonical is non-repo. Kept in one place so create and
+// every read agree.
+func DeriveNonRepo(gitURLCanonical string) bool {
+	return strings.TrimSpace(gitURLCanonical) == ""
 }
 
 // NewID returns a fresh project id in the canonical `proj_<8hex>`

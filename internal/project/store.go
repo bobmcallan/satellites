@@ -67,6 +67,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput, now time.Time) (Proj
 		Status:          StatusActive,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		NonRepo:         DeriveNonRepo(canon),
 	}, nil
 }
 
@@ -161,6 +162,8 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
     `, p.Name, p.Description, p.GitURLCanonical, now, id); err != nil {
 		return Project{}, fmt.Errorf("project: update: %w", err)
 	}
+	// git_url may have changed above; recompute the derived non_repo signal.
+	p.NonRepo = DeriveNonRepo(p.GitURLCanonical)
 	return p, nil
 }
 
@@ -190,6 +193,8 @@ func scanCommon(s rowScanner) (Project, error) {
 		t := seedAtRow.Time
 		p.SeedUpdatedAt = &t
 	}
+	// Derived, not stored: a project with no bound git remote is non-repo.
+	p.NonRepo = DeriveNonRepo(p.GitURLCanonical)
 	return p, nil
 }
 
