@@ -56,9 +56,9 @@
       <button type="button" class="story-tab" role="tab" data-tab="description"
               :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
               @click="tab='description'">Description / ACs</button>
-      <button type="button" class="story-tab" role="tab" data-tab="progress"
-              :class="tab==='progress' ? 'is-active' : ''" :aria-selected="tab==='progress' ? 'true' : 'false'"
-              @click="tab='progress'">Progress</button>
+      <button type="button" class="story-tab" role="tab" data-tab="result"
+              :class="tab==='result' ? 'is-active' : ''" :aria-selected="tab==='result' ? 'true' : 'false'"
+              @click="tab='result'">Result</button>
       <button type="button" class="story-tab" role="tab" data-tab="ledger"
               :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
               @click="tab='ledger'">Ledger / Log</button>
@@ -86,7 +86,7 @@
     {{/* Progress tab: the live region — refetched + swapped on a story-scoped
          SSE trigger (sty_96cc0ade). The PROCESS trace lives in the story-trace
          template; the swap keeps it live. */}}
-    <div class="story-tabpanel" role="tabpanel" data-tabpanel="progress" x-show="tab==='progress'" x-cloak>
+    <div class="story-tabpanel" role="tabpanel" data-tabpanel="result" x-show="tab==='result'" x-cloak>
       <div data-field="story-live-region">
         {{template "story-trace" .}}
       </div>
@@ -188,11 +188,11 @@
       <code data-field="story-id">{{.StoryID}}</code>
       · type <code data-field="story-type">{{.StoryType}}</code>
       · status <span class="story-status-pill" data-field="current-status">{{.CurrentStatus}}</span>
-      {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{end}}
+      {{if .WorkflowName}}· workflow <code data-field="workflow-name">{{.WorkflowName}}</code>{{if .WorkflowSource}} <span class="qa-workflow-source" data-field="workflow-source">({{.WorkflowSource}})</span>{{end}}{{end}}
     </p>
   {{if .NoWorkflow}}
   <section class="panel" data-section="no-workflow">
-    <p class="empty" data-field="no-workflow">No workflow governs story type <code>{{.StoryType}}</code> — nothing to reconcile. A <code>kind:workflow</code> skill whose <code>applies_to</code> contains this type defines the declared process.</p>
+    <p class="empty" data-field="no-workflow">This story embeds no <code>## Workflow</code> and no <code>kind:workflow</code> skill's <code>applies_to</code> covers type <code>{{.StoryType}}</code> — nothing to reconcile. Embed a <code>## Workflow</code> in the story (or declare a workflow with <code>applies_to: ["*"]</code>) to define its process.</p>
   </section>
   {{else}}
   <section class="panel" data-section="process-trace">
@@ -220,6 +220,17 @@
           <td class="qa-col-when" data-field="when">{{.When}}</td>
           <td class="qa-col-notes" data-field="notes">{{.Verdict}}</td>
         </tr>
+        {{/* The edge's full event history, ledger order — a rejected edge
+             visibly loops: request, reject (notes), re-request, accept. */}}
+        {{range .Events}}
+        <tr class="qa-row-event qa-row-event-{{.Kind}}" data-row="gate-event" data-event-kind="{{.Kind}}">
+          <td class="qa-col-event-pad"></td>
+          <td class="qa-col-event-kind" data-field="event-kind" colspan="2"><code>{{.Kind}}</code></td>
+          <td class="qa-col-event-actor" data-field="event-actor">{{.Actor}}</td>
+          <td class="qa-col-event-when" data-field="event-when">{{.When}}</td>
+          <td class="qa-col-event-notes" data-field="event-notes">{{.Notes}}</td>
+        </tr>
+        {{end}}
         {{if .StepSummary}}
         <tr class="ledger-row-summary" data-row="step-summary">
           <td colspan="6"><div class="ledger-summary-text" data-field="step-summary">{{.StepSummary}}</div></td>
@@ -229,6 +240,34 @@
       </tbody>
     </table>
   </section>
+  {{if .CloseOut.Show}}
+  <section class="panel" data-section="close-out">
+    <h2 class="section-heading">Close-out{{if not .CloseOut.Terminal}} <span class="qa-status-label" data-field="closeout-state">(in flight)</span>{{end}}</h2>
+    <table class="ledger-table" data-table="close-out">
+      <thead>
+        <tr><th></th><th>estimate</th><th>actual</th></tr>
+      </thead>
+      <tbody>
+        <tr data-row="closeout-time">
+          <td>time</td>
+          <td data-field="estimate-time">{{.CloseOut.EstimateTime}}</td>
+          <td data-field="actual-time">{{.CloseOut.ActualElapsed}}</td>
+        </tr>
+        <tr data-row="closeout-tokens">
+          <td>tokens</td>
+          <td data-field="estimate-tokens">{{.CloseOut.EstimateTokens}}</td>
+          <td data-field="actual-tokens">{{.CloseOut.ActualTokens}}</td>
+        </tr>
+        <tr data-row="closeout-rejects">
+          <td>rejects / reprocess</td>
+          <td data-field="estimate-rejects">—</td>
+          <td data-field="actual-rejects">{{.CloseOut.TotalRejects}}</td>
+        </tr>
+      </tbody>
+    </table>
+    {{if .CloseOut.EstimateBasis}}<p class="changelog-lede" data-field="estimate-basis">basis: {{.CloseOut.EstimateBasis}}</p>{{end}}
+  </section>
+  {{end}}
   {{end}}
 {{end}}
 

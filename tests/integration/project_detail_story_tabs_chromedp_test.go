@@ -20,8 +20,8 @@ import (
 
 // TestProjectDetailStoryTabs_Chromedp drives the project-detail inline story
 // panel (sty_762730ad): expanding a story row shows readable markdown
-// description/ACs, and tabs (Description/ACs · Progress · Ledger/Log) where
-// Progress and Ledger lazy-load via fragment endpoints.
+// description/ACs, and tabs (Description/ACs · Result · Ledger/Log) where
+// Result and Ledger lazy-load via fragment endpoints.
 func TestProjectDetailStoryTabs_Chromedp(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
 
@@ -129,16 +129,16 @@ func TestProjectDetailStoryTabs_Chromedp(t *testing.T) {
 		t.Errorf("AC1: acceptance criteria missing: %q", acHTML)
 	}
 
-	// AC2/AC3: Progress tab lazy-loads the PROCESS trace.
+	// AC2/AC3: Result tab lazy-loads the workflow trace.
 	if err := chromedp.Run(bctx,
-		chromedp.Click(`[data-tab="progress"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-field="story-progress"] [data-table="process-trace"]`, chromedp.ByQuery),
+		chromedp.Click(`[data-tab="result"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="story-result"] [data-table="process-trace"]`, chromedp.ByQuery),
 	); err != nil {
-		t.Fatalf("progress tab: %v", err)
+		t.Fatalf("result tab: %v", err)
 	}
 	var traceRows int
 	if err := chromedp.Run(bctx, chromedp.Evaluate(
-		`document.querySelectorAll('[data-field="story-progress"] [data-row="transition"]').length`, &traceRows)); err != nil {
+		`document.querySelectorAll('[data-field="story-result"] [data-row="transition"]').length`, &traceRows)); err != nil {
 		t.Fatalf("count trace rows: %v", err)
 	}
 	if traceRows == 0 {

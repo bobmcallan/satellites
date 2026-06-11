@@ -43,6 +43,15 @@ const (
 	kindStepSummary      = "step_summary"
 )
 
+// spineKinds are the row kinds that constitute process activity — used for
+// the close-out's started-at derivation.
+var spineKinds = map[string]bool{
+	kindReviewRequested:  true,
+	kindReviewAccept:     true,
+	kindReviewReject:     true,
+	kindStatusTransition: true,
+}
+
 // Actual-status values for a declared transition.
 const (
 	// StatusNotReached: the transition has not been attempted and is not the
@@ -63,25 +72,61 @@ const (
 // spinePayload is the union of the structured payload fields the reviewer
 // spine rows carry. Each kind populates a subset; absent fields stay empty.
 type spinePayload struct {
-	FromStatus string `json:"from_status"`
-	ToStatus   string `json:"to_status"`
-	Gate       string `json:"gate"`
-	GateSkill  string `json:"gate_skill"`
-	Decision   string `json:"decision"`
+	FromStatus string    `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	Gate       string    `json:"gate"`
+	GateSkill  string    `json:"gate_skill"`
+	Decision   string    `json:"decision"`
+	Estimate   *Estimate `json:"estimate"`
+}
+
+// GateEvent is one ledger event on a transition's edge, in ledger order —
+// request, reject (with notes), re-request, accept, fire. Rendering the full
+// sequence makes a challenged-and-reprocessed story visibly loop instead of
+// reading forward-only (sty_a4257811).
+type GateEvent struct {
+	Kind  string    `json:"kind"`
+	At    time.Time `json:"at"`
+	Actor string    `json:"actor,omitempty"`
+	Notes string    `json:"notes,omitempty"`
 }
 
 // TransitionTrace is one declared transition annotated with what actually
 // happened to it, per the ledger.
 type TransitionTrace struct {
-	From          string     `json:"from"`
-	To            string     `json:"to"`
-	ReviewerSkill string     `json:"reviewer_skill,omitempty"` // declared gate ("" = unguarded)
-	Status        string     `json:"status"`                   // one of the Status* values
-	Verdict       string     `json:"verdict,omitempty"`        // last accept/reject notes
-	Actor         string     `json:"actor,omitempty"`
-	At            *time.Time `json:"at,omitempty"`           // when it fired (status_transition)
-	StepSummary   string     `json:"step_summary,omitempty"` // per-transition summary prose
-	RejectCount   int        `json:"reject_count,omitempty"` // gate rejections before accept
+	From          string      `json:"from"`
+	To            string      `json:"to"`
+	ReviewerSkill string      `json:"reviewer_skill,omitempty"` // declared gate ("" = unguarded)
+	Status        string      `json:"status"`                   // one of the Status* values
+	Verdict       string      `json:"verdict,omitempty"`        // last accept/reject notes
+	Actor         string      `json:"actor,omitempty"`
+	At            *time.Time  `json:"at,omitempty"`           // when it fired (status_transition)
+	StepSummary   string      `json:"step_summary,omitempty"` // per-transition summary prose
+	RejectCount   int         `json:"reject_count,omitempty"` // gate rejections before accept
+	Events        []GateEvent `json:"events,omitempty"`       // full edge history, ledger order
+}
+
+// Estimate is the plan-stage projection a gate recorded in its accept
+// payload (`estimate: {time_minutes, tokens, basis}`). Keyed purely on the
+// payload field — never on which gate skill wrote it.
+type Estimate struct {
+	TimeMinutes int    `json:"time_minutes"`
+	Tokens      int    `json:"tokens"`
+	Basis       string `json:"basis,omitempty"`
+}
+
+// CloseOut compares the recorded estimate against what the ledger shows
+// actually happened. TokensActual stays nil until a reviewer-metrics source
+// records token actuals — the view renders the slot as "—"; the shape does
+// not change when it lands.
+type CloseOut struct {
+	Estimate       *Estimate  `json:"estimate,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"` // first spine event
+	EndedAt        *time.Time `json:"ended_at,omitempty"`   // transition into a terminal state
+	ElapsedMinutes int        `json:"elapsed_minutes,omitempty"`
+	TotalRejects   int        `json:"total_rejects"`
+	TokensActual   *int       `json:"tokens_actual,omitempty"`
+	Terminal       bool       `json:"terminal"` // story sits in a state with no outgoing transition
 }
 
 // ProcessTrace is the reconciled declared-vs-actual view for one story.
@@ -91,6 +136,7 @@ type ProcessTrace struct {
 	WorkflowName  string            `json:"workflow_name"`
 	CurrentStatus string            `json:"current_status"`
 	Transitions   []TransitionTrace `json:"transitions"`
+	CloseOut      CloseOut          `json:"close_out"`
 }
 
 // Reconcile overlays the actual ledger trail onto the declared workflow.
@@ -131,6 +177,13 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 					} else {
 						tt.Status = StatusAccepted
 					}
+					tt.Events = append(tt.Events, GateEvent{Kind: e.Kind, At: e.CreatedAt, Actor: e.Actor})
+				}
+			case kindReviewRequested:
+				// Requests carry from_status + gate; record the attempt so a
+				// rejected-then-retried edge shows its full loop.
+				if p.FromStatus == tr.From && (p.ToStatus == "" || p.ToStatus == tr.To) && gateMatch(p.Gate, tr.ReviewerSkill) {
+					tt.Events = append(tt.Events, GateEvent{Kind: e.Kind, At: e.CreatedAt, Actor: e.Actor})
 				}
 			case kindReviewAccept:
 				// Accept may omit to_status on some rows; key on from_status +
@@ -143,6 +196,7 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 					if e.Actor != "" {
 						tt.Actor = e.Actor
 					}
+					tt.Events = append(tt.Events, GateEvent{Kind: e.Kind, At: e.CreatedAt, Actor: e.Actor, Notes: strings.TrimSpace(e.Body)})
 				}
 			case kindReviewReject:
 				// Reject rows carry no to_status; disambiguate by gate.
@@ -157,6 +211,7 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 							tt.Actor = e.Actor
 						}
 					}
+					tt.Events = append(tt.Events, GateEvent{Kind: e.Kind, At: e.CreatedAt, Actor: e.Actor, Notes: strings.TrimSpace(e.Body)})
 				}
 			case kindStepSummary:
 				if p.FromStatus == tr.From && p.ToStatus == tr.To {
@@ -170,7 +225,55 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 		}
 		out.Transitions = append(out.Transitions, tt)
 	}
+	out.CloseOut = closeOut(currentStatus, wf, sorted, out.Transitions)
 	return out
+}
+
+// closeOut derives the estimate-vs-actual summary purely from configuration
+// (the workflow's transition graph decides which states are terminal) and the
+// ledger rows that already land today (sty_a4257811). The estimate comes from
+// the FIRST review_accept payload carrying an `estimate` object — keyed on the
+// payload field, never on a gate skill's name.
+func closeOut(currentStatus string, wf *workflow.Workflow, sorted []LedgerEntry, transitions []TransitionTrace) CloseOut {
+	var co CloseOut
+
+	outgoing := map[string]bool{}
+	terminal := map[string]bool{}
+	for _, tr := range wf.Transitions {
+		outgoing[tr.From] = true
+	}
+	for _, tr := range wf.Transitions {
+		if !outgoing[tr.To] {
+			terminal[tr.To] = true
+		}
+	}
+	co.Terminal = terminal[currentStatus]
+
+	for _, e := range sorted {
+		var p spinePayload
+		if len(e.Payload) > 0 {
+			_ = json.Unmarshal(e.Payload, &p)
+		}
+		if spineKinds[e.Kind] && co.StartedAt == nil {
+			at := e.CreatedAt
+			co.StartedAt = &at
+		}
+		if e.Kind == kindReviewAccept && co.Estimate == nil && p.Estimate != nil {
+			est := *p.Estimate
+			co.Estimate = &est
+		}
+		if e.Kind == kindStatusTransition && terminal[p.ToStatus] {
+			at := e.CreatedAt
+			co.EndedAt = &at
+		}
+	}
+	for _, tt := range transitions {
+		co.TotalRejects += tt.RejectCount
+	}
+	if co.StartedAt != nil && co.EndedAt != nil && co.EndedAt.After(*co.StartedAt) {
+		co.ElapsedMinutes = int(co.EndedAt.Sub(*co.StartedAt).Round(time.Minute) / time.Minute)
+	}
+	return co
 }
 
 // gateMatch tolerates the two naming forms a gate appears under in the ledger

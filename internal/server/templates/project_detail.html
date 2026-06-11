@@ -196,9 +196,9 @@
                   <button type="button" class="story-tab" role="tab" data-tab="description"
                           :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
                           @click.stop="tab='description'">Description / ACs</button>
-                  <button type="button" class="story-tab" role="tab" data-tab="progress"
-                          :class="tab==='progress' ? 'is-active' : ''" :aria-selected="tab==='progress' ? 'true' : 'false'"
-                          @click.stop="tab='progress'; if(!loaded.progress){ loaded.progress=true; window.loadStoryFragment('{{.ID}}','trace',$refs.progressPanel); }">Progress</button>
+                  <button type="button" class="story-tab" role="tab" data-tab="result"
+                          :class="tab==='result' ? 'is-active' : ''" :aria-selected="tab==='result' ? 'true' : 'false'"
+                          @click.stop="tab='result'; if(!loaded.result){ loaded.result=true; window.loadStoryFragment('{{.ID}}','trace',$refs.resultPanel); }">Result</button>
                   <button type="button" class="story-tab" role="tab" data-tab="ledger"
                           :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
                           @click.stop="tab='ledger'; if(!loaded.ledger){ loaded.ledger=true; window.loadStoryFragment('{{.ID}}','ledger',$refs.ledgerPanel); }">Ledger / Log</button>
@@ -215,8 +215,8 @@
                   </section>
                 </div>
 
-                <div class="story-tabpanel" role="tabpanel" data-tabpanel="progress" x-show="tab==='progress'" x-cloak>
-                  <div class="story-detail-block" data-field="story-progress" x-ref="progressPanel"><p class="empty">Loading…</p></div>
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="result" x-show="tab==='result'" x-cloak>
+                  <div class="story-detail-block" data-field="story-result" x-ref="resultPanel"><p class="empty">Loading…</p></div>
                 </div>
 
                 <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>

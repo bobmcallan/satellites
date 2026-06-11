@@ -151,3 +151,83 @@ func TestReconcile_NilWorkflow(t *testing.T) {
 		t.Fatalf("nil workflow trace = %+v", tr)
 	}
 }
+
+// TestReconcile_AlienWorkflowEventsAndCloseOut pins the sty_a4257811
+// config-over-code constraint: a workflow whose states and gate names appear
+// nowhere in the satellites codebase derives its stages, its full edge event
+// sequence (request → reject → re-request → accept → fire: a visible loop),
+// and its close-out (estimate from any accept payload's `estimate` object,
+// elapsed to the config-derived terminal state, reject totals) — proving the
+// reconciler hardcodes no stage, gate, status, or type knowledge.
+func TestReconcile_AlienWorkflowEventsAndCloseOut(t *testing.T) {
+	wf := &workflow.Workflow{
+		Name:   "moonbase-workflow",
+		States: []string{"draft", "vetting", "sealed"},
+		Transitions: []workflow.Transition{
+			{From: "draft", To: "vetting", ReviewerSkill: "lunar-intake-review"},
+			{From: "vetting", To: "sealed", ReviewerSkill: "qa-seal-review"},
+		},
+	}
+	entries := []LedgerEntry{
+		ent("review_requested", "", map[string]any{"from_status": "draft", "gate": "lunar-intake-review"}, 0),
+		ent("review_accept", "intake fine", map[string]any{
+			"from_status": "draft", "to_status": "vetting", "gate": "lunar-intake-review",
+			"estimate": map[string]any{"time_minutes": 45, "tokens": 120000, "basis": "two craters"},
+		}, 60),
+		ent("status_transition", "", map[string]any{"from_status": "draft", "to_status": "vetting"}, 61),
+		ent("review_requested", "", map[string]any{"from_status": "vetting", "gate": "qa-seal-review"}, 120),
+		ent("review_reject", "seal leaks", map[string]any{"from_status": "vetting", "gate": "qa-seal-review"}, 180),
+		ent("review_requested", "", map[string]any{"from_status": "vetting", "gate": "qa-seal-review"}, 240),
+		ent("review_accept", "sealed tight", map[string]any{"from_status": "vetting", "to_status": "sealed", "gate": "qa-seal-review"}, 3600),
+		ent("status_transition", "", map[string]any{"from_status": "vetting", "to_status": "sealed"}, 3601),
+	}
+
+	tr := Reconcile("sty_alien", "moon", "sealed", wf, entries)
+
+	seal, ok := find(tr, "vetting", "sealed")
+	if !ok || seal.Status != StatusAccepted || seal.RejectCount != 1 {
+		t.Fatalf("seal edge wrong: %+v", seal)
+	}
+	kinds := make([]string, 0, len(seal.Events))
+	for _, ev := range seal.Events {
+		kinds = append(kinds, ev.Kind)
+	}
+	want := []string{"review_requested", "review_reject", "review_requested", "review_accept", "status_transition"}
+	if len(kinds) != len(want) {
+		t.Fatalf("event sequence = %v, want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("event sequence = %v, want %v", kinds, want)
+		}
+	}
+	if seal.Events[1].Notes != "seal leaks" {
+		t.Errorf("reject notes lost: %+v", seal.Events[1])
+	}
+
+	co := tr.CloseOut
+	if co.Estimate == nil || co.Estimate.TimeMinutes != 45 || co.Estimate.Tokens != 120000 || co.Estimate.Basis != "two craters" {
+		t.Fatalf("estimate not derived from accept payload: %+v", co.Estimate)
+	}
+	if !co.Terminal {
+		t.Error("sealed has no outgoing transition — close-out must read terminal")
+	}
+	if co.TotalRejects != 1 {
+		t.Errorf("total rejects = %d, want 1", co.TotalRejects)
+	}
+	if co.StartedAt == nil || co.EndedAt == nil || co.ElapsedMinutes != 60 {
+		t.Errorf("elapsed wrong: started=%v ended=%v mins=%d", co.StartedAt, co.EndedAt, co.ElapsedMinutes)
+	}
+	if co.TokensActual != nil {
+		t.Error("token actuals must stay nil until a metrics source records them")
+	}
+
+	// Mid-flight: at vetting the seal edge reads pending, intake accepted.
+	mid := Reconcile("sty_alien", "moon", "vetting", wf, entries[:4])
+	if got, _ := find(mid, "vetting", "sealed"); got.Status != StatusPending {
+		t.Errorf("mid-flight seal edge = %s, want pending", got.Status)
+	}
+	if mid.CloseOut.Terminal {
+		t.Error("vetting has an outgoing transition — not terminal")
+	}
+}

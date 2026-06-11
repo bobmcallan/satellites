@@ -1104,6 +1104,15 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   border-left: 2px solid #3a5a36;
   padding-left: 0.6rem;
 }
+/* Result view (sty_a4257811): per-transition edge events — the loop made
+   visible — render muted beneath their transition row; a reject is tinted. */
+.qa-row-event td { background: #0a0a0a; color: #8a8a8a; font-size: 0.8rem; padding: 0.25rem 0.6rem; border-bottom: 1px solid #141414; }
+.qa-row-event td code { color: #9aa7b0; }
+.qa-row-event-review_reject td { color: #c98a8a; }
+.qa-row-event-review_reject td code { color: #d9a0a0; }
+.qa-col-event-notes { white-space: pre-wrap; }
+.qa-workflow-source { color: #777; font-size: 0.8rem; }
+
 .ledger-row.is-expandable { cursor: pointer; }
 .ledger-row.is-expandable:hover { background: #0f0f0f; }
 .ledger-row.is-expandable[aria-expanded="true"] { background: #0f0f0f; }

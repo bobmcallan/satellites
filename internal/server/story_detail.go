@@ -54,6 +54,31 @@ type storyTraceRowView struct {
 	Actor       string
 	When        string
 	RejectCount int
+	Events      []storyTraceEventView
+}
+
+// storyTraceEventView is one edge event (request/reject/re-request/accept/
+// fire) rendered under its transition so a challenged story visibly loops
+// (sty_a4257811). Pure projection of the generic ledger row kinds.
+type storyTraceEventView struct {
+	Kind  string
+	When  string
+	Actor string
+	Notes string
+}
+
+// storyCloseOutView is the estimate-vs-actual close-out block. Every field is
+// derived from the embedded workflow + existing ledger rows; TokensActual
+// renders "—" until a metrics source records token actuals.
+type storyCloseOutView struct {
+	Show           bool
+	Terminal       bool
+	EstimateTime   string
+	EstimateTokens string
+	EstimateBasis  string
+	ActualElapsed  string
+	ActualTokens   string
+	TotalRejects   int
 }
 
 // storyLedgerRowView is one append-only ledger entry for the Ledger/Log tab
@@ -73,7 +98,9 @@ type storyDetailData struct {
 	StoryType          string
 	CurrentStatus      string
 	WorkflowName       string
+	WorkflowSource     string // "embedded" (story's own ## Workflow) or "type" (applies_to fallback)
 	NoWorkflow         bool
+	CloseOut           storyCloseOutView
 	Description        template.HTML
 	AcceptanceCriteria template.HTML
 	Rows               []storyTraceRowView
@@ -152,18 +179,64 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 		arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
 	}
 	data.LedgerRows = ledgerRows(entries)
-	wf, err := resolveWorkflowForStory(ctx, story)
-	if err != nil || wf == nil {
-		if err != nil {
-			arbor.WarnCtx(ctx, "story_detail: resolve workflow", "type", story.Category, "err", err)
+	// The story's OWN embedded ## Workflow is the declared process — it wins
+	// outright (sty_a4257811; the old type-first resolution reported "no
+	// workflow governs" for stories that carried a complete embedded block).
+	// Type-resolution (applies_to, incl. the "*" wildcard) survives only as
+	// the fallback for a story with no embedded block, and the view says
+	// which source it rendered from.
+	wf, wfErr := workflow.ParseBody([]byte(story.Description))
+	if wfErr == nil && wf != nil {
+		data.WorkflowSource = "embedded"
+	} else {
+		wf, wfErr = resolveWorkflowForStory(ctx, story)
+		if wfErr != nil {
+			arbor.WarnCtx(ctx, "story_detail: resolve workflow", "type", story.Category, "err", wfErr)
 		}
+		if wf != nil {
+			data.WorkflowSource = "type"
+		}
+	}
+	if wf == nil {
 		data.NoWorkflow = true
 		return data, nil
 	}
 	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
 	data.WorkflowName = trace.WorkflowName
 	data.Rows = traceRows(trace)
+	data.CloseOut = closeOutView(trace.CloseOut)
 	return data, nil
+}
+
+// closeOutView renders the close-out derivation for the Result view. "—"
+// marks a slot with no recorded value (notably token actuals, which await a
+// reviewer-metrics source).
+func closeOutView(co processtrace.CloseOut) storyCloseOutView {
+	v := storyCloseOutView{
+		Show:           true,
+		Terminal:       co.Terminal,
+		EstimateTime:   "—",
+		EstimateTokens: "—",
+		ActualElapsed:  "—",
+		ActualTokens:   "—",
+		TotalRejects:   co.TotalRejects,
+	}
+	if co.Estimate != nil {
+		if co.Estimate.TimeMinutes > 0 {
+			v.EstimateTime = fmt.Sprintf("%dm", co.Estimate.TimeMinutes)
+		}
+		if co.Estimate.Tokens > 0 {
+			v.EstimateTokens = fmt.Sprintf("%dk", co.Estimate.Tokens/1000)
+		}
+		v.EstimateBasis = co.Estimate.Basis
+	}
+	if co.ElapsedMinutes > 0 {
+		v.ActualElapsed = fmt.Sprintf("%dm", co.ElapsedMinutes)
+	}
+	if co.TokensActual != nil {
+		v.ActualTokens = fmt.Sprintf("%dk", *co.TokensActual/1000)
+	}
+	return v
 }
 
 // storyTraceFragmentHandler renders just the live trace region (status pill +
@@ -413,6 +486,14 @@ func traceRows(trace processtrace.ProcessTrace) []storyTraceRowView {
 			row.When = t.At.UTC().Format("2006-01-02 15:04")
 		} else {
 			row.When = "—"
+		}
+		for _, ev := range t.Events {
+			row.Events = append(row.Events, storyTraceEventView{
+				Kind:  ev.Kind,
+				When:  ev.At.UTC().Format("2006-01-02 15:04"),
+				Actor: ev.Actor,
+				Notes: ev.Notes,
+			})
 		}
 		rows = append(rows, row)
 	}
