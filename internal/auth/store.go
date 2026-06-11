@@ -51,6 +51,9 @@ type User struct {
 	DisplayName string
 	Role        Role
 	CreatedAt   time.Time
+	// LastSeenAt is the last authenticated-access time (throttled), or nil
+	// when the user has never been seen. Backs the member-list "last accessed".
+	LastSeenAt *time.Time
 }
 
 // APIKey is a credential authenticating HTTP/MCP requests.
@@ -123,11 +126,15 @@ func (s *Store) CreateUser(ctx context.Context, id, email, displayName string, r
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u User
+	var lastSeen sql.NullTime
 	if err := s.DB.QueryRowContext(ctx, `
-        SELECT id, email, display_name, role, created_at
+        SELECT id, email, display_name, role, created_at, last_seen_at
           FROM users WHERE email = $1
-    `, email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt); err != nil {
+    `, email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt, &lastSeen); err != nil {
 		return nil, err
+	}
+	if lastSeen.Valid {
+		u.LastSeenAt = &lastSeen.Time
 	}
 	return &u, nil
 }
@@ -274,13 +281,34 @@ func (s *Store) RevokeKeyForUser(ctx context.Context, userID, id string) error {
 // by the session middleware to resolve the cookie's user_id to a row.
 func (s *Store) GetUserByID(ctx context.Context, id string) (*User, error) {
 	var u User
+	var lastSeen sql.NullTime
 	if err := s.DB.QueryRowContext(ctx, `
-        SELECT id, email, display_name, role, created_at
+        SELECT id, email, display_name, role, created_at, last_seen_at
           FROM users WHERE id = $1
-    `, id).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt); err != nil {
+    `, id).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.CreatedAt, &lastSeen); err != nil {
 		return nil, err
 	}
+	if lastSeen.Valid {
+		u.LastSeenAt = &lastSeen.Time
+	}
 	return &u, nil
+}
+
+// TouchLastSeen records the user's last authenticated-access time, throttled to
+// at most once per minute per user (one indexed write, no read). Best-effort:
+// callers log and ignore the error — it must never block a request.
+func (s *Store) TouchLastSeen(ctx context.Context, userID string) error {
+	if userID == "" {
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx, `
+        UPDATE users SET last_seen_at = now()
+        WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < now() - interval '1 minute')
+    `, userID)
+	if err != nil {
+		return fmt.Errorf("auth: touch last_seen: %w", err)
+	}
+	return nil
 }
 
 // IssueAPIKey mints an `executor`-role api-key (the only role

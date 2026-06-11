@@ -178,12 +178,13 @@
     {{end}}
 
     <table class="panel-table" data-field="pj-members-table">
-      <thead><tr><th>MEMBER</th><th>ACCESS</th>{{if .IsProjectAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
+      <thead><tr><th>MEMBER</th><th>ACCESS</th><th>LAST ACCESSED</th>{{if .IsProjectAdmin}}<th>ACTIONS</th>{{end}}</tr></thead>
       <tbody>
         {{range .ProjectMembers}}
         <tr data-field="pj-member-row">
           <td data-field="pj-member-email">{{if .Email}}{{.Email}}{{else}}{{.UserID}}{{end}}</td>
           <td data-field="pj-member-role">{{.Role}}{{if eq .Source "workspace"}} <span class="badge" data-field="pj-member-via">via workspace</span>{{end}}</td>
+          <td data-field="pj-member-last">{{.LastAccessed}}</td>
           {{if $.IsProjectAdmin}}
           {{$prole := .Role}}
           {{if eq .Source "workspace"}}
@@ -198,6 +199,12 @@
                 {{range $.ProjectRoles}}<option value="{{.}}"{{if eq . $prole}} selected{{end}}>{{.}}</option>{{end}}
               </select>
             </form>
+            <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-invite-link">
+              <input type="hidden" name="action" value="pj_invite_link">
+              <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
+              <input type="hidden" name="role" value="{{$prole}}">
+              <button type="submit" class="btn secondary" data-action="pj-member-regen-link">REGENERATE LINK</button>
+            </form>
             <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-member-remove">
               <input type="hidden" name="action" value="pj_member_remove">
               <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
@@ -209,7 +216,7 @@
           {{end}}
         </tr>
         {{else}}
-        <tr><td colspan="3" class="empty" data-field="pj-members-empty">No explicit members. Workspace owners/admins have implicit admin access.</td></tr>
+        <tr><td colspan="{{if .IsProjectAdmin}}4{{else}}3{{end}}" class="empty" data-field="pj-members-empty">No explicit members. Workspace owners/admins have implicit admin access.</td></tr>
         {{end}}
       </tbody>
     </table>

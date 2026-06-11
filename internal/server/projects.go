@@ -146,5 +146,6 @@ func withSessionUser(ctx context.Context, cfg Config, userID string) context.Con
 	if err != nil || u == nil {
 		return ctx
 	}
+	cfg.Store.TouchLastSeenAsync(u.ID) // portal access → last-seen (throttled)
 	return auth.WithUser(ctx, u)
 }

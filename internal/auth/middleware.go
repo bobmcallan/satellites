@@ -6,9 +6,26 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 )
+
+// TouchLastSeenAsync records the user's last-seen time off the request path:
+// a detached, time-boxed, best-effort write that never blocks or fails the
+// request. The DB-side throttle keeps it to ~one write per minute per user.
+func (s *Store) TouchLastSeenAsync(userID string) {
+	if userID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.TouchLastSeen(ctx, userID); err != nil {
+			arbor.WarnCtx(ctx, "auth: touch last_seen", "user_id", userID, "err", err)
+		}
+	}()
+}
 
 type ctxKey struct{}
 type apiKeyRoleCtxKey struct{}
@@ -187,6 +204,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 			ctx := WithUser(r.Context(), u)
 			ctx = agentRoleFromHeader(ctx, r)
 			r = r.WithContext(ctx)
+			s.TouchLastSeenAsync(u.ID)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -209,6 +227,7 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		ctx = WithAPIKeyProject(ctx, keyProject)
 		ctx = agentRoleFromHeader(ctx, r)
 		r = r.WithContext(ctx)
+		s.TouchLastSeenAsync(u.ID)
 		next.ServeHTTP(w, r)
 	})
 }

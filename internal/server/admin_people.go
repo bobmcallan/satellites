@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"sort"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
@@ -59,11 +60,12 @@ type adminPeopleData struct {
 }
 
 type peopleMemberRow struct {
-	UserID string
-	Email  string
-	Name   string
-	Role   string
-	Source string // "project" (explicit) | "workspace" (inherited admin)
+	UserID       string
+	Email        string
+	Name         string
+	Role         string
+	Source       string // "project" (explicit) | "workspace" (inherited admin)
+	LastAccessed string // formatted last-seen, or "never"
 }
 
 type peopleProjectRow struct {
@@ -367,7 +369,17 @@ func resolveUser(ctx context.Context, cfg Config, row *peopleMemberRow) {
 	if u, err := cfg.Store.GetUserByID(ctx, row.UserID); err == nil && u != nil {
 		row.Email = u.Email
 		row.Name = u.DisplayName
+		row.LastAccessed = formatLastSeen(u.LastSeenAt)
 	}
+}
+
+// formatLastSeen renders a last-seen timestamp for the member list: "never"
+// when the user has not been seen, else a UTC minute-precision stamp.
+func formatLastSeen(t *time.Time) string {
+	if t == nil {
+		return "never"
+	}
+	return t.UTC().Format("2006-01-02 15:04 UTC")
 }
 
 func mustJSON(v any) []byte {

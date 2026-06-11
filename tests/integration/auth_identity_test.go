@@ -121,3 +121,53 @@ type cookieJar struct{ cookies []*http.Cookie }
 
 func (j *cookieJar) SetCookies(_ *url.URL, cs []*http.Cookie) { j.cookies = append(j.cookies, cs...) }
 func (j *cookieJar) Cookies(_ *url.URL) []*http.Cookie        { return j.cookies }
+
+// TestTouchLastSeen pins sty_e34daf4d: last_seen_at starts NULL, is set on
+// touch, throttles repeat touches within a minute, and refreshes once stale.
+func TestTouchLastSeen(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	ctx := context.Background()
+	authStore := auth.New(env.DB)
+
+	u, err := authStore.CreateUser(ctx, "usr_ls_1", "ls1@test.local", "LS One", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if u.LastSeenAt != nil {
+		t.Fatalf("fresh user has last_seen: %v", u.LastSeenAt)
+	}
+
+	// First touch sets it.
+	if err := authStore.TouchLastSeen(ctx, u.ID); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	got, _ := authStore.GetUserByID(ctx, u.ID)
+	if got.LastSeenAt == nil {
+		t.Fatal("last_seen not set after touch")
+	}
+	first := *got.LastSeenAt
+
+	// Immediate re-touch is throttled (no change within the minute window).
+	if err := authStore.TouchLastSeen(ctx, u.ID); err != nil {
+		t.Fatalf("touch 2: %v", err)
+	}
+	again, _ := authStore.GetUserByID(ctx, u.ID)
+	if !again.LastSeenAt.Equal(first) {
+		t.Fatalf("throttle failed: %v != %v", again.LastSeenAt, first)
+	}
+
+	// Backdate beyond the throttle window → next touch refreshes it.
+	if _, err := env.DB.ExecContext(ctx,
+		`UPDATE users SET last_seen_at = now() - interval '2 minutes' WHERE id = $1`, u.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if err := authStore.TouchLastSeen(ctx, u.ID); err != nil {
+		t.Fatalf("touch 3: %v", err)
+	}
+	fresh, _ := authStore.GetUserByID(ctx, u.ID)
+	if fresh.LastSeenAt == nil || !fresh.LastSeenAt.After(first) {
+		t.Fatalf("stale touch did not refresh: %v", fresh.LastSeenAt)
+	}
+}
