@@ -117,8 +117,8 @@ func TestReconcileAction(t *testing.T) {
 		{"update: stamped, version advanced, unedited", sub, stampedOld, actionUpdate},
 		{"skip: stamped, already current", sub, stampedCurrent, actionSkip},
 		{"conflict: stamped but edited", sub, stampedEdited, actionConflict},
-		{"leave: unstamped local + substrate present + body differs", sub, unstamped, actionLeaveUnstamped},
-		{"match: unstamped local byte-identical to substrate", sub, unstampedMatch, actionMatchUnstamped},
+		{"conflict: unstamped local + substrate present + body differs", sub, unstamped, actionConflict},
+		{"adopt: unstamped local byte-identical to substrate", sub, unstampedMatch, actionMatchUnstamped},
 		{"remove: stamped, substrate gone", nil, stampedCurrent, actionRemove},
 		{"conflict-on-remove: edited, substrate gone", nil, stampedEdited, actionConflict},
 		{"leave: unstamped, substrate gone", nil, unstamped, actionLeaveUnstamped},
@@ -340,6 +340,55 @@ func TestApplySyncItem_InstallThenRemove(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "fix-workflow")); !os.IsNotExist(err) {
 		t.Fatalf("expected dir removed, stat err = %v", err)
+	}
+}
+
+// TestApplySyncItem_AdoptStampsUnstamped pins sty_ad9e9b4b: an unstamped local
+// copy byte-identical to the substrate reconciles to adopt (actionMatchUnstamped),
+// and applying it writes the SAME body WITH the identity stamp — so the copy
+// becomes managed with no content change, and a re-sync then reads as current.
+func TestApplySyncItem_AdoptStampsUnstamped(t *testing.T) {
+	root := t.TempDir()
+	sub := substrateSkill{Name: "fix-workflow", DocumentID: "doc_fw", Version: 2, Body: "---\nname: fix-workflow\n---\n# fw\n"}
+	name := localSkillName(sub.Name)
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Unstamped local copy, byte-identical to the substrate body.
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(sub.Body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	local, err := readLocalSkill(root, name)
+	if err != nil || local == nil {
+		t.Fatalf("readLocalSkill: %v (nil=%v)", err, local == nil)
+	}
+	if local.Stamped {
+		t.Fatal("precondition: local copy must be unstamped")
+	}
+	if got := reconcileAction(&sub, local); got != actionMatchUnstamped {
+		t.Fatalf("identical unstamped should adopt (match), got %v", got)
+	}
+
+	if err := applySyncItem(root, syncPlanItem{Name: name, Action: actionMatchUnstamped, Sub: &sub}); err != nil {
+		t.Fatalf("apply adopt: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read after adopt: %v", err)
+	}
+	stamp, authored, ok, _ := splitStamp(string(raw))
+	if !ok || stamp.DocumentID != "doc_fw" {
+		t.Fatalf("adopted file must be stamped: ok=%v stamp=%+v", ok, stamp)
+	}
+	if authored != sub.Body {
+		t.Errorf("adopt must not change the body: got %q want %q", authored, sub.Body)
+	}
+	// Re-reconcile: now stamped + current → skip.
+	local2, _ := readLocalSkill(root, name)
+	if got := reconcileAction(&sub, local2); got != actionSkip {
+		t.Errorf("after adopt, copy should be current (skip), got %v", got)
 	}
 }
 

@@ -1,3 +1,4 @@
+<!-- satellites-sync:begin {"document_id":"doc_2c9a7dd3","version":5,"hash":"ab0eaae2e5d96ee264ed0d4981932a376ef5cbdc4e7e7e6b7ce188fe49512fd9"} satellites-sync:end -->
 ---
 name: urgent-done-review
 type: skill
@@ -7,63 +8,47 @@ tags: [kind:gate]
 description: Pass-through gate for the urgent-workflow close transition (deploy → done). Advances the story with no review — it exists so the agent can request the client to move the story to the next stage. Emits {decision, notes} JSON and enacts the transition.
 ---
 
-You are the **urgent-done-review** gate, running on the `deploy → done`
-transition — the final edge. This is a **pass-through** gate: it carries no
-review requirements yet, so it **always accepts** and closes the story. The
-user fills in real requirements (e.g. "deploy must be verified") for this gate
-later; until then, pass through.
+Always accept and close the story: this gate carries no review requirements. Resolve the target state from the story's `## Workflow`, append the ledger rows that enact the move, then print the decision.
+
+## Naming
+
+On upload this skill is registered as `satellites-urgent-done-review` (the substrate prepends the `satellites-` prefix to the frontmatter `name`). That prefixed form is the value a story's `reviewer_skill` carries and the value you write into the `gate` payload field — use it exactly as written below.
 
 ## Input
 
-A single JSON object arrives on stdin. It carries the story's CURRENT status
-(`story_status`) and its body (`story_body`), which contains a `## Workflow`
-fenced yaml block of states + transitions — but **NO `next_status`**: even a
-pass-through gate resolves the target itself from that block.
+One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `story_status` (current state), and `story_body` (markdown containing a `## Workflow` fenced yaml block). No `next_status` — even a pass-through gate resolves the target itself.
 
-```json
-{
-  "story_id":     "sty_<hex>",
-  "project_id":   "proj_<hex>",
-  "workspace_id": "wksp_<hex>",
-  "story_body":   "the full story markdown (contains a ## Workflow yaml block)",
-  "story_status": "deploy"
-}
-```
-
-The gate's `.satellites/satellites exec` calls authenticate as the operator's
-own (admin) user, which the server authorizes to write status_transition /
-review_* rows.
+The gate's `.satellites/satellites exec` calls authenticate as the operator's admin user, authorized to write status_transition / review_* rows.
 
 ## Enact (always accept)
 
-This is a pass-through gate: it does no review, but it still derives its target
-from the story's `## Workflow` — pass-through means no requirements, not a
-free-floating destination.
+Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-urgent-done-review`; its `to` is your `to_status`. If no such transition exists, reject (append `review_reject`, print reject). Never invent a `to_status`.
 
-**Resolve your target status from the story's `## Workflow`.** Read the
-`## Workflow` fenced yaml block out of `story_body` and parse its
-`transitions`. Find the transition whose **`from` == `story_status`** AND whose
-**`reviewer_skill` == `satellites-urgent-done-review`** (this gate's own name).
-That transition's **`to`** is your resolved target status (call it
-`to_status`). If no such transition exists, this gate was requested for a
-transition the workflow does not declare — **reject**: append a `review_reject`
-and print reject. Never invent a `to_status`.
-
-Then run these two `ledger_append` calls with Bash before printing your decision
-(no document_upsert):
+Then run these two `ledger_append` calls with Bash before printing your decision (no document_upsert):
 
 ```sh
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"pass-through gate","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-urgent-done-review"}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
-The status_transition row IS the status change — the server projects its
-`to_status` onto the story. Do NOT call document_upsert to move status; the
-status field is ignored there.
+The status_transition row IS the status change; the status field on document_upsert is ignored. If the status_transition `ledger_append` fails, the transition did not land — print `reject` with the failure as the reason.
 
-Only advance to the `to_status` you resolved from the story's `## Workflow`. If
-the status_transition `ledger_append` fails (e.g. the server refuses the write),
-the transition did not land — print `reject` with the failure as the reason.
+## Environment
+
+Runs as the urgent-workflow close gate, fired when a story reaches `deploy`. It mutates substrate by appending ledger rows as the operator's admin user; it reads the story body but uploads no documents.
+
+```yaml
+guardrails:
+  always:
+    - Resolve to_status only from a matching ## Workflow transition (from == story_status AND reviewer_skill == satellites-urgent-done-review).
+    - Append both review_accept and status_transition rows before printing accept.
+    - Treat a failed status_transition append as a non-transition — print reject with the failure as the reason.
+  ask_first: []
+  never:
+    - Invent, default, or guess a to_status when no matching transition exists — reject instead.
+    - Write document_upsert rows or any ledger kind beyond review_accept / review_reject / status_transition.
+    - Add review requirements or block the story — this gate is pass-through.
+```
 
 ## Output
 

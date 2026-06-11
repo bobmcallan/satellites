@@ -7,9 +7,12 @@
 //
 // Ownership is keyed by an injected identity stamp, NOT the skill name
 // prefix (sty_4b517016 built the stamp; operator decision on sty_52e10340).
-// sync only ever updates or removes a local skill it materialised (one
-// carrying the stamp); an unstamped local skill is operator-authored and is
-// never touched. Pull-only: it never writes back to the substrate.
+// sync updates or removes a local skill it materialised (one carrying the
+// stamp). An unstamped local copy that shares a substrate name is adopted when
+// byte-identical (stamped in place) or surfaced as a conflict when it differs
+// (sty_ad9e9b4b) — never silently left stale; only an unstamped local with NO
+// substrate row is genuinely operator-authored and left untouched. Pull-only:
+// it never writes back to the substrate.
 //
 // Composes the existing document_list / document_get verbs — no new MCP verb
 // (no-new-mcp-verbs).
@@ -81,9 +84,9 @@ const (
 	actionUpdate                           // stamped local copy, substrate version advanced, unedited
 	actionSkip                             // stamped local copy already current
 	actionRemove                           // stamped local copy, substrate row gone
-	actionConflict                         // stamped local copy edited (hash mismatch) — refuse to overwrite
-	actionLeaveUnstamped                   // local copy with no stamp + content differs — operator-authored, never touch
-	actionMatchUnstamped                   // local copy with no stamp but byte-identical to the substrate body
+	actionConflict                         // edited stamped copy, OR unstamped copy of a substrate skill that differs — resolve, don't silently overwrite
+	actionLeaveUnstamped                   // unstamped local with NO substrate row — genuinely operator-authored, never touch
+	actionMatchUnstamped                   // unstamped local byte-identical to the substrate body — adopt it (stamp in place)
 )
 
 func (a syncAction) String() string {
@@ -93,7 +96,7 @@ func (a syncAction) String() string {
 	case actionUpdate:
 		return "update"
 	case actionSkip:
-		return "skip"
+		return "current"
 	case actionRemove:
 		return "remove"
 	case actionConflict:
@@ -101,9 +104,32 @@ func (a syncAction) String() string {
 	case actionLeaveUnstamped:
 		return "leave"
 	case actionMatchUnstamped:
-		return "match"
+		return "adopt"
 	}
 	return "?"
+}
+
+// reason is a one-line explanation printed beside each action so the verdict
+// is self-explanatory — in particular so `current` (you ARE up to date) is not
+// confused with `leave` (unmanaged; you are NOT getting substrate updates).
+func (a syncAction) reason() string {
+	switch a {
+	case actionInstall:
+		return "new — materialised from substrate"
+	case actionUpdate:
+		return "substrate advanced — updated"
+	case actionSkip:
+		return "already up to date"
+	case actionRemove:
+		return "substrate row gone — removed"
+	case actionConflict:
+		return "local differs from substrate — resolve with --on-conflict"
+	case actionLeaveUnstamped:
+		return "operator-authored (no substrate row) — not managed"
+	case actionMatchUnstamped:
+		return "unstamped local matched substrate — stamp adopted"
+	}
+	return ""
 }
 
 // localSkill is what sync reads off disk for one materialised name: whether
@@ -185,14 +211,17 @@ func reconcileAction(sub *substrateSkill, local *localSkill) syncAction {
 		return actionInstall
 	case sub != nil && local != nil:
 		if !local.Stamped {
-			// Unstamped local. If its body is byte-identical to the
-			// substrate, it already matches — report `match` (it is simply
-			// unmanaged, missing only the stamp). Otherwise it is
-			// operator-authored content; never clobber → `leave`.
+			// Unstamped local of a substrate-owned skill. Byte-identical → adopt
+			// it (stamp it) so it becomes managed. DIFFERS → it is stale-or-edited
+			// and would otherwise silently never receive substrate updates; route
+			// it to conflict so it is visible and resolvable (default keeps local,
+			// --on-conflict force overwrites with a backup). A genuinely
+			// operator-authored skill has NO substrate row and is handled in the
+			// sub==nil branch below (→ leave).
 			if local.BodyHash == hashBody(sub.Body) {
 				return actionMatchUnstamped
 			}
-			return actionLeaveUnstamped
+			return actionConflict
 		}
 		if local.Malformed {
 			return actionConflict
@@ -349,10 +378,16 @@ func newSkillSyncCmd(configArg, userArg *string) *cobra.Command {
 		Long: `sync pulls type:skill rows from the substrate into
 .claude/skills/<name>/SKILL.md so the gate runs the materialised install.
 
-Pull-only and stamp-keyed: sync only updates or removes a local skill it
-materialised (one carrying the injected identity stamp); an operator-authored
-skill with no stamp is never touched. Editing a rubric in the substrate and
-re-running sync takes effect with no hand-edit and no binary release.
+Pull-only and stamp-keyed: sync updates or removes a local skill it
+materialised (one carrying the injected identity stamp). An unstamped local
+copy of a substrate skill is adopted when byte-identical (stamped in place) or
+reported as a conflict when it differs; only a skill with no substrate row at
+all is treated as operator-authored and left untouched. Editing a rubric in the
+substrate and re-running sync takes effect with no hand-edit and no binary
+release.
+
+Each line prints the action plus a one-line reason, so 'current' (already up to
+date) is distinct from 'leave' (unmanaged, NOT receiving substrate updates).
 
 A 'conflict' (a stamped local copy you have edited since it was materialised)
 is resolved per --on-conflict: 'prompt' (default) asks you to force-overwrite
@@ -514,7 +549,7 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 	plan := reconcileSkills(subs, locals, protected)
 	for _, item := range plan {
 		if dryRun {
-			fmt.Fprintf(out, "[dry-run] %-8s %s\n", item.Action, item.Name)
+			fmt.Fprintf(out, "[dry-run] %-9s %s  (%s)\n", item.Action, item.Name, item.Action.reason())
 			continue
 		}
 		// A conflict (edited stamped copy) is not applied blindly — it is
@@ -528,7 +563,7 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 		if err := applySyncItem(skillsRoot, item); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%-8s %s\n", item.Action, item.Name)
+		fmt.Fprintf(out, "%-9s %s  (%s)\n", item.Action, item.Name, item.Action.reason())
 	}
 	return nil
 }
@@ -617,11 +652,15 @@ func backupSkill(skillsRoot, name string) (string, error) {
 	return bak, nil
 }
 
-// applySyncItem performs the verdict for one plan item. Conflicts, skips,
-// and leaves are reported but make no change.
+// applySyncItem performs the verdict for one plan item. install/update and
+// adopt (match) write the materialised, stamped SKILL.md; remove deletes it.
+// Skips, conflicts, and leaves are reported but make no change.
 func applySyncItem(skillsRoot string, item syncPlanItem) error {
 	switch item.Action {
-	case actionInstall, actionUpdate:
+	case actionInstall, actionUpdate, actionMatchUnstamped:
+		// install/update materialise the substrate copy; adopt (match) writes the
+		// SAME body plus the identity stamp so an unstamped-but-identical local
+		// becomes managed (no content change).
 		dir := filepath.Join(skillsRoot, item.Name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
@@ -633,7 +672,7 @@ func applySyncItem(skillsRoot string, item syncPlanItem) error {
 		if err := os.RemoveAll(filepath.Join(skillsRoot, item.Name)); err != nil {
 			return fmt.Errorf("remove %s: %w", item.Name, err)
 		}
-	case actionSkip, actionConflict, actionLeaveUnstamped, actionMatchUnstamped:
+	case actionSkip, actionConflict, actionLeaveUnstamped:
 		// no write
 	}
 	return nil
