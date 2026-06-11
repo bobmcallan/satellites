@@ -6,7 +6,7 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":8,"hash":"c9c4ef5a26cee0975bb5d1ed5b79ec88ae97f8e8e9c25b27279a67c685704dba"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":9,"hash":"7f02f5ac489a92ee5f4cd6cf0441e431fca6061577f9254f272438da65501871"} satellites-sync:end -->
 
 # satellites-commit-push
 
@@ -30,6 +30,12 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    - **[[satellites-doc-drift-review]]** — when the change touches the CLI
      (`internal/cli`, `cmd/satellites`): `satellites surface check`. Exit 0 →
      proceed; exit 1 → **do not commit**, resolve per the gate skill, re-run.
+   - **[[satellites-global-button-style-review]]** — when the change touches
+     the portal UI (`internal/server/templates`, `internal/server/static`).
+   - **[[satellites-workflow-drift-review]]** — when the change touches process
+     configuration (skills, principles, workflows, story workflows):
+     `satellites workflow check`. Exit 0 → proceed; exit 1 → **do not commit**,
+     resolve per the gate skill, re-run.
 
 2. **Configure + stage**
 

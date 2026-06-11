@@ -43,6 +43,8 @@ gate owns its decision rule):
 
 - [[satellites-technical-debt-review]] — always, pre-commit.
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
+- [[satellites-global-button-style-review]] — when the change touches the portal UI.
+- [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
 
 ```yaml
 states:

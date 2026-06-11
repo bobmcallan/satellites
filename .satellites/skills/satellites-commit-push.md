@@ -29,6 +29,12 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    - **[[satellites-doc-drift-review]]** — when the change touches the CLI
      (`internal/cli`, `cmd/satellites`): `satellites surface check`. Exit 0 →
      proceed; exit 1 → **do not commit**, resolve per the gate skill, re-run.
+   - **[[satellites-global-button-style-review]]** — when the change touches
+     the portal UI (`internal/server/templates`, `internal/server/static`).
+   - **[[satellites-workflow-drift-review]]** — when the change touches process
+     configuration (skills, principles, workflows, story workflows):
+     `satellites workflow check`. Exit 0 → proceed; exit 1 → **do not commit**,
+     resolve per the gate skill, re-run.
 
 2. **Configure + stage**
 

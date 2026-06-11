@@ -1,0 +1,146 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+)
+
+// Fixture corpus helpers — a minimal healthy process: one workflow naming
+// one entry gate (comprehensive) + one checkpoint gate, both materialised.
+func healthyCorpus() []matSkill {
+	wfBody := "# wf\n\n## Checkpoint gates\n\n- [[debt-gate]] — always, pre-commit.\n\n```yaml\nstates:\n  - backlog\n  - doing\n  - done\ntransitions:\n  - {from: backlog, to: doing, reviewer_skill: \"entry-review\"}\n  - {from: doing,   to: done,  reviewer_skill: \"exit-review\"}\n```\n"
+	entryBody := "Judge the story's shape, its plan, its acceptance criteria, the embedded workflow, and code grounding in one verdict.\n"
+	mk := func(name, kind, scope, desc, body string) matSkill {
+		extra := ""
+		if kind == "workflow" {
+			extra = "applies_to: [\"any\"]\n"
+		}
+		raw := "---\nname: " + name + "\nkind: " + kind + "\n" + extra + "description: " + desc + "\n---\n" + body
+		return matSkill{name: name, kind: kind, scope: scope, description: desc, body: body, raw: raw}
+	}
+	return []matSkill{
+		mk("the-workflow", "workflow", "", "the lifecycle", wfBody),
+		mk("entry-review", "gate", "", "entry gate", entryBody),
+		mk("exit-review", "gate", "", "exit gate", "verify the acceptance criteria\n"),
+		mk("debt-gate", "gate", "", "pre-commit gate", "one decision rule\n"),
+	}
+}
+
+// TestWorkflowCheck_CleanCorpus: a healthy corpus and governed stories yield
+// zero blocking findings.
+func TestWorkflowCheck_CleanCorpus(t *testing.T) {
+	stories := []storyLite{{ID: "sty_1", Category: "anything", Status: "backlog",
+		Body: "# s\n\n## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"entry-review\"}\n```\n"}}
+	for _, f := range runWorkflowChecks(healthyCorpus(), stories) {
+		if f.Severity == "block" {
+			t.Errorf("clean corpus produced blocking finding: %+v", f)
+		}
+	}
+}
+
+// TestWorkflowCheck_DriftClasses replays each pre-epic drift class against
+// the pure check core (sty_11e09ae7 AC2).
+func TestWorkflowCheck_DriftClasses(t *testing.T) {
+	find := func(fs []driftFinding, code, artifact string) bool {
+		for _, f := range fs {
+			if f.Code == code && f.Artifact == artifact {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("class4_stamp_above_frontmatter", func(t *testing.T) {
+		skills := healthyCorpus()
+		skills[1].raw = "<!-- satellites-sync:begin {} satellites-sync:end -->\n" + skills[1].raw
+		if !find(runWorkflowChecks(skills, nil), "unusable-skill", "entry-review") {
+			t.Error("stamp above frontmatter must report unusable-skill")
+		}
+	})
+
+	t.Run("class4_missing_description", func(t *testing.T) {
+		skills := healthyCorpus()
+		skills[2].description = ""
+		if !find(runWorkflowChecks(skills, nil), "unusable-skill", "exit-review") {
+			t.Error("missing description must report unusable-skill")
+		}
+	})
+
+	t.Run("class6_degenerate_workflow", func(t *testing.T) {
+		skills := healthyCorpus()
+		skills[0].raw = "---\nname: the-workflow\nkind: workflow\ndescription: d\n---\n```yaml\nstates:\n  - only\ntransitions: []\n```\n"
+		if !find(runWorkflowChecks(skills, nil), "workflow-lifecycle", "the-workflow") {
+			t.Error("degenerate lifecycle must report workflow-lifecycle")
+		}
+	})
+
+	t.Run("class1_shadow_gate", func(t *testing.T) {
+		skills := append(healthyCorpus(), matSkill{name: "lonely-gate", kind: "gate", description: "d",
+			body: "one rule\n", raw: "---\nname: lonely-gate\nkind: gate\ndescription: d\n---\none rule\n"})
+		if !find(runWorkflowChecks(skills, nil), "orphan-gate", "lonely-gate") {
+			t.Error("a gate no workflow names must report orphan-gate (the techdebt case)")
+		}
+	})
+
+	t.Run("class5_missing_gate", func(t *testing.T) {
+		skills := healthyCorpus()[:3] // drop debt-gate; the workflow's checkpoint still names it
+		if !find(runWorkflowChecks(skills, nil), "missing-gate", "debt-gate") {
+			t.Error("a named but unmaterialised gate must report missing-gate")
+		}
+	})
+
+	t.Run("class2_gate_in_capability", func(t *testing.T) {
+		skills := append(healthyCorpus(), matSkill{name: "fat-capability", kind: "capability", description: "d",
+			body: "Run the linter. Exit 1 (BLOCKED) → do not publish.\n"})
+		fs := runWorkflowChecks(skills, nil)
+		ok := false
+		for _, f := range fs {
+			if f.Code == "nonatomic-candidate" && f.Artifact == "fat-capability" && f.Severity == "advise" {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Error("fail-closed markers in a capability must report an advisory nonatomic-candidate")
+		}
+	})
+
+	t.Run("class3_host_coupled_system_scope", func(t *testing.T) {
+		skills := append(healthyCorpus(), matSkill{name: "sys-skill", kind: "capability", scope: "system", description: "d",
+			body: "Bump .version and watch .github/workflows/release.yml.\n"})
+		if !find(runWorkflowChecks(skills, nil), "host-coupled-system", "sys-skill") {
+			t.Error("repo-dev references in a system-scope skill must report host-coupled-system")
+		}
+	})
+
+	t.Run("class5_ungoverned_story", func(t *testing.T) {
+		stories := []storyLite{{ID: "sty_lost", Category: "portal", Status: "backlog", Body: "# no workflow here\n"}}
+		skills := healthyCorpus()
+		// the-workflow applies to nothing (no applies_to in fixture frontmatter) → portal uncovered
+		if !find(runWorkflowChecks(skills, stories), "ungoverned-story", "sty_lost") {
+			t.Error("a non-terminal story with no embedded workflow and no applies_to cover must report ungoverned-story")
+		}
+	})
+
+	t.Run("class5_unresolvable_embedded_gate", func(t *testing.T) {
+		stories := []storyLite{{ID: "sty_ghost", Category: "x", Status: "backlog",
+			Body: "## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"ghost-review\"}\n```\n"}}
+		if !find(runWorkflowChecks(healthyCorpus(), stories), "unresolvable-gate", "sty_ghost") {
+			t.Error("an embedded workflow naming a non-materialised reviewer must report unresolvable-gate")
+		}
+	})
+
+	t.Run("class7_shallow_first_gate", func(t *testing.T) {
+		skills := healthyCorpus()
+		skills[1].body = "Check only that a plan exists.\n" // drops shape/acceptance/workflow/grounding
+		fs := runWorkflowChecks(skills, nil)
+		ok := false
+		for _, f := range fs {
+			if f.Code == "first-gate-shallow" && f.Artifact == "entry-review" && strings.Contains(f.Message, "grounding") {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Errorf("a shallow entry gate must report first-gate-shallow naming the missing layers: %+v", fs)
+		}
+	})
+}

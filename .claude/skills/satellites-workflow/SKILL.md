@@ -6,7 +6,7 @@ tags: [kind:workflow]
 applies_to: ["*"]
 description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → done, every edge reviewer-gated, with the commit-time gates named in this definition. Invoke when implementing a story; it IS the executor's process.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_67945dca","version":1,"hash":"40cf0495b2d8fab6fc28e60d03d89eecffe69ebc816ee7e2ceb7bf458ae91b8f"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_67945dca","version":2,"hash":"68d4fe05ee3bea1177c2a438c099ba5b3e630c51e55de4371964bfe0aeafd10e"} satellites-sync:end -->
 
 # Satellites workflow
 
@@ -44,6 +44,8 @@ gate owns its decision rule):
 
 - [[satellites-technical-debt-review]] — always, pre-commit.
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
+- [[satellites-global-button-style-review]] — when the change touches the portal UI.
+- [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
 
 ```yaml
 states:

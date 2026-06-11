@@ -80,6 +80,7 @@ is refused, and the command errors when none validates).`,
 	workflowCmd.PersistentFlags().StringVar(configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	workflowCmd.PersistentFlags().StringVar(userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
 	workflowCmd.AddCommand(design)
+	workflowCmd.AddCommand(newWorkflowCheckCmd(configArg, userArg))
 	return workflowCmd
 }
 
@@ -237,8 +238,10 @@ func availableGateSkills() []map[string]string {
 type matSkill struct {
 	name        string
 	kind        string
+	scope       string // frontmatter scope ("" = project/unset)
 	description string
 	body        string
+	raw         string // full on-disk file content (stamp + frontmatter + body)
 }
 
 // materialisedSkills reads the .claude/skills set (name, kind, description, body).
@@ -265,7 +268,7 @@ func materialisedSkills() []matSkill {
 		if name == "" {
 			name = e.Name()
 		}
-		out = append(out, matSkill{name: name, kind: strings.TrimSpace(fm.Kind), description: strings.TrimSpace(fm.Description), body: string(bodyB)})
+		out = append(out, matSkill{name: name, kind: strings.TrimSpace(fm.Kind), scope: strings.TrimSpace(fm.Scope), description: strings.TrimSpace(fm.Description), body: string(bodyB), raw: string(raw)})
 	}
 	return out
 }

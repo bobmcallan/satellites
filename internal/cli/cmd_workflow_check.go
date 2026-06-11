@@ -1,0 +1,429 @@
+// `satellites workflow check` — the process-drift validator (sty_11e09ae7).
+// Read-only and fail-closed: it reconciles the DEFINED process (workflow
+// skills, gate skills, the materialised skill tree, the project's stories)
+// against itself and reports every mechanical drift class this epic's audit
+// found by hand. Exit 0 CLEAN / exit 1 BLOCKED; advisory findings report
+// without blocking.
+//
+// Every check is a pure function over parsed inputs so fixtures can replay
+// each drift class in unit tests. The MCP-door half of the surface contract
+// (skill/principle writes/reads/deletes refused over MCP) is enforced
+// server-side and pinned by its integration test — a client check cannot
+// probe it and does not pretend to.
+
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/bobmcallan/satellites/internal/workflow"
+	"github.com/spf13/cobra"
+)
+
+// driftFinding is one reported drift. Severity is "block" or "advise".
+type driftFinding struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Artifact string `json:"artifact"`
+	Message  string `json:"message"`
+}
+
+// storyLite is the minimal story projection the governance check reads.
+type storyLite struct {
+	ID       string
+	Name     string
+	Category string
+	Status   string
+	Body     string
+}
+
+// checkpointGateRe pulls [[gate-name]] references out of a workflow body's
+// "## Checkpoint gates" section — the definition's commit-time gate list.
+var checkpointGateRe = regexp.MustCompile(`\[\[([a-z0-9-]+)\]\]`)
+
+// checkpointGates returns the gate names a workflow body's Checkpoint gates
+// section references. Empty when the section is absent.
+func checkpointGates(body string) []string {
+	i := strings.Index(body, "## Checkpoint gates")
+	if i < 0 {
+		return nil
+	}
+	section := body[i:]
+	if j := strings.Index(section[3:], "\n## "); j >= 0 {
+		section = section[:j+3]
+	}
+	var out []string
+	for _, m := range checkpointGateRe.FindAllStringSubmatch(section, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// checkSyncedSkillUsable (class 4 — Claude-unusable synced skills): every
+// materialised SKILL.md must open with its YAML frontmatter (a sync stamp or
+// anything else above it hides the skill from Claude Code) and expose a
+// non-empty description (without one the harness shows the first body line).
+func checkSyncedSkillUsable(skills []matSkill) []driftFinding {
+	var out []driftFinding
+	for _, s := range skills {
+		if !strings.HasPrefix(s.raw, "---\n") && !strings.HasPrefix(s.raw, "---\r\n") {
+			out = append(out, driftFinding{"block", "unusable-skill", s.name,
+				"SKILL.md does not open with frontmatter — Claude Code cannot read its contract (sync stamp above frontmatter?)"})
+			continue
+		}
+		if s.description == "" {
+			out = append(out, driftFinding{"block", "unusable-skill", s.name,
+				"no description in frontmatter — the skill list falls back to the first body line and the skill is undispatchable"})
+		}
+	}
+	return out
+}
+
+// parseWorkflows extracts every kind:workflow skill's parsed definition,
+// reporting class 6 (workflow soundness) findings for the unparseable or
+// degenerate ones.
+func parseWorkflows(skills []matSkill) (map[string]*workflow.Workflow, []driftFinding) {
+	wfs := map[string]*workflow.Workflow{}
+	var out []driftFinding
+	for _, s := range skills {
+		if s.kind != "workflow" {
+			continue
+		}
+		wf, err := workflow.Parse([]byte(s.raw))
+		if err != nil || wf == nil {
+			out = append(out, driftFinding{"block", "workflow-lifecycle", s.name,
+				"kind:workflow skill carries no parseable states/transitions block"})
+			continue
+		}
+		if err := wf.ValidateLifecycle(); err != nil {
+			out = append(out, driftFinding{"block", "workflow-lifecycle", s.name, err.Error()})
+			continue
+		}
+		wfs[s.name] = wf
+	}
+	return wfs, out
+}
+
+// checkGateCoverage (classes 1 + 5) — the definition is the whole process:
+// every kind:gate skill must be named by some workflow (a transition's
+// reviewer_skill or a Checkpoint gates reference); a gate nothing names is a
+// shadow gate that runs outside any definition (the techdebt case). And every
+// gate a workflow names must be materialised, or its transition fails closed
+// at dispatch.
+func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+	named := map[string]bool{}
+	for name, wf := range wfs {
+		for _, tr := range wf.Transitions {
+			if g := strings.TrimSpace(tr.ReviewerSkill); g != "" {
+				named[g] = true
+			}
+		}
+		for _, s := range skills {
+			if s.name == name {
+				for _, g := range checkpointGates(s.body) {
+					named[g] = true
+				}
+			}
+		}
+	}
+	byName := map[string]matSkill{}
+	for _, s := range skills {
+		byName[s.name] = s
+	}
+
+	var out []driftFinding
+	for _, s := range skills {
+		if s.kind != "gate" {
+			continue
+		}
+		if !named[s.name] {
+			out = append(out, driftFinding{"block", "orphan-gate", s.name,
+				"kind:gate skill no workflow definition names (transition or Checkpoint gates) — a shadow gate runs outside the defined process"})
+		}
+	}
+	for g := range named {
+		if _, ok := byName[g]; !ok {
+			out = append(out, driftFinding{"block", "missing-gate", g,
+				"a workflow names this reviewer skill but it is not materialised in .claude/skills — its transition fails closed"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Artifact < out[j].Artifact })
+	return out
+}
+
+// nonAtomicMarkers flag a non-gate skill that looks like it embeds a
+// fail-closed verdict routine (class 2). Advisory: the authoritative judge is
+// `satellites skill review` item 8 — this points at candidates.
+var nonAtomicMarkers = []string{"Exit 1 (BLOCKED)", "exit 1 → **do not commit**", "fail closed"}
+
+func checkNonAtomicCandidates(skills []matSkill) []driftFinding {
+	var out []driftFinding
+	for _, s := range skills {
+		if s.kind == "gate" || s.kind == "workflow" {
+			continue
+		}
+		for _, m := range nonAtomicMarkers {
+			if strings.Contains(strings.ToLower(s.body), strings.ToLower(m)) {
+				out = append(out, driftFinding{"advise", "nonatomic-candidate", s.name,
+					fmt.Sprintf("non-gate skill body carries a fail-closed verdict marker (%q) — run `satellites skill review` (atomicity item) to judge whether it embeds a gate", m)})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// hostCoupledPatterns are repo-dev specifics a system-scope artifact must not
+// reference (class 3). Deliberately narrow: a product's own distribution
+// contract (release URLs, install paths) is not host coupling and none of
+// these patterns match it.
+var hostCoupledPatterns = []string{".github/workflows", ".version", "internal/cli", "cmd/satellites", "fly.dev"}
+
+func checkSystemScopeCoupling(skills []matSkill) []driftFinding {
+	var out []driftFinding
+	for _, s := range skills {
+		if !strings.EqualFold(s.scope, "system") {
+			continue
+		}
+		for _, p := range hostCoupledPatterns {
+			if strings.Contains(s.body, p) {
+				out = append(out, driftFinding{"block", "host-coupled-system", s.name,
+					fmt.Sprintf("system-scope skill references repo-dev specific %q — system scope must work in any repository (re-scope to project or rewrite)", p)})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// terminalStoryStatuses are statuses with no outgoing work anywhere; a story
+// resting in one needs no governing workflow resolution.
+var terminalStoryStatuses = map[string]bool{"done": true, "cancelled": true, "deleted": true}
+
+// checkStoryGovernance (class 5) — every non-terminal story is governed:
+// its own embedded ## Workflow (whose reviewer skills must be materialised),
+// or a workflow whose applies_to covers its category ("*" wildcard counts).
+func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+	byName := map[string]bool{}
+	for _, s := range skills {
+		byName[s.name] = true
+	}
+	covered := func(category string) bool {
+		for _, wf := range wfs {
+			for _, at := range wf.AppliesTo {
+				at = strings.TrimSpace(at)
+				if at == "*" || strings.EqualFold(at, category) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	var out []driftFinding
+	for _, st := range stories {
+		if terminalStoryStatuses[strings.ToLower(st.Status)] {
+			continue
+		}
+		wf, err := workflow.ParseBody([]byte(st.Body))
+		if err == nil && wf != nil {
+			for _, tr := range wf.Transitions {
+				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] {
+					out = append(out, driftFinding{"block", "unresolvable-gate", st.ID,
+						fmt.Sprintf("embedded workflow names reviewer %q which is not materialised — the story cannot move", g)})
+				}
+			}
+			continue
+		}
+		if !covered(st.Category) {
+			out = append(out, driftFinding{"block", "ungoverned-story", st.ID,
+				fmt.Sprintf("no embedded ## Workflow and no workflow's applies_to covers category %q — the story has no defined process", st.Category)})
+		}
+	}
+	return out
+}
+
+// firstGateLayers are the comprehensive-review layers the entry gate must
+// judge (class 7, surface contract): a story is created with no review, so
+// the FIRST gate carries the whole judgment.
+var firstGateLayers = []string{"shape", "plan", "acceptance", "workflow", "grounding"}
+
+func checkFirstGateComprehensive(skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+	byName := map[string]matSkill{}
+	for _, s := range skills {
+		byName[s.name] = s
+	}
+	var out []driftFinding
+	for wfName, wf := range wfs {
+		entry := wf.InitialState()
+		if entry == "" {
+			continue
+		}
+		for _, tr := range wf.Transitions {
+			if tr.From != entry || strings.TrimSpace(tr.ReviewerSkill) == "" {
+				continue
+			}
+			gate, ok := byName[tr.ReviewerSkill]
+			if !ok {
+				continue // missing-gate already reported
+			}
+			// A cancellation edge is not the review path; judge only edges
+			// that move work forward (target has outgoing transitions).
+			forward := false
+			for _, tr2 := range wf.Transitions {
+				if tr2.From == tr.To {
+					forward = true
+					break
+				}
+			}
+			if !forward {
+				continue
+			}
+			lower := strings.ToLower(gate.body)
+			var missing []string
+			for _, l := range firstGateLayers {
+				if !strings.Contains(lower, l) {
+					missing = append(missing, l)
+				}
+			}
+			if len(missing) > 0 {
+				out = append(out, driftFinding{"block", "first-gate-shallow", gate.name,
+					fmt.Sprintf("entry gate of %s does not cover comprehensive-review layer(s) %v — the first gate is where an unreviewed story is judged", wfName, missing)})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Artifact < out[j].Artifact })
+	return out
+}
+
+// runWorkflowChecks composes every drift check over the supplied corpus —
+// the pure core the unit fixtures replay.
+func runWorkflowChecks(skills []matSkill, stories []storyLite) []driftFinding {
+	var out []driftFinding
+	out = append(out, checkSyncedSkillUsable(skills)...)
+	wfs, wfFindings := parseWorkflows(skills)
+	out = append(out, wfFindings...)
+	out = append(out, checkGateCoverage(skills, wfs)...)
+	out = append(out, checkNonAtomicCandidates(skills)...)
+	out = append(out, checkSystemScopeCoupling(skills)...)
+	out = append(out, checkStoryGovernance(stories, skills, wfs)...)
+	out = append(out, checkFirstGateComprehensive(skills, wfs)...)
+	return out
+}
+
+// listProjectStories pulls the repo project's stories (id, category, status,
+// body) for the governance check; an unconfigured repo yields none.
+func listProjectStories(ctx context.Context, configArg, userArg string) ([]storyLite, error) {
+	_, pj, err := resolveDeployScope(ctx, configArg, userArg)
+	if err != nil || strings.TrimSpace(pj) == "" {
+		return nil, nil
+	}
+	listReq, _ := json.Marshal(docListRequest{Type: "story", ProjectID: pj, Limit: 200})
+	raw, err := dispatchVerb(ctx, "document_list", listReq, configArg, userArg)
+	if err != nil {
+		return nil, fmt.Errorf("workflow check: list stories: %w", err)
+	}
+	var listed struct {
+		Items []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
+			Status   string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return nil, fmt.Errorf("workflow check: decode list: %w", err)
+	}
+	var out []storyLite
+	for _, it := range listed.Items {
+		if terminalStoryStatuses[strings.ToLower(it.Status)] {
+			continue
+		}
+		getReq, _ := json.Marshal(struct {
+			ID string `json:"id"`
+		}{it.ID})
+		graw, gErr := dispatchVerb(ctx, "document_get", getReq, configArg, userArg)
+		if gErr != nil {
+			continue
+		}
+		var got struct {
+			RawBody string `json:"raw_body"`
+		}
+		if json.Unmarshal(graw, &got) != nil {
+			continue
+		}
+		out = append(out, storyLite{ID: it.ID, Name: it.Name, Category: it.Category, Status: it.Status, Body: got.RawBody})
+	}
+	return out, nil
+}
+
+func newWorkflowCheckCmd(configArg, userArg *string) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Validate the configured process for drift (defined workflow vs executable reality) — exit 1 on any blocking finding",
+		Long: `check reconciles the defined process against itself, read-only:
+
+  unusable-skill        a materialised SKILL.md Claude Code cannot dispatch
+  workflow-lifecycle    a kind:workflow skill with a degenerate state machine
+  orphan-gate           a kind:gate skill no workflow definition names (shadow gate)
+  missing-gate          a workflow names a reviewer skill that is not materialised
+  nonatomic-candidate   (advisory) a non-gate skill carrying fail-closed verdict markers
+  host-coupled-system   a system-scope skill referencing repo-dev specifics
+  ungoverned-story      a non-terminal story with no embedded workflow and no applies_to cover
+  unresolvable-gate     a story's embedded workflow names a non-materialised reviewer
+  first-gate-shallow    a workflow's entry gate skips comprehensive-review layers
+
+Blocking findings exit 1; advisory findings report and pass. The MCP write/
+read/delete bounds on skills and principles are enforced server-side and
+pinned by integration tests — they are out of a client check's reach.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			stories, err := listProjectStories(ctx, *configArg, *userArg)
+			if err != nil {
+				return err
+			}
+			findings := runWorkflowChecks(materialisedSkills(), stories)
+			return reportWorkflowChecks(cmd.OutOrStdout(), findings, asJSON)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit findings as a JSON array")
+	return cmd
+}
+
+// reportWorkflowChecks prints the findings and returns a non-nil error (exit
+// 1) when any blocking finding exists.
+func reportWorkflowChecks(out io.Writer, findings []driftFinding, asJSON bool) error {
+	blocking := 0
+	for _, f := range findings {
+		if f.Severity == "block" {
+			blocking++
+		}
+	}
+	if asJSON {
+		b, _ := json.MarshalIndent(findings, "", "  ")
+		fmt.Fprintln(out, string(b))
+	} else {
+		for _, f := range findings {
+			fmt.Fprintf(out, "%-7s %-22s %-36s %s\n", f.Severity, f.Code, f.Artifact, f.Message)
+		}
+		fmt.Fprintln(out, "\n── workflow drift check ──")
+		if blocking == 0 {
+			fmt.Fprintln(out, "verdict: CLEAN — the defined process and the executable reality agree.")
+		} else {
+			fmt.Fprintf(out, "verdict: BLOCKED — %d blocking finding(s); fix the drift or correct the definition.\n", blocking)
+		}
+	}
+	if blocking > 0 {
+		return fmt.Errorf("workflow check: %d blocking finding(s)", blocking)
+	}
+	return nil
+}
