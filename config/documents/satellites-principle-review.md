@@ -22,7 +22,7 @@ Read the whole file, then answer each PASS / REVISE with one sentence of evidenc
 1. **One obeyable rule.** Does it state a single constraint an agent can obey on every relevant action? Flag a principle that bundles several rules or reads as guidance.
 2. **Always-on, not situational.** A principle applies continuously; a one-time procedure is a skill and a fact is a document. Flag misplaced content.
 3. **Testable.** Could a reviewer point at an action and say "this violates it"? Flag a rule too vague to enforce.
-4. **Durable + agnostic.** Will it hold after current work lands, and read cleanly to someone outside this repository? Flag in-flight pins and host-repo coupling.
+4. **Durable + scope-true.** Will it hold after current work lands? Judge coupling BY SCOPE: a **system-scope** principle referencing repo-dev specifics (repo paths, CI workflow names, deploy hosts, version files, a host toolchain) is a blocking REVISE — system scope must read cleanly in any repository. A **project-scope** principle may bind to its own repo's process; flag only in-flight pins there, not coupling.
 5. **Not skill-shaped.** A principle is a belief, not a procedure — flag any `Spec` / `Verifier` / `Environment` scaffolding, numbered steps, or guardrail block. Those belong in a skill; here they mean the content is misclassified.
 6. **Residency tag intentional.** If the file carries `principles:always` it is injected into every session — flag it unless the belief genuinely must stay resident; if it lacks the tag, confirm it is fine to leave discoverable via the index. The tag is a deliberate choice, not a default.
 
