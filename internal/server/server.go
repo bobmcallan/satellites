@@ -54,6 +54,10 @@ type Config struct {
 	// substrate store (layering guard); nil disables the
 	// POST /projects/{id}/blobs upload route.
 	StoreBlob StoreBlobFunc
+	// GetBlob fetches a stored blob's bytes for the GET
+	// /projects/{id}/blobs/{blob} download route (sty_52c2393f). Injected from
+	// main; nil disables the download route.
+	GetBlob GetBlobFunc
 }
 
 // LiveScoper resolves the SSE topic-scope for a session user — admins see
@@ -124,6 +128,9 @@ func Build(cfg Config) http.Handler {
 	// when a blob store is wired.
 	if cfg.StoreBlob != nil {
 		mux.Handle("POST /projects/{id}/blobs", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(blobUploadHandler(cfg)))))
+	}
+	if cfg.GetBlob != nil {
+		mux.Handle("GET /projects/{id}/blobs/{blob}", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(blobDownloadHandler(cfg)))))
 	}
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it

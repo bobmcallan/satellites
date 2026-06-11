@@ -21,6 +21,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/extract"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -475,13 +476,45 @@ func main() {
 			if err != nil {
 				return server.BlobRef{}, err
 			}
-			return server.BlobRef{
+			ref := server.BlobRef{
 				ID:          b.ID,
 				ProjectID:   b.ProjectID,
 				Filename:    b.Filename,
 				ContentType: b.ContentType,
 				SizeBytes:   b.SizeBytes,
 				SHA256:      b.SHA256,
+			}
+			// Extract text → a project text document that retains a pointer to
+			// the blob (sty_52c2393f). Best-effort: a failure never fails the
+			// upload, the original blob is already retained.
+			if text, ok := extract.Text(up.Filename, up.ContentType, up.Content); ok {
+				body := fmt.Sprintf("# %s\n\n> Extracted from attachment `%s` (%s, %d bytes). Original: GET /projects/%s/blobs/%s\n\n%s",
+					b.Filename, b.ID, b.ContentType, b.SizeBytes, b.ProjectID, b.ID, text)
+				doc, _, derr := docStore.Upsert(ctx, document.UpsertInput{
+					Key:       document.Key{Scope: document.ScopeProject, WorkspaceID: up.WorkspaceID, ProjectID: up.ProjectID, Name: "attachment-" + b.ID},
+					Type:      document.TypeDocument,
+					Body:      body,
+					CreatedBy: up.CreatedBy,
+				}, time.Now().UTC())
+				if derr != nil {
+					arbor.WarnCtx(ctx, "blob extract: create document", "blob_id", b.ID, "err", derr)
+				} else {
+					ref.DocumentID = doc.ID
+					ref.Extracted = true
+				}
+			}
+			return ref, nil
+		},
+		GetBlob: func(ctx context.Context, blobID string) (server.BlobContent, error) {
+			b, content, err := blobStore.GetContent(ctx, blobID)
+			if err != nil {
+				return server.BlobContent{}, err
+			}
+			return server.BlobContent{
+				ProjectID:   b.ProjectID,
+				Filename:    b.Filename,
+				ContentType: b.ContentType,
+				Content:     content,
 			}, nil
 		},
 	})

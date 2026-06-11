@@ -36,12 +36,70 @@ type BlobRef struct {
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	SHA256      string `json:"sha256"`
+	// DocumentID + Extracted report the text document the extractor produced
+	// from this blob (sty_52c2393f). DocumentID is "" / Extracted false when the
+	// type is unsupported (image, octet-stream) — the blob is still stored.
+	DocumentID string `json:"document_id,omitempty"`
+	Extracted  bool   `json:"extracted"`
 }
 
-// StoreBlobFunc persists an uploaded blob and returns its reference. Injected
-// from main (which owns internal/blob) so this transport package imports no
-// substrate store. A nil StoreBlob disables the upload route.
+// StoreBlobFunc persists an uploaded blob (and, for supported types, extracts a
+// text document) returning the reference. Injected from main (which owns
+// internal/blob, extract, and the document store) so this transport package
+// imports no substrate store. A nil StoreBlob disables the upload route.
 type StoreBlobFunc func(ctx context.Context, up BlobUpload) (BlobRef, error)
+
+// BlobContent is a stored blob's original bytes plus the metadata needed to
+// serve it back as an attachment.
+type BlobContent struct {
+	ProjectID   string
+	Filename    string
+	ContentType string
+	Content     []byte
+}
+
+// GetBlobFunc fetches a stored blob's original bytes + metadata. Injected from
+// main; nil disables the download route.
+type GetBlobFunc func(ctx context.Context, blobID string) (BlobContent, error)
+
+// blobDownloadHandler serves GET /projects/{id}/blobs/{blob} — streams a stored
+// blob's original bytes, behind the same Bearer auth + project access check as
+// upload. A blob whose project_id does not match the path (or is missing) is 404.
+func blobDownloadHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if auth.FromContext(ctx) == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		projectID := r.PathValue("id")
+		blobID := r.PathValue("blob")
+		if projectID == "" || blobID == "" {
+			http.Error(w, "project id and blob id required", http.StatusBadRequest)
+			return
+		}
+		getReq, _ := json.Marshal(verb.ProjectGetRequest{ID: projectID})
+		if _, err := verb.Dispatch(ctx, "project_get", getReq); err != nil {
+			http.Error(w, "no access to project", http.StatusForbidden)
+			return
+		}
+		bc, err := cfg.GetBlob(ctx, blobID)
+		if err != nil || bc.ProjectID != projectID {
+			http.Error(w, "blob not found", http.StatusNotFound)
+			return
+		}
+		ct := bc.ContentType
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ct)
+		if bc.Filename != "" {
+			w.Header().Set("Content-Disposition", "attachment; filename=\""+bc.Filename+"\"")
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bc.Content)
+	}
+}
 
 // blobUploadHandler serves POST /projects/{id}/blobs — a multipart binary
 // upload to a project the caller can access. Mounted behind the same Bearer
