@@ -207,3 +207,147 @@ func TestInvitationVerbsAuthorization(t *testing.T) {
 		}
 	})
 }
+
+// TestInvitationLinks covers the link-invite store lifecycle (sty_8557f770):
+// create-link (token + expiry, no membership yet), redeem → membership,
+// double-redeem, expired, and unknown-token.
+func TestInvitationLinks(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	ctx := context.Background()
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	authStore := auth.New(env.DB)
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	invStore := invitation.New(env.DB)
+
+	owner, _ := authStore.CreateUser(ctx, "usr_link_owner", "owner@link.local", "Owner", auth.RoleAdmin)
+	ws, _ := wsStore.Create(ctx, owner.ID, "link-ws", now)
+	pj, _ := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "link-pj"}, now)
+	redeemer, _ := authStore.CreateUser(ctx, "usr_link_redeemer", "redeemer@link.local", "Redeemer", auth.RoleUser)
+
+	newLink := func(role string) invitation.Invitation {
+		inv, err := invStore.CreateLink(ctx, invitation.CreateLinkInput{
+			Scope: invitation.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID,
+			Role: role, InvitedBy: owner.ID,
+		}, now)
+		if err != nil {
+			t.Fatalf("create link: %v", err)
+		}
+		return inv
+	}
+
+	t.Run("create link stores token + expiry, grants nothing yet", func(t *testing.T) {
+		inv := newLink(project.RoleWrite)
+		if inv.Token == "" || inv.ExpiresAt == nil {
+			t.Fatalf("token/expiry missing: %+v", inv)
+		}
+		if inv.Status != invitation.StatusPending || inv.Email != "" {
+			t.Fatalf("unexpected link invite: %+v", inv)
+		}
+		if _, err := pjStore.GetRole(ctx, pj.ID, redeemer.ID); !errors.Is(err, project.ErrMemberNotFound) {
+			t.Fatalf("unredeemed link granted membership: %v", err)
+		}
+	})
+
+	t.Run("redeem creates membership; double-redeem fails", func(t *testing.T) {
+		inv := newLink(project.RoleWrite)
+		redeemed, err := invStore.RedeemToken(ctx, inv.Token, redeemer.ID, now)
+		if err != nil {
+			t.Fatalf("redeem: %v", err)
+		}
+		if redeemed.Status != invitation.StatusAccepted || redeemed.AcceptedBy != redeemer.ID {
+			t.Fatalf("redeemed = %+v", redeemed)
+		}
+		role, err := pjStore.GetRole(ctx, pj.ID, redeemer.ID)
+		if err != nil || role != project.RoleWrite {
+			t.Fatalf("role=%q err=%v", role, err)
+		}
+		if _, err := invStore.RedeemToken(ctx, inv.Token, redeemer.ID, now); !errors.Is(err, invitation.ErrNotPending) {
+			t.Fatalf("double redeem want ErrNotPending, got %v", err)
+		}
+	})
+
+	t.Run("expired link is rejected, grants nothing", func(t *testing.T) {
+		inv := newLink(project.RoleRead)
+		if _, err := env.DB.ExecContext(ctx,
+			`UPDATE invitations SET expires_at = $1 WHERE token = $2`, now.Add(-time.Hour), inv.Token); err != nil {
+			t.Fatalf("force-expire: %v", err)
+		}
+		fresh, _ := authStore.CreateUser(ctx, "usr_link_exp", "exp@link.local", "Exp", auth.RoleUser)
+		if _, err := invStore.RedeemToken(ctx, inv.Token, fresh.ID, now); !errors.Is(err, invitation.ErrExpired) {
+			t.Fatalf("want ErrExpired, got %v", err)
+		}
+		if _, err := pjStore.GetRole(ctx, pj.ID, fresh.ID); !errors.Is(err, project.ErrMemberNotFound) {
+			t.Fatalf("expired link granted membership: %v", err)
+		}
+	})
+
+	t.Run("unknown token is not found", func(t *testing.T) {
+		if _, err := invStore.RedeemToken(ctx, "deadbeefdeadbeef", redeemer.ID, now); !errors.Is(err, invitation.ErrNotFound) {
+			t.Fatalf("want ErrNotFound, got %v", err)
+		}
+	})
+}
+
+// TestInvitationLinkVerbs covers link create + redeem through the verb surface
+// (sty_8557f770): empty-email invitation_create returns a token + redeem_path,
+// and invitation_redeem registers the authenticated caller as a member.
+func TestInvitationLinkVerbs(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	testbootstrap.Reset(t, env)
+
+	ctx := context.Background()
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	authStore := auth.New(env.DB)
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	invStore := invitation.New(env.DB)
+	verb.SetAuthStore(authStore)
+	verb.SetWorkspaceStore(wsStore)
+	verb.SetProjectStore(pjStore)
+	verb.SetInvitationStore(invStore)
+	t.Cleanup(func() {
+		verb.SetAuthStore(nil)
+		verb.SetWorkspaceStore(nil)
+		verb.SetProjectStore(nil)
+		verb.SetInvitationStore(nil)
+	})
+
+	owner, _ := authStore.CreateUser(ctx, "usr_lv_owner", "owner@lv.local", "Owner", auth.RoleUser)
+	ws, _ := wsStore.Create(ctx, owner.ID, "lv-ws", now)
+	pj, _ := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "lv-pj"}, now)
+	redeemer, _ := authStore.CreateUser(ctx, "usr_lv_redeemer", "redeemer@lv.local", "Redeemer", auth.RoleUser)
+
+	// Link-mode create: empty email → token + redeem_path.
+	createBody, _ := json.Marshal(map[string]string{"scope": "project", "project_id": pj.ID, "role": "write"})
+	raw, err := verb.Dispatch(authWithUser(ctx, owner), "invitation_create", createBody)
+	if err != nil {
+		t.Fatalf("link create: %v", err)
+	}
+	var created struct {
+		Token      string `json:"token"`
+		RedeemPath string `json:"redeem_path"`
+		Status     string `json:"status"`
+	}
+	_ = json.Unmarshal(raw, &created)
+	if created.Token == "" || created.RedeemPath != "/invite/"+created.Token || created.Status != "pending" {
+		t.Fatalf("unexpected link create response: %s", raw)
+	}
+
+	// Redeem as the (different) authenticated caller → membership.
+	redeemBody, _ := json.Marshal(map[string]string{"token": created.Token})
+	if _, err := verb.Dispatch(authWithUser(ctx, redeemer), "invitation_redeem", redeemBody); err != nil {
+		t.Fatalf("redeem verb: %v", err)
+	}
+	role, err := pjStore.GetRole(ctx, pj.ID, redeemer.ID)
+	if err != nil || role != project.RoleWrite {
+		t.Fatalf("redeemer not registered: role=%q err=%v", role, err)
+	}
+
+	// Redeeming with no authenticated caller is forbidden.
+	if _, err := verb.Dispatch(ctx, "invitation_redeem", redeemBody); err == nil {
+		t.Fatal("unauthenticated redeem should be forbidden")
+	}
+}

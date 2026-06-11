@@ -37,6 +37,7 @@ type adminPeopleData struct {
 	FooterEmail string
 	Version     string
 	FlashError  string
+	FlashLink   string
 
 	WorkspaceID      string
 	WorkspaceName    string
@@ -91,7 +92,7 @@ func adminPeopleHandler(cfg Config) http.HandlerFunc {
 		ctx := withSessionUser(r.Context(), cfg, userID)
 		switch r.Method {
 		case http.MethodGet:
-			renderAdminPeople(w, ctx, cfg, userID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("project_id"), "")
+			renderAdminPeople(w, ctx, cfg, userID, r.URL.Query().Get("workspace_id"), r.URL.Query().Get("project_id"), "", "")
 		case http.MethodPost:
 			handleAdminPeoplePost(w, r.WithContext(ctx), cfg, userID)
 		default:
@@ -102,7 +103,7 @@ func adminPeopleHandler(cfg Config) http.HandlerFunc {
 
 func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, userID string) {
 	if err := r.ParseForm(); err != nil {
-		renderAdminPeople(w, r.Context(), cfg, userID, "", "", "bad form")
+		renderAdminPeople(w, r.Context(), cfg, userID, "", "", "bad form", "")
 		return
 	}
 	ctx := r.Context()
@@ -144,6 +145,21 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 			Email: r.FormValue("email"), Scope: "project",
 			ProjectID: projectID, Role: r.FormValue("role"),
 		})
+	case "pj_invite_link":
+		// Generate a stored, redeemable link (no email) and surface it for
+		// manual sending — render directly so the one-time link is shown.
+		body, _ := json.Marshal(verb.InvitationCreateRequest{
+			Scope: "project", ProjectID: projectID, Role: r.FormValue("role"),
+		})
+		raw, e := verb.Dispatch(ctx, "invitation_create", body)
+		if e != nil {
+			err = e
+			break
+		}
+		var resp verb.InvitationCreateResponse
+		_ = json.Unmarshal(raw, &resp)
+		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, "", absoluteURL(r, resp.RedeemPath))
+		return
 	case "pj_member_role":
 		err = dispatch("project_member_update_role", verb.ProjectMemberUpdateRequest{
 			ProjectID: projectID, UserID: r.FormValue("user_id"), Role: r.FormValue("role"),
@@ -155,13 +171,13 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 	case "invite_revoke":
 		err = dispatch("invitation_revoke", verb.InvitationRevokeRequest{ID: r.FormValue("id")})
 	default:
-		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, "unknown action")
+		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, "unknown action", "")
 		return
 	}
 
 	if err != nil {
 		arbor.WarnCtx(ctx, "admin_people: action", "action", action, "user_id", userID, "err", err)
-		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, err.Error())
+		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, err.Error(), "")
 		return
 	}
 	q := url.Values{}
@@ -178,7 +194,19 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, userID, requestedWS, projectID, flashErr string) {
+// absoluteURL builds a fully-qualified URL for path from the request, honouring
+// a proxy's X-Forwarded-Proto. Used to render a copy-paste invite link.
+func absoluteURL(r *http.Request, path string) string {
+	scheme := "https"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS == nil {
+		scheme = "http"
+	}
+	return scheme + "://" + r.Host + path
+}
+
+func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, userID, requestedWS, projectID, flashErr, flashLink string) {
 	data := adminPeopleData{
 		Title:          "people · satellites",
 		ActiveNav:      "people",
@@ -187,6 +215,7 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 		FooterEmail:    footerEmail,
 		Version:        versionString(),
 		FlashError:     flashErr,
+		FlashLink:      flashLink,
 		WorkspaceRoles: []string{"admin", "member"},
 		ProjectRoles:   []string{"read", "write", "admin"},
 	}

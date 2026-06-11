@@ -5,6 +5,8 @@
 package invitation
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -39,24 +41,43 @@ var (
 	ErrNotPending = errors.New("invitation: not pending")
 	// ErrDuplicate is returned when a pending invite for (email,target) exists.
 	ErrDuplicate = errors.New("invitation: duplicate pending invitation")
+	// ErrExpired is returned when redeeming a link invite past its expiry.
+	ErrExpired = errors.New("invitation: link expired")
 )
 
-// Invitation is one pending/accepted/revoked invite row.
+// DefaultLinkTTL bounds how long a freshly generated invite link stays
+// redeemable.
+const DefaultLinkTTL = 14 * 24 * time.Hour
+
+// Invitation is one pending/accepted/revoked invite row. A link invite has a
+// Token (and Email empty); an email invite has an Email (and Token empty).
 type Invitation struct {
 	ID          string     `json:"id"`
-	Email       string     `json:"email"`
+	Email       string     `json:"email,omitempty"`
 	Scope       string     `json:"scope"`
 	WorkspaceID string     `json:"workspace_id,omitempty"`
 	ProjectID   string     `json:"project_id,omitempty"`
 	Role        string     `json:"role"`
 	InvitedBy   string     `json:"invited_by,omitempty"`
 	Status      string     `json:"status"`
+	Token       string     `json:"token,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	AcceptedBy  string     `json:"accepted_by,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	AcceptedAt  *time.Time `json:"accepted_at,omitempty"`
 }
 
 // NewID returns a fresh invitation id in the canonical `inv_<8hex>` form.
 func NewID() string { return fmt.Sprintf("inv_%s", uuid.NewString()[:8]) }
+
+// NewToken returns a high-entropy URL-safe invite token (32 hex chars).
+func NewToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("invitation: token rng: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // IsValidScope reports whether s is a recognised scope.
 func IsValidScope(s string) bool { return s == ScopeWorkspace || s == ScopeProject }

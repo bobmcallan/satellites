@@ -151,6 +151,10 @@
       {{if .IsProjectAdmin}}<button type="button" class="btn primary" @click="pjInviteOpen = !pjInviteOpen" data-action="pj-invite-open">INVITE TO PROJECT</button>{{end}}
     </div>
 
+    {{if .FlashLink}}
+    <p class="notice" data-field="pj-invite-link">Invite link (send manually): <a href="{{.FlashLink}}" data-field="pj-invite-link-url">{{.FlashLink}}</a></p>
+    {{end}}
+
     {{if .IsProjectAdmin}}
     <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite" x-show="pjInviteOpen" x-cloak>
       <input type="hidden" name="action" value="pj_invite">
@@ -161,6 +165,15 @@
         {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
       </select>
       <button type="submit" class="btn primary" data-action="pj-invite-submit">SEND INVITE</button>
+    </form>
+    <form method="POST" action="/settings/people" class="form-row" data-form="pj-invite-link" x-show="pjInviteOpen" x-cloak>
+      <input type="hidden" name="action" value="pj_invite_link">
+      <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+      <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
+      <select name="role" data-field="pj-invite-link-role">
+        {{range .ProjectRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      <button type="submit" class="btn secondary" data-action="pj-invite-link-submit">GENERATE INVITE LINK</button>
     </form>
     {{end}}
 

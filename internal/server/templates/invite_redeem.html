@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="login-body">
+
+<header class="topbar">
+  <h1 class="brand">SATELLITES</h1>
+</header>
+
+<main class="login-main">
+  <section class="panel login-panel" data-field="invite-redeem">
+    <h2>accept invite</h2>
+    {{if .Error}}<p class="error" data-field="invite-error">{{.Error}}</p>{{end}}
+
+    {{if .SignedIn}}
+    <p>You've been invited to join a project on satellites. Accept to add yourself as a member.</p>
+    <form method="POST" action="/invite/{{.Token}}" data-form="invite-accept">
+      <button type="submit" class="btn primary" data-action="invite-accept">ACCEPT INVITE</button>
+    </form>
+    {{else}}
+    <p>Sign in to accept this invitation, then open this link again.</p>
+    <a href="/login" class="btn primary" data-action="invite-signin">SIGN IN</a>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>

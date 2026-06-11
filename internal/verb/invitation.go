@@ -46,6 +46,20 @@ type InvitationRevokeRequest struct {
 	ID string `json:"id"`
 }
 
+type InvitationRedeemRequest struct {
+	Token string `json:"token"`
+}
+
+// InvitationCreateResponse carries the stored invitation plus, for a link
+// invite, the relative path a recipient redeems it at.
+type InvitationCreateResponse struct {
+	invitation.Invitation
+	RedeemPath string `json:"redeem_path,omitempty"`
+}
+
+// redeemPath is the relative URL a link invite is redeemed at.
+func redeemPath(token string) string { return "/invite/" + token }
+
 func init() {
 	Register(&Verb{
 		Name:        "invitation_create",
@@ -61,6 +75,11 @@ func init() {
 		Name:        "invitation_revoke",
 		Description: "Revoke a pending invitation by id.",
 		Invoke:      invokeInvitationRevoke,
+	})
+	Register(&Verb{
+		Name:        "invitation_redeem",
+		Description: "Redeem an invite-link token as the authenticated caller → project/workspace membership.",
+		Invoke:      invokeInvitationRedeem,
 	})
 }
 
@@ -142,6 +161,25 @@ func invokeInvitationCreate(ctx context.Context, raw json.RawMessage) (json.RawM
 	}
 	if !ok {
 		return nil, fmt.Errorf("invitation_create: forbidden")
+	}
+
+	// Link mode: no email → generate a stored, redeemable invite token instead
+	// of an email-bound invite. Whoever redeems the token becomes a member.
+	if strings.TrimSpace(req.Email) == "" {
+		inv, err := invitationStore.CreateLink(ctx, invitation.CreateLinkInput{
+			Scope:       req.Scope,
+			WorkspaceID: wsID,
+			ProjectID:   pjID,
+			Role:        req.Role,
+			InvitedBy:   callerUserID(ctx),
+		}, time.Now().UTC())
+		if err != nil {
+			if errors.Is(err, invitation.ErrInvalidRole) {
+				return nil, fmt.Errorf("invitation_create: invalid_role for scope %q", req.Scope)
+			}
+			return nil, err
+		}
+		return json.Marshal(InvitationCreateResponse{Invitation: inv, RedeemPath: redeemPath(inv.Token)})
 	}
 
 	inv, err := invitationStore.Create(ctx, invitation.CreateInput{
@@ -249,4 +287,39 @@ func invokeInvitationRevoke(ctx context.Context, raw json.RawMessage) (json.RawM
 		return nil, err
 	}
 	return json.Marshal(map[string]string{"id": req.ID, "status": invitation.StatusRevoked})
+}
+
+// invokeInvitationRedeem turns a held invite-link token into membership for the
+// authenticated caller. Authorization is possession of the token — no
+// canInvite gate — but the caller must be signed in.
+func invokeInvitationRedeem(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if invitationStore == nil {
+		return nil, fmt.Errorf("invitation_redeem: store not configured")
+	}
+	var req InvitationRedeemRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("invitation_redeem: bad request: %w", err)
+		}
+	}
+	if strings.TrimSpace(req.Token) == "" {
+		return nil, fmt.Errorf("invitation_redeem: token required")
+	}
+	caller := callerUserID(ctx)
+	if caller == "" {
+		return nil, fmt.Errorf("invitation_redeem: forbidden (sign in to redeem)")
+	}
+	inv, err := invitationStore.RedeemToken(ctx, req.Token, caller, time.Now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, invitation.ErrNotFound):
+			return nil, fmt.Errorf("invitation_redeem: not_found")
+		case errors.Is(err, invitation.ErrNotPending):
+			return nil, fmt.Errorf("invitation_redeem: already_redeemed")
+		case errors.Is(err, invitation.ErrExpired):
+			return nil, fmt.Errorf("invitation_redeem: expired")
+		}
+		return nil, err
+	}
+	return json.Marshal(inv)
 }

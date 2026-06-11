@@ -107,6 +107,151 @@ func (s *Store) pendingExists(ctx context.Context, email, scope, wsID, pjID stri
 	return true, nil
 }
 
+// CreateLinkInput is accepted by CreateLink. Exactly one of WorkspaceID /
+// ProjectID is set per scope; Email is intentionally absent — a link invite is
+// redeemed by whoever holds the token. TTL 0 falls back to DefaultLinkTTL.
+type CreateLinkInput struct {
+	Scope       string
+	WorkspaceID string
+	ProjectID   string
+	Role        string
+	InvitedBy   string
+	TTL         time.Duration
+}
+
+// CreateLink records a pending link invitation bearing a fresh secret token,
+// not bound to any email. Returns the stored invite with Token populated.
+func (s *Store) CreateLink(ctx context.Context, in CreateLinkInput, now time.Time) (Invitation, error) {
+	if !IsValidScope(in.Scope) {
+		return Invitation{}, ErrInvalidScope
+	}
+	if !validRoleForScope(in.Scope, in.Role) {
+		return Invitation{}, ErrInvalidRole
+	}
+	switch in.Scope {
+	case ScopeWorkspace:
+		if in.WorkspaceID == "" {
+			return Invitation{}, fmt.Errorf("invitation: workspace_id required for workspace scope")
+		}
+	case ScopeProject:
+		if in.ProjectID == "" {
+			return Invitation{}, fmt.Errorf("invitation: project_id required for project scope")
+		}
+	}
+	token, err := NewToken()
+	if err != nil {
+		return Invitation{}, err
+	}
+	ttl := in.TTL
+	if ttl <= 0 {
+		ttl = DefaultLinkTTL
+	}
+	now = now.UTC()
+	expires := now.Add(ttl)
+	inv := Invitation{
+		ID:          NewID(),
+		Scope:       in.Scope,
+		WorkspaceID: in.WorkspaceID,
+		ProjectID:   in.ProjectID,
+		Role:        in.Role,
+		InvitedBy:   in.InvitedBy,
+		Status:      StatusPending,
+		Token:       token,
+		ExpiresAt:   &expires,
+		CreatedAt:   now,
+	}
+	if _, err := s.DB.ExecContext(ctx, `
+        INSERT INTO invitations (id, scope, workspace_id, project_id, role, invited_by, status, token, expires_at, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+    `, inv.ID, inv.Scope, nullStr(inv.WorkspaceID), nullStr(inv.ProjectID), inv.Role, nullStr(inv.InvitedBy), token, expires, now); err != nil {
+		return Invitation{}, fmt.Errorf("invitation: insert link: %w", err)
+	}
+	return inv, nil
+}
+
+// GetByToken returns the invitation bearing token, or ErrNotFound.
+func (s *Store) GetByToken(ctx context.Context, token string) (Invitation, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return Invitation{}, ErrNotFound
+	}
+	row := s.DB.QueryRowContext(ctx, `SELECT `+invColumns+` FROM invitations WHERE token = $1`, token)
+	inv, err := scanRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, ErrNotFound
+	}
+	return inv, err
+}
+
+// RedeemToken claims a pending, non-expired link invite for userID: it creates
+// the workspace_members / project_members row at the invite role and marks the
+// invite accepted with accepted_by = userID. ErrNotFound for an unknown token,
+// ErrNotPending if already redeemed/revoked, ErrExpired past expiry.
+func (s *Store) RedeemToken(ctx context.Context, token, userID string, now time.Time) (Invitation, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || userID == "" {
+		return Invitation{}, ErrNotFound
+	}
+	now = now.UTC()
+	inv, err := s.GetByToken(ctx, token)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if inv.Status != StatusPending {
+		return Invitation{}, ErrNotPending
+	}
+	if inv.ExpiresAt != nil && now.After(*inv.ExpiresAt) {
+		return Invitation{}, ErrExpired
+	}
+	if err := s.redeemOne(ctx, inv, userID, now); err != nil {
+		return Invitation{}, err
+	}
+	inv.Status = StatusAccepted
+	inv.AcceptedAt = &now
+	inv.AcceptedBy = userID
+	return inv, nil
+}
+
+func (s *Store) redeemOne(ctx context.Context, inv Invitation, userID string, now time.Time) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("invitation: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	switch inv.Scope {
+	case ScopeWorkspace:
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO workspace_members (workspace_id, user_id, role, added_at, added_by)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role
+        `, inv.WorkspaceID, userID, inv.Role, now, nullStr(inv.InvitedBy)); err != nil {
+			return fmt.Errorf("invitation: redeem workspace membership: %w", err)
+		}
+	case ScopeProject:
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO project_members (project_id, user_id, role, added_at, added_by)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role
+        `, inv.ProjectID, userID, inv.Role, now, nullStr(inv.InvitedBy)); err != nil {
+			return fmt.Errorf("invitation: redeem project membership: %w", err)
+		}
+	default:
+		return ErrInvalidScope
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE invitations SET status='accepted', accepted_at=$1, accepted_by=$2 WHERE id=$3 AND status='pending'`,
+		now, userID, inv.ID)
+	if err != nil {
+		return fmt.Errorf("invitation: mark redeemed: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPending // raced — redeemed/revoked between read and write
+	}
+	return tx.Commit()
+}
+
 // ListInput filters List. Any non-empty field narrows the result.
 type ListInput struct {
 	WorkspaceID string
@@ -116,7 +261,7 @@ type ListInput struct {
 
 // List returns invitations matching the filter, newest-first.
 func (s *Store) List(ctx context.Context, in ListInput) ([]Invitation, error) {
-	q := `SELECT id, email, scope, workspace_id, project_id, role, invited_by, status, created_at, accepted_at FROM invitations`
+	q := `SELECT ` + invColumns + ` FROM invitations`
 	var conds []string
 	var args []any
 	add := func(col, val string) {
@@ -150,10 +295,7 @@ func (s *Store) List(ctx context.Context, in ListInput) ([]Invitation, error) {
 
 // GetByID returns the invitation, or ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id string) (Invitation, error) {
-	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, email, scope, workspace_id, project_id, role, invited_by, status, created_at, accepted_at
-        FROM invitations WHERE id = $1
-    `, id)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+invColumns+` FROM invitations WHERE id = $1`, id)
 	inv, err := scanRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Invitation{}, ErrNotFound
@@ -189,8 +331,7 @@ func (s *Store) ClaimForEmail(ctx context.Context, email, userID string, now tim
 		return nil, nil
 	}
 	now = now.UTC()
-	rows, err := s.DB.QueryContext(ctx, `
-        SELECT id, email, scope, workspace_id, project_id, role, invited_by, status, created_at, accepted_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+invColumns+`
         FROM invitations WHERE email = $1 AND status = 'pending'
         ORDER BY created_at ASC, id
     `, email)
@@ -277,20 +418,31 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// invColumns is the canonical select list backing scanCommon. Keep the two
+// in lock-step.
+const invColumns = `id, email, scope, workspace_id, project_id, role, invited_by, status, token, expires_at, accepted_by, created_at, accepted_at`
+
 func scanCommon(sc rowScanner) (Invitation, error) {
 	var (
-		inv        Invitation
-		wsID, pjID sql.NullString
-		invBy      sql.NullString
-		acceptedAt sql.NullTime
+		inv                    Invitation
+		email, wsID, pjID      sql.NullString
+		invBy, token, acceptBy sql.NullString
+		expiresAt, acceptedAt  sql.NullTime
 	)
-	if err := sc.Scan(&inv.ID, &inv.Email, &inv.Scope, &wsID, &pjID, &inv.Role,
-		&invBy, &inv.Status, &inv.CreatedAt, &acceptedAt); err != nil {
+	if err := sc.Scan(&inv.ID, &email, &inv.Scope, &wsID, &pjID, &inv.Role,
+		&invBy, &inv.Status, &token, &expiresAt, &acceptBy, &inv.CreatedAt, &acceptedAt); err != nil {
 		return Invitation{}, err
 	}
+	inv.Email = email.String
 	inv.WorkspaceID = wsID.String
 	inv.ProjectID = pjID.String
 	inv.InvitedBy = invBy.String
+	inv.Token = token.String
+	inv.AcceptedBy = acceptBy.String
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		inv.ExpiresAt = &t
+	}
 	if acceptedAt.Valid {
 		t := acceptedAt.Time
 		inv.AcceptedAt = &t
