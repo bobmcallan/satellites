@@ -49,6 +49,11 @@ type Config struct {
 	// email invitations (epic:user-admin, sty_480dba9b). Injected from main so
 	// this package keeps clear of substrate stores; nil is a no-op.
 	ProvisionLogin LoginProvisioner
+	// StoreBlob persists a binary upload (sty_59652a7d) and returns its
+	// reference. Injected from main so this transport package imports no blob
+	// substrate store (layering guard); nil disables the
+	// POST /projects/{id}/blobs upload route.
+	StoreBlob StoreBlobFunc
 }
 
 // LiveScoper resolves the SSE topic-scope for a session user — admins see
@@ -113,6 +118,13 @@ func Build(cfg Config) http.Handler {
 	// Live story-list refetch fragment (sty_8f69be8b) — more specific than
 	// /projects/ so it wins under Go 1.22 pattern precedence.
 	mux.HandleFunc("GET /projects/{id}/stories.fragment", storyFragmentHandler(cfg))
+	// Binary ingestion (sty_59652a7d): multipart upload to a project the caller
+	// can access, behind the same Bearer middleware as /mcp. More specific than
+	// /projects/ so it wins under Go 1.22 pattern precedence. Registered only
+	// when a blob store is wired.
+	if cfg.StoreBlob != nil {
+		mux.Handle("POST /projects/{id}/blobs", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(blobUploadHandler(cfg)))))
+	}
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE

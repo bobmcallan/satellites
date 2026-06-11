@@ -16,6 +16,7 @@ import (
 	"github.com/bobmcallan/satellites/config/documents"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/blob"
 	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
@@ -85,6 +86,7 @@ func main() {
 	verb.SetInvitationStore(invStore)
 
 	verb.SetProjectStore(project.New(sqlDB))
+	blobStore := blob.New(sqlDB) // binary ingestion (sty_59652a7d)
 	ledgerStore := ledger.New(sqlDB)
 	verb.SetLedgerStore(ledgerStore)
 
@@ -458,6 +460,29 @@ func main() {
 			// Claim any pending invitations for this verified email.
 			_, err := invStore.ClaimForEmail(ctx, email, userID, time.Now().UTC())
 			return err
+		},
+		// Binary ingestion (sty_59652a7d): the transport hands us a BlobUpload;
+		// we persist it through the blob store and hand back the reference. Keeps
+		// internal/blob out of the server package per the layering guard.
+		StoreBlob: func(ctx context.Context, up server.BlobUpload) (server.BlobRef, error) {
+			b, err := blobStore.Create(ctx, blob.CreateInput{
+				WorkspaceID: up.WorkspaceID,
+				ProjectID:   up.ProjectID,
+				Filename:    up.Filename,
+				ContentType: up.ContentType,
+				CreatedBy:   up.CreatedBy,
+			}, up.Content, time.Now().UTC())
+			if err != nil {
+				return server.BlobRef{}, err
+			}
+			return server.BlobRef{
+				ID:          b.ID,
+				ProjectID:   b.ProjectID,
+				Filename:    b.Filename,
+				ContentType: b.ContentType,
+				SizeBytes:   b.SizeBytes,
+				SHA256:      b.SHA256,
+			}, nil
 		},
 	})
 
