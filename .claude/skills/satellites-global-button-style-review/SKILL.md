@@ -1,4 +1,4 @@
-<!-- satellites-sync:begin {"document_id":"doc_5d268705","version":1,"hash":"c9105e183fd79013f313edd3f42d9a08cb5a4e3d44278c5ac5560ef254b3cbca"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_5d268705","version":2,"hash":"2c226324b10a2e7c1f80448462b0de9cecc41b3d38ca84f18809d161b20f913d"} satellites-sync:end -->
 ---
 name: satellites-global-button-style-review
 type: skill
@@ -47,8 +47,8 @@ perl -0777 -ne 'while(/<button\b[^>]*>/gs){$t=$&;
   next if $t=~/\bclass="[^"]*\b(?:btn|story-tab|category-chip|tag-chip|story-expand-toggle|modal-close|user-menu[\w-]*|ledger-search-clear|panel-filter-chip-remove|panel-filter-chip-clear)\b/;
   print "FLAG bare/non-.btn button: $t\n"}' internal/server/templates/*.html
 
-# (2) Any button carrying an inline style= override.
-grep -rEzoP '<button\b[^>]*\bstyle="[^"]*"[^>]*>' internal/server/templates/*.html
+# (2) Any button carrying an inline style= override (PCRE only — never mix -E with -P).
+grep -rzoP '<button\b[^>]*\bstyle="[^"]*"[^>]*>' internal/server/templates/*.html
 ```
 
 **CLEAN (SHIP)** — both checks print nothing. The convention holds; the commit

@@ -46,8 +46,8 @@ perl -0777 -ne 'while(/<button\b[^>]*>/gs){$t=$&;
   next if $t=~/\bclass="[^"]*\b(?:btn|story-tab|category-chip|tag-chip|story-expand-toggle|modal-close|user-menu[\w-]*|ledger-search-clear|panel-filter-chip-remove|panel-filter-chip-clear)\b/;
   print "FLAG bare/non-.btn button: $t\n"}' internal/server/templates/*.html
 
-# (2) Any button carrying an inline style= override.
-grep -rEzoP '<button\b[^>]*\bstyle="[^"]*"[^>]*>' internal/server/templates/*.html
+# (2) Any button carrying an inline style= override (PCRE only — never mix -E with -P).
+grep -rzoP '<button\b[^>]*\bstyle="[^"]*"[^>]*>' internal/server/templates/*.html
 ```
 
 **CLEAN (SHIP)** — both checks print nothing. The convention holds; the commit
