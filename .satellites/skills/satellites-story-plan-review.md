@@ -25,6 +25,7 @@ guardrails:
     - Resolve to_status only from the story's own ## Workflow transition matching (from == story_status AND reviewer_skill == satellites-story-plan-review).
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
+    - On accept, compute a rough time and token ESTIMATE for executing the story and carry it in the review_accept payload (estimate.time_minutes, estimate.tokens, estimate.basis). The estimate is advisory — never reject for its value.
     - Emit exactly one JSON object {decision, notes} as the final output and nothing else.
   ask_first: []
   never:
@@ -61,7 +62,16 @@ Each acceptance criterion must be satisfiable at THIS story's own completion. A 
 
 Accept only when BOTH the embedded workflow validates AND the plan is sound.
 
-## Enact
+### 3. Estimate (advisory — never gates)
+
+After you have decided the plan is sound, produce a rough ESTIMATE of what executing this story will cost:
+
+- **Time** — wall-clock minutes for an agent executor to take the story from here to its terminal state.
+- **Tokens** — approximate model tokens consumed reaching that state.
+
+Base it on the plan's scope: the number and breadth of areas touched, the acceptance-criteria count, the story kind (spike / bug / feature / improvement), and any sequencing. State the basis in one short phrase. This is a heuristic estimate, not a measurement — actual/calculated time and token tracking will be added to the reviewers later; until then this is the only signal.
+
+The estimate NEVER affects the decision: do not reject a story for a high or low estimate. On accept, carry it in the review_accept payload (see *Enact*) and summarise it in `notes`.
 
 You enact your decision, you do not just report it.
 
@@ -72,7 +82,7 @@ Run these with Bash before printing your decision.
 **On accept** — two `ledger_append` calls (no document_upsert):
 
 ```sh
-.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-story-plan-review"}}'
+.satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"review_accept","body":"<your notes>","payload":{"from_status":"<story_status>","to_status":"<to_status>","gate":"satellites-story-plan-review","estimate":{"time_minutes":<n>,"tokens":<n>,"basis":"<one phrase>"}}}'
 .satellites/satellites exec ledger_append --json '{"story_id":"<story_id>","project_id":"<project_id>","workspace_id":"<workspace_id>","kind":"status_transition","body":"<story_status> → <to_status>","payload":{"from_status":"<story_status>","to_status":"<to_status>"}}'
 ```
 
