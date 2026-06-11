@@ -220,6 +220,39 @@ func TestMCPWriteSurface_EndToEnd(t *testing.T) {
 		})
 	}
 
+	// ---- skill delete is REFUSED over MCP (sty_1c234792) ----
+	// MCP can neither read nor write a skill; the delete side door must be
+	// closed too, or an MCP caller can undo review-gated uploads. The skill
+	// row is seeded directly through the store (as the CLI upload path would).
+	t.Run("mcp_refuses_skill_delete", func(t *testing.T) {
+		seeded, _, err := docStore.Upsert(ctx, document.UpsertInput{
+			Key:  document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: "delete-door-skill"},
+			Type: document.TypeSkill,
+			Body: "---\nname: delete-door-skill\nkind: gate\n---\n# g\n",
+		}, time.Now().UTC())
+		if err != nil {
+			t.Fatalf("seed skill: %v", err)
+		}
+		for name, args := range map[string]map[string]any{
+			"by-id":   {"id": seeded.ID},
+			"by-name": {"name": "delete-door-skill", "scope": "project", "workspace_id": ws.ID, "project_id": pj.ID},
+		} {
+			req := mcp.CallToolRequest{}
+			req.Params.Name = "document_delete"
+			req.Params.Arguments = args
+			res, err := cli.CallTool(ctx, req)
+			if err != nil {
+				t.Fatalf("CallTool %s: %v", name, err)
+			}
+			if !res.IsError {
+				t.Errorf("MCP skill delete (%s) must be refused; got %+v", name, res.Content)
+			}
+		}
+		if d, err := docStore.GetByID(ctx, seeded.ID); err != nil || d.Status == string(document.StatusDeleted) {
+			t.Errorf("skill must survive the refused deletes: err=%v status=%v", err, d.Status)
+		}
+	})
+
 	// ---- story delete via document_delete (id-addressed) ----
 	t.Run("story_delete_by_id", func(t *testing.T) {
 		_ = call(t, "document_delete", map[string]any{"id": created.ID})

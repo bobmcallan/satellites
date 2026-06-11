@@ -1102,6 +1102,13 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 		if err != nil {
 			return nil, mapStoreError(err, "document_delete")
 		}
+		// Skills/principles are client-owned executable configuration: MCP can
+		// neither read nor write them, so it must not delete them either —
+		// otherwise the one remaining side door undoes review-gated uploads
+		// (sty_1c234792 surface contract). The CLI exec path passes.
+		if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), d.Type, d.Tags) {
+			return nil, fmt.Errorf("document_delete: %w: skills/principles are managed client-side (`satellites exec document_delete` after review), not over MCP", ErrForbidden)
+		}
 		if d.Type == document.TypeStory {
 			if err := documentStore.HardDelete(ctx, req.ID); err != nil {
 				return nil, mapStoreError(err, "document_delete")
@@ -1144,6 +1151,15 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 	}
 	if err := authorizeWrite(ctx, key); err != nil {
 		return nil, err
+	}
+	// Same MCP bound as the id-addressed path: a skill/principle addressed by
+	// (scope, name) is still client-owned configuration.
+	if auth.TransportFromContext(ctx) == auth.TransportMCP {
+		if res, gErr := documentStore.Get(ctx, key, document.GetOptions{}); gErr == nil {
+			if mcpReadForbiddenDoc(auth.TransportMCP, res.Document.Type, res.Document.Tags) {
+				return nil, fmt.Errorf("document_delete: %w: skills/principles are managed client-side (`satellites exec document_delete` after review), not over MCP", ErrForbidden)
+			}
+		}
 	}
 	doc, v, err := documentStore.Delete(ctx, key, callerUserID(ctx), false, time.Now().UTC())
 	if err != nil {

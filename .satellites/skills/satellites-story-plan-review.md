@@ -4,10 +4,10 @@ type: skill
 kind: gate
 when: status==backlog
 tags: [kind:gate]
-description: Gate skill for the entry-to-work transition (e.g. backlog → in_progress). Decides whether a story has a sound, executable plan before an executor picks it up. Emits {decision, notes} JSON.
+description: The comprehensive story review — the workflow's FIRST gate. Decides in one verdict whether a story is a sound contract before an executor picks it up - story shape, plan, acceptance criteria, embedded workflow, and code grounding. A story is created freely (it is user intent, no review on upsert); THIS gate is where it is judged. Emits {decision, notes} JSON.
 ---
 
-Decide whether the story is a sound contract — its workflow is correctly embedded and its plan is ready to execute. Gate the contract, not the work: do not run the build or tests, and do not penalise the absence of code.
+Decide whether the story is a sound contract — its shape conforms, its workflow is correctly embedded, its plan is ready to execute, and that plan is grounded in the code it claims to change. A story is created with no review (intent is free to land); this gate is the single point where everything is judged. Gate the contract, not the work: do not run the build or tests, and do not penalise the absence of code.
 
 ## Input
 
@@ -37,6 +37,15 @@ guardrails:
 
 ## What to check
 
+### 0. Story shape
+
+The story row itself conforms: a kebab-case `name`, a `category`, and coherent
+linkage (an `epic:<slug>` tag pairs with a `parent_id`; an anchor/parent story
+carries no executable plan of its own). Audit against
+`document:project/story-schema` essentials when in doubt. Reject naming the
+malformed field — a story that cannot be addressed or grouped correctly is not
+a contract.
+
 ### 1. The embedded workflow
 
 The body must carry a `## Workflow` section. Validate that it is SOUND, not that it equals a canonical block (per `no-default-workflow`, a workflow is designed from the requirement). Run the structural review:
@@ -60,7 +69,17 @@ Reject when the plan is missing, vague ("improve performance"), or so underspeci
 
 Each acceptance criterion must be satisfiable at THIS story's own completion. A criterion that depends on another, not-yet-delivered story belongs in that enabler story, not here — the done-gate checks every AC literally and fails closed, so a deferred bullet guarantees a later false reject. Reject and name the offending criterion.
 
-Accept only when BOTH the embedded workflow validates AND the plan is sound.
+### 2b. Code grounding
+
+The Approach must be grounded in the repository's reality, not asserted over
+it. When it names files, symbols, or commands, spot-check (Read/Glob — reads
+only) that a representative one exists as described; an Approach that claims
+to change code but names nothing concrete an executor could open is not
+grounded. Reject naming the ungrounded claim. (This is still the contract, not
+the work: verify the plan's references, never build or test.)
+
+Accept only when ALL layers pass — shape, embedded workflow, plan, and
+grounding. One verdict covers them all.
 
 ### 3. Estimate (advisory — never gates)
 
