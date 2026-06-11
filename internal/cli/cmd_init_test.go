@@ -234,6 +234,9 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	if !commandUnderEvent(t, s, "SessionStart", "", sessionContextCommand) {
 		t.Errorf("always-context inject hook (SessionStart → %s) not installed", sessionContextCommand)
 	}
+	if !commandUnderEvent(t, s, "Stop", "", stopCheckCommand) {
+		t.Errorf("commit-without-gate Stop advisory (Stop → %s) not installed", stopCheckCommand)
+	}
 	if !commandUnderEvent(t, s, "PreToolUse", accessMatcher, sessionContextCommand) {
 		t.Errorf("always-context re-anchor hook (PreToolUse %s → %s) not installed", accessMatcher, sessionContextCommand)
 	}

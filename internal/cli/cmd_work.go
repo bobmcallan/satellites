@@ -17,7 +17,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,21 +75,27 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 	work.AddCommand(initCmd)
 
 	var closeConfigArg, closeSessionArg string
+	var closeForce bool
 	closeCmd := &cobra.Command{
 		Use:   "close <story-id>",
 		Short: "Close a story's engagement — clear it from the store so it no longer vouches",
 		Long: `close ends a story's engagement for this session: it records a close event
 (removing the store row) and clears engagement.json when it names the story. A
-finished story then leaves no leftover that could authorise later edits.`,
+finished story then leaves no leftover that could authorise later edits.
+
+Guard (epic:enforcement-surface): close refuses when the engaged story is still
+non-terminal AND commits were made since it was engaged — that is abandoning
+shared work that never reached done. Pass --force to close anyway.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(closeConfigArg)
 			return runWorkClose(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(closeConfigArg),
-				args[0], resolveSession(closeSessionArg), time.Now().UTC())
+				args[0], resolveSession(closeSessionArg), closeForce, time.Now().UTC())
 		},
 	}
 	closeCmd.Flags().StringVar(&closeConfigArg, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
 	closeCmd.Flags().StringVar(&closeSessionArg, "session", "", "Session key (default $CLAUDE_CODE_SESSION_ID, else 'local').")
+	closeCmd.Flags().BoolVar(&closeForce, "force", false, "Close even when the story is non-terminal with commits made since engagement (overrides the ungated-work guard).")
 	work.AddCommand(closeCmd)
 
 	var statusConfigArg string
@@ -316,9 +324,61 @@ func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, ses
 	return nil
 }
 
+// terminalPhases are the canonical end states the enforcement guards treat as
+// "the story finished" — closing or ending a turn on one is not abandonment.
+// Kept here (not derived from a workflow) because the client holds no workflow
+// knowledge; these are the shared terminals the fix/feature/parent/urgent
+// workflows converge on (mirrors the `done` cleanup key in cmd_story_review.go).
+var terminalPhases = map[string]bool{"done": true, "cancelled": true, "canceled": true}
+
+// isTerminalPhase reports whether a phase is a workflow terminal. An empty phase
+// is NOT terminal — an engagement with no recorded status is still in flight.
+func isTerminalPhase(phase string) bool {
+	return terminalPhases[strings.ToLower(strings.TrimSpace(phase))]
+}
+
+// phaseOrUnset renders a phase for a message, naming an empty phase explicitly.
+func phaseOrUnset(phase string) string {
+	if strings.TrimSpace(phase) == "" {
+		return "unset"
+	}
+	return phase
+}
+
+// commitsSince counts commits on HEAD authored since `since`, the signal for
+// "work was committed during this engagement". It shells to git in repoRoot and
+// fails OPEN (returns 0) on any error — not a git repo, no commits, git absent —
+// so the enforcement guards never block on a git hiccup. A zero `since` returns
+// 0 (no engagement time → nothing to compare).
+func commitsSince(repoRoot string, since time.Time) int {
+	if since.IsZero() {
+		return 0
+	}
+	root := strings.TrimSpace(repoRoot)
+	if root == "" {
+		root = "."
+	}
+	cmd := exec.Command("git", "-C", root, "rev-list", "--count", "--since", since.UTC().Format(time.RFC3339), "HEAD")
+	outBytes, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(outBytes)))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // runWorkClose ends a story's engagement for a session: a close event clears the
 // store row, and engagement.json is removed when it names the story.
-func runWorkClose(out io.Writer, repoRoot, workDir, stateDB, storyID, session string, now time.Time) error {
+//
+// Guard (sty_b713f886): refuse to close an engagement whose story is still
+// non-terminal when commits were made since it was engaged — closing then
+// abandons shared work that never reached done. force overrides. The guard
+// fails OPEN (allows close) on any uncertainty (no engagement, git unavailable)
+// so it never wedges a legitimate close.
+func runWorkClose(out io.Writer, repoRoot, workDir, stateDB, storyID, session string, force bool, now time.Time) error {
 	storyID = strings.TrimSpace(storyID)
 	if storyID == "" {
 		return fmt.Errorf("work close: story id required")
@@ -328,6 +388,17 @@ func runWorkClose(out io.Writer, repoRoot, workDir, stateDB, storyID, session st
 		return fmt.Errorf("work close: open store: %w", err)
 	}
 	defer store.Close()
+
+	if !force {
+		if eng, ok, cErr := store.Current(session, storyID); cErr == nil && ok && !isTerminalPhase(eng.Phase) {
+			if n := commitsSince(repoRoot, eng.UpdatedAt); n > 0 {
+				return fmt.Errorf("work close: %s is still %q (not terminal) and %d commit(s) were made since it was engaged — "+
+					"closing now abandons shared work that never reached done. Drive it to done through its gates, or pass --force to close anyway",
+					storyID, phaseOrUnset(eng.Phase), n)
+			}
+		}
+	}
+
 	if _, err := store.Append(workstate.Event{Session: session, Story: storyID, Kind: workstate.KindClose, TS: now}); err != nil {
 		return fmt.Errorf("work close: %w", err)
 	}

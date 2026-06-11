@@ -80,7 +80,7 @@ func TestRunWorkInit_SingleOpenPerSession(t *testing.T) {
 	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess2", true, now); err != nil {
 		t.Fatalf("different session should be allowed: %v", err)
 	}
-	if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_aaa", "sess1", now.Add(3*time.Minute)); err != nil {
+	if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_aaa", "sess1", false, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess1", true, now.Add(4*time.Minute)); err != nil {
@@ -102,7 +102,7 @@ func TestRunWorkClose_ClearsLegacyFile(t *testing.T) {
 	if _, ok := readEngagement(workDir); !ok {
 		t.Fatalf("engagement.json should exist after init")
 	}
-	if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_ccc", "sess1", now.Add(time.Minute)); err != nil {
+	if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_ccc", "sess1", false, now.Add(time.Minute)); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if _, ok := readEngagement(workDir); ok {

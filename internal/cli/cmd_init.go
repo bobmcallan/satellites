@@ -67,6 +67,13 @@ const (
 	// CLAUDE.md prose. ADVISORY: no `|| exit 2`, and the handler fails open, so
 	// a fetch hiccup never blocks a session.
 	sessionContextCommand = "satellites hook context"
+
+	// The commit-without-gate Stop advisory (sty_b713f886, epic:enforcement-
+	// surface). Stop: at end of turn it warns when the session committed work but
+	// its engaged story is still non-terminal. ADVISORY — no `|| exit 2`, and the
+	// handler always exits 0, because a Stop hook that errors would block the stop
+	// (it cannot un-push, so it must never block).
+	stopCheckCommand = "satellites hook stopcheck"
 )
 
 // installedHook describes one hook init merges into .claude/settings.json.
@@ -88,6 +95,7 @@ var hooksToInstall = []installedHook{
 	{"UserPromptSubmit", "", promptCommand, ".claude/settings.json (UserPromptSubmit story-access reminder)"},
 	{"SessionStart", "", sessionIndexCommand, ".claude/settings.json (SessionStart code-index refresh)"},
 	{"SessionStart", "", sessionContextCommand, ".claude/settings.json (SessionStart always-context inject)"},
+	{"Stop", "", stopCheckCommand, ".claude/settings.json (Stop commit-without-gate advisory)"},
 }
 
 func init() {
