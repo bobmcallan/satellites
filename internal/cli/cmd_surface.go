@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -70,6 +71,7 @@ MCP verb.`,
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			start := time.Now()
 			return runSurfaceCheck(ctx, surfaceOpts{
 				ConfigPath:  *configArg,
 				UserArg:     *userArg,
@@ -78,6 +80,9 @@ MCP verb.`,
 				WorkspaceID: strings.TrimSpace(workspaceID),
 				Stdout:      cmd.OutOrStdout(),
 				Stderr:      cmd.ErrOrStderr(),
+				OnVerdict: func(verdict string, blockingFindings int) {
+					recordGateVerdict(ctx, *configArg, *userArg, "surface-check", verdict, blockingFindings, time.Since(start), cmd.OutOrStdout())
+				},
 			})
 		},
 	}
@@ -95,6 +100,10 @@ type surfaceOpts struct {
 	WorkspaceID string
 	Stdout      io.Writer
 	Stderr      io.Writer
+	// OnVerdict, when set, receives the gate's verdict (CLEAN/BLOCKED) and
+	// blocking-finding count at verdict time — the gate-verdict evidence
+	// seam (epic:graduated-workflow).
+	OnVerdict func(verdict string, blockingFindings int)
 }
 
 func runSurfaceCheck(ctx context.Context, opts surfaceOpts) error {
@@ -110,6 +119,13 @@ func runSurfaceCheck(ctx context.Context, opts surfaceOpts) error {
 
 	missing := surfaceDrift(live, body)
 	printSurfaceReport(opts.Stdout, live, missing, opts.DocName)
+	if opts.OnVerdict != nil {
+		if len(missing) > 0 {
+			opts.OnVerdict(gateVerdictBlocked, len(missing))
+		} else {
+			opts.OnVerdict(gateVerdictClean, 0)
+		}
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("surface gate: %d command(s) undocumented in %q — reconcile the doc to match the CLI", len(missing), opts.DocName)
 	}

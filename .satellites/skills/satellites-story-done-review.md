@@ -17,6 +17,7 @@ The gate's `.satellites/satellites exec` calls authenticate as the operator's ad
 - Read the acceptance criteria from the body and check each against the working tree.
 - Run the relevant build and tests. A criterion claiming a test exists is met only if that test runs and passes.
 - Use `git log` / `git diff` to confirm the change is committed, and the `.satellites/satellites` CLI to read related rows the criteria reference.
+- **Checkpoint compliance reads from rows, not prose:** the checkpoint gates write their own `ci_result` ledger rows at verdict time (payload `{gate, verdict, blocking_findings, duration_ms}`). Read the story's ledger (`.satellites/satellites exec ledger_list --json '{"story_id":"<story_id>","kind":"ci_result"}'`): a row with verdict CLEAN is proof that gate ran clean — do not re-run it. No such row → the checkpoint is unproven; verify it yourself as before.
 
 ## Environment
 

@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
@@ -387,11 +388,23 @@ pinned by integration tests — they are out of a client check's reach.`,
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			start := time.Now()
 			stories, err := listProjectStories(ctx, *configArg, *userArg)
 			if err != nil {
 				return err
 			}
 			findings := runWorkflowChecks(materialisedSkills(), stories)
+			blocking := 0
+			for _, f := range findings {
+				if f.Severity == "block" {
+					blocking++
+				}
+			}
+			verdict := gateVerdictClean
+			if blocking > 0 {
+				verdict = gateVerdictBlocked
+			}
+			recordGateVerdict(ctx, *configArg, *userArg, "workflow-check", verdict, blocking, time.Since(start), cmd.OutOrStdout())
 			return reportWorkflowChecks(cmd.OutOrStdout(), findings, asJSON)
 		},
 	}

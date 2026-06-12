@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/techdebt"
@@ -92,7 +93,11 @@ the integration tier cannot start (no Docker), it is skipped with a warning.`,
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			start := time.Now()
 			return runTechdebtReview(ctx, techdebtOpts{
+				OnVerdict: func(verdict string, blockingFindings int) {
+					recordGateVerdict(ctx, *configArg, *userArg, "techdebt-review", verdict, blockingFindings, time.Since(start), cmd.OutOrStdout())
+				},
 				ConfigPath:      *configArg,
 				UserArg:         *userArg,
 				Worktree:        worktree,
@@ -126,6 +131,17 @@ type techdebtOpts struct {
 	SkipIntegration bool
 	Stdout          io.Writer
 	Stderr          io.Writer
+	// OnVerdict, when set, receives the gate's final verdict (CLEAN/BLOCKED)
+	// and its blocking-finding count at verdict time — the seam the
+	// gate-verdict evidence recorder hangs off (epic:graduated-workflow).
+	OnVerdict func(verdict string, blockingFindings int)
+}
+
+// emitVerdict invokes the OnVerdict seam when wired — nil-safe.
+func (o techdebtOpts) emitVerdict(verdict string, blockingFindings int) {
+	if o.OnVerdict != nil {
+		o.OnVerdict(verdict, blockingFindings)
+	}
 }
 
 func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
@@ -140,6 +156,7 @@ func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
 	// 1. Build is never registerable — a broken build always blocks.
 	if out, code := runGo(ctx, dir, "build", "./..."); code != 0 {
 		fmt.Fprintf(opts.Stdout, "BLOCKED: `go build ./...` failed — a broken build is never tolerable debt.\n\n%s\n", strings.TrimSpace(out))
+		opts.emitVerdict(gateVerdictBlocked, 1)
 		return fmt.Errorf("technical-debt gate: build failed")
 	}
 	fmt.Fprintln(opts.Stdout, "build: ok")
@@ -156,6 +173,7 @@ func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
 	unitFails := techdebt.ParseFailures(unitOut)
 	if unitCode != 0 && len(unitFails) == 0 {
 		fmt.Fprintf(opts.Stdout, "BLOCKED: unit tier failed without a named test (build/setup failure).\n\n%s\n", tail(unitOut, 60))
+		opts.emitVerdict(gateVerdictBlocked, 1)
 		return fmt.Errorf("technical-debt gate: unit tier failed to run")
 	}
 	failing = append(failing, unitFails...)
@@ -175,6 +193,7 @@ func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
 			fmt.Fprintf(opts.Stderr, "warn: integration tier could not start (no Docker?) — skipped, not blocked.\n")
 		case intCode != 0 && len(intFails) == 0:
 			fmt.Fprintf(opts.Stdout, "BLOCKED: integration tier failed without a named test (build/setup failure).\n\n%s\n", tail(intOut, 60))
+			opts.emitVerdict(gateVerdictBlocked, 1)
 			return fmt.Errorf("technical-debt gate: integration tier failed to run")
 		default:
 			failing = append(failing, intFails...)
@@ -198,8 +217,10 @@ func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
 	printTechdebtReport(opts.Stdout, res, complete)
 
 	if !res.OK {
+		opts.emitVerdict(gateVerdictBlocked, len(res.NewRed)+len(res.Unowned))
 		return fmt.Errorf("technical-debt gate: %d new red, %d unowned register entr(ies) — fix it, or file a story and add an owned register row", len(res.NewRed), len(res.Unowned))
 	}
+	opts.emitVerdict(gateVerdictClean, 0)
 	return nil
 }
 
