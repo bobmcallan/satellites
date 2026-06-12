@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/bobmcallan/satellites/internal/verb"
 )
 
 // TestClaimLeaseTTLOutlivesDispatch pins that the local work-claim lease
@@ -36,5 +40,25 @@ func TestRunReviewRequiresSkill(t *testing.T) {
 	}
 	if got := err.Error(); got != "--skill is required: name the gate skill to run" {
 		t.Fatalf("error = %q, want the --skill-required message", got)
+	}
+}
+
+// TestRunSatellitesActorCommand pins AC4's decision mapping: exit 0 → accept,
+// non-zero → reject, with the command + output recorded as evidence notes.
+func TestRunSatellitesActorCommand(t *testing.T) {
+	ctx := context.Background()
+	out := runSatellitesActorCommand(ctx, reviewOpts{}, "echo all-clear; true")
+	if out.Decision != verb.GateDecisionAccept {
+		t.Fatalf("exit 0 must accept: %+v", out)
+	}
+	if !strings.Contains(out.Notes, "all-clear") || !strings.Contains(out.Notes, "exit 0") {
+		t.Fatalf("accept notes must carry command evidence: %q", out.Notes)
+	}
+	out = runSatellitesActorCommand(ctx, reviewOpts{}, "echo broken-window; exit 3")
+	if out.Decision != verb.GateDecisionReject {
+		t.Fatalf("non-zero exit must reject: %+v", out)
+	}
+	if !strings.Contains(out.Notes, "broken-window") || !strings.Contains(out.Notes, "failed") {
+		t.Fatalf("reject notes must carry command evidence: %q", out.Notes)
 	}
 }

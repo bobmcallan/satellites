@@ -109,3 +109,27 @@ func TestRunWorkClose_ClearsLegacyFile(t *testing.T) {
 		t.Errorf("engagement.json should be cleared after close")
 	}
 }
+
+// TestRefuseNonExecutorActor pins the actor handoff stop (AC3,
+// epic:graduated-workflow dispatcher story): a non-executor state refuses
+// the executor action naming whose turn it is; empty/executor pass.
+func TestRefuseNonExecutorActor(t *testing.T) {
+	if err := refuseNonExecutorActor("work init", "sty_x", "in_progress", ""); err != nil {
+		t.Fatalf("empty actor must pass: %v", err)
+	}
+	if err := refuseNonExecutorActor("work init", "sty_x", "in_progress", "executor"); err != nil {
+		t.Fatalf("executor actor must pass: %v", err)
+	}
+	err := refuseNonExecutorActor("work init", "sty_x", "techdebt-review", "satellites")
+	if err == nil {
+		t.Fatal("satellites actor must refuse")
+	}
+	for _, want := range []string{"satellites", "techdebt-review", "stop"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal must name %q: %v", want, err)
+		}
+	}
+	if err := refuseNonExecutorActor("work init", "sty_x", "blocked", "operator"); err == nil {
+		t.Fatal("operator actor must refuse")
+	}
+}

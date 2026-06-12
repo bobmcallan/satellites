@@ -498,3 +498,29 @@ func TestParse_V2LegacyMixUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// TestParse_V2StateCommand pins the command rider: legal on an
+// actor:satellites state, rejected anywhere else; a satellites state may
+// omit it (the dispatcher refuses at advance time, not parse time).
+func TestParse_V2StateCommand(t *testing.T) {
+	good := []byte("# t\n\n```yaml\n" +
+		"states:\n  - {name: a, actor: executor}\n  - {name: td, actor: satellites, command: \"satellites techdebt review\"}\n  - {name: nocmd, actor: satellites}\n  - done\n" +
+		"transitions:\n  - {from: a, to: td}\n  - {from: td, on: pass, to: done}\n  - {from: td, on: fail, to: a, max_iterations: 2, on_exhausted: done}\n  - {from: nocmd, to: done}\n```\n")
+	wf, err := ParseBody(good)
+	if err != nil {
+		t.Fatalf("command on satellites state must parse: %v", err)
+	}
+	st, _ := wf.StateOf("td")
+	if st.Command != "satellites techdebt review" {
+		t.Fatalf("command = %q", st.Command)
+	}
+	if st2, _ := wf.StateOf("nocmd"); st2.Command != "" {
+		t.Fatalf("omitted command should be empty, got %q", st2.Command)
+	}
+	bad := []byte("# t\n\n```yaml\n" +
+		"states:\n  - {name: a, actor: executor, command: \"make\"}\n  - done\n" +
+		"transitions:\n  - {from: a, to: done}\n```\n")
+	if _, err := ParseBody(bad); err == nil || !strings.Contains(err.Error(), "actor is not satellites") {
+		t.Fatalf("command on non-satellites state must reject, got %v", err)
+	}
+}

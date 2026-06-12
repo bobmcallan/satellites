@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -148,6 +149,34 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		return err
 	}
 
+	// 1a. v2 edge resolution (epic:graduated-workflow). On a state whose
+	// outgoing edges carry on:pass|fail the gate skill judges ONLY and this
+	// client enacts the decision's edge deterministically — including bounded
+	// fail loops and exhaustion. The resolution itself lives in internal/verb
+	// (this file's layering guard: no internal/workflow import). A story with
+	// no v2 edges from its current status follows the legacy path untouched.
+	edges, _ := verb.ResolveV2Edges(body, story.Status)
+
+	// Actor handoff stop: an operator state takes no review dispatch at all —
+	// it is a human decision point, and the executor's move is to stop.
+	if edges.Actor == "operator" {
+		return fmt.Errorf("status_transition: story %s is in state %q whose actor is %q — it is the operator's turn; not your state → stop",
+			story.ID, story.Status, edges.Actor)
+	}
+
+	// Pre-dispatch bound check: when the fail loop is bounded and the ledger
+	// already carries the full quota of rejects for this state, the review is
+	// not re-dispatched — the bound is spent. (Normally exhaustion was already
+	// enacted at the Nth reject; this refusal covers the re-request race.)
+	var priorRejects int
+	if edges.IsV2 && edges.MaxIterations > 0 {
+		priorRejects = verb.CountEdgeRejects(fullLedgerViews(ctx, opts, story.ID), story.Status)
+		if priorRejects >= edges.MaxIterations {
+			return fmt.Errorf("status_transition: review for state %q refused — its fail loop is exhausted (%d/%d rejects); the story escalates to %q and it is not the executor's to re-request",
+				story.Status, priorRejects, edges.MaxIterations, edges.OnExhausted)
+		}
+	}
+
 	// 1b. Open the per-repo working-state store (sty_676e070c) — the inbox +
 	// claim rows that replaced the per-story .satellites/work/<story>/ files.
 	store, err := workstate.Open(resolveStateDB(opts.ConfigPath))
@@ -199,28 +228,61 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stderr, "warn: stage review_requested to inbox: %v\n", sErr)
 	}
 
-	// 7. Run the gate locally (owned by internal/verb's dispatcher). The
-	// dispatch timeout (gateDispatchTimeout) must cover a done-review that
-	// actually builds + runs the change's tests; the work-claim lease
-	// (claimLeaseTTL, above) is derived from it so the lease outlives the run
-	// and a second reviewer cannot reclaim mid-build.
-	disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: gateDispatchTimeout}
-	gateOut, err := disp.Dispatch(ctx, verb.GateInput{
-		SkillName:    gateSkill,
-		StoryID:      story.ID,
-		ProjectID:    story.ProjectID,
-		WorkspaceID:  story.WorkspaceID,
-		StoryBody:    body,
-		StoryStatus:  story.Status,
-		RecentLedger: recent,
-		WorktreeRoot: opts.WorktreeRoot,
-	})
-	if err != nil {
-		return fmt.Errorf("gate dispatch: %w", err)
+	// 7. Run the gate locally. Two judgment paths:
+	//   - actor:satellites state → NO claude -p: the client runs the state's
+	//     declared deterministic command; exit 0 selects the pass edge,
+	//     non-zero the fail edge. No agent discretion anywhere in the loop.
+	//   - otherwise → the claude gate skill judges (owned by internal/verb's
+	//     dispatcher). The dispatch timeout (gateDispatchTimeout) must cover a
+	//     done-review that actually builds + runs tests; the work-claim lease
+	//     (claimLeaseTTL, above) is derived from it so the lease outlives the
+	//     run and a second reviewer cannot reclaim mid-build.
+	var gateOut verb.GateOutput
+	if edges.Actor == "satellites" {
+		if !edges.IsV2 {
+			return fmt.Errorf("status_transition: state %q declares actor satellites but no on:pass|fail edges — nothing deterministic to enact", story.Status)
+		}
+		if edges.Command == "" {
+			return fmt.Errorf("status_transition: state %q declares actor satellites but names no command — the client cannot advance it deterministically", story.Status)
+		}
+		gateOut = runSatellitesActorCommand(ctx, opts, edges.Command)
+	} else {
+		disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: gateDispatchTimeout}
+		gateOut, err = disp.Dispatch(ctx, verb.GateInput{
+			SkillName:    gateSkill,
+			StoryID:      story.ID,
+			ProjectID:    story.ProjectID,
+			WorkspaceID:  story.WorkspaceID,
+			StoryBody:    body,
+			StoryStatus:  story.Status,
+			RecentLedger: recent,
+			WorktreeRoot: opts.WorktreeRoot,
+		})
+		if err != nil {
+			return fmt.Errorf("gate dispatch: %w", err)
+		}
 	}
 	fmt.Fprintf(opts.Stdout, "decision: %s\n", gateOut.Decision)
 	if strings.TrimSpace(gateOut.Notes) != "" {
 		fmt.Fprintf(opts.Stdout, "notes: %s\n", gateOut.Notes)
+	}
+
+	// 7b. v2 enactment (epic:graduated-workflow): on a v2 state the client —
+	// not the skill — enacts the decision's edge: review_* row + the
+	// status_transition row for the pass/fail target, or the exhaustion
+	// transition when this reject spends the bound. Deterministic code; the
+	// executor decides none of it.
+	if edges.IsV2 {
+		plan, perr := verb.PlanV2Enactment(gateOut.Decision, gateSkill, story.Status, gateOut.Notes, edges, priorRejects)
+		if perr != nil {
+			return fmt.Errorf("v2 enactment: %w", perr)
+		}
+		for _, row := range plan.Rows {
+			reviewAppendLedger(ctx, opts, story, row.Kind, row.Body, row.Payload)
+		}
+		if plan.Exhausted {
+			fmt.Fprintf(opts.Stdout, "exhausted: fail loop bound reached — escalated to %s\n", plan.ToStatus)
+		}
 	}
 
 	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Running
@@ -390,6 +452,64 @@ func flushLocalInbox(ctx context.Context, opts reviewOpts, store *workstate.Stor
 		}
 		fmt.Fprintf(opts.Stdout, "flushed %d local inbox row(s) to ledger\n", flushed)
 	}
+}
+
+// fullLedgerViews fetches the story's COMPLETE ledger (cursor-paginated,
+// oldest-first) projected to the minimal view the v2 reject counter reads.
+// Unlike the 5-row gate slice this must see every reject since the loop's
+// last re-arm — a bound counted from a truncated window would never trip.
+// Best-effort: an unreachable ledger yields an empty slice (count 0), which
+// fails open to dispatching the review — the reviewer remains the gate.
+func fullLedgerViews(ctx context.Context, opts reviewOpts, storyID string) []verb.LedgerEntryView {
+	var out []verb.LedgerEntryView
+	cursor := ""
+	for {
+		req, err := json.Marshal(verb.LedgerListRequest{StoryID: storyID, Limit: 200, Cursor: cursor})
+		if err != nil {
+			return out
+		}
+		raw, err := dispatchVerb(ctx, "ledger_list", req, opts.ConfigPath, opts.UserArg)
+		if err != nil {
+			return out
+		}
+		var resp verb.LedgerListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return out
+		}
+		for _, e := range resp.Entries {
+			out = append(out, verb.LedgerEntryView{Kind: e.Kind, Payload: e.Payload})
+		}
+		if resp.NextCursor == "" {
+			return out
+		}
+		cursor = resp.NextCursor
+	}
+}
+
+// runSatellitesActorCommand advances an actor:satellites state: it runs the
+// state's declared command in the worktree and maps the exit code onto the
+// gate decision — exit 0 = pass/accept, non-zero = fail/reject. The notes
+// carry the command, its exit, and an output tail so the verdict row reads
+// like evidence, but the decision is the exit code alone.
+func runSatellitesActorCommand(ctx context.Context, opts reviewOpts, command string) verb.GateOutput {
+	cctx, cancel := context.WithTimeout(ctx, gateDispatchTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, "sh", "-c", command)
+	if strings.TrimSpace(opts.WorktreeRoot) != "" {
+		cmd.Dir = opts.WorktreeRoot
+	}
+	outBytes, runErr := cmd.CombinedOutput()
+	tail := strings.TrimSpace(string(outBytes))
+	const tailCap = 1000
+	if len(tail) > tailCap {
+		tail = "…" + tail[len(tail)-tailCap:]
+	}
+	if runErr == nil {
+		return verb.GateOutput{Decision: verb.GateDecisionAccept,
+			Notes: fmt.Sprintf("satellites-actor command %q exit 0\n%s", command, tail)}
+	}
+	return verb.GateOutput{Decision: verb.GateDecisionReject,
+		Notes: fmt.Sprintf("satellites-actor command %q failed (%v)\n%s", command, runErr, tail)}
 }
 
 // recentGateLedger assembles the ≤5-row recent-ledger slice a gate run

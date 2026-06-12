@@ -55,9 +55,15 @@ type Workflow struct {
 // (any team shape can be expressed); the names executor / reviewer /
 // satellites / operator are the reserved vocabulary the dispatcher attaches
 // semantics to. Empty actor = unspecified = pre-actor semantics.
+//
+// Command is the deterministic command an `actor: satellites` state runs to
+// advance itself — exit 0 selects the pass edge, non-zero the fail edge. It is
+// legal only on satellites states; a satellites state may omit it (the
+// dispatcher then refuses to advance rather than guessing).
 type State struct {
-	Name  string `yaml:"name"`
-	Actor string `yaml:"actor,omitempty"`
+	Name    string `yaml:"name"`
+	Actor   string `yaml:"actor,omitempty"`
+	Command string `yaml:"command,omitempty"`
 }
 
 // UnmarshalYAML accepts both the scalar and the mapping form.
@@ -202,7 +208,11 @@ func (w *Workflow) validate() error {
 		if s.Actor != "" && actor == "" {
 			return fmt.Errorf("workflow: yaml block: states[%d] %q has a blank actor — omit the key or name who acts", i, name)
 		}
-		w.States[i] = State{Name: name, Actor: actor}
+		command := strings.TrimSpace(s.Command)
+		if command != "" && actor != "satellites" {
+			return fmt.Errorf("workflow: yaml block: states[%d] %q carries a command but its actor is not satellites — only a satellites state runs a deterministic command", i, name)
+		}
+		w.States[i] = State{Name: name, Actor: actor, Command: command}
 	}
 	if len(w.Transitions) == 0 {
 		return fmt.Errorf("workflow: yaml block: transitions required (at least one)")
@@ -378,12 +388,19 @@ func (w *Workflow) InitialState() string {
 // ActorOf returns the actor declared on the named state — empty when the
 // state is unknown or declares no actor (pre-actor semantics).
 func (w *Workflow) ActorOf(state string) string {
+	s, _ := w.StateOf(state)
+	return s.Actor
+}
+
+// StateOf returns the full declared state by name; ok is false when the
+// state is not declared.
+func (w *Workflow) StateOf(state string) (State, bool) {
 	for _, s := range w.States {
 		if s.Name == state {
-			return s.Actor
+			return s, true
 		}
 	}
-	return ""
+	return State{}, false
 }
 
 // IsTerminal reports whether a declared state has no outgoing transition (a

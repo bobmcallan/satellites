@@ -57,7 +57,10 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(configArg)
-			editable := resolveEditable(cmd.Context(), configArg, args[0], status)
+			editable, actor, resolvedStatus := resolveEngageGuards(cmd.Context(), configArg, args[0], status)
+			if err := refuseNonExecutorActor("work init", args[0], resolvedStatus, actor); err != nil {
+				return err
+			}
 			if err := runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
 				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC()); err != nil {
 				return err
@@ -247,17 +250,26 @@ func refreshEngagementPhase(store *workstate.Store, session, storyID, phase stri
 // workflow block, unknown status) returns true so the lease remains the hard
 // gate. The door reads the stored result; this resolves it once at engage.
 func resolveEditable(ctx context.Context, configPath, storyID, status string) bool {
+	editable, _, _ := resolveEngageGuards(ctx, configPath, storyID, status)
+	return editable
+}
+
+// resolveEngageGuards fetches the story once and derives the two engage-time
+// guards from its embedded `## Workflow`: editability and the current state's
+// actor. Best-effort like resolveEditable: any failure yields (true, "") so
+// offline work is never over-blocked.
+func resolveEngageGuards(ctx context.Context, configPath, storyID, status string) (bool, string, string) {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
 	if err != nil {
-		return true
+		return true, "", status
 	}
 	raw, err := dispatchVerb(ctx, "document_get", req, configPath, "")
 	if err != nil {
-		return true // offline / not resolvable → don't over-block
+		return true, "", status // offline / not resolvable → don't over-block
 	}
 	var resp verb.DocumentGetResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return true
+		return true, "", status
 	}
 	body := resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
@@ -268,9 +280,20 @@ func resolveEditable(ctx context.Context, configPath, storyID, status string) bo
 	}
 	wf, err := workflow.ParseBody([]byte(body))
 	if err != nil || strings.TrimSpace(status) == "" || !wf.HasState(status) {
-		return true
+		return true, "", status
 	}
-	return wf.IsEditable(status)
+	return wf.IsEditable(status), wf.ActorOf(status), status
+}
+
+// refuseNonExecutorActor is the actor handoff stop (epic:graduated-workflow):
+// an executor action in a state whose declared actor is not the executor is
+// refused with whose turn it is. Empty actor = pre-actor semantics = allowed.
+func refuseNonExecutorActor(action, storyID, status, actor string) error {
+	if actor == "" || actor == "executor" {
+		return nil
+	}
+	return fmt.Errorf("%s: story %s is in state %q whose actor is %q — it is %s's turn, not the executor's; not your state → stop",
+		action, storyID, status, actor, actor)
 }
 
 // runWorkInit records the engagement in the per-repo store (the new authority,
