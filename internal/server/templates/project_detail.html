@@ -179,9 +179,10 @@
             <td colspan="5">
               {{/* sty_762730ad: tabbed inline panel (Description/ACs · Ledger/Log)
                    with readable markdown content; the merged Ledger/Log lazy-loads
-                   on first open (epic:graduated-workflow ledger-log-merge). Per-row
-                   Alpine scope nested inside the storyPanel root. */}}
-              <div class="story-detail-flat" x-data="{ tab: 'description', loaded: {} }">
+                   on first open (epic:graduated-workflow ledger-log-merge). Tab
+                   state lives on the storyPanel component — NOT a per-row x-data —
+                   so it survives the liveRefresh tbody swap (sty_0ac9c75a). */}}
+              <div class="story-detail-flat">
                 {{/* epic:dynamic-workflow-status order:2: status is DISPLAY-ONLY here.
                      The editable button grid + portal status-write are removed — status
                      moves only through reviewer gates. */}}
@@ -194,14 +195,14 @@
 
                 <nav class="story-tabs" role="tablist" data-field="story-tabs">
                   <button type="button" class="story-tab" role="tab" data-tab="description"
-                          :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
-                          @click.stop="tab='description'">Description / ACs</button>
+                          :class="detailTab==='description' ? 'is-active' : ''" :aria-selected="detailTab==='description' ? 'true' : 'false'"
+                          @click.stop="detailTab='description'">Description / ACs</button>
                   <button type="button" class="story-tab" role="tab" data-tab="ledger"
-                          :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
-                          @click.stop="tab='ledger'; if(!loaded.ledger){ loaded.ledger=true; window.loadStoryFragment('{{.ID}}',$refs.ledgerPanel); }">Ledger / Log</button>
+                          :class="detailTab==='ledger' ? 'is-active' : ''" :aria-selected="detailTab==='ledger' ? 'true' : 'false'"
+                          @click.stop="openLedger('{{.ID}}')">Ledger / Log</button>
                 </nav>
 
-                <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="tab==='description'">
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="detailTab==='description'">
                   <section class="story-detail-block" data-field="story-description">
                     <h4>description</h4>
                     {{if .BodyHTML}}<div class="changelog-content" data-field="story-description-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
@@ -212,8 +213,8 @@
                   </section>
                 </div>
 
-                <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
-                  <div class="story-detail-block" data-field="story-ledger" x-ref="ledgerPanel"><p class="empty">Loading…</p></div>
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="detailTab==='ledger'" x-cloak>
+                  <div class="story-detail-block" data-field="story-ledger"><p class="empty">Loading…</p></div>
                 </div>
               </div>
             </td>

@@ -313,6 +313,12 @@
         return {
             query: '',
             expanded: '',
+            // Active tab of the expanded row's inline panel. Lives here (not
+            // in a per-row x-data) so it survives the liveRefresh tbody swap,
+            // same as `expanded` (sty_0ac9c75a). One row expands at a time,
+            // so a single field suffices.
+            detailTab: 'description',
+            _ledgerLoaded: false,
             // _originalRowOrder is the snapshot of story-row ids in
             // server-rendered order, captured once on init() so removing
             // the order chip can restore the table.
@@ -428,6 +434,13 @@
                     window.Alpine.initTree(tbody);
                 }
 
+                // The swap wiped the expanded row's lazily-loaded ledger
+                // fragment; detailTab survived (component state, not DOM),
+                // so re-load the content the open tab is showing.
+                if (this.expanded && this.detailTab === 'ledger') {
+                    window.loadStoryFragment(this.expanded, this.ledgerPanelFor(this.expanded));
+                }
+
                 // Re-capture the server order for the freshly-rendered rows,
                 // then re-apply the active sort (or restore server order).
                 const order = [];
@@ -538,6 +551,29 @@
                 const id = (target && target.dataset && target.dataset.id) || '';
                 if (!id) { return; }
                 this.expanded = this.expanded === id ? '' : id;
+                // A newly expanded (or collapsed) row starts back on the
+                // Description tab with a fresh ledger lazy-load state.
+                this.detailTab = 'description';
+                this._ledgerLoaded = false;
+            },
+
+            // ledgerPanelFor locates the expanded row's ledger container.
+            // Looked up by data attribute rather than x-ref — every detail
+            // row carries the same ref name, so refs would collide.
+            ledgerPanelFor(id) {
+                const host = this.$root || this.$el;
+                const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+                return host && host.querySelector(
+                    'tr.story-detail[data-detail-for="' + sel + '"] [data-field="story-ledger"]');
+            },
+
+            // openLedger switches the expanded row's panel to Ledger/Log and
+            // lazy-loads the merged fragment on first open (sty_762730ad).
+            openLedger(id) {
+                this.detailTab = 'ledger';
+                if (this._ledgerLoaded) { return; }
+                this._ledgerLoaded = true;
+                window.loadStoryFragment(id, this.ledgerPanelFor(id));
             },
 
             // copyStoryID writes the story id to the clipboard and flips
