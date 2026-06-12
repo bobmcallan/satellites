@@ -164,19 +164,6 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			story.ID, story.Status, edges.Actor)
 	}
 
-	// Pre-dispatch bound check: when the fail loop is bounded and the ledger
-	// already carries the full quota of rejects for this state, the review is
-	// not re-dispatched — the bound is spent. (Normally exhaustion was already
-	// enacted at the Nth reject; this refusal covers the re-request race.)
-	var priorRejects int
-	if edges.IsV2 && edges.MaxIterations > 0 {
-		priorRejects = verb.CountEdgeRejects(fullLedgerViews(ctx, opts, story.ID), story.Status)
-		if priorRejects >= edges.MaxIterations {
-			return fmt.Errorf("status_transition: review for state %q refused — its fail loop is exhausted (%d/%d rejects); the story escalates to %q and it is not the executor's to re-request",
-				story.Status, priorRejects, edges.MaxIterations, edges.OnExhausted)
-		}
-	}
-
 	// 1b. Open the per-repo working-state store (sty_676e070c) — the inbox +
 	// claim rows that replaced the per-story .satellites/work/<story>/ files.
 	store, err := workstate.Open(resolveStateDB(opts.ConfigPath))
@@ -192,6 +179,48 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// same operator reclaims its own lease.
 	if err := store.ClaimWork(story.ID, workClaimant(resolveCallerUserID(opts.UserArg)), story.Status, claimLeaseTTL, time.Now()); err != nil {
 		return fmt.Errorf("claim work area for %s: %w", story.ID, err)
+	}
+
+	// 1a'. Checkpoint-trigger traverse (epic:graduated-workflow story 6): a
+	// state whose single ungated edge carries `trigger: checkpoint` is left by
+	// the executor's checkpoint, not a review — the client enacts the move
+	// deterministically (no gate, no judgment), then chains into the new
+	// state's own semantics below (a satellites-actor state runs its command
+	// and enacts pass/fail; a reviewer or operator state stops the traverse —
+	// their move is a separate request / a human's turn).
+	if !edges.IsV2 && edges.Actor != "operator" {
+		if to, ok := verb.CheckpointEdge(body, story.Status); ok {
+			reviewAppendLedger(ctx, opts, story, "status_transition",
+				fmt.Sprintf("%s → %s (checkpoint)", story.Status, to),
+				map[string]any{"from_status": story.Status, "to_status": to, "trigger": "checkpoint"})
+			fmt.Fprintf(opts.Stdout, "checkpoint: %s → %s\n", story.Status, to)
+			story.Status = to
+			edges, _ = verb.ResolveV2Edges(body, story.Status)
+			if edges.Actor != "satellites" {
+				// Landed where someone else acts (reviewer gate = its own
+				// request; operator = a human's turn; terminal = done).
+				whose := edges.Actor
+				if whose == "" {
+					whose = "the next gate"
+				}
+				fmt.Fprintf(opts.Stdout, "status: now %s — %s's turn\n", story.Status, whose)
+				flushLocalInbox(ctx, opts, store, story)
+				return nil
+			}
+		}
+	}
+
+	// Pre-dispatch bound check: when the fail loop is bounded and the ledger
+	// already carries the full quota of rejects for this state, the review is
+	// not re-dispatched — the bound is spent. (Normally exhaustion was already
+	// enacted at the Nth reject; this refusal covers the re-request race.)
+	var priorRejects int
+	if edges.IsV2 && edges.MaxIterations > 0 {
+		priorRejects = verb.CountEdgeRejects(fullLedgerViews(ctx, opts, story.ID), story.Status)
+		if priorRejects >= edges.MaxIterations {
+			return fmt.Errorf("status_transition: review for state %q refused — its fail loop is exhausted (%d/%d rejects); the story escalates to %q and it is not the executor's to re-request",
+				story.Status, priorRejects, edges.MaxIterations, edges.OnExhausted)
+		}
 	}
 
 	// 2. Resolve only the optional step-summariser skill (a post-transition
@@ -354,6 +383,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// effort: the transition has already happened, so a summariser failure warns
 	// but does not fail the review. Inlined (not a helper) so the recent-ledger
 	// slice flows by inference and the CLI never names internal/ledger.
+	// Skipped on the satellites-actor path: that lane is deterministic
+	// end-to-end — no claude -p anywhere in it, the summariser included.
+	if edges.Actor == "satellites" {
+		summariserSkill = ""
+	}
 	if summariserSkill != "" {
 		toStatus := observed
 		if toStatus == "" {

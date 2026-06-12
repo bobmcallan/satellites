@@ -67,6 +67,28 @@ func ResolveV2Edges(storyBody, status string) (V2Edges, error) {
 	return out, nil
 }
 
+// CheckpointEdge resolves the single ungated `trigger: checkpoint` edge out
+// of the current status — the edge the executor's checkpoint enacts
+// deterministically (no gate, no judgment). ok is false when the state has
+// no such edge, more than one, or any `on` edges (a review state is never a
+// checkpoint source).
+func CheckpointEdge(storyBody, status string) (string, bool) {
+	wf, err := workflow.ParseBody([]byte(storyBody))
+	if err != nil {
+		return "", false
+	}
+	to, count := "", 0
+	for _, t := range wf.TransitionsFrom(strings.TrimSpace(status)) {
+		if t.On != "" {
+			return "", false
+		}
+		if t.Trigger == "checkpoint" && t.ReviewerSkill == "" {
+			to, count = t.To, count+1
+		}
+	}
+	return to, count == 1
+}
+
 // PlannedRow is one ledger row the dispatcher must append, in order.
 type PlannedRow struct {
 	Kind    string

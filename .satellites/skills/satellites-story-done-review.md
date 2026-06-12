@@ -47,9 +47,11 @@ guardrails:
 
 ## Enact
 
-You enact your decision, you do not just report it.
+You enact your decision, you do not just report it — EXCEPT on a v2 edge.
 
 Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-story-done-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject` below, print reject). Never invent a `to_status`.
+
+**Judge-only on v2 edges:** if the matched transition carries an `on:` field (`on: pass` / `on: fail`), the CLIENT enacts — the reviewer's decision selects the edge, the client writes the review_* and status_transition rows, counts the fail-loop bound, and escalates on exhaustion. In that case write NOTHING: skip every `ledger_append` below and print only the decision JSON. Writing rows yourself on a v2 edge double-enacts.
 
 Run these with Bash before printing your decision. These `ledger_append` calls are your **only** permitted writes — never run a `document_upsert`, any other `exec` write, or any git/file mutation of the tree.
 

@@ -145,3 +145,22 @@ func TestPlanV2Enactment_Refusals(t *testing.T) {
 		t.Fatal("bounded fail edge without on_exhausted must refuse")
 	}
 }
+
+// TestCheckpointEdge pins the checkpoint-trigger resolution (story 6): a
+// state's single ungated trigger edge resolves; review states (on-edges) and
+// gated/multiple/absent triggers do not.
+func TestCheckpointEdge(t *testing.T) {
+	if to, ok := CheckpointEdge(v2StoryBody, "in_progress"); !ok || to != "techdebt-review" {
+		t.Fatalf("checkpoint edge = %q/%v, want techdebt-review/true", to, ok)
+	}
+	if _, ok := CheckpointEdge(v2StoryBody, "done-review"); ok {
+		t.Fatal("a review state must not resolve a checkpoint edge")
+	}
+	if _, ok := CheckpointEdge(v2StoryBody, "blocked"); ok {
+		t.Fatal("a terminal state must not resolve a checkpoint edge")
+	}
+	legacy := "# t\n\n```yaml\nstates: [a, done]\ntransitions:\n  - {from: a, to: done, reviewer_skill: x}\n```\n"
+	if _, ok := CheckpointEdge(legacy, "a"); ok {
+		t.Fatal("a gated legacy edge must not resolve as checkpoint")
+	}
+}

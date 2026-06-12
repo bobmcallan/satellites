@@ -4,7 +4,7 @@ type: skill
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
-description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → done, every edge reviewer-gated, with the commit-time gates named in this definition. Invoke when implementing a story; it IS the executor's process.
+description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
 
 # Satellites workflow
@@ -12,26 +12,42 @@ description: The lifecycle EVERY satellites story follows (any category) — bac
 The single executable workflow for this repo's stories, whatever their
 category. The story is the goal; this is the loop. (Anchors — parent stories
 that group children and carry no executable work — follow
-`satellites-parent-workflow` instead.)
+`satellites-parent-workflow` instead.) Reviews are STATES with actors: the
+status itself answers "whose turn is it, and was the gate run?".
 
 1. `document_get` the story; read its acceptance criteria.
 2. Before starting, `document_upsert` two sections into the story body:
    - **`## Workflow`** — the fenced ```yaml block below, copied verbatim. Later gates parse the story's copy.
    - **The plan** — Purpose / Approach / numbered Acceptance criteria.
-3. Request each gated transition: `satellites story status_transition <story-id> --skill <gate>`. The plan-review accept IS your go-ahead to start.
-4. Do the work; run the **checkpoint** (below) at every natural checkpoint.
-5. Request the next gate until `done`.
+3. Request the entry gates: `satellites story status_transition <story-id> --skill <gate>`
+   for plan-review (backlog → ready) and start-review (ready → in_progress).
+4. Do the work. At every natural checkpoint run the **checkpoint capability**
+   (below), then `satellites story status_transition <story-id> --skill
+   satellites-technical-debt-review` — the client enacts the checkpoint edge
+   into `techdebt-review` and runs that state's command itself (exit code =
+   pass/fail; no judgment anywhere): pass lands `done-review`, fail returns the
+   story to `in_progress`, and the 3rd fail escalates to `blocked` by the
+   client's own enactment.
+5. From `done-review`, request `satellites story status_transition <story-id>
+   --skill satellites-story-done-review`. The gate JUDGES ONLY on these edges —
+   the client enacts pass → `done` / fail → back to `in_progress` (×3, then
+   `blocked`).
 
-A rejected gate (or a missing/mismatched `## Workflow`) returns notes; fix and request again. Only reviewers advance status — never hand-patch it.
+A rejected gate returns notes; fix and request again — each reject is a real
+transition back to `in_progress`, visible on the ledger. Only reviewers and the
+client's deterministic enactment advance status — never hand-patch it. A story
+in `blocked` is the operator's: not your state → stop.
 
-A client/server change is invisible to the gate until it is built, tested, committed, pushed through CI, and the client refreshed; the gate runs the local binary, so an unshipped change is not seen.
+A client/server change is invisible to the gate until it is built, tested,
+committed, pushed through CI, and the client refreshed; the gate runs the local
+binary, so an unshipped change is not seen.
 
-## Transitions
+## States and actors
 
-- `backlog → ready` — `satellites-story-plan-review` accepts the plan.
-- `ready → in_progress` — `satellites-story-start-review` confirms ready to start.
-- `in_progress → done` — `satellites-story-done-review` verifies against the acceptance criteria.
-- `backlog/ready/in_progress → cancelled` — `satellites-story-cancel-review`.
+- `in_progress` (executor) — the work happens here, and every fail edge lands back here.
+- `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
+- `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
+- `blocked` (operator) — fail-loop exhaustion lands here; only the operator moves a story out.
 
 ## Checkpoint gates
 
@@ -41,25 +57,35 @@ meaningful change, before requesting review) run the [[satellites-commit-push]]
 capability, which executes these atomic gates and honours their verdicts (each
 gate owns its decision rule):
 
-- [[satellites-technical-debt-review]] — always, pre-commit.
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
+- [[satellites-technical-debt-review]] — graduated to the `techdebt-review`
+  STATE: its command runs via the status_transition traverse in step 4 (not as
+  a separate pre-commit step), and its verdict lands as a ledger row on the
+  story. The gate skill still owns the decision rule.
 
 ```yaml
 states:
   - backlog
   - ready
-  - in_progress
+  - {name: in_progress,     actor: executor}
+  - {name: techdebt-review, actor: satellites, command: "satellites techdebt review"}
+  - {name: done-review,     actor: reviewer}
+  - {name: blocked,         actor: operator}
   - done
   - cancelled
 transitions:
-  - {from: backlog,     to: ready,       reviewer_skill: "satellites-story-plan-review"}
-  - {from: ready,       to: in_progress, reviewer_skill: "satellites-story-start-review"}
-  - {from: in_progress, to: done,        reviewer_skill: "satellites-story-done-review"}
-  - {from: backlog,     to: cancelled,   reviewer_skill: "satellites-story-cancel-review"}
-  - {from: ready,       to: cancelled,   reviewer_skill: "satellites-story-cancel-review"}
-  - {from: in_progress, to: cancelled,   reviewer_skill: "satellites-story-cancel-review"}
+  - {from: backlog,         to: ready,           reviewer_skill: "satellites-story-plan-review"}
+  - {from: ready,           to: in_progress,     reviewer_skill: "satellites-story-start-review"}
+  - {from: in_progress,     to: techdebt-review, trigger: checkpoint}
+  - {from: techdebt-review, on: pass, to: done-review}
+  - {from: techdebt-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}
+  - {from: done-review,     on: pass, to: done, reviewer_skill: "satellites-story-done-review"}
+  - {from: done-review,     on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
+  - {from: backlog,         to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: ready,           to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: in_progress,     to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
 ```
 
 ## Environment
@@ -71,11 +97,12 @@ requests gated transitions, and triggers checkpoint commits.
 guardrails:
   always:
     - Copy the Workflow yaml block into the story verbatim before requesting a gate.
-    - Route every status change through the transition's reviewer skill.
-    - Run the checkpoint capability (and its gates) before requesting review.
+    - Route every status change through the transition's reviewer skill or the client's deterministic enactment.
+    - Run the checkpoint capability (and its gates) before the techdebt-review traverse.
   ask_first:
     - Cancelling a story (the rationale is the operator's call unless already given).
   never:
     - Hand-patch story status or bypass a gate verdict.
+    - Act in a state whose actor is not yours — blocked is the operator's.
     - Run a fail-closed check this definition does not name.
 ```

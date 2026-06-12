@@ -20,9 +20,11 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		name        string
 		transitions int
 	}{
-		// The single repo workflow (sty_20d71a66): 3 forward gates + 3
-		// cancellation edges, every one reviewer-gated.
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 6},
+		// The single repo workflow, stateful v3 (epic:graduated-workflow):
+		// 2 gated entry edges + 1 checkpoint edge + 4 on-edges + 3
+		// cancellation edges. Ungated edges are the deterministic
+		// client-enacted ones (trigger/on) — every other edge is gated.
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 10},
 		{filepath.Join("..", "..", ".claude", "skills", "satellites-parent-workflow", "SKILL.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {
@@ -43,11 +45,13 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		if len(wf.Transitions) != c.transitions {
 			t.Errorf("%s: %d transitions, want %d", c.path, len(wf.Transitions), c.transitions)
 		}
-		// Every transition must name a gate — the loop must never see an
-		// ungated edge it cannot drive (sty_3934ad71).
+		// Every transition must be drivable: gated by a reviewer skill OR
+		// deterministically client-enacted (a checkpoint trigger or an
+		// on:pass|fail edge) — the loop must never see an edge nothing can
+		// drive (sty_3934ad71; v2 semantics epic:graduated-workflow).
 		for _, tr := range wf.Transitions {
-			if strings.TrimSpace(tr.ReviewerSkill) == "" {
-				t.Errorf("%s: ungated transition %s→%s (every edge must be reviewer-gated)", c.path, tr.From, tr.To)
+			if strings.TrimSpace(tr.ReviewerSkill) == "" && tr.On == "" && tr.Trigger == "" {
+				t.Errorf("%s: undrivable transition %s→%s (needs a gate, an on-edge, or a trigger)", c.path, tr.From, tr.To)
 			}
 		}
 	}
