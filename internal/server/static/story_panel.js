@@ -433,6 +433,12 @@
                 if (window.Alpine && typeof window.Alpine.initTree === 'function') {
                     window.Alpine.initTree(tbody);
                 }
+                // Fresh rows carry fresh data-last-seen — re-run the
+                // engagement-dot aging pass so colors snap immediately
+                // (sty_25e2e8ac).
+                if (typeof window.satAgeEngagementDots === 'function') {
+                    window.satAgeEngagementDots();
+                }
 
                 // The swap wiped the expanded row's lazily-loaded ledger
                 // fragment; detailTab survived (component state, not DOM),
@@ -721,4 +727,41 @@
 
     window.storyPanelFactory = storyPanel;
     window.storyPanelFactory.__test__ = { parseStoryQuery, removeFromQuery };
+})();
+
+// Engagement processing dot aging (sty_25e2e8ac). Color is a pure function of
+// now − data-last-seen against the panel's data-eng-*-secs thresholds; a
+// lease_until in the past greys the dot. Runs at load, on a 30s aging timer,
+// and after every liveRefresh tbody swap; exposed on window so the
+// integration tier drives aging deterministically (no reload).
+(function () {
+    function ageEngagementDots(nowMs) {
+        var now = typeof nowMs === 'number' ? nowMs : Date.now();
+        var panel = document.querySelector('[data-eng-orange-secs]');
+        var orangeMs = (panel ? parseInt(panel.dataset.engOrangeSecs, 10) || 300 : 300) * 1000;
+        var redMs = (panel ? parseInt(panel.dataset.engRedSecs, 10) || 900 : 900) * 1000;
+        document.querySelectorAll('.engagement-dot').forEach(function (dot) {
+            var last = Date.parse(dot.dataset.lastSeen || '');
+            if (isNaN(last)) { return; }
+            var lease = Date.parse(dot.dataset.leaseUntil || '');
+            var age = now - last;
+            dot.classList.remove('is-orange', 'is-red', 'is-stale');
+            if (!isNaN(lease) && lease < now) {
+                dot.classList.add('is-stale');
+            } else if (age >= redMs) {
+                dot.classList.add('is-red');
+            } else if (age >= orangeMs) {
+                dot.classList.add('is-orange');
+            }
+            var mins = Math.max(0, Math.round(age / 60000));
+            dot.title = 'last activity ' + mins + 'm ago';
+        });
+    }
+    window.satAgeEngagementDots = ageEngagementDots;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { ageEngagementDots(); });
+    } else {
+        ageEngagementDots();
+    }
+    setInterval(function () { ageEngagementDots(); }, 30000);
 })();

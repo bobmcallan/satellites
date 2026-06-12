@@ -45,7 +45,8 @@
 
   <section class="panel" data-section="project-stories">
     <div x-data="storyPanel" class="panel-stories" data-field="panel-stories-body"
-         data-project-id="{{.Project.ID}}" data-story-filtered="{{.StoryFiltered}}" data-story-total="{{.StoryTotal}}">
+         data-project-id="{{.Project.ID}}" data-story-filtered="{{.StoryFiltered}}" data-story-total="{{.StoryTotal}}"
+         data-eng-orange-secs="{{.EngOrangeSecs}}" data-eng-red-secs="{{.EngRedSecs}}">
     <div class="panel-header">
       <h2>stories</h2>
       <span class="stories-count-indicator" data-field="stories-count-indicator"
@@ -167,7 +168,7 @@
               </div>
               {{end}}
             </td>
-            <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
+            <td class="col-status">{{if .EngLastSeen}}<span class="engagement-dot" data-field="engagement-dot" data-last-seen="{{.EngLastSeen}}" data-lease-until="{{.EngLeaseUntil}}"></span>{{end}}<code class="status-pill">{{.Status}}</code></td>
             <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
             <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
           </tr>

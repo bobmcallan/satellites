@@ -34,6 +34,10 @@ type projectDetailData struct {
 	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
 	StoryTotal    int // project-wide all-status total (indicator denominator)
 	Paginator     paginatorData
+	// Engagement-age thresholds (seconds) for the processing dot — rendered
+	// as container data attributes; the client computes colors (sty_25e2e8ac).
+	EngOrangeSecs int
+	EngRedSecs    int
 	DevMode       bool
 	FooterName    string
 	FooterEmail   string
@@ -77,6 +81,12 @@ type storyRow struct {
 	Tags       []string
 	UpdatedAt  time.Time
 	CreatedAt  time.Time
+	// Engagement signal (sty_25e2e8ac): newest engagement row's last_seen /
+	// lease_until for this story (RFC3339, empty = no engagement). The portal
+	// renders a processing dot whose color is computed client-side from age —
+	// the server pushes no timeout state.
+	EngLastSeen   string
+	EngLeaseUntil string
 }
 
 // statusRankUnknown sorts unworkflowed / unknown-status rows to the end of a
@@ -153,6 +163,8 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			StoryFiltered: paginator.Filtered,
 			StoryTotal:    paginator.Total,
 			Paginator:     paginator,
+			EngOrangeSecs: readEngagementThreshold(ctx, "engagement.orange_after_secs", engOrangeSecsFallback),
+			EngRedSecs:    readEngagementThreshold(ctx, "engagement.red_after_secs", engRedSecsFallback),
 			DevMode:       cfg.DevMode,
 			FooterName:    footerName,
 			FooterEmail:   footerEmail,
@@ -249,7 +261,57 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 		// now loaded, so the row's own ## Workflow is parseable here.
 		stories[i].StatusRank = statusRank(stories[i].Body, stories[i].Status)
 	}
+	attachEngagements(ctx, projectID, stories)
 	return stories, paginator, nil
+}
+
+// attachEngagements decorates the visible rows with the newest engagement
+// signal per story, folded across sessions (sty_25e2e8ac). Best-effort: a
+// failure leaves the rows undecorated (no dot) rather than failing the page.
+func attachEngagements(ctx context.Context, projectID string, stories []storyRow) {
+	views, err := latestEngagements(ctx, projectID, time.Now().UTC())
+	if err != nil {
+		arbor.WarnCtx(ctx, "project_detail: engagements", "id", projectID, "err", err)
+		return
+	}
+	newest := map[string]engagementView{}
+	for _, v := range views {
+		if cur, ok := newest[v.StoryID]; !ok || v.LastSeen.After(cur.LastSeen) {
+			newest[v.StoryID] = v
+		}
+	}
+	for i := range stories {
+		if v, ok := newest[stories[i].ID]; ok {
+			stories[i].EngLastSeen = v.LastSeen.UTC().Format(time.RFC3339)
+			stories[i].EngLeaseUntil = v.LeaseUntil
+		}
+	}
+}
+
+// Engagement-age thresholds (seconds) — system key/values with fallbacks, so
+// retuning the portal indicator needs no code change (sty_25e2e8ac AC4).
+const (
+	engOrangeSecsFallback = 300
+	engRedSecsFallback    = 900
+)
+
+// readEngagementThreshold mirrors readStoryPageSize: a system-scope variable
+// read that falls back on any failure.
+func readEngagementThreshold(ctx context.Context, name string, fallback int) int {
+	body, _ := json.Marshal(verb.VariableGetRequest{Name: name, Scope: "system"})
+	raw, err := verb.Dispatch(ctx, "variable_get", body)
+	if err != nil {
+		return fallback
+	}
+	var resp verb.VariableGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fallback
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(resp.Value))
+	if err != nil || n < 1 {
+		return fallback
+	}
+	return n
 }
 
 // storyFragmentHandler renders just the story-rows table fragment for the

@@ -1288,3 +1288,41 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   flex-direction: column;
   gap: 1.5rem;
 }
+
+/* Engagement processing dot (sty_25e2e8ac). Color is a pure function of
+   time-since-last-client-activity, computed CLIENT-side from data-last-seen
+   against the panel's data-eng-*-secs thresholds — the server pushes no
+   timeout state. Green glow = fresh ticks; orange/red = aging; stale = the
+   lease expired or the engagement closed. */
+.engagement-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 0.45rem;
+  vertical-align: middle;
+  background: #2ecc71;
+  box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55);
+  animation: engagement-glow 2s ease-out infinite;
+}
+.engagement-dot.is-orange {
+  background: #f5a623;
+  animation: none;
+  box-shadow: none;
+}
+.engagement-dot.is-red {
+  background: #e5484d;
+  animation: none;
+  box-shadow: none;
+}
+.engagement-dot.is-stale {
+  background: #8b8d98;
+  animation: none;
+  box-shadow: none;
+  opacity: 0.45;
+}
+@keyframes engagement-glow {
+  0%   { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+}
