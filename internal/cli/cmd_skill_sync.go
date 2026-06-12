@@ -69,6 +69,9 @@ type skillStamp struct {
 	DocumentID string `json:"document_id"`
 	Version    int    `json:"version"`
 	Hash       string `json:"hash"`
+	// Publisher is set for a library-pinned skill: the publishing project id
+	// (epic:skill-library). Empty for scope-owned skills.
+	Publisher string `json:"publisher,omitempty"`
 }
 
 // substrateSkill is one row sync pulls: its identity + the authored body
@@ -78,6 +81,9 @@ type substrateSkill struct {
 	DocumentID string
 	Version    int
 	Body       string
+	// Publisher marks a library-pinned skill with its publishing project id;
+	// empty for scope-owned rows. Carried into the sync stamp.
+	Publisher string
 }
 
 // syncAction is the reconcile verdict for one name.
@@ -259,7 +265,7 @@ func splitStamp(raw string) (stamp skillStamp, authored string, ok, malformed, l
 // (description, dispatch fields) while sync keeps its identity marker. A
 // body with no frontmatter degrades to stamp-first.
 func materialise(s substrateSkill) string {
-	stamp := skillStamp{DocumentID: s.DocumentID, Version: s.Version, Hash: hashBody(s.Body)}
+	stamp := skillStamp{DocumentID: s.DocumentID, Version: s.Version, Hash: hashBody(s.Body), Publisher: s.Publisher}
 	head, body, found := splitAfterFrontmatter(s.Body)
 	if !found {
 		return stampBlock(stamp) + s.Body
@@ -575,12 +581,19 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 			return err
 		}
 	}
+	libSet, err := listPinnedLibrarySkills(ctx, dispatch, configArg)
+	if err != nil {
+		return err
+	}
 
-	// The union (precedence project > workspace > system) is what every
-	// resolvable scope owns — its local names guard removal so no scope orphans
-	// another's stamped skill. The install/update set is the union by default,
-	// or a single scope when --scope narrows it.
-	union := mergeByPrecedence(sysSet, wsSet, pjSet)
+	// The union (precedence project > workspace > system > library pins) is
+	// what every resolvable scope owns — its local names guard removal so no
+	// scope orphans another's stamped skill. The install/update set is the
+	// union by default, or a single scope when --scope narrows it. Library
+	// pins sit at LOWEST precedence: a same-named project/local skill wins
+	// (epic:skill-library); an unpinned skill drops out of the union and
+	// reconciles to remove.
+	union := mergeByPrecedence(libSet, sysSet, wsSet, pjSet)
 	protected := make(map[string]bool, len(union))
 	for _, s := range union {
 		protected[localSkillName(s.Name)] = true
@@ -811,6 +824,58 @@ func firstNonEmpty(a, b string) string {
 // (sty_cbeeb452) — the dynamic skill index passes true so a user's overridden
 // workflow/gate skill wins; sync passes false so it reconciles the shared rows
 // against the operator's stamped local tree, not per-caller overrides.
+// listPinnedLibrarySkills pulls the repo's library_pins
+// (.satellites/satellites.toml) from the shared library, each
+// "<publisher>/<name>" via a scope=library document_get. A pin that does not
+// parse or resolve fails the sync loudly — a typo'd or withdrawn pin must
+// not silently no-op. No config, or no pins, yields an empty set.
+func listPinnedLibrarySkills(ctx context.Context, dispatch verbDispatch, configArg string) ([]substrateSkill, error) {
+	cfg, _, err := cliconfig.Load(configArg)
+	if err != nil {
+		if errors.Is(err, cliconfig.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]substrateSkill, 0, len(cfg.LibraryPins))
+	for _, pin := range cfg.LibraryPins {
+		publisher, name, ok := strings.Cut(strings.TrimSpace(pin), "/")
+		if !ok || publisher == "" || name == "" {
+			return nil, fmt.Errorf("skill sync: library pin %q must be <publisher>/<name>", pin)
+		}
+		getReq, mErr := json.Marshal(struct {
+			Name      string `json:"name"`
+			Scope     string `json:"scope"`
+			ProjectID string `json:"project_id"`
+		}{Name: name, Scope: "library", ProjectID: publisher})
+		if mErr != nil {
+			return nil, mErr
+		}
+		raw, dErr := dispatch(ctx, "document_get", getReq)
+		if dErr != nil {
+			return nil, fmt.Errorf("skill sync: pinned library skill %q: %w", pin, dErr)
+		}
+		var got struct {
+			RawBody  string `json:"raw_body"`
+			Document struct {
+				ID            string `json:"id"`
+				LatestVersion int    `json:"latest_version"`
+			} `json:"document"`
+		}
+		if uErr := json.Unmarshal(raw, &got); uErr != nil {
+			return nil, fmt.Errorf("skill sync: decode pinned %q: %w", pin, uErr)
+		}
+		out = append(out, substrateSkill{
+			Name:       name,
+			DocumentID: got.Document.ID,
+			Version:    got.Document.LatestVersion,
+			Body:       got.RawBody,
+			Publisher:  publisher,
+		})
+	}
+	return out, nil
+}
+
 func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string, effective bool) ([]substrateSkill, error) {
 	listReq, err := json.Marshal(docListRequest{Type: "skill", Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Limit: 200, Effective: effective})
 	if err != nil {

@@ -51,6 +51,13 @@ type Config struct {
 	// verbatim.
 	SkillsRoot string `toml:"skills_root"`
 
+	// LibraryPins names the shared-library skills this repo consumes as-is,
+	// each "<publisher>/<name>" (publisher = the publishing project id).
+	// `skill sync` materialises pinned skills at lowest precedence — a
+	// same-named project/local skill wins — and removing a pin removes the
+	// materialised copy on the next sync (epic:skill-library, sty_56855694).
+	LibraryPins []string `toml:"library_pins"`
+
 	// WorkDir overrides where per-worktree engagement state lives (the
 	// `.satellites/work` the START-door hook reads and `satellites work init`
 	// writes). NOT required in the toml — empty means the default
