@@ -23,6 +23,7 @@ verb; first-run is a thin orchestration skill over those verbs. Holds to
 | `satellites update` | **Binary refresh.** Self-update the global binary in place from the release channel, checksum-verified; no-op when current. | DONE. |
 | `satellites deploy` | **Substrate → local pull.** Reconcile `.claude/skills/` against the repo's project scope (install/update/remove by identity stamp, never clobber an edited or operator-authored skill). **Pull-only** — it does not push. | DONE. |
 | `satellites {document,skill,principle} upload` | **Local → substrate push.** Validate + upsert the repo's `config/` sources to the substrate, project/workspace-bound. A deliberate operator/agent verb, invoked as a prompt — never coupled into a bootstrap or session-start step. | DONE. |
+| `satellites skill publish <name>` | **Local → library promotion.** Publish one `.satellites/skills/` skill into the shared library under this repo's publisher namespace (identity = publisher project + name), gated by the same strict content review as upload, provenance-stamped (publisher, repo URL, commit). Headless (API-key auth) so a CI step publishes on merge; `--dryrun` previews identity/version/provenance without dispatching. | DONE. |
 | **bootstrap skill** | **First-run orchestration only.** Detects what is already done and delegates to the verbs above. Holds none of their logic. | See §2. |
 
 Single-source rule: a dynamic step lives in exactly one verb. `auth` owns
