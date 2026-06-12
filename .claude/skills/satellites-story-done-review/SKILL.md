@@ -6,7 +6,7 @@ when: status==in_progress
 tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":9,"hash":"d18fc448e4c2d45b587270bcd8b29c97c916e3be9f649d4ba84c11ea36599742"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":11,"hash":"2204e867f6a40b5a901273819b4014de5f276598a713221b1643554097da9a76"} satellites-sync:end -->
 
 Decide whether the change is genuinely complete — every acceptance criterion met and verified against the real tree, not asserted.
 
@@ -18,6 +18,7 @@ The gate's `.satellites/satellites exec` calls authenticate as the operator's ad
 - Read the acceptance criteria from the body and check each against the working tree.
 - Run the relevant build and tests. A criterion claiming a test exists is met only if that test runs and passes.
 - Use `git log` / `git diff` to confirm the change is committed, and the `.satellites/satellites` CLI to read related rows the criteria reference.
+- **Checkpoint compliance reads from rows, not prose:** the checkpoint gates write their own `ci_result` ledger rows at verdict time (payload `{gate, verdict, blocking_findings, duration_ms}`). Read the story's ledger (`.satellites/satellites exec ledger_list --json '{"story_id":"<story_id>","kind":"ci_result"}'`): a row with verdict CLEAN is proof that gate ran clean — do not re-run it. No such row → the checkpoint is unproven; verify it yourself as before.
 
 ## Environment
 
@@ -47,9 +48,11 @@ guardrails:
 
 ## Enact
 
-You enact your decision, you do not just report it.
+You enact your decision, you do not just report it — EXCEPT on a v2 edge.
 
 Resolve your target from the story's `## Workflow`: parse its `transitions`, find the one whose `from == story_status` AND `reviewer_skill == satellites-story-done-review` (this gate's own name); its `to` is your `to_status`. If no such transition exists, reject (append `review_reject` below, print reject). Never invent a `to_status`.
+
+**Judge-only on v2 edges:** if the matched transition carries an `on:` field (`on: pass` / `on: fail`), the CLIENT enacts — the reviewer's decision selects the edge, the client writes the review_* and status_transition rows, counts the fail-loop bound, and escalates on exhaustion. In that case write NOTHING: skip every `ledger_append` below and print only the decision JSON. Writing rows yourself on a v2 edge double-enacts.
 
 Run these with Bash before printing your decision. These `ledger_append` calls are your **only** permitted writes — never run a `document_upsert`, any other `exec` write, or any git/file mutation of the tree.
 
