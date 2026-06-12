@@ -65,6 +65,7 @@ type LedgerListRequest struct {
 	SessionID       string   `json:"session_id,omitempty"`
 	RunID           string   `json:"run_id,omitempty"`
 	Kind            string   `json:"kind,omitempty"`
+	KindPrefix      string   `json:"kind_prefix,omitempty"`       // kind LIKE '<prefix>%'; ignored when kind set
 	BodyContainsAny []string `json:"body_contains_any,omitempty"` // OR'd ILIKE terms on body
 	CreatedAfter    string   `json:"created_after,omitempty"`     // RFC3339
 	CreatedBefore   string   `json:"created_before,omitempty"`    // RFC3339
@@ -112,6 +113,21 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if actor == "" {
 		actor = actorFromContext(ctx)
 	}
+	// Engagement rows are idempotent on (session, story, seq): the client's
+	// fire-and-forget flush may replay an event whose high-water mark never
+	// advanced (sty_84c55d0d). A duplicate returns OK without a second row.
+	if strings.HasPrefix(req.Kind, "engagement:") {
+		if seq, ok := engagementSeq(req.Payload); ok {
+			exists, dErr := ledgerStore.EngagementSeqExists(ctx, req.SessionID, req.StoryID, seq)
+			if dErr != nil {
+				return nil, dErr
+			}
+			if exists {
+				return json.Marshal(map[string]any{"deduplicated": true,
+					"session_id": req.SessionID, "story_id": req.StoryID, "seq": seq})
+			}
+		}
+	}
 	e, err := ledgerStore.Append(ctx, ledger.AppendInput{
 		StoryID:     req.StoryID,
 		ProjectID:   req.ProjectID,
@@ -142,6 +158,21 @@ func invokeLedgerAppend(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		dispatchSummaryRegen(ctx, req.StoryID)
 	}
 	return json.Marshal(e)
+}
+
+// engagementSeq reads the local-store sequence number from an engagement
+// payload; ok=false when absent (legacy events without seq are never deduped).
+func engagementSeq(payload json.RawMessage) (int64, bool) {
+	if len(payload) == 0 {
+		return 0, false
+	}
+	var p struct {
+		Seq *int64 `json:"seq"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.Seq == nil {
+		return 0, false
+	}
+	return *p.Seq, true
 }
 
 // extractToStatus reads the to_status field from a status_transition payload.
@@ -177,6 +208,7 @@ func invokeLedgerList(ctx context.Context, raw json.RawMessage) (json.RawMessage
 		SessionID:       req.SessionID,
 		RunID:           req.RunID,
 		Kind:            req.Kind,
+		KindPrefix:      req.KindPrefix,
 		BodyContainsAny: req.BodyContainsAny,
 		Limit:           req.Limit,
 		Cursor:          req.Cursor,

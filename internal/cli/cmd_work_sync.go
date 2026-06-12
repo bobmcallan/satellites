@@ -62,9 +62,13 @@ func runWorkSync(out io.Writer, stateDB string, append engagementAppender) error
 }
 
 // realLedgerAppender appends an engagement event via the ledger_append verb.
+// The payload carries seq (the server-side dedup key — replays of the same
+// (session, story, seq) are idempotent) and lease_until (the portal's lease
+// view) alongside phase.
 func realLedgerAppender(ctx context.Context, projectID, configPath string) engagementAppender {
 	return func(ev workstate.LoggedEvent) error {
-		payload, _ := json.Marshal(map[string]any{"phase": ev.Phase})
+		payload, _ := json.Marshal(map[string]any{
+			"phase": ev.Phase, "seq": ev.Seq, "lease_until": ev.LeaseUntil})
 		req, err := json.Marshal(verb.LedgerAppendRequest{
 			StoryID:   ev.Story,
 			ProjectID: projectID,

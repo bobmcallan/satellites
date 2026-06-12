@@ -71,6 +71,7 @@ type ListFilter struct {
 	SessionID       string
 	RunID           string
 	Kind            string
+	KindPrefix      string    // matches kind LIKE '<prefix>%' (e.g. "engagement:"); ignored when Kind is set
 	BodyContainsAny []string  // OR semantics — body matches any term
 	CreatedAfter    time.Time // zero = no lower bound
 	CreatedBefore   time.Time // zero = no upper bound
@@ -189,6 +190,32 @@ func (s *Store) AppendMany(ctx context.Context, ins []AppendInput, now time.Time
 	return nil
 }
 
+// EngagementSeqExists reports whether an engagement:* row for this
+// (session, story) already carries the given local-store sequence number —
+// the idempotency key for the client's fire-and-forget flush (sty_84c55d0d).
+// A replay (crash between append and high-water-mark advance, or two racing
+// flushes) is detected here and skipped by the verb layer.
+func (s *Store) EngagementSeqExists(ctx context.Context, sessionID, storyID string, seq int64) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(storyID) == "" {
+		return false, nil
+	}
+	var one int
+	err := s.DB.QueryRowContext(ctx, `
+        SELECT 1 FROM evidence
+        WHERE session_id = $1 AND story_id = $2
+          AND kind LIKE 'engagement:%'
+          AND (payload->>'seq')::bigint = $3
+        LIMIT 1
+    `, sessionID, storyID, seq).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("ledger: engagement seq exists: %w", err)
+	}
+	return true, nil
+}
+
 // ListByStory is the back-compat shape for story-only callers (the
 // reviewer hook, summary regeneration, the request_review gate). It
 // returns every entry for the named story, oldest-first, optionally
@@ -221,6 +248,7 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		strings.TrimSpace(f.SessionID) == "" &&
 		strings.TrimSpace(f.RunID) == "" &&
 		strings.TrimSpace(f.Kind) == "" &&
+		strings.TrimSpace(f.KindPrefix) == "" &&
 		len(trimNonEmpty(f.BodyContainsAny)) == 0 &&
 		f.CreatedAfter.IsZero() && f.CreatedBefore.IsZero() {
 		return ListResult{}, fmt.Errorf("ledger: at least one filter field required")
@@ -250,6 +278,11 @@ func (s *Store) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	addCond("session_id", f.SessionID)
 	addCond("run_id", f.RunID)
 	addCond("kind", f.Kind)
+	if strings.TrimSpace(f.Kind) == "" && strings.TrimSpace(f.KindPrefix) != "" {
+		conds = append(conds, fmt.Sprintf("kind LIKE $%d", placeholder))
+		args = append(args, f.KindPrefix+"%")
+		placeholder++
+	}
 
 	if terms := trimNonEmpty(f.BodyContainsAny); len(terms) > 0 {
 		parts := make([]string, 0, len(terms))

@@ -33,6 +33,17 @@ docs.`,
 		Version:       versionLine(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Engagement ticker (sty_84c55d0d): every command invocation is the
+		// leased session's heartbeat — throttled local tick + detached flush.
+		// Best-effort and non-blocking; `work sync` and the no-op commands
+		// are excluded (the flush must not spawn itself).
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			path := strings.TrimPrefix(cmd.CommandPath(), "satellites ")
+			if path == "satellites" || tickCommandSkip[path] {
+				return
+			}
+			tickAndFlush("")
+		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
 	for _, c := range registered {
