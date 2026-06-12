@@ -160,6 +160,8 @@ func assessAccess(cwd, session, story string, now time.Time) (remind bool, remin
 	return true, fmt.Sprintf(
 		"satellites: you accessed story %s but this session has no active engagement for it. "+
 			"If you intend to WORK on it, run `satellites work init %s` first to engage its workflow. "+
+			"`satellites work status` shows live engagements across sessions; "+
+			"`satellites story get` / `satellites ledger list` read server-side status and history. "+
 			"If you are only reading, ignore this.", story, story)
 }
 

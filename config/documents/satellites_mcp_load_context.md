@@ -19,18 +19,20 @@ Fetch everything else only when a task needs it — **do not preload.**
 ## First-time setup (once per repo)
 
 `document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
-and follow it — install, auth, write the TOML, `project_match` for `project_id`.
+and follow it — install, auth, TOML, `project_match`.
 
 ## Session start
 
 - **Skills:** `satellites skill sync` pulls every scope into `.claude/skills/`
   (stamp-reconciled). Author a NEW skill in `.satellites/skills/`, then
   `satellites skill upload` (review-gated); never hand-write `.claude/skills/`.
-- **Code index:** `satellites code index`, then prefer `satellites code
-  search`/`symbol` over Read/Grep (Grep wins for non-symbol text).
-- **Always-context:** the `satellites hook context` SessionStart hook injects the
-  resident set (`principles:always` docs/principles) + the index pointer, and
-  re-anchors it on each story `document_get` — pushed for you, don't fetch it.
+- **Code index:** `satellites code index`; prefer `code search`/`symbol` over
+  Read/Grep (Grep wins for non-symbol text).
+- **Always-context:** the SessionStart hook injects the resident set
+  (`principles:always`) + index pointer and re-anchors it on each story
+  `document_get` — pushed, don't fetch.
+- **Work state:** `satellites work status` = live engagements;
+  `story get <id>` / `ledger list <id>` = server status + history.
 
 ## On demand — do NOT preload
 
