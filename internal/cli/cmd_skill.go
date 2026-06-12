@@ -42,6 +42,8 @@ func init() {
 		UserArg:   &userArg,
 	}))
 	skill.AddCommand(newSkillPublishCmd(&configArg, &userArg))
+	skill.AddCommand(newSkillSearchCmd(&configArg, &userArg))
+	skill.AddCommand(newSkillAdoptCmd(&configArg, &userArg))
 	skill.AddCommand(newSkillSyncCmd(&configArg, &userArg))
 	skill.AddCommand(newSkillIndexCmd(&configArg, &userArg))
 	skill.AddCommand(newCorpusReviewCmd("skills", &configArg, &userArg))

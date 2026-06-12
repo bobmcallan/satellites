@@ -60,7 +60,24 @@ func (f reviewFinding) String() string {
 func reviewContent(body string) []reviewFinding {
 	var out []reviewFinding
 	inFence := false
+	// Frontmatter is substrate keys and provenance (project_id, forked-from
+	// stamps), not authored prose — exempt like code fences. Only a block
+	// opening on line 1 counts; a later `---` is a markdown rule.
+	inFrontmatter := false
 	for i, line := range strings.Split(body, "\n") {
+		if strings.TrimRight(line, "\r") == "---" {
+			if i == 0 {
+				inFrontmatter = true
+				continue
+			}
+			if inFrontmatter {
+				inFrontmatter = false
+				continue
+			}
+		}
+		if inFrontmatter {
+			continue
+		}
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			inFence = !inFence
 			continue
