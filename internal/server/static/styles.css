@@ -215,6 +215,10 @@ main {
   font-weight: 700;
   letter-spacing: 0.05em;
 }
+/* Explicit link color (covers :visited too — an author rule on the anchor
+   overrides the UA's visited purple, unreadable on the dark theme). */
+.project-card-link, .project-card-link:visited { color: inherit; }
+.project-card-link:hover { color: #4ade80; }
 .project-card-status {
   color: #4ade80;
   font-size: 0.75rem;
