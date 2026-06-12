@@ -434,8 +434,8 @@
                     window.Alpine.initTree(tbody);
                 }
                 // Fresh rows carry fresh data-last-seen — re-run the
-                // engagement-dot aging pass so colors snap immediately
-                // (sty_25e2e8ac).
+                // activity-spinner aging pass so colors snap immediately
+                // (sty_07bb85b6).
                 if (typeof window.satAgeEngagementDots === 'function') {
                     window.satAgeEngagementDots();
                 }
@@ -729,18 +729,19 @@
     window.storyPanelFactory.__test__ = { parseStoryQuery, removeFromQuery };
 })();
 
-// Engagement processing dot aging (sty_25e2e8ac). Color is a pure function of
-// now − data-last-seen against the panel's data-eng-*-secs thresholds; a
-// lease_until in the past greys the dot. Runs at load, on a 30s aging timer,
-// and after every liveRefresh tbody swap; exposed on window so the
-// integration tier drives aging deterministically (no reload).
+// Activity-spinner aging (sty_07bb85b6, supersedes the sty_25e2e8ac dot).
+// Color is a pure function of now − data-last-seen against the panel's
+// data-eng-*-secs thresholds; a lease_until in the past marks the spinner
+// stale (hidden). Runs at load, on a 30s aging timer, and after every
+// liveRefresh tbody swap; exposed on window so the integration tier drives
+// aging deterministically (no reload).
 (function () {
     function ageEngagementDots(nowMs) {
         var now = typeof nowMs === 'number' ? nowMs : Date.now();
         var panel = document.querySelector('[data-eng-orange-secs]');
         var orangeMs = (panel ? parseInt(panel.dataset.engOrangeSecs, 10) || 300 : 300) * 1000;
         var redMs = (panel ? parseInt(panel.dataset.engRedSecs, 10) || 900 : 900) * 1000;
-        document.querySelectorAll('.engagement-dot').forEach(function (dot) {
+        document.querySelectorAll('.activity-spinner').forEach(function (dot) {
             var last = Date.parse(dot.dataset.lastSeen || '');
             if (isNaN(last)) { return; }
             var lease = Date.parse(dot.dataset.leaseUntil || '');

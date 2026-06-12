@@ -79,7 +79,7 @@ func latestEngagements(ctx context.Context, projectID string, now time.Time) ([]
 			return nil, err
 		}
 		for _, e := range resp.Entries {
-			foldEngagement(byPair, e.SessionID, e.StoryID, e.Body, e.Payload, e.CreatedAt)
+			foldEngagement(byPair, e.Kind, e.SessionID, e.StoryID, e.Body, e.Payload, e.CreatedAt)
 		}
 		if resp.NextCursor == "" {
 			break
@@ -97,8 +97,23 @@ func latestEngagements(ctx context.Context, projectID string, now time.Time) ([]
 // view — entries arrive oldest-first, so the last write per pair wins. Pure
 // for tests. Rows missing either correlation id carry no pair and are
 // dropped; phase prefers the payload field, falling back to the body.
-func foldEngagement(byPair map[string]engagementView, sessionID, storyID, body string, payload json.RawMessage, createdAt time.Time) {
+//
+// The fold is QUALIFIED (sty_07bb85b6): the view answers "is a Claude session
+// WORKING this story", so only the engaged lane's kinds count —
+// engage / tick / phase. A `candidate` row (a mere story READ records one)
+// never lights the pair, and a `close` clears it; any other kind is ignored.
+func foldEngagement(byPair map[string]engagementView, kind, sessionID, storyID, body string, payload json.RawMessage, createdAt time.Time) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(storyID) == "" {
+		return
+	}
+	switch strings.TrimPrefix(kind, "engagement:") {
+	case "engage", "tick", "phase":
+		// working signals — fall through to record
+	case "close":
+		delete(byPair, sessionID+"|"+storyID)
+		return
+	default:
+		// candidate (read access) and unknown kinds are not work
 		return
 	}
 	var p struct {

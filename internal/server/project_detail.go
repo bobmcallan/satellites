@@ -281,11 +281,25 @@ func attachEngagements(ctx context.Context, projectID string, stories []storyRow
 		}
 	}
 	for i := range stories {
+		if !engagementVisibleStatus(stories[i].Status) {
+			continue // backlog / terminal rows never wear the indicator
+		}
 		if v, ok := newest[stories[i].ID]; ok {
 			stories[i].EngLastSeen = v.LastSeen.UTC().Format(time.RFC3339)
 			stories[i].EngLeaseUntil = v.LeaseUntil
 		}
 	}
+}
+
+// engagementVisibleStatus gates the activity indicator by row status
+// (sty_07bb85b6): a story not yet started (backlog) or finished
+// (done / cancelled) shows no indicator, whatever engagement rows linger.
+func engagementVisibleStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "backlog", "done", "cancelled", "canceled", "":
+		return false
+	}
+	return true
 }
 
 // Engagement-age thresholds (seconds) — system key/values with fallbacks, so

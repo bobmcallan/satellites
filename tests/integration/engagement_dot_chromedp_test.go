@@ -19,11 +19,17 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestEngagementDot_Chromedp drives the portal processing indicator
-// (sty_25e2e8ac): a story with a fresh engagement renders the green dot, a
-// quiet one renders red past the threshold, an expired lease renders stale,
-// the tooltip reads "last activity Xm ago", and the client-side aging pass
-// degrades a fresh dot with NO reload.
+// TestEngagementDot_Chromedp drives the QUALIFIED activity spinner
+// (sty_07bb85b6, superseding the sty_25e2e8ac dot):
+//   - an in-flight story with a live engaged session renders the spinner
+//     AFTER the title (inside .story-row-title), with no row-height change
+//   - a quiet engagement degrades (is-red at render past the threshold) and
+//     the client aging pass turns a fresh one orange then red with NO reload
+//   - an expired lease is stale (hidden)
+//   - a candidate-only story (read access) renders NO indicator
+//   - a closed engagement renders NO indicator
+//   - backlog and done rows render NO indicator even with engagement rows
+//   - the tooltip reads "last activity Xm ago"
 func TestEngagementDot_Chromedp(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
 
@@ -66,11 +72,20 @@ func TestEngagementDot_Chromedp(t *testing.T) {
 		_ = json.Unmarshal(raw, &resp)
 		return resp.Document.ID
 	}
-	freshID := mkStory("engdot fresh")
-	agedID := mkStory("engdot aged")
-	staleID := mkStory("engdot stale")
-
-	engage := func(storyID, session string, lastSeen, leaseUntil time.Time, seq int64) {
+	// status_transition is the only status writer — the row projects onto the
+	// story (sty_42d13ae4).
+	setStatus := func(storyID, status string) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{"to_status": status})
+		req, _ := json.Marshal(verb.LedgerAppendRequest{
+			StoryID: storyID, ProjectID: pj.ID, Kind: "status_transition",
+			Body: "→ " + status, Payload: payload,
+		})
+		if _, err := verb.Dispatch(ctx, "ledger_append", req); err != nil {
+			t.Fatalf("set status %s → %s: %v", storyID, status, err)
+		}
+	}
+	engRow := func(storyID, kind, session string, lastSeen, leaseUntil time.Time, seq int64) {
 		t.Helper()
 		payload, _ := json.Marshal(map[string]any{
 			"phase": "in_progress", "seq": seq,
@@ -78,14 +93,34 @@ func TestEngagementDot_Chromedp(t *testing.T) {
 		})
 		if _, err := ledStore.Append(ctx, ledger.AppendInput{
 			StoryID: storyID, ProjectID: pj.ID, WorkspaceID: ws.ID, SessionID: session,
-			Kind: "engagement:tick", Body: "in_progress", Payload: payload, Actor: "usr_dev_admin",
+			Kind: kind, Body: "in_progress", Payload: payload, Actor: "usr_dev_admin",
 		}, lastSeen); err != nil {
-			t.Fatalf("append engagement for %s: %v", storyID, err)
+			t.Fatalf("append %s for %s: %v", kind, storyID, err)
 		}
 	}
-	engage(freshID, "sess-fresh", now, now.Add(2*time.Hour), 1)
-	engage(agedID, "sess-aged", now.Add(-16*time.Minute), now.Add(2*time.Hour), 1)
-	engage(staleID, "sess-stale", now.Add(-2*time.Minute), now.Add(-time.Minute), 1)
+
+	freshID := mkStory("engdot fresh")
+	agedID := mkStory("engdot aged")
+	staleID := mkStory("engdot stale")
+	candID := mkStory("engdot candidate-only")
+	closedID := mkStory("engdot closed")
+	backlogID := mkStory("engdot backlog")
+	doneID := mkStory("engdot done")
+
+	for _, id := range []string{freshID, agedID, staleID, candID, closedID} {
+		setStatus(id, "in_progress")
+	}
+	setStatus(doneID, "done") // backlogID stays at its created default
+
+	lease := now.Add(2 * time.Hour)
+	engRow(freshID, "engagement:tick", "sess-fresh", now, lease, 1)
+	engRow(agedID, "engagement:tick", "sess-aged", now.Add(-16*time.Minute), lease, 1)
+	engRow(staleID, "engagement:tick", "sess-stale", now.Add(-2*time.Minute), now.Add(-time.Minute), 1)
+	engRow(candID, "engagement:candidate", "sess-cand", now, lease, 1)
+	engRow(closedID, "engagement:tick", "sess-closed", now.Add(-time.Minute), lease, 1)
+	engRow(closedID, "engagement:close", "sess-closed", now, lease, 2)
+	engRow(backlogID, "engagement:tick", "sess-backlog", now, lease, 1)
+	engRow(doneID, "engagement:tick", "sess-done", now, lease, 1)
 
 	bctx := newBrowserCtx(t)
 	if err := chromedp.Run(bctx,
@@ -93,59 +128,74 @@ func TestEngagementDot_Chromedp(t *testing.T) {
 		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
 		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
-		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
+		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID+"?stories_q=status%3Aall"),
 		chromedp.WaitVisible(`tr.story-row`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("login + navigate: %v", err)
 	}
 
-	classOf := func(storyID string) string {
+	eval := func(js string, out any) {
 		t.Helper()
-		var cls string
-		js := fmt.Sprintf(`(function(){var d=document.querySelector('tr[data-id=%q] .engagement-dot');return d?d.className:'<missing>'})()`, storyID)
-		if err := chromedp.Run(bctx, chromedp.Evaluate(js, &cls)); err != nil {
-			t.Fatalf("evaluate class for %s: %v", storyID, err)
+		if err := chromedp.Run(bctx, chromedp.Evaluate(js, out)); err != nil {
+			t.Fatalf("evaluate %s: %v", js, err)
 		}
+	}
+	spinnerClass := func(storyID string) string {
+		var cls string
+		eval(fmt.Sprintf(`(function(){var d=document.querySelector('tr[data-id=%q] .story-row-title .activity-spinner');return d?d.className:'<missing>'})()`, storyID), &cls)
 		return cls
 	}
 
-	if cls := classOf(freshID); cls != "engagement-dot" {
-		t.Errorf("fresh engagement must render the plain green dot, got %q", cls)
+	// Qualified rendering: only the working, in-flight stories wear a spinner.
+	if cls := spinnerClass(freshID); cls != "activity-spinner" {
+		t.Errorf("fresh engaged story must render the plain spinner after the title, got %q", cls)
 	}
-	if cls := classOf(agedID); !strings.Contains(cls, "is-red") {
+	if cls := spinnerClass(agedID); !strings.Contains(cls, "is-red") {
 		t.Errorf("a 16-minute-quiet engagement must render is-red, got %q", cls)
 	}
-	if cls := classOf(staleID); !strings.Contains(cls, "is-stale") {
-		t.Errorf("an expired lease must render is-stale, got %q", cls)
+	if cls := spinnerClass(staleID); !strings.Contains(cls, "is-stale") {
+		t.Errorf("an expired lease must mark is-stale, got %q", cls)
+	}
+	var staleDisplay string
+	eval(fmt.Sprintf(`getComputedStyle(document.querySelector('tr[data-id=%q] .activity-spinner')).display`, staleID), &staleDisplay)
+	if staleDisplay != "none" {
+		t.Errorf("a stale spinner must not be shown (display none), got %q", staleDisplay)
+	}
+	for storyID, why := range map[string]string{
+		candID:    "candidate-only (read access) story",
+		closedID:  "closed engagement",
+		backlogID: "backlog story",
+		doneID:    "done story",
+	} {
+		if cls := spinnerClass(storyID); cls != "<missing>" {
+			t.Errorf("%s must render NO indicator, got %q", why, cls)
+		}
 	}
 
-	// Tooltip honesty (AC5): "last activity Xm ago".
-	var title string
-	if err := chromedp.Run(bctx, chromedp.Evaluate(
-		fmt.Sprintf(`document.querySelector('tr[data-id=%q] .engagement-dot').title`, agedID), &title)); err != nil {
-		t.Fatalf("evaluate title: %v", err)
+	// Row height unchanged: the SAME row measures identically with and
+	// without its spinner (remove it in-page and compare).
+	var heights []float64
+	eval(fmt.Sprintf(`(function(){var r=document.querySelector('tr[data-id=%q]');var before=r.offsetHeight;var d=r.querySelector('.activity-spinner');var p=d.parentNode;p.removeChild(d);var after=r.offsetHeight;p.appendChild(d);return [before, after]})()`, freshID), &heights)
+	if len(heights) != 2 || heights[0] != heights[1] {
+		t.Errorf("spinner must not change the row height: %v", heights)
 	}
+
+	// Tooltip honesty: "last activity Xm ago".
+	var title string
+	eval(fmt.Sprintf(`document.querySelector('tr[data-id=%q] .activity-spinner').title`, agedID), &title)
 	if !strings.HasPrefix(title, "last activity ") || !strings.HasSuffix(title, "m ago") {
 		t.Errorf("tooltip must read 'last activity Xm ago', got %q", title)
 	}
 
-	// No-reload aging (AC2): drive the aging pass with a future now — the
-	// fresh dot must degrade to orange, then red, with no navigation.
+	// No-reload aging: drive the aging pass with a future now — the fresh
+	// spinner must degrade to orange, then red, with no navigation.
 	var cls string
-	if err := chromedp.Run(bctx, chromedp.Evaluate(fmt.Sprintf(
-		`(function(){window.satAgeEngagementDots(Date.now()+6*60*1000);return document.querySelector('tr[data-id=%q] .engagement-dot').className})()`,
-		freshID), &cls)); err != nil {
-		t.Fatalf("aging pass (orange): %v", err)
-	}
+	eval(fmt.Sprintf(`(function(){window.satAgeEngagementDots(Date.now()+6*60*1000);return document.querySelector('tr[data-id=%q] .activity-spinner').className})()`, freshID), &cls)
 	if !strings.Contains(cls, "is-orange") {
-		t.Errorf("fresh dot must turn is-orange past the 5-min threshold, got %q", cls)
+		t.Errorf("fresh spinner must turn is-orange past the 5-min threshold, got %q", cls)
 	}
-	if err := chromedp.Run(bctx, chromedp.Evaluate(fmt.Sprintf(
-		`(function(){window.satAgeEngagementDots(Date.now()+16*60*1000);return document.querySelector('tr[data-id=%q] .engagement-dot').className})()`,
-		freshID), &cls)); err != nil {
-		t.Fatalf("aging pass (red): %v", err)
-	}
+	eval(fmt.Sprintf(`(function(){window.satAgeEngagementDots(Date.now()+16*60*1000);return document.querySelector('tr[data-id=%q] .activity-spinner').className})()`, freshID), &cls)
 	if !strings.Contains(cls, "is-red") {
-		t.Errorf("fresh dot must turn is-red past the 15-min threshold, got %q", cls)
+		t.Errorf("fresh spinner must turn is-red past the 15-min threshold, got %q", cls)
 	}
 }

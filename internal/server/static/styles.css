@@ -1289,40 +1289,39 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   gap: 1.5rem;
 }
 
-/* Engagement processing dot (sty_25e2e8ac). Color is a pure function of
-   time-since-last-client-activity, computed CLIENT-side from data-last-seen
-   against the panel's data-eng-*-secs thresholds — the server pushes no
-   timeout state. Green glow = fresh ticks; orange/red = aging; stale = the
-   lease expired or the engagement closed. */
-.engagement-dot {
+/* Activity spinner (sty_07bb85b6, supersedes the sty_25e2e8ac dot). Means
+   exactly one thing: a Claude session is WORKING this story (live engaged
+   lease — candidates and closed engagements never render it; the server
+   omits it on backlog/terminal rows). Sits inline after the title, sized to
+   the line so the row never grows. Color is a pure function of
+   time-since-last-client-activity, computed CLIENT-side against the panel's
+   data-eng-*-secs thresholds: fresh = softly spinning ring; aging = static
+   soft amber/red; stale or expired lease = not shown. */
+.activity-spinner {
   display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  margin-right: 0.45rem;
+  box-sizing: border-box; /* border inside the 10px box — the title line must not grow */
+  width: 10px;
+  height: 10px;
+  margin-left: 0.5rem;
   vertical-align: middle;
-  background: #2ecc71;
-  box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55);
-  animation: engagement-glow 2s ease-out infinite;
+  border-radius: 50%;
+  border: 2px solid rgba(46, 204, 113, 0.18);
+  border-top-color: rgba(46, 204, 113, 0.65);
+  animation: activity-spin 1.1s linear infinite;
 }
-.engagement-dot.is-orange {
-  background: #f5a623;
+.activity-spinner.is-orange {
   animation: none;
-  box-shadow: none;
+  border-color: rgba(245, 166, 35, 0.4);
+  border-top-color: rgba(245, 166, 35, 0.4);
 }
-.engagement-dot.is-red {
-  background: #e5484d;
+.activity-spinner.is-red {
   animation: none;
-  box-shadow: none;
+  border-color: rgba(229, 72, 77, 0.4);
+  border-top-color: rgba(229, 72, 77, 0.4);
 }
-.engagement-dot.is-stale {
-  background: #8b8d98;
-  animation: none;
-  box-shadow: none;
-  opacity: 0.45;
+.activity-spinner.is-stale {
+  display: none;
 }
-@keyframes engagement-glow {
-  0%   { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55); }
-  70%  { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+@keyframes activity-spin {
+  to { transform: rotate(360deg); }
 }
