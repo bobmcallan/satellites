@@ -93,7 +93,7 @@ func statusRank(body, status string) int {
 		return statusRankUnknown
 	}
 	for i, s := range wf.States {
-		if s == status {
+		if s.Name == status {
 			return i
 		}
 	}

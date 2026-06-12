@@ -45,8 +45,48 @@ import (
 type Workflow struct {
 	Name        string       `yaml:"-"`
 	AppliesTo   []string     `yaml:"-"`
-	States      []string     `yaml:"states"`
+	States      []State      `yaml:"states"`
 	Transitions []Transition `yaml:"transitions"`
+}
+
+// State is one declared workflow state. Authored either as a bare scalar
+// (`- backlog`) or an object (`- {name: techdebt-review, actor: satellites}`).
+// Actor says WHO acts while a story sits in the state — an open vocabulary
+// (any team shape can be expressed); the names executor / reviewer /
+// satellites / operator are the reserved vocabulary the dispatcher attaches
+// semantics to. Empty actor = unspecified = pre-actor semantics.
+type State struct {
+	Name  string `yaml:"name"`
+	Actor string `yaml:"actor,omitempty"`
+}
+
+// UnmarshalYAML accepts both the scalar and the mapping form.
+func (s *State) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		s.Name = value.Value
+		return nil
+	case yaml.MappingNode:
+		type plain State
+		var p plain
+		if err := value.Decode(&p); err != nil {
+			return err
+		}
+		*s = State(p)
+		return nil
+	default:
+		return fmt.Errorf("state must be a string or a {name, actor} mapping")
+	}
+}
+
+// MarshalYAML keeps round-trips stable: a state with no actor re-emits as the
+// bare scalar it was authored as.
+func (s State) MarshalYAML() (interface{}, error) {
+	if s.Actor == "" {
+		return s.Name, nil
+	}
+	type plain State
+	return plain(s), nil
 }
 
 // Transition is one edge in the workflow state machine.
@@ -58,11 +98,23 @@ type Workflow struct {
 // `dynamic-phase-insertion`-style flows in future workflows; v5
 // honours the field but the request_review verb won't act on it
 // until story 8 (dynamic phases) lands.
+//
+// On selects the edge by the reviewer's decision — "pass" for accept,
+// "fail" for reject (a reject is then a real transition, not a stay).
+// MaxIterations bounds a fail loop; OnExhausted names the declared state
+// the Nth failure lands in (the two require each other). Trigger
+// "checkpoint" marks an edge entered by the executor's checkpoint rather
+// than a review decision. An edge with none of these keeps today's
+// accept-moves/reject-stays semantics.
 type Transition struct {
 	From          string `yaml:"from"`
 	To            string `yaml:"to"`
 	ReviewerSkill string `yaml:"reviewer_skill"`
 	Dynamic       bool   `yaml:"dynamic,omitempty"`
+	On            string `yaml:"on,omitempty"`
+	MaxIterations int    `yaml:"max_iterations,omitempty"`
+	OnExhausted   string `yaml:"on_exhausted,omitempty"`
+	Trigger       string `yaml:"trigger,omitempty"`
 }
 
 // workflowFrontmatter mirrors the subset of frontmatter fields the
@@ -128,22 +180,29 @@ func Parse(raw []byte) (*Workflow, error) {
 
 // validate checks structural invariants the parser cannot catch
 // during unmarshalling — empty state set, transitions that reference
-// states the workflow didn't declare, duplicate edges.
+// states the workflow didn't declare, duplicate edges, and the v2
+// loop rules (pass/fail pairing, bounded fail-cycles, exhaustion
+// targets). Legacy workflows (no on/actor/bounds) hit none of the v2
+// paths and validate exactly as before.
 func (w *Workflow) validate() error {
 	if len(w.States) == 0 {
 		return fmt.Errorf("workflow: yaml block: states required (at least one)")
 	}
 	known := make(map[string]struct{}, len(w.States))
 	for i, s := range w.States {
-		s = strings.TrimSpace(s)
-		if s == "" {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
 			return fmt.Errorf("workflow: yaml block: states[%d] is empty", i)
 		}
-		if _, dup := known[s]; dup {
-			return fmt.Errorf("workflow: yaml block: states[%d] %q is duplicated", i, s)
+		if _, dup := known[name]; dup {
+			return fmt.Errorf("workflow: yaml block: states[%d] %q is duplicated", i, name)
 		}
-		known[s] = struct{}{}
-		w.States[i] = s
+		known[name] = struct{}{}
+		actor := strings.TrimSpace(s.Actor)
+		if s.Actor != "" && actor == "" {
+			return fmt.Errorf("workflow: yaml block: states[%d] %q has a blank actor — omit the key or name who acts", i, name)
+		}
+		w.States[i] = State{Name: name, Actor: actor}
 	}
 	if len(w.Transitions) == 0 {
 		return fmt.Errorf("workflow: yaml block: transitions required (at least one)")
@@ -164,14 +223,118 @@ func (w *Workflow) validate() error {
 		if _, ok := known[to]; !ok {
 			return fmt.Errorf("workflow: yaml block: transitions[%d].to %q is not a declared state", i, to)
 		}
-		key := from + "->" + to
+		on := strings.TrimSpace(t.On)
+		if on != "" && on != "pass" && on != "fail" {
+			return fmt.Errorf("workflow: yaml block: transitions[%d].on %q is not pass or fail", i, t.On)
+		}
+		trigger := strings.TrimSpace(t.Trigger)
+		if trigger != "" && trigger != "checkpoint" {
+			return fmt.Errorf("workflow: yaml block: transitions[%d].trigger %q is not checkpoint", i, t.Trigger)
+		}
+		onExhausted := strings.TrimSpace(t.OnExhausted)
+		if t.MaxIterations < 0 {
+			return fmt.Errorf("workflow: yaml block: transitions[%d].max_iterations %d is negative", i, t.MaxIterations)
+		}
+		if t.MaxIterations > 0 && on != "fail" {
+			return fmt.Errorf("workflow: yaml block: transitions[%d] carries max_iterations but is not an `on: fail` edge — a bound is only meaningful on a fail loop", i)
+		}
+		if t.MaxIterations > 0 && onExhausted == "" {
+			return fmt.Errorf("workflow: yaml block: transitions[%d] carries max_iterations %d with no on_exhausted — the Nth failure has nowhere to land", i, t.MaxIterations)
+		}
+		if onExhausted != "" {
+			if t.MaxIterations == 0 {
+				return fmt.Errorf("workflow: yaml block: transitions[%d] carries on_exhausted %q with no max_iterations — an exhaustion target needs a bound", i, onExhausted)
+			}
+			if _, ok := known[onExhausted]; !ok {
+				return fmt.Errorf("workflow: yaml block: transitions[%d].on_exhausted %q is not a declared state", i, onExhausted)
+			}
+		}
+		key := from + "->" + to + "/" + on
 		if _, dup := seen[key]; dup {
-			return fmt.Errorf("workflow: yaml block: transitions[%d] %s is duplicated", i, key)
+			return fmt.Errorf("workflow: yaml block: transitions[%d] %s->%s is duplicated", i, from, to)
 		}
 		seen[key] = struct{}{}
-		w.Transitions[i] = Transition{From: from, To: to, ReviewerSkill: strings.TrimSpace(t.ReviewerSkill), Dynamic: t.Dynamic}
+		w.Transitions[i] = Transition{
+			From: from, To: to,
+			ReviewerSkill: strings.TrimSpace(t.ReviewerSkill),
+			Dynamic:       t.Dynamic,
+			On:            on,
+			MaxIterations: t.MaxIterations,
+			OnExhausted:   onExhausted,
+			Trigger:       trigger,
+		}
+	}
+	if err := w.validateLoops(); err != nil {
+		return err
 	}
 	return nil
+}
+
+// validateLoops enforces the v2 loop rules across the whole edge set:
+// pass/fail edges come in pairs from a reviewed state, and every fail
+// edge that closes a cycle carries a bound (no infinite process).
+func (w *Workflow) validateLoops() error {
+	// Pass/fail pairing per source state.
+	hasPass := map[string]bool{}
+	hasFail := map[string]bool{}
+	for _, t := range w.Transitions {
+		switch t.On {
+		case "pass":
+			hasPass[t.From] = true
+		case "fail":
+			hasFail[t.From] = true
+		}
+	}
+	for from := range hasPass {
+		if !hasFail[from] {
+			return fmt.Errorf("workflow: yaml block: state %q has an `on: pass` edge but no `on: fail` edge — a reviewed state needs both outcomes", from)
+		}
+	}
+	for from := range hasFail {
+		if !hasPass[from] {
+			return fmt.Errorf("workflow: yaml block: state %q has an `on: fail` edge but no `on: pass` edge — a reviewed state needs both outcomes", from)
+		}
+	}
+	// Bounded loops: an unbounded fail edge must not close a cycle.
+	for _, t := range w.Transitions {
+		if t.On != "fail" || t.MaxIterations > 0 {
+			continue
+		}
+		if w.reaches(t.To, t.From) {
+			return fmt.Errorf("workflow: yaml block: `on: fail` edge %s->%s closes a cycle with no max_iterations — loops must be bounded", t.From, t.To)
+		}
+	}
+	return nil
+}
+
+// reaches reports whether `to` is reachable from `from` over the
+// transition digraph (DFS; both endpoints are declared states).
+func (w *Workflow) reaches(from, to string) bool {
+	if from == to {
+		return true
+	}
+	visited := map[string]bool{}
+	stack := []string{from}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if visited[cur] {
+			continue
+		}
+		visited[cur] = true
+		for _, t := range w.Transitions {
+			if t.From != cur {
+				continue
+			}
+			if t.To == to {
+				return true
+			}
+			if !visited[t.To] {
+				stack = append(stack, t.To)
+			}
+		}
+	}
+	return false
 }
 
 // TransitionsFrom returns every outgoing edge from the named state.
@@ -195,14 +358,30 @@ func (w *Workflow) InitialState() string {
 	hasIncoming := make(map[string]bool, len(w.Transitions))
 	for _, t := range w.Transitions {
 		hasIncoming[t.To] = true
+		// An exhaustion target is entered by the client's enactment — a
+		// real incoming transition; an escalation state is never the entry.
+		if t.OnExhausted != "" {
+			hasIncoming[t.OnExhausted] = true
+		}
 	}
 	for _, s := range w.States {
-		if !hasIncoming[s] {
-			return s
+		if !hasIncoming[s.Name] {
+			return s.Name
 		}
 	}
 	if len(w.States) > 0 {
-		return w.States[0]
+		return w.States[0].Name
+	}
+	return ""
+}
+
+// ActorOf returns the actor declared on the named state — empty when the
+// state is unknown or declares no actor (pre-actor semantics).
+func (w *Workflow) ActorOf(state string) string {
+	for _, s := range w.States {
+		if s.Name == state {
+			return s.Actor
+		}
 	}
 	return ""
 }
@@ -217,8 +396,8 @@ func (w *Workflow) IsTerminal(state string) bool {
 func (w *Workflow) TerminalStates() []string {
 	var out []string
 	for _, s := range w.States {
-		if w.IsTerminal(s) {
-			out = append(out, s)
+		if w.IsTerminal(s.Name) {
+			out = append(out, s.Name)
 		}
 	}
 	return out
@@ -241,8 +420,8 @@ func (w *Workflow) IsEditable(state string) bool {
 func (w *Workflow) EditableStates() []string {
 	var out []string
 	for _, s := range w.States {
-		if w.IsEditable(s) {
-			out = append(out, s)
+		if w.IsEditable(s.Name) {
+			out = append(out, s.Name)
 		}
 	}
 	return out
@@ -273,7 +452,7 @@ func ParseBody(body []byte) (*Workflow, error) {
 // hasState reports whether s is a declared state.
 func (w *Workflow) hasState(s string) bool {
 	for _, st := range w.States {
-		if st == s {
+		if st.Name == s {
 			return true
 		}
 	}

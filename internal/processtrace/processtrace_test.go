@@ -26,7 +26,7 @@ func ent(kind, body string, payload map[string]any, offsetSec int) LedgerEntry {
 func fixWorkflow() *workflow.Workflow {
 	return &workflow.Workflow{
 		Name:   "satellites-fix-workflow",
-		States: []string{"backlog", "in_progress", "done"},
+		States: []workflow.State{{Name: "backlog"}, {Name: "in_progress"}, {Name: "done"}},
 		Transitions: []workflow.Transition{
 			{From: "backlog", To: "in_progress", ReviewerSkill: "satellites-story-plan-review"},
 			{From: "in_progress", To: "done", ReviewerSkill: "satellites-story-done-review"},
@@ -129,7 +129,7 @@ func TestReconcile_RejectedNotAdvanced(t *testing.T) {
 func TestReconcile_UnguardedTransitionFires(t *testing.T) {
 	wf := &workflow.Workflow{
 		Name:   "wf",
-		States: []string{"a", "b"},
+		States: []workflow.State{{Name: "a"}, {Name: "b"}},
 		Transitions: []workflow.Transition{
 			{From: "a", To: "b", ReviewerSkill: ""},
 		},
@@ -162,7 +162,7 @@ func TestReconcile_NilWorkflow(t *testing.T) {
 func TestReconcile_AlienWorkflowEventsAndCloseOut(t *testing.T) {
 	wf := &workflow.Workflow{
 		Name:   "moonbase-workflow",
-		States: []string{"draft", "vetting", "sealed"},
+		States: []workflow.State{{Name: "draft"}, {Name: "vetting"}, {Name: "sealed"}},
 		Transitions: []workflow.Transition{
 			{From: "draft", To: "vetting", ReviewerSkill: "lunar-intake-review"},
 			{From: "vetting", To: "sealed", ReviewerSkill: "qa-seal-review"},

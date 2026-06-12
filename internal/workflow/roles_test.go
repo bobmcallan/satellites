@@ -5,7 +5,7 @@ import "testing"
 // fixWorkflow is the canonical fix workflow: backlog → in_progress → done.
 func fixWorkflow() *Workflow {
 	return &Workflow{
-		States: []string{"backlog", "in_progress", "done"},
+		States: []State{{Name: "backlog"}, {Name: "in_progress"}, {Name: "done"}},
 		Transitions: []Transition{
 			{From: "backlog", To: "in_progress", ReviewerSkill: "plan"},
 			{From: "in_progress", To: "done", ReviewerSkill: "done"},
@@ -75,7 +75,7 @@ func TestValidateLifecycle(t *testing.T) {
 	}
 	// Epic/parent style: backlog → done, no editable middle — still valid.
 	parent := &Workflow{
-		States:      []string{"backlog", "done"},
+		States:      []State{{Name: "backlog"}, {Name: "done"}},
 		Transitions: []Transition{{From: "backlog", To: "done", ReviewerSkill: "close"}},
 	}
 	if err := parent.ValidateLifecycle(); err != nil {
@@ -83,14 +83,14 @@ func TestValidateLifecycle(t *testing.T) {
 	}
 	// Cyclic: every state has an outgoing edge ⇒ no terminal ⇒ fail.
 	cyclic := &Workflow{
-		States:      []string{"a", "b"},
+		States:      []State{{Name: "a"}, {Name: "b"}},
 		Transitions: []Transition{{From: "a", To: "b"}, {From: "b", To: "a"}},
 	}
 	if err := cyclic.ValidateLifecycle(); err == nil {
 		t.Errorf("cyclic workflow (no terminal) should fail")
 	}
 	// Single state: initial == terminal, no transitions ⇒ no editable derivable.
-	single := &Workflow{States: []string{"only"}}
+	single := &Workflow{States: []State{{Name: "only"}}}
 	if err := single.ValidateLifecycle(); err == nil {
 		t.Errorf("single-state workflow should fail (no derivable editable path)")
 	}
@@ -100,7 +100,7 @@ func TestValidateLifecycle(t *testing.T) {
 // only the final state is terminal (no hard-coded names).
 func TestStateRoles_MultiMiddle(t *testing.T) {
 	w := &Workflow{
-		States: []string{"backlog", "planned", "in_progress", "test", "deploy", "done"},
+		States: []State{{Name: "backlog"}, {Name: "planned"}, {Name: "in_progress"}, {Name: "test"}, {Name: "deploy"}, {Name: "done"}},
 		Transitions: []Transition{
 			{From: "backlog", To: "planned", ReviewerSkill: "p"},
 			{From: "planned", To: "in_progress", ReviewerSkill: "s"},

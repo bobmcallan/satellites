@@ -122,8 +122,8 @@ func TestParse_RoundTripExample(t *testing.T) {
 		t.Fatalf("states = %v, want %v", wf.States, wantStates)
 	}
 	for i, want := range wantStates {
-		if wf.States[i] != want {
-			t.Fatalf("states[%d] = %q, want %q", i, wf.States[i], want)
+		if wf.States[i].Name != want {
+			t.Fatalf("states[%d] = %q, want %q", i, wf.States[i].Name, want)
 		}
 	}
 	if len(wf.Transitions) != 4 {
@@ -301,5 +301,200 @@ transitions:
 	}
 	if !wf.Transitions[0].Dynamic {
 		t.Fatalf("dynamic flag lost: %+v", wf.Transitions[0])
+	}
+}
+
+// TestParse_V2Sketch parses the graduated-workflow target model (the epic
+// anchor's sketch, verbatim) and asserts the v2 surface: state actors,
+// on:pass|fail edges, iteration bounds, exhaustion targets, and the
+// checkpoint trigger — epic:graduated-workflow story 1 AC#1.
+func TestParse_V2Sketch(t *testing.T) {
+	body := []byte("# v2 sketch\n\n```yaml\n" +
+		"states:\n" +
+		"  - {name: in_progress,     actor: executor}\n" +
+		"  - {name: techdebt-review, actor: satellites}\n" +
+		"  - {name: done-review,     actor: reviewer}\n" +
+		"  - {name: blocked,         actor: operator}\n" +
+		"  - done\n" +
+		"transitions:\n" +
+		"  - {from: in_progress,     to: techdebt-review, trigger: checkpoint}\n" +
+		"  - {from: techdebt-review, on: pass, to: done-review}\n" +
+		"  - {from: techdebt-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}\n" +
+		"  - {from: done-review,     on: pass, to: done}\n" +
+		"  - {from: done-review,     on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}\n" +
+		"```\n")
+	wf, err := ParseBody(body)
+	if err != nil {
+		t.Fatalf("parse v2 sketch: %v", err)
+	}
+	wantActors := map[string]string{
+		"in_progress": "executor", "techdebt-review": "satellites",
+		"done-review": "reviewer", "blocked": "operator", "done": "",
+	}
+	for state, actor := range wantActors {
+		if got := wf.ActorOf(state); got != actor {
+			t.Errorf("ActorOf(%q) = %q, want %q", state, got, actor)
+		}
+	}
+	if len(wf.Transitions) != 5 {
+		t.Fatalf("transitions = %d, want 5", len(wf.Transitions))
+	}
+	if tr := wf.Transitions[0]; tr.Trigger != "checkpoint" || tr.On != "" {
+		t.Errorf("checkpoint edge parsed wrong: %+v", tr)
+	}
+	fail := wf.Transitions[2]
+	if fail.On != "fail" || fail.MaxIterations != 3 || fail.OnExhausted != "blocked" {
+		t.Errorf("fail edge parsed wrong: %+v", fail)
+	}
+	if pass := wf.Transitions[3]; pass.On != "pass" || pass.MaxIterations != 0 || pass.OnExhausted != "" {
+		t.Errorf("pass edge parsed wrong: %+v", pass)
+	}
+	if err := wf.ValidateLifecycle(); err != nil {
+		t.Errorf("v2 sketch must pass ValidateLifecycle: %v", err)
+	}
+	// blocked and done are both terminal; the loop edges keep in_progress non-terminal.
+	terms := wf.TerminalStates()
+	if len(terms) != 2 {
+		t.Errorf("terminal states = %v, want [blocked done]", terms)
+	}
+}
+
+// TestParse_V2Rejections pins every malformed v2 shape the validator must
+// reject — epic:graduated-workflow story 1 AC#3.
+func TestParse_V2Rejections(t *testing.T) {
+	wrap := func(yaml string) []byte { return []byte("# t\n\n```yaml\n" + yaml + "```\n") }
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "unbounded fail-cycle",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done}\n" +
+				"  - {from: b, on: fail, to: a}\n",
+			want: "closes a cycle with no max_iterations",
+		},
+		{
+			name: "on_exhausted names undeclared state",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done}\n" +
+				"  - {from: b, on: fail, to: a, max_iterations: 3, on_exhausted: limbo}\n",
+			want: "on_exhausted \"limbo\" is not a declared state",
+		},
+		{
+			name: "dangling pass without fail",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done}\n",
+			want: "no `on: fail` edge",
+		},
+		{
+			name: "dangling fail without pass",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: fail, to: done}\n",
+			want: "no `on: pass` edge",
+		},
+		{
+			name: "max_iterations on a pass edge",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done, max_iterations: 3}\n" +
+				"  - {from: b, on: fail, to: a, max_iterations: 3, on_exhausted: done}\n",
+			want: "not an `on: fail` edge",
+		},
+		{
+			name: "max_iterations without on_exhausted",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done}\n" +
+				"  - {from: b, on: fail, to: a, max_iterations: 3}\n",
+			want: "no on_exhausted",
+		},
+		{
+			name: "on_exhausted without max_iterations",
+			yaml: "states: [a, b, done]\ntransitions:\n" +
+				"  - {from: a, to: b}\n" +
+				"  - {from: b, on: pass, to: done}\n" +
+				"  - {from: b, on: fail, to: a, on_exhausted: done}\n",
+			want: "no max_iterations",
+		},
+		{
+			name: "unknown on value",
+			yaml: "states: [a, done]\ntransitions:\n" +
+				"  - {from: a, to: done, on: maybe}\n",
+			want: "not pass or fail",
+		},
+		{
+			name: "unknown trigger value",
+			yaml: "states: [a, done]\ntransitions:\n" +
+				"  - {from: a, to: done, trigger: cron}\n",
+			want: "not checkpoint",
+		},
+		{
+			name: "blank actor",
+			yaml: "states:\n  - {name: a, actor: \"  \"}\n  - done\ntransitions:\n" +
+				"  - {from: a, to: done}\n",
+			want: "blank actor",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := ParseBody(wrap(c.yaml))
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", c.want)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), c.want)
+			}
+		})
+	}
+}
+
+// TestParse_V2BoundedLoopAccepted: a fail edge that closes a cycle WITH a
+// bound is legal — the rejection above is specifically about unbounded loops.
+// A bounded fail edge pointing at a non-cycling target is equally fine.
+func TestParse_V2BoundedLoopAccepted(t *testing.T) {
+	body := []byte("# t\n\n```yaml\n" +
+		"states: [a, b, blocked, done]\n" +
+		"transitions:\n" +
+		"  - {from: a, to: b}\n" +
+		"  - {from: b, on: pass, to: done}\n" +
+		"  - {from: b, on: fail, to: a, max_iterations: 2, on_exhausted: blocked}\n" +
+		"```\n")
+	wf, err := ParseBody(body)
+	if err != nil {
+		t.Fatalf("bounded loop must parse: %v", err)
+	}
+	if err := wf.ValidateLifecycle(); err != nil {
+		t.Fatalf("bounded loop must pass lifecycle: %v", err)
+	}
+}
+
+// TestParse_V2LegacyMixUnchanged: reviewer_skill edges with no `on` keep
+// accept-moves/reject-stays semantics — PickTransition still resolves the
+// single gated edge, and the v2 fields zero-value cleanly.
+func TestParse_V2LegacyMixUnchanged(t *testing.T) {
+	body := []byte("# t\n\n```yaml\n" +
+		"states: [backlog, in_progress, done]\n" +
+		"transitions:\n" +
+		"  - {from: backlog, to: in_progress, reviewer_skill: \"plan\"}\n" +
+		"  - {from: in_progress, to: done, reviewer_skill: \"close\"}\n" +
+		"```\n")
+	wf, err := ParseBody(body)
+	if err != nil {
+		t.Fatalf("legacy workflow must parse: %v", err)
+	}
+	tr, gate, dyn, err := wf.PickTransition("backlog")
+	if err != nil || dyn || gate != "plan" || tr.To != "in_progress" {
+		t.Fatalf("legacy PickTransition changed: tr=%+v gate=%q dyn=%v err=%v", tr, gate, dyn, err)
+	}
+	for _, tr := range wf.Transitions {
+		if tr.On != "" || tr.MaxIterations != 0 || tr.OnExhausted != "" || tr.Trigger != "" {
+			t.Fatalf("legacy edge grew v2 fields: %+v", tr)
+		}
 	}
 }
