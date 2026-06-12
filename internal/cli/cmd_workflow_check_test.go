@@ -129,6 +129,39 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 		}
 	})
 
+	t.Run("class8_gate_placement_conflict", func(t *testing.T) {
+		// A workflow binding debt-gate's command to a state, plus a capability
+		// whose body restates running that command — the commit-push/techdebt
+		// contradiction (sty_acbaa6e3).
+		skills := healthyCorpus()
+		skills[0].raw = "---\nname: the-workflow\nkind: workflow\napplies_to: [\"any\"]\ndescription: the lifecycle\n---\n" +
+			"# wf\n\n## Checkpoint gates\n\n- [[debt-gate]] — the state's command.\n- [[exit-review]] — keeps the fixture's other gate named.\n\n```yaml\nstates:\n  - backlog\n  - {name: doing,       actor: executor}\n  - {name: debt-review, actor: satellites, command: \"run debt check\"}\n  - {name: blocked,     actor: operator}\n  - done\ntransitions:\n  - {from: backlog,     to: doing,       reviewer_skill: \"entry-review\"}\n  - {from: doing,       to: debt-review, trigger: checkpoint}\n  - {from: debt-review, on: pass, to: done}\n  - {from: debt-review, on: fail, to: doing, max_iterations: 3, on_exhausted: blocked}\n```\n"
+		conflicted := append(skills, matSkill{name: "ship-capability", kind: "capability", description: "d",
+			body: "Before committing run `run debt check`; on exit 0 proceed.\n",
+			raw:  "---\nname: ship-capability\nkind: capability\ndescription: d\n---\nBefore committing run `run debt check`; on exit 0 proceed.\n"})
+		fs := runWorkflowChecks(conflicted, nil)
+		ok := false
+		for _, f := range fs {
+			if f.Code == "gate-placement-conflict" && f.Artifact == "ship-capability" && f.Severity == "block" {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Errorf("a capability restating a state-bound command must report gate-placement-conflict: %+v", fs)
+		}
+
+		// The reconciled shape: the capability references the gate by [[name]]
+		// only — no execution claim, no finding.
+		reconciled := append(skills, matSkill{name: "ship-capability", kind: "capability", description: "d",
+			body: "Precondition: the [[debt-gate]] traverse has already passed; never restate its run.\n",
+			raw:  "---\nname: ship-capability\nkind: capability\ndescription: d\n---\nPrecondition: the [[debt-gate]] traverse has already passed; never restate its run.\n"})
+		for _, f := range runWorkflowChecks(reconciled, nil) {
+			if f.Code == "gate-placement-conflict" {
+				t.Errorf("a reference-only capability must not report gate-placement-conflict: %+v", f)
+			}
+		}
+	})
+
 	t.Run("class7_shallow_first_gate", func(t *testing.T) {
 		skills := healthyCorpus()
 		skills[1].body = "Check only that a plan exists.\n" // drops shape/acceptance/workflow/grounding

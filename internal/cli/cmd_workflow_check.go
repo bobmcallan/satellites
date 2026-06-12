@@ -158,6 +158,44 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []d
 	return out
 }
 
+// checkGatePlacementConflict (class 8): when a workflow binds a gate's
+// execution to a state (the `command:` rider on an actor:satellites state),
+// that command has exactly one execution home — the state's traverse, with the
+// gate skill owning the decision rule. A non-gate skill whose body instructs
+// running the same command is a second placement claim: an executor following
+// it runs the gate outside its state and the two documents drift apart (the
+// commit-push/techdebt contradiction). Reference the gate by [[name]] instead.
+func checkGatePlacementConflict(skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+	type binding struct{ wf, state string }
+	commands := map[string]binding{}
+	for name, wf := range wfs {
+		for _, st := range wf.States {
+			if c := strings.TrimSpace(st.Command); c != "" {
+				commands[c] = binding{wf: name, state: st.Name}
+			}
+		}
+	}
+	var out []driftFinding
+	for _, s := range skills {
+		if s.kind == "gate" || s.kind == "workflow" {
+			continue
+		}
+		for c, b := range commands {
+			if strings.Contains(s.body, c) {
+				out = append(out, driftFinding{"block", "gate-placement-conflict", s.name,
+					fmt.Sprintf("skill body instructs running %q, which workflow %s binds to state %q — the state's traverse is the command's single execution home; reference the gate skill instead of restating its run", c, b.wf, b.state)})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Artifact != out[j].Artifact {
+			return out[i].Artifact < out[j].Artifact
+		}
+		return out[i].Message < out[j].Message
+	})
+	return out
+}
+
 // nonAtomicMarkers flag a non-gate skill that looks like it embeds a
 // fail-closed verdict routine (class 2). Advisory: the authoritative judge is
 // `satellites skill review` item 8 — this points at candidates.
@@ -310,6 +348,7 @@ func runWorkflowChecks(skills []matSkill, stories []storyLite) []driftFinding {
 	wfs, wfFindings := parseWorkflows(skills)
 	out = append(out, wfFindings...)
 	out = append(out, checkGateCoverage(skills, wfs)...)
+	out = append(out, checkGatePlacementConflict(skills, wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
 	out = append(out, checkStoryGovernance(stories, skills, wfs)...)
@@ -374,6 +413,7 @@ func newWorkflowCheckCmd(configArg, userArg *string) *cobra.Command {
   workflow-lifecycle    a kind:workflow skill with a degenerate state machine
   orphan-gate           a kind:gate skill no workflow definition names (shadow gate)
   missing-gate          a workflow names a reviewer skill that is not materialised
+  gate-placement-conflict  a non-gate skill instructs running a command a workflow binds to a state
   nonatomic-candidate   (advisory) a non-gate skill carrying fail-closed verdict markers
   host-coupled-system   a system-scope skill referencing repo-dev specifics
   ungoverned-story      a non-terminal story with no embedded workflow and no applies_to cover

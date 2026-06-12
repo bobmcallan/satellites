@@ -4,9 +4,9 @@ type: skill
 kind: gate
 when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
-description: The process-drift pre-commit gate. Run before every commit that touches process configuration (workflow/gate/capability skills, principles, story workflows) — `satellites workflow check` reconciles the defined process against the executable reality and fails closed on any blocking drift (shadow gates, unusable skills, host-coupled system scope, ungoverned stories, degenerate workflows, shallow first gates).
+description: The process-drift pre-commit gate. Run before every commit that touches process configuration (workflow/gate/capability skills, principles, story workflows) — `satellites workflow check` reconciles the defined process against the executable reality and fails closed on any blocking drift (shadow gates, unusable skills, host-coupled system scope, ungoverned stories, degenerate workflows, shallow first gates, gate-placement conflicts).
 ---
-<!-- satellites-sync:begin {"document_id":"doc_b9e42751","version":1,"hash":"a9191a2b4afd20d2b9f59a8c43b0f45bdf2d57a96dc5ff33fd2765b388cf119a"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_b9e42751","version":2,"hash":"2255b95e67fa8f388d75a26d809fa5297692521b5b7ba25db4e59244b17c936a"} satellites-sync:end -->
 
 # satellites-workflow-drift-review
 
@@ -30,7 +30,9 @@ names its artifact and the repair: name the orphaned gate in a workflow
 definition (or retire it), materialise or correct a missing reviewer, repair
 the unusable SKILL.md (re-run `satellites skill sync`), re-scope or rewrite a
 host-coupled system skill, embed a `## Workflow` in (or cover the category
-of) an ungoverned story, deepen a shallow entry gate. Fix the drift or
+of) an ungoverned story, deepen a shallow entry gate, remove a
+`gate-placement-conflict` (a non-gate skill restating a command the workflow
+binds to a state — reference the gate by `[[name]]` instead). Fix the drift or
 correct the definition, then re-run.
 
 ## Environment
