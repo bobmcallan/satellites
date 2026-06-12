@@ -12,7 +12,6 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/renderer/html"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/changelog"
@@ -41,10 +40,12 @@ func SetChangelogStore(s *changelog.Store) { changelogStore = s }
 // rendering changelog entry content. WithUnsafe is intentionally
 // absent — goldmark refuses to emit raw HTML by default, so any
 // <script> the operator inserts in a content body lands as escaped
-// text. The renderer is safe to use concurrently.
+// text. No WithHardWraps: bodies are authored with ~80-column source
+// wrapping, and hard wraps would pin the rendered prose to that width
+// instead of letting paragraphs reflow to the container (sty_2021031d).
+// The renderer is safe to use concurrently.
 var markdownRenderer = goldmark.New(
 	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
-	goldmark.WithRendererOptions(html.WithHardWraps()),
 )
 
 var changelogTmpl = template.Must(template.ParseFS(assets,

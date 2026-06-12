@@ -987,6 +987,9 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   font-size: 0.85rem;
   letter-spacing: 0.05em;
 }
+/* Reflowed markdown prose (no hard wraps — sty_2021031d) fills its container;
+   the page's responsive side-margin ladder on `main` (5%–20%) already keeps
+   it off the browser edges, so no extra measure cap here. */
 .changelog-content { color: #d8d8d8; }
 .changelog-content > :first-child { margin-top: 0; }
 .changelog-content > :last-child { margin-bottom: 0; }
