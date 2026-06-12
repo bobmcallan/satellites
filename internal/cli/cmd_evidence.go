@@ -60,11 +60,37 @@ server ledger — never the executor's turn.`,
 	ev.AddCommand(showCmd)
 
 	var ciConfig, ciUser, ciStage, ciResult, ciRef, ciNotes string
+	var ciFromHead bool
 	ciCmd := &cobra.Command{
-		Use:   "ci <story-id> --stage <test|release|deploy> --result <success|failure>",
+		Use:   "ci [story-id] --stage <test|release|deploy> --result <success|failure> | --from-head",
 		Short: "Record a CI stage outcome against a story (store + ci_result ledger row)",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			story := ""
+			if len(args) == 1 {
+				story = strings.TrimSpace(args[0])
+			}
+			cfg, _, _ := cliconfig.Load(ciConfig)
+			appendLedger := func(ctx context.Context, req json.RawMessage) error {
+				_, err := dispatchVerb(ctx, "ledger_append", req, ciConfig, ciUser)
+				return err
+			}
+			base := evidenceCIOpts{
+				StateDB:   resolveStateDB(ciConfig),
+				Story:     story,
+				Ref:       strings.TrimSpace(ciRef),
+				Notes:     strings.TrimSpace(ciNotes),
+				ProjectID: cfg.ProjectID,
+			}
+			if ciFromHead {
+				if strings.TrimSpace(ciStage) != "" || strings.TrimSpace(ciResult) != "" {
+					return fmt.Errorf("--from-head resolves every stage and result itself; drop --stage/--result")
+				}
+				return runEvidenceCIFromHead(cmd.Context(), cmd.OutOrStdout(), story, base, appendLedger)
+			}
+			if story == "" {
+				return fmt.Errorf("story-id required (or pass --from-head to resolve it from HEAD's commit trailer)")
+			}
 			stage, result := strings.TrimSpace(ciStage), strings.TrimSpace(ciResult)
 			if !validCIStages[stage] {
 				return fmt.Errorf("--stage must be one of test|release|deploy (got %q)", stage)
@@ -72,28 +98,17 @@ server ledger — never the executor's turn.`,
 			if !validCIResults[result] {
 				return fmt.Errorf("--result must be one of success|failure (got %q)", result)
 			}
-			cfg, _, _ := cliconfig.Load(ciConfig)
-			appendLedger := func(ctx context.Context, req json.RawMessage) error {
-				_, err := dispatchVerb(ctx, "ledger_append", req, ciConfig, ciUser)
-				return err
-			}
-			return runEvidenceCI(cmd.Context(), cmd.OutOrStdout(), evidenceCIOpts{
-				StateDB:   resolveStateDB(ciConfig),
-				Story:     strings.TrimSpace(args[0]),
-				Stage:     stage,
-				Result:    result,
-				Ref:       strings.TrimSpace(ciRef),
-				Notes:     strings.TrimSpace(ciNotes),
-				ProjectID: cfg.ProjectID,
-			}, appendLedger)
+			base.Stage, base.Result = stage, result
+			return runEvidenceCI(cmd.Context(), cmd.OutOrStdout(), base, appendLedger)
 		},
 	}
 	ciCmd.Flags().StringVar(&ciConfig, "config", "", "Path to satellites.toml (defaults to walk-up from CWD).")
 	ciCmd.Flags().StringVar(&ciUser, "user", "", "Caller user id (defaults to the configured admin user).")
-	ciCmd.Flags().StringVar(&ciStage, "stage", "", "REQUIRED. CI stage: test | release | deploy.")
-	ciCmd.Flags().StringVar(&ciResult, "result", "", "REQUIRED. Outcome: success | failure.")
-	ciCmd.Flags().StringVar(&ciRef, "ref", "", "Commit sha or run URL the outcome is for.")
+	ciCmd.Flags().StringVar(&ciStage, "stage", "", "CI stage: test | release | deploy (required without --from-head).")
+	ciCmd.Flags().StringVar(&ciResult, "result", "", "Outcome: success | failure (required without --from-head).")
+	ciCmd.Flags().StringVar(&ciRef, "ref", "", "Commit sha or run URL the outcome is for (--from-head default: HEAD).")
 	ciCmd.Flags().StringVar(&ciNotes, "notes", "", "Optional detail line.")
+	ciCmd.Flags().BoolVar(&ciFromHead, "from-head", false, "Resolve story (commit trailer), sha (HEAD), and all three stage conclusions via gh; record each concluded stage. Idempotent.")
 	ev.AddCommand(ciCmd)
 
 	var auditConfig, auditUser string

@@ -105,12 +105,12 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    have concluded, capture each stage:
 
    ```bash
-   scripts/record-ci-evidence.sh   # story id from HEAD's commit trailer; idempotent
+   satellites evidence ci --from-head   # story id from HEAD's commit trailer; idempotent
    ```
 
-   It writes a `ci_result` row per stage (test/release/deploy) via
-   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm with
-   `satellites evidence show <story>`.
+   It writes a `ci_result` row per concluded stage (test/release/deploy), keyed
+   to the story in the commit trailer; a stage with no concluded run is skipped.
+   Confirm with `satellites evidence show <story>`.
 
 ## Environment
 

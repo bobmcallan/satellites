@@ -232,7 +232,11 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		// per-type review skill carries the maintainability critique the
 		// local agent runs; --skip-review overrides after that review.
 		if !skipReview && !hasReviewExemptTag(t.Tags) {
-			if findings := reviewContent(t.Body); len(findings) > 0 {
+			findings := reviewContent(t.Body)
+			if kind == "skills" {
+				findings = append(findings, reviewSkillSelfContained(t.Body)...)
+			}
+			if len(findings) > 0 {
 				fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s); run skill %q for the maintainability critique, or pass --skip-review:\n",
 					t.Path, len(findings), reviewSkill)
 				for _, f := range findings {

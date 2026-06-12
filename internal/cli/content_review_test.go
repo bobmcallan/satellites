@@ -40,3 +40,42 @@ func TestReviewSkillForKind(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewSkillSelfContained pins the repo-script-dependency rule
+// (sty_26adfec7): a skill step shelling to an unversioned repo script is
+// blocked — including inside code fences, where invocations live — while a
+// verb-only body stays clean.
+func TestReviewSkillSelfContained(t *testing.T) {
+	fixture := "## Routine\n\n```bash\nscripts/record-ci-evidence.sh   # story id from HEAD\n```\n"
+	got := reviewSkillSelfContained(fixture)
+	if len(got) != 1 || got[0].Rule != "repo-script-dependency" {
+		t.Errorf("fenced repo-script invocation must report repo-script-dependency: %v", got)
+	}
+
+	clean := "## Routine\n\n```bash\nsatellites evidence ci --from-head\n```\nSee scripts in your PATH.\n"
+	if got := reviewSkillSelfContained(clean); len(got) != 0 {
+		t.Errorf("verb-only body must stay clean: %v", got)
+	}
+}
+
+// TestStoryIDFromMessage + TestCIResultFromConclusion pin the --from-head
+// resolution helpers (sty_26adfec7).
+func TestStoryIDFromMessage(t *testing.T) {
+	if got := storyIDFromMessage("feat(cli): thing (sty_aaaa1111)\n\nrefs sty_bbbb2222"); got != "sty_bbbb2222" {
+		t.Errorf("last trailer must win, got %q", got)
+	}
+	if got := storyIDFromMessage("chore: no trailer"); got != "" {
+		t.Errorf("no trailer must yield empty, got %q", got)
+	}
+}
+
+func TestCIResultFromConclusion(t *testing.T) {
+	if ciResultFromConclusion("success") != "success" {
+		t.Error("success must map to success")
+	}
+	for _, c := range []string{"failure", "cancelled", "timed_out", ""} {
+		if ciResultFromConclusion(c) != "failure" {
+			t.Errorf("%q must map to failure", c)
+		}
+	}
+}

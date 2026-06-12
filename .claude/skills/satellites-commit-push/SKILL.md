@@ -6,7 +6,7 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":10,"hash":"d461a29016edec701480e7773cf27647a8989a86703effa9eec6c4d17c593843"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":11,"hash":"9fcf77c9762325ccb62b3ebe02f0482dce513ca2b180e0fe35a004ce53e1ce87"} satellites-sync:end -->
 
 # satellites-commit-push
 
@@ -106,12 +106,12 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    have concluded, capture each stage:
 
    ```bash
-   scripts/record-ci-evidence.sh   # story id from HEAD's commit trailer; idempotent
+   satellites evidence ci --from-head   # story id from HEAD's commit trailer; idempotent
    ```
 
-   It writes a `ci_result` row per stage (test/release/deploy) via
-   `satellites evidence ci`, keyed to the story in the commit trailer. Confirm with
-   `satellites evidence show <story>`.
+   It writes a `ci_result` row per concluded stage (test/release/deploy), keyed
+   to the story in the commit trailer; a stage with no concluded run is skipped.
+   Confirm with `satellites evidence show <story>`.
 
 ## Environment
 

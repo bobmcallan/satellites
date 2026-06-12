@@ -75,6 +75,25 @@ func reviewContent(body string) []reviewFinding {
 	return out
 }
 
+// repoScriptPattern matches a repo-local script path (scripts/foo.sh). A
+// skill step depending on one is not self-contained: the logic belongs in the
+// skill text or the client verb surface (the record-ci-evidence.sh case).
+// Unlike the rotting-ref rule this is checked across the WHOLE body including
+// code fences, because that is exactly where invocations live.
+var repoScriptPattern = regexp.MustCompile(`\bscripts/[A-Za-z0-9._-]+\.(sh|bash|py)\b`)
+
+// reviewSkillSelfContained runs the skills-only strict checks: a skill body
+// may not depend on an unversioned repo script.
+func reviewSkillSelfContained(body string) []reviewFinding {
+	var out []reviewFinding
+	for i, line := range strings.Split(body, "\n") {
+		for _, m := range repoScriptPattern.FindAllString(line, -1) {
+			out = append(out, reviewFinding{Line: i + 1, Rule: "repo-script-dependency", Text: m})
+		}
+	}
+	return out
+}
+
 // reviewSkillForKind maps an upload kind dir to the per-type review skill the
 // local agent runs for the maintainability critique. All substrate-owned skills
 // carry the `satellites-` prefix (satellites-skill-naming): documents→
