@@ -36,6 +36,14 @@ const (
 	// process without editing the shared rows. user_id is the caller
 	// identity, never a request-body field.
 	ScopeUser Scope = "user"
+	// ScopeLibrary is the shared distribution surface (epic:skill-library,
+	// sty_5678cc4b): published artifacts readable by every authenticated
+	// caller, writable only into the caller's own publisher namespace.
+	// Publisher = the publishing project, so a library row is keyed
+	// (project_id, name) with workspace_id NULL — it deliberately escapes
+	// the workspace boundary. Library is NOT a layer of the inherit
+	// cascade; reads name it explicitly.
+	ScopeLibrary Scope = "library"
 )
 
 // Status is the typed column on document_versions.
@@ -73,25 +81,29 @@ var ErrTypeMismatch = errors.New("document: type mismatch on existing key")
 // Summary) lives on the row directly; for type='document' rows these
 // fields are at their zero value.
 type Document struct {
-	ID                 string     `json:"id"`
-	Type               string     `json:"type"`
-	Scope              Scope      `json:"scope"`
-	WorkspaceID        string     `json:"workspace_id,omitempty"`
-	ProjectID          string     `json:"project_id,omitempty"`
-	UserID             string     `json:"user_id,omitempty"`
-	Name               string     `json:"name"`
-	LatestVersion      int        `json:"latest_version"`
-	Tags               []string   `json:"tags"`
-	Status             string     `json:"status"`
-	Priority           string     `json:"priority,omitempty"`
-	Category           string     `json:"category,omitempty"`
-	ParentID           string     `json:"parent_id,omitempty"`
-	AcceptanceCriteria string     `json:"acceptance_criteria,omitempty"`
-	Headline           string     `json:"headline,omitempty"`
-	Summary            string     `json:"summary,omitempty"`
-	SummaryUpdatedAt   *time.Time `json:"summary_updated_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                 string   `json:"id"`
+	Type               string   `json:"type"`
+	Scope              Scope    `json:"scope"`
+	WorkspaceID        string   `json:"workspace_id,omitempty"`
+	ProjectID          string   `json:"project_id,omitempty"`
+	UserID             string   `json:"user_id,omitempty"`
+	Name               string   `json:"name"`
+	LatestVersion      int      `json:"latest_version"`
+	Tags               []string `json:"tags"`
+	Status             string   `json:"status"`
+	Priority           string   `json:"priority,omitempty"`
+	Category           string   `json:"category,omitempty"`
+	ParentID           string   `json:"parent_id,omitempty"`
+	AcceptanceCriteria string   `json:"acceptance_criteria,omitempty"`
+	Headline           string   `json:"headline,omitempty"`
+	// Audience gates library reads ('all' by default; a non-'all' row is
+	// readable only by its publisher). Set by the DB default — no write
+	// surface ships with the initial library.
+	Audience         string     `json:"audience,omitempty"`
+	Summary          string     `json:"summary,omitempty"`
+	SummaryUpdatedAt *time.Time `json:"summary_updated_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // Type values for the documents.type discriminator.
@@ -146,6 +158,10 @@ func (k Key) Validate() error {
 		}
 	case ScopeUser:
 		if k.UserID == "" || k.WorkspaceID != "" || k.ProjectID != "" {
+			return ErrScopeMismatch
+		}
+	case ScopeLibrary:
+		if k.ProjectID == "" || k.WorkspaceID != "" || k.UserID != "" {
 			return ErrScopeMismatch
 		}
 	default:

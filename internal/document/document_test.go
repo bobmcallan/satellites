@@ -27,6 +27,10 @@ func TestKey_Validate(t *testing.T) {
 		{"project ok", Key{Scope: ScopeProject, WorkspaceID: "wksp_1", ProjectID: "proj_1", Name: "x"}, false},
 		{"project without workspace_id rejected", Key{Scope: ScopeProject, ProjectID: "proj_1", Name: "x"}, true},
 		{"project without project_id rejected", Key{Scope: ScopeProject, WorkspaceID: "wksp_1", Name: "x"}, true},
+		{"library ok", Key{Scope: ScopeLibrary, ProjectID: "proj_1", Name: "x"}, false},
+		{"library without project_id rejected", Key{Scope: ScopeLibrary, Name: "x"}, true},
+		{"library with workspace_id rejected", Key{Scope: ScopeLibrary, WorkspaceID: "wksp_1", ProjectID: "proj_1", Name: "x"}, true},
+		{"library with user_id rejected", Key{Scope: ScopeLibrary, ProjectID: "proj_1", UserID: "usr_1", Name: "x"}, true},
 		{"empty name rejected", Key{Scope: ScopeSystem}, true},
 		{"unknown scope rejected", Key{Scope: "other", Name: "x"}, true},
 	}

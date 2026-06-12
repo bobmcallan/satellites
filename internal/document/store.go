@@ -667,6 +667,7 @@ type ListFilter struct {
 	Status       string   // "" or "all" → no filter
 	NamePrefix   string   // "" → no filter; non-empty → name ILIKE prefix||'%'
 	NameContains string   // "" → no filter; non-empty → name ILIKE '%'||x||'%' (substring, distinct from NamePrefix)
+	Audience     string   // "" → no filter; non-empty → equality (library read filter)
 }
 
 // scopeAll is the sentinel Scope that cross-lists system + the caller's
@@ -778,6 +779,9 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	if f.NameContains != "" {
 		add("name ILIKE ?", "%"+f.NameContains+"%")
 	}
+	if f.Audience != "" {
+		add("audience = ?", f.Audience)
+	}
 
 	if opts.Cursor != "" {
 		ts, id, err := decodeCursor(opts.Cursor)
@@ -866,6 +870,9 @@ func (s *Store) Count(ctx context.Context, f ListFilter) (int, error) {
 	}
 	if f.NameContains != "" {
 		add("name ILIKE ?", "%"+f.NameContains+"%")
+	}
+	if f.Audience != "" {
+		add("audience = ?", f.Audience)
 	}
 
 	q := "SELECT COUNT(*) FROM documents"
@@ -1065,7 +1072,7 @@ const selectDocumentColumns = `SELECT
     tags, status,
     COALESCE(priority,''), COALESCE(category,''),
     COALESCE(parent_id,''), acceptance_criteria,
-    COALESCE(headline,''),
+    COALESCE(headline,''), audience,
     summary, summary_updated_at,
     created_at, updated_at`
 
@@ -1082,7 +1089,7 @@ func scanDocumentFull(rs rowScanner) (Document, error) {
 		&tags, &d.Status,
 		&d.Priority, &d.Category,
 		&d.ParentID, &d.AcceptanceCriteria,
-		&d.Headline,
+		&d.Headline, &d.Audience,
 		&d.Summary, &summaryAt,
 		&d.CreatedAt, &d.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

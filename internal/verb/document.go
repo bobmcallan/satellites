@@ -295,6 +295,7 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		Status:       req.Status,
 		NamePrefix:   req.NamePrefix,
 		NameContains: req.NameContains,
+		Audience:     libraryAudienceFilter(document.Scope(req.Scope)),
 	}, document.ListOptions{
 		Limit:  req.Limit,
 		Cursor: req.Cursor,
@@ -390,6 +391,7 @@ func invokeDocumentCount(ctx context.Context, raw json.RawMessage) (json.RawMess
 		Status:       req.Status,
 		NamePrefix:   req.NamePrefix,
 		NameContains: req.NameContains,
+		Audience:     libraryAudienceFilter(document.Scope(req.Scope)),
 	})
 	if err != nil {
 		return nil, err
@@ -417,6 +419,9 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 		if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), d.Type, d.Tags) {
 			return nil, fmt.Errorf("document_get: %w: skills/principles are read client-side, not over MCP", ErrForbidden)
+		}
+		if err := authorizeLibraryAudience(ctx, d); err != nil {
+			return nil, err
 		}
 		resp := DocumentGetResponse{
 			Document:      d,
@@ -462,6 +467,9 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), res.Document.Type, res.Document.Tags) {
 				return nil, fmt.Errorf("document_get: %w: skills/principles are read client-side, not over MCP", ErrForbidden)
 			}
+			if err := authorizeLibraryAudience(ctx, res.Document); err != nil {
+				return nil, err
+			}
 			return marshalDocumentGet(ctx, res, key, opts, &req)
 		}
 		if !errors.Is(lookupErr, document.ErrNotFound) {
@@ -489,7 +497,9 @@ func buildResolutionChain(name string, scope document.Scope, wsID, pjID, userID 
 		base.UserID = userID
 	}
 	chain := []document.Key{base}
-	if !inherit {
+	if !inherit || scope == document.ScopeLibrary {
+		// The library is a distribution surface, not a precedence layer: it
+		// joins no cascade and the caller's user overlay does not shadow it.
 		return chain
 	}
 	// Prepend the caller's user override layer at highest precedence for
@@ -520,6 +530,8 @@ func parseScope(s string) (document.Scope, error) {
 		return document.ScopeProject, nil
 	case "user":
 		return document.ScopeUser, nil
+	case "library":
+		return document.ScopeLibrary, nil
 	case "":
 		return "", fmt.Errorf("document_get: %w: scope required", ErrBadRequest)
 	default:
@@ -584,6 +596,13 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 		}
 		return nil
 	}
+	// Library reads are open to any authenticated caller — no workspace or
+	// project membership (epic:skill-library, sty_5678cc4b). The audience
+	// filter is enforced post-fetch (authorizeLibraryAudience): it lives on
+	// the row, not the key.
+	if key.Scope == document.ScopeLibrary {
+		return nil
+	}
 	if workspaceStore == nil {
 		// Workspace store unwired: in-process tests that don't exercise
 		// auth shouldn't fail closed. Server boot always wires it.
@@ -606,6 +625,31 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 		return err
 	}
 	return nil
+}
+
+// libraryAudienceFilter returns the audience predicate a scoped list/count
+// must carry: library listings surface only audience='all' rows (the read
+// filter, epic:skill-library); every other scope is unfiltered. A publisher
+// reads its own non-'all' rows by (scope, name) get, not via list.
+func libraryAudienceFilter(scope document.Scope) string {
+	if scope == document.ScopeLibrary {
+		return "all"
+	}
+	return ""
+}
+
+// authorizeLibraryAudience enforces the library read filter on a fetched row:
+// audience='all' is readable by any authenticated caller; anything else only
+// by callers with ≥ read on the publisher project — the future door for
+// restricted libraries, with no grant model now (epic:skill-library).
+func authorizeLibraryAudience(ctx context.Context, d document.Document) error {
+	if d.Scope != document.ScopeLibrary || d.Audience == "" || d.Audience == "all" {
+		return nil
+	}
+	if authStore == nil {
+		return nil
+	}
+	return enforceProjectScope(ctx, "", d.ProjectID, "document_get", project.RoleRead)
 }
 
 // requireScopeKey enforces that a scoped document_list is bounded to a single
@@ -637,6 +681,10 @@ func requireScopeKey(scope, wsID, pjID string) error {
 		if strings.TrimSpace(wsID) == "" {
 			return fmt.Errorf("document_list: %w: all scope requires workspace_id", ErrBadRequest)
 		}
+	case "library":
+		// The library is intentionally global — a list spans every publisher
+		// (that is the discovery surface). An optional project_id narrows to
+		// one publisher's namespace. (epic:skill-library, sty_5678cc4b)
 	}
 	return nil
 }
@@ -665,6 +713,11 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID, pjID st
 	if scope == document.ScopeUser {
 		// User-scope list is the caller's own overlay; effectiveList keys it
 		// to the caller, never crossing users.
+		return nil
+	}
+	if scope == document.ScopeLibrary {
+		// Library lists are open to any authenticated caller; the store
+		// filter narrows rows to audience='all' (epic:skill-library).
 		return nil
 	}
 	if workspaceStore == nil {
@@ -805,6 +858,9 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if scope == document.ScopeLibrary && strings.TrimSpace(key.ProjectID) == "" {
+		return nil, fmt.Errorf("document_upsert: %w: library scope requires project_id (the publisher project)", ErrBadRequest)
+	}
 	if scope == document.ScopeUser {
 		// A user override is keyed to the caller, never a request-body field.
 		key.UserID = callerUserID(ctx)
@@ -1197,6 +1253,16 @@ func authorizeWrite(ctx context.Context, key document.Key) error {
 	// Project scope: enforce the project capability matrix (≥ write).
 	if key.Scope == document.ScopeProject {
 		return enforceProjectScope(ctx, key.WorkspaceID, key.ProjectID, "document write", project.RoleWrite)
+	}
+	// Library scope: the one publisher-namespace check (epic:skill-library,
+	// sty_5678cc4b). A library write lands only in the caller's OWN publisher
+	// namespace — the project named by project_id — so the caller needs
+	// ≥ write there; any other namespace is refused.
+	if key.Scope == document.ScopeLibrary {
+		if err := enforceProjectScope(ctx, "", key.ProjectID, "document write", project.RoleWrite); err != nil {
+			return fmt.Errorf("%w: a library write is confined to the caller's own publisher namespace (publisher = project %s)", err, key.ProjectID)
+		}
+		return nil
 	}
 	if key.WorkspaceID == "" {
 		return fmt.Errorf("document write: %w: %s scope requires workspace_id", ErrBadRequest, key.Scope)
