@@ -24,7 +24,7 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// 2 gated entry edges + 1 checkpoint edge + 4 on-edges + 3
 		// cancellation edges. Ungated edges are the deterministic
 		// client-enacted ones (trigger/on) — every other edge is gated.
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 10},
+		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 12},
 		{filepath.Join("..", "..", ".claude", "skills", "satellites-parent-workflow", "SKILL.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {

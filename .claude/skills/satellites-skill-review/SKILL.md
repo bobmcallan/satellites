@@ -6,7 +6,7 @@ description: Review a skill file before `satellites skill upload` — strict dri
 scope: system
 tags: [kind:capability, area:substrate]
 ---
-<!-- satellites-sync:begin {"document_id":"doc_38da610a","version":4,"hash":"53fdcee8384f9afef194bd257af79875233bf64e9855f05fa52c00c3eaa1fecb"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_38da610a","version":5,"hash":"13225cb972c6607e62ecaa2c9c2cdf58fdb15191e74a896962ac5ca901cb8bf6"} satellites-sync:end -->
 # satellites-skill-review
 
 Review a `skill` file before `satellites skill upload`. Report findings and fix them with the author. The CLI hard-blocks the strict checks below; this review keeps the process dispatchable.
@@ -15,6 +15,7 @@ Review a `skill` file before `satellites skill upload`. Report findings and fix 
 
 - **No drift-prone references.** Reject a concrete substrate slug in prose (`<prefix>_<hex>` — a story, document, workspace, or project id). Use a template form (`story:<id>`) or prose, never a live id. The upload content gate fails on a concrete slug; `--skip-review` overrides only after this review.
 - **Links resolve.** Relative paths named outside a code fence must exist or be a `<placeholder>`.
+- **No repo-script dependencies.** Reject a skill whose body invokes an unversioned repo script (`scripts/*.sh` and kin, fenced or not) — fold the logic into the skill text or the client verb surface. The upload gate hard-blocks the reference (`repo-script-dependency`).
 
 ## Maintainability critique
 

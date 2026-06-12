@@ -4,7 +4,7 @@ type: skill
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
-description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
+description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
 
 # Satellites workflow
@@ -28,12 +28,18 @@ status itself answers "whose turn is it, and was the gate run?".
    LOCAL working tree (exit code = pass/fail; no judgment anywhere): a fail
    returns the story to `in_progress` with nothing shipped (the 3rd fail
    escalates to `blocked` by the client's own enactment); a pass lands
-   `done-review` and releases the ship.
+   `integration-review` and releases the ship.
 5. On pass, run the **checkpoint capability** (below) — commit, push, watch
    CI, record evidence — so the verified tree becomes the pushed commit the
-   reviewer judges. Nothing ships from a tree whose traverse failed.
-6. From `done-review`, request `satellites story status_transition <story-id>
-   --skill satellites-story-done-review`. The gate JUDGES ONLY on these edges —
+   reviewers judge. Nothing ships from a tree whose traverse failed.
+6. From `integration-review`, request `satellites story status_transition
+   <story-id> --skill satellites-integration-test-review` — it judges the
+   UI/DOGFOOD criteria's evidence (named tests in tests/integration/, run
+   green by the traverse, tier-conformant); a story with no browser surface
+   accepts trivially. Pass lands `done-review`; fail returns to `in_progress`
+   (×3, then `blocked`).
+7. From `done-review`, request `satellites story status_transition <story-id>
+   --skill satellites-story-done-review`. The gates JUDGE ONLY on these edges —
    the client enacts pass → `done` / fail → back to `in_progress` (×3, then
    `blocked`).
 
@@ -50,6 +56,7 @@ binary, so an unshipped change is not seen.
 
 - `in_progress` (executor) — the work happens here, and every fail edge lands back here.
 - `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
+- `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
 - `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
 - `blocked` (operator) — fail-loop exhaustion lands here; only the operator moves a story out.
 
@@ -77,23 +84,26 @@ which executes the remaining atomic gates pre-commit and honours their verdicts
 states:
   - backlog
   - ready
-  - {name: in_progress,     actor: executor}
-  - {name: techdebt-review, actor: satellites, command: "satellites techdebt review"}
-  - {name: done-review,     actor: reviewer}
-  - {name: blocked,         actor: operator}
+  - {name: in_progress,        actor: executor}
+  - {name: techdebt-review,    actor: satellites, command: "satellites techdebt review"}
+  - {name: integration-review, actor: reviewer}
+  - {name: done-review,        actor: reviewer}
+  - {name: blocked,            actor: operator}
   - done
   - cancelled
 transitions:
-  - {from: backlog,         to: ready,           reviewer_skill: "satellites-story-plan-review"}
-  - {from: ready,           to: in_progress,     reviewer_skill: "satellites-story-start-review"}
-  - {from: in_progress,     to: techdebt-review, trigger: checkpoint}
-  - {from: techdebt-review, on: pass, to: done-review}
-  - {from: techdebt-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}
-  - {from: done-review,     on: pass, to: done, reviewer_skill: "satellites-story-done-review"}
-  - {from: done-review,     on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
-  - {from: backlog,         to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
-  - {from: ready,           to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
-  - {from: in_progress,     to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: backlog,            to: ready,           reviewer_skill: "satellites-story-plan-review"}
+  - {from: ready,              to: in_progress,     reviewer_skill: "satellites-story-start-review"}
+  - {from: in_progress,        to: techdebt-review, trigger: checkpoint}
+  - {from: techdebt-review,    on: pass, to: integration-review}
+  - {from: techdebt-review,    on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}
+  - {from: integration-review, on: pass, to: done-review, reviewer_skill: "satellites-integration-test-review"}
+  - {from: integration-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-integration-test-review"}
+  - {from: done-review,        on: pass, to: done, reviewer_skill: "satellites-story-done-review"}
+  - {from: done-review,        on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
+  - {from: backlog,            to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: ready,              to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: in_progress,        to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
 ```
 
 ## Environment
