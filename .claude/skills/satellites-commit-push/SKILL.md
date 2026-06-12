@@ -6,7 +6,7 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":9,"hash":"7f02f5ac489a92ee5f4cd6cf0441e431fca6061577f9254f272438da65501871"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":10,"hash":"d461a29016edec701480e7773cf27647a8989a86703effa9eec6c4d17c593843"} satellites-sync:end -->
 
 # satellites-commit-push
 
@@ -19,14 +19,18 @@ latest pushed commit, not the local tree. A change not committed + pushed +
 
 ## Routine
 
-1. **Run the pre-commit gates — each is its own atomic skill; this checkpoint
-   only names them and honours their verdicts.** A gate's routine, repair
-   semantics, and guardrails live in the gate skill — the single home; do not
-   restate or improvise them here.
+1. **Precondition — the techdebt-review traverse has already PASSED at this
+   checkpoint.** The technical-debt verdict
+   ([[satellites-technical-debt-review]]) is rendered by the workflow's
+   `techdebt-review` state against the local tree BEFORE this capability runs
+   — never ship from a tree whose traverse failed; on a fail, resolve per the
+   gate skill and re-traverse before returning here.
 
-   - **[[satellites-technical-debt-review]]** — always: `satellites techdebt
-     review`. Exit 0 → proceed; exit 1 → **do not commit**, resolve per the gate
-     skill, re-run.
+   Then run the remaining pre-commit gates — each is its own atomic skill; this
+   checkpoint only names them and honours their verdicts. A gate's routine,
+   repair semantics, and guardrails live in the gate skill — the single home;
+   do not restate or improvise them here.
+
    - **[[satellites-doc-drift-review]]** — when the change touches the CLI
      (`internal/cli`, `cmd/satellites`): `satellites surface check`. Exit 0 →
      proceed; exit 1 → **do not commit**, resolve per the gate skill, re-run.
@@ -120,7 +124,8 @@ deploy workflow, so the bounds below apply to every run.
 ```yaml
 guardrails:
   always:
-    - Pass the techdebt and (when CLI touched) surface gates BEFORE committing — fail closed.
+    - Run only after the techdebt-review traverse has PASSED at this checkpoint — its verdict precedes any ship action.
+    - Pass the (when CLI touched) surface and other named gates BEFORE committing — fail closed.
     - Bump the correct per-binary .version on every commit and stage it.
     - Run `release check` locally and confirm it is CLEAN before `git push`.
     - Watch all THREE CI workflows (test, release, deploy) and confirm each conclusion.
@@ -134,7 +139,7 @@ guardrails:
   never:
     - Force-push or rewrite pushed history without the operator's say-so.
     - Bypass a gate with `--skip-review`, `--no-verify`, or by editing the gate output.
-    - Commit on a BLOCKED techdebt or surface gate.
+    - Ship from a tree whose techdebt-review traverse failed, or commit on a BLOCKED surface gate.
     - Push a CLIENT_PATH change without a matching `satellites.version` bump.
     - Add AI attribution to a commit message.
 ```

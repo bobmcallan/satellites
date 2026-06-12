@@ -4,15 +4,17 @@ type: skill
 kind: gate
 when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
-description: The technical-debt pre-commit gate (broken-windows enforcement). Run before every commit — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. The commit-push routine names it; at commit the tree must be clean OR its debt must be a story.
+description: The technical-debt gate (broken-windows enforcement). Runs as the techdebt-review state's command on the workflow's checkpoint traverse, against the local tree BEFORE anything ships — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. At commit the tree must be clean OR its debt must be a story.
 ---
 
 # satellites-technical-debt-review
 
-Run before the commit step of every `satellites-commit-push` (it is the wired-in
-pre-commit gate), or any time you want to know the tree is clean before staking a
-review on it. It enforces, at commit, that the tree is **clean OR its debt is a
-story** — a found failure is yours to fix or file, never to pass by.
+Runs as the `techdebt-review` STATE's command: the client executes it on the
+workflow's checkpoint traverse, against the local working tree, BEFORE the ship
+routine ([[satellites-commit-push]]) may run — a fail leaves the remote
+untouched. Also run it any time you want to know the tree is clean before
+staking a review on it. It enforces, at commit, that the tree is **clean OR its
+debt is a story** — a found failure is yours to fix or file, never to pass by.
 
 **Scope.** This gate is for satellites Go repositories: it drives the Go
 toolchain (`go build` / `go test`) and the `.satellites/` layout (the CLI, the

@@ -4,7 +4,7 @@ type: skill
 kind: gate
 when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
-description: Run before every commit that touches the CLI. The command-surface drift gate fails closed when a live `satellites` command is not named in the command-surface reference doc, so an update that adds, renames, or removes a command cannot ship while the docs read stale. The commit-push routine names it alongside the technical-debt gate.
+description: Run before every commit that touches the CLI. The command-surface drift gate fails closed when a live `satellites` command is not named in the command-surface reference doc, so an update that adds, renames, or removes a command cannot ship while the docs read stale. The commit-push routine names it among its pre-commit gates.
 ---
 
 # satellites-doc-drift-review

@@ -21,14 +21,18 @@ status itself answers "whose turn is it, and was the gate run?".
    - **The plan** — Purpose / Approach / numbered Acceptance criteria.
 3. Request the entry gates: `satellites story status_transition <story-id> --skill <gate>`
    for plan-review (backlog → ready) and start-review (ready → in_progress).
-4. Do the work. At every natural checkpoint run the **checkpoint capability**
-   (below), then `satellites story status_transition <story-id> --skill
+4. Do the work. At every natural checkpoint request the traverse FIRST:
+   `satellites story status_transition <story-id> --skill
    satellites-technical-debt-review` — the client enacts the checkpoint edge
-   into `techdebt-review` and runs that state's command itself (exit code =
-   pass/fail; no judgment anywhere): pass lands `done-review`, fail returns the
-   story to `in_progress`, and the 3rd fail escalates to `blocked` by the
-   client's own enactment.
-5. From `done-review`, request `satellites story status_transition <story-id>
+   into `techdebt-review` and runs that state's command itself against the
+   LOCAL working tree (exit code = pass/fail; no judgment anywhere): a fail
+   returns the story to `in_progress` with nothing shipped (the 3rd fail
+   escalates to `blocked` by the client's own enactment); a pass lands
+   `done-review` and releases the ship.
+5. On pass, run the **checkpoint capability** (below) — commit, push, watch
+   CI, record evidence — so the verified tree becomes the pushed commit the
+   reviewer judges. Nothing ships from a tree whose traverse failed.
+6. From `done-review`, request `satellites story status_transition <story-id>
    --skill satellites-story-done-review`. The gate JUDGES ONLY on these edges —
    the client enacts pass → `done` / fail → back to `in_progress` (×3, then
    `blocked`).
@@ -52,18 +56,22 @@ binary, so an unshipped change is not seen.
 ## Checkpoint gates
 
 This definition names every fail-closed check that runs while driving a story —
-nothing gate-like runs outside it. At every natural checkpoint (end of phase,
-meaningful change, before requesting review) run the [[satellites-commit-push]]
-capability, which executes these atomic gates and honours their verdicts (each
-gate owns its decision rule):
+nothing gate-like runs outside it. The checkpoint order at every natural
+checkpoint (end of phase, meaningful change, before requesting review) is
+**verdict, then ship**:
+
+- [[satellites-technical-debt-review]] — the `techdebt-review` STATE's command,
+  run via the status_transition traverse in step 4 against the local working
+  tree BEFORE anything ships. Its verdict lands as a ledger row on the story,
+  and a fail leaves the remote untouched. The gate skill owns the decision rule.
+
+A traverse pass releases the [[satellites-commit-push]] capability (step 5),
+which executes the remaining atomic gates pre-commit and honours their verdicts
+(each gate owns its decision rule):
 
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
-- [[satellites-technical-debt-review]] — graduated to the `techdebt-review`
-  STATE: its command runs via the status_transition traverse in step 4 (not as
-  a separate pre-commit step), and its verdict lands as a ledger row on the
-  story. The gate skill still owns the decision rule.
 
 ```yaml
 states:
@@ -98,7 +106,7 @@ guardrails:
   always:
     - Copy the Workflow yaml block into the story verbatim before requesting a gate.
     - Route every status change through the transition's reviewer skill or the client's deterministic enactment.
-    - Run the checkpoint capability (and its gates) before the techdebt-review traverse.
+    - Run the techdebt-review traverse to a pass before the checkpoint capability ships anything.
   ask_first:
     - Cancelling a story (the rationale is the operator's call unless already given).
   never:
