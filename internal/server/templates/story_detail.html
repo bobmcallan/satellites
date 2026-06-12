@@ -47,18 +47,15 @@
     </p>
   </div>
 
-  {{/* Tabbed expanded content (sty_fdcf8297): Description/ACs (default) ·
-       Progress (the live PROCESS trace) · Ledger/Log (the append-only ledger).
-       Tab state + the x-show panels live OUTSIDE the swapped live region, so a
-       refetch never strands a binding. */}}
+  {{/* Tabbed expanded content: Description/ACs (default) · Ledger/Log (the
+       merged view — close-out + workflow-annotated ledger; epic:graduated-
+       workflow ledger-log-merge). Tab state + the x-show panels live OUTSIDE
+       the swapped live region, so a refetch never strands a binding. */}}
   <div class="story-detail-body" data-section="story-body" x-show="expanded" x-cloak>
     <nav class="story-tabs" role="tablist" data-field="story-tabs">
       <button type="button" class="story-tab" role="tab" data-tab="description"
               :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
               @click="tab='description'">Description / ACs</button>
-      <button type="button" class="story-tab" role="tab" data-tab="result"
-              :class="tab==='result' ? 'is-active' : ''" :aria-selected="tab==='result' ? 'true' : 'false'"
-              @click="tab='result'">Result</button>
       <button type="button" class="story-tab" role="tab" data-tab="ledger"
               :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
               @click="tab='ledger'">Ledger / Log</button>
@@ -83,17 +80,13 @@
       </section>
     </div>
 
-    {{/* Progress tab: the live region — refetched + swapped on a story-scoped
-         SSE trigger (sty_96cc0ade). The PROCESS trace lives in the story-trace
-         template; the swap keeps it live. */}}
-    <div class="story-tabpanel" role="tabpanel" data-tabpanel="result" x-show="tab==='result'" x-cloak>
+    {{/* Ledger/Log tab: the live region — refetched + swapped on a story-
+         scoped SSE trigger (sty_96cc0ade). The merged view lives in the
+         story-trace template; the swap keeps it live. */}}
+    <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
       <div data-field="story-live-region">
         {{template "story-trace" .}}
       </div>
-    </div>
-
-    <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>
-      {{template "story-ledger" .}}
     </div>
   </div>
 </main>
@@ -147,42 +140,10 @@
 })();
 </script>
 
-{{/* story-ledger: the append-only ledger table. Shared (sty_762730ad) by the
-     standalone Ledger/Log tab and the /stories/{id}/ledger.fragment endpoint
-     the project-detail inline panel lazy-loads. */}}
-{{define "story-ledger"}}
-      <section class="panel" data-section="ledger-log">
-        <h2 class="section-heading">Ledger / Log</h2>
-        {{if .LedgerRows}}
-        <table class="ledger-table" data-table="ledger-log">
-          <thead>
-            <tr>
-              <th class="qa-col-when">when</th>
-              <th class="qa-col-gate">kind</th>
-              <th class="qa-col-gate">actor</th>
-              <th class="qa-col-notes">detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .LedgerRows}}
-            <tr class="qa-row" data-row="ledger-entry">
-              <td class="qa-col-when" data-field="ledger-when">{{.When}}</td>
-              <td class="qa-col-gate" data-field="ledger-kind"><code>{{.Kind}}</code></td>
-              <td class="qa-col-gate" data-field="ledger-actor">{{.Actor}}</td>
-              <td class="qa-col-notes" data-field="ledger-body">{{.Body}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-        {{else}}
-        <p class="empty" data-field="ledger-log">No ledger entries yet.</p>
-        {{end}}
-      </section>
-{{end}}
-
-{{/* story-trace: the live region — status line + workflow/process-trace —
-     rendered inline and standalone by storyTraceFragmentHandler for the SSE
-     refetch (sty_96cc0ade). Markup lives here only; both paths share it. */}}
+{{/* story-trace: the merged Ledger/Log live region — status line, close-out,
+     and the workflow-annotated append-only ledger (epic:graduated-workflow
+     ledger-log-merge). Rendered inline and standalone by
+     storyTraceFragmentHandler for the SSE refetch; markup lives here only. */}}
 {{define "story-trace"}}
     <p class="changelog-lede">
       <code data-field="story-id">{{.StoryID}}</code>
@@ -192,54 +153,9 @@
     </p>
   {{if .NoWorkflow}}
   <section class="panel" data-section="no-workflow">
-    <p class="empty" data-field="no-workflow">This story embeds no <code>## Workflow</code> and no <code>kind:workflow</code> skill's <code>applies_to</code> covers type <code>{{.StoryType}}</code> — nothing to reconcile. Embed a <code>## Workflow</code> in the story (or declare a workflow with <code>applies_to: ["*"]</code>) to define its process.</p>
+    <p class="empty" data-field="no-workflow">This story embeds no <code>## Workflow</code> and no <code>kind:workflow</code> skill's <code>applies_to</code> covers type <code>{{.StoryType}}</code> — rows below carry no transition badges. Embed a <code>## Workflow</code> in the story (or declare a workflow with <code>applies_to: ["*"]</code>) to define its process.</p>
   </section>
-  {{else}}
-  <section class="panel" data-section="process-trace">
-    <table class="ledger-table" data-table="process-trace">
-      <thead>
-        <tr>
-          <th class="qa-col-transition">transition</th>
-          <th class="qa-col-gate">gate</th>
-          <th class="qa-col-actual">actual</th>
-          <th class="qa-col-rejects">rejects</th>
-          <th class="qa-col-when">when</th>
-          <th class="qa-col-notes">notes</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Rows}}
-        <tr class="qa-row qa-row-{{.Status}}" data-row="transition" data-status="{{.Status}}">
-          <td class="qa-col-transition" data-field="transition"><code>{{.From}}</code> → <code>{{.To}}</code></td>
-          <td class="qa-col-gate" data-field="gate">{{.Gate}}</td>
-          <td class="qa-col-actual" data-field="actual">
-            <span class="qa-badge qa-badge-{{.Status}}" aria-label="{{.Status}}">{{.Badge}}</span>
-            <span class="qa-status-label">{{.Status}}</span>
-          </td>
-          <td class="qa-col-rejects" data-field="rejects">{{if .RejectCount}}{{.RejectCount}}{{else}}—{{end}}</td>
-          <td class="qa-col-when" data-field="when">{{.When}}</td>
-          <td class="qa-col-notes" data-field="notes">{{.Verdict}}</td>
-        </tr>
-        {{/* The edge's full event history, ledger order — a rejected edge
-             visibly loops: request, reject (notes), re-request, accept. */}}
-        {{range .Events}}
-        <tr class="qa-row-event qa-row-event-{{.Kind}}" data-row="gate-event" data-event-kind="{{.Kind}}">
-          <td class="qa-col-event-pad"></td>
-          <td class="qa-col-event-kind" data-field="event-kind" colspan="2"><code>{{.Kind}}</code></td>
-          <td class="qa-col-event-actor" data-field="event-actor">{{.Actor}}</td>
-          <td class="qa-col-event-when" data-field="event-when">{{.When}}</td>
-          <td class="qa-col-event-notes" data-field="event-notes">{{.Notes}}</td>
-        </tr>
-        {{end}}
-        {{if .StepSummary}}
-        <tr class="ledger-row-summary" data-row="step-summary">
-          <td colspan="6"><div class="ledger-summary-text" data-field="step-summary">{{.StepSummary}}</div></td>
-        </tr>
-        {{end}}
-        {{end}}
-      </tbody>
-    </table>
-  </section>
+  {{end}}
   {{if .CloseOut.Show}}
   <section class="panel" data-section="close-out">
     <h2 class="section-heading">Close-out{{if not .CloseOut.Terminal}} <span class="qa-status-label" data-field="closeout-state">(in flight)</span>{{end}}</h2>
@@ -268,7 +184,35 @@
     {{if .CloseOut.EstimateBasis}}<p class="changelog-lede" data-field="estimate-basis">basis: {{.CloseOut.EstimateBasis}}</p>{{end}}
   </section>
   {{end}}
-  {{end}}
+  <section class="panel" data-section="ledger-log">
+    <h2 class="section-heading">Ledger / Log</h2>
+    {{if .MergedRows}}
+    <table class="ledger-table" data-table="ledger-log">
+      <thead>
+        <tr>
+          <th class="qa-col-when">when</th>
+          <th class="qa-col-gate">kind</th>
+          <th class="qa-col-transition">transition</th>
+          <th class="qa-col-gate">actor</th>
+          <th class="qa-col-notes">detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .MergedRows}}
+        <tr class="qa-row{{if .BadgeClass}} qa-row-{{.BadgeClass}}{{end}}" data-row="ledger-entry"{{if .BadgeClass}} data-badge="{{.BadgeClass}}"{{end}}>
+          <td class="qa-col-when" data-field="ledger-when">{{.When}}</td>
+          <td class="qa-col-gate" data-field="ledger-kind"><code>{{.Kind}}</code></td>
+          <td class="qa-col-transition" data-field="ledger-transition">{{if .Transition}}<span class="qa-badge-transition"><code>{{.Transition}}</code></span>{{end}}{{if .BadgeLabel}} <span class="qa-badge qa-badge-{{.BadgeClass}}" data-field="ledger-badge">{{.BadgeLabel}}</span>{{end}}{{if and (not .Transition) (not .BadgeLabel)}}—{{end}}</td>
+          <td class="qa-col-gate" data-field="ledger-actor">{{.Actor}}</td>
+          <td class="qa-col-notes" data-field="ledger-body">{{.Body}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="ledger-log">No ledger entries yet.</p>
+    {{end}}
+  </section>
 {{end}}
 
 </body>

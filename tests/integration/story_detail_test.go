@@ -327,15 +327,14 @@ func TestStoryDetailQAView(t *testing.T) {
 		}
 		s := string(body)
 		for _, want := range []string{
-			"test-fix-workflow", // declared workflow name
-			"backlog", "in_progress", "done",
-			`data-status="accepted"`, // plan-review fired
-			`data-status="pending"`,  // done edge is the next move
-			"plan ready",             // accept verdict surfaced
-			`data-table="process-trace"`,
+			"test-fix-workflow",        // declared workflow name
+			"plan ready",               // accept verdict body surfaced in the merged rows
+			`data-table="ledger-log"`,  // the merged Ledger/Log table
+			`data-section="close-out"`, // close-out renders on top
+			"backlog → in_progress",    // spine row badged with its transition
 		} {
 			if !strings.Contains(s, want) {
-				t.Errorf("trace fragment missing %q", want)
+				t.Errorf("merged trace fragment missing %q", want)
 			}
 		}
 	})
@@ -375,7 +374,7 @@ func TestStoryDetailQAView(t *testing.T) {
 		}
 		fb, _ := io.ReadAll(fragResp.Body)
 		fs := string(fb)
-		for _, want := range []string{`data-table="process-trace"`, `data-field="current-status"`, "in_progress"} {
+		for _, want := range []string{`data-table="ledger-log"`, `data-field="current-status"`, "in_progress"} {
 			if !strings.Contains(fs, want) {
 				t.Errorf("trace fragment missing %q", want)
 			}

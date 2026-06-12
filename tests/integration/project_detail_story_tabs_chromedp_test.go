@@ -20,8 +20,8 @@ import (
 
 // TestProjectDetailStoryTabs_Chromedp drives the project-detail inline story
 // panel (sty_762730ad): expanding a story row shows readable markdown
-// description/ACs, and tabs (Description/ACs · Result · Ledger/Log) where
-// Result and Ledger lazy-load via fragment endpoints.
+// description/ACs, and tabs (Description/ACs · Ledger/Log) where the merged
+// Ledger/Log lazy-loads via the trace fragment endpoint.
 func TestProjectDetailStoryTabs_Chromedp(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
 
@@ -129,23 +129,17 @@ func TestProjectDetailStoryTabs_Chromedp(t *testing.T) {
 		t.Errorf("AC1: acceptance criteria missing: %q", acHTML)
 	}
 
-	// AC2/AC3: Result tab lazy-loads the workflow trace.
-	if err := chromedp.Run(bctx,
-		chromedp.Click(`[data-tab="result"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-field="story-result"] [data-table="process-trace"]`, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("result tab: %v", err)
-	}
-	var traceRows int
+	// The merged Ledger/Log tab (epic:graduated-workflow ledger-log-merge):
+	// exactly two tabs, and the ledger tab lazy-loads the merged view —
+	// close-out + workflow-annotated ledger rows.
+	var tabCount int
 	if err := chromedp.Run(bctx, chromedp.Evaluate(
-		`document.querySelectorAll('[data-field="story-result"] [data-row="transition"]').length`, &traceRows)); err != nil {
-		t.Fatalf("count trace rows: %v", err)
+		`document.querySelectorAll('[data-field="story-tabs"] .story-tab').length`, &tabCount)); err != nil {
+		t.Fatalf("count tabs: %v", err)
 	}
-	if traceRows == 0 {
-		t.Errorf("AC3: Progress tab loaded no PROCESS-trace rows")
+	if tabCount != 2 {
+		t.Errorf("AC1: story panel has %d tabs, want exactly 2 (Description/ACs + Ledger/Log)", tabCount)
 	}
-
-	// AC2/AC3: Ledger tab lazy-loads the append-only ledger.
 	if err := chromedp.Run(bctx,
 		chromedp.Click(`[data-tab="ledger"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-field="story-ledger"] [data-table="ledger-log"]`, chromedp.ByQuery),
@@ -159,5 +153,14 @@ func TestProjectDetailStoryTabs_Chromedp(t *testing.T) {
 	}
 	if ledgerRows < 2 {
 		t.Errorf("AC3: Ledger tab loaded %d rows, want >= 2", ledgerRows)
+	}
+	// Spine rows carry their transition badge in the merged view.
+	var badged int
+	if err := chromedp.Run(bctx, chromedp.Evaluate(
+		`document.querySelectorAll('[data-field="story-ledger"] [data-field="ledger-transition"] code').length`, &badged)); err != nil {
+		t.Fatalf("count transition badges: %v", err)
+	}
+	if badged == 0 {
+		t.Errorf("AC2: merged ledger rows carry no transition badges")
 	}
 }

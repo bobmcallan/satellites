@@ -231,3 +231,60 @@ func TestReconcile_AlienWorkflowEventsAndCloseOut(t *testing.T) {
 		t.Error("vetting has an outgoing transition — not terminal")
 	}
 }
+
+// TestAnnotateLedger pins the merged-view projection on alien names
+// (epic:graduated-workflow ledger-log-merge): spine rows resolve their
+// transition via the same keys Reconcile uses, the exhaustion enactment
+// resolves through the fail edge's on_exhausted (no declared from→to edge),
+// checkpoint gate and CI ci_result rows carry their payloads through, and
+// unknown kinds pass through unbadged. nil workflow → no transition badges.
+func TestAnnotateLedger(t *testing.T) {
+	wf := &workflow.Workflow{
+		Name: "moonbase-workflow",
+		States: []workflow.State{
+			{Name: "forging", Actor: "smith"}, {Name: "vetting", Actor: "oracle"},
+			{Name: "marooned", Actor: "harbourmaster"}, {Name: "sealed"},
+		},
+		Transitions: []workflow.Transition{
+			{From: "forging", To: "vetting", Trigger: "checkpoint"},
+			{From: "vetting", To: "sealed", On: "pass"},
+			{From: "vetting", To: "forging", On: "fail", MaxIterations: 2, OnExhausted: "marooned"},
+		},
+	}
+	at := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	entries := []LedgerEntry{
+		{Kind: "review_reject", Body: "leaks", Payload: []byte(`{"from_status":"vetting","gate":"qa-seal"}`), CreatedAt: at},
+		{Kind: "status_transition", Payload: []byte(`{"from_status":"vetting","to_status":"forging","on":"fail"}`), CreatedAt: at.Add(time.Minute)},
+		{Kind: "status_transition", Payload: []byte(`{"from_status":"vetting","to_status":"marooned","exhausted":true}`), CreatedAt: at.Add(2 * time.Minute)},
+		{Kind: "ci_result", Payload: []byte(`{"gate":"crater-scan","verdict":"BLOCKED","blocking_findings":4}`), CreatedAt: at.Add(3 * time.Minute)},
+		{Kind: "ci_result", Payload: []byte(`{"stage":"deploy","result":"success"}`), CreatedAt: at.Add(4 * time.Minute)},
+		{Kind: "engagement:phase", Body: "noise", CreatedAt: at.Add(5 * time.Minute)},
+	}
+	got := AnnotateLedger(wf, entries)
+	if len(got) != 6 {
+		t.Fatalf("annotated = %d, want 6", len(got))
+	}
+	if got[0].Transition != "vetting → forging" {
+		t.Errorf("reject badge = %q (reject keys on from+gate; the fail edge is its loop)", got[0].Transition)
+	}
+	if got[1].Transition != "vetting → forging" || got[1].Exhausted {
+		t.Errorf("fail-edge move badge wrong: %+v", got[1])
+	}
+	if got[2].Transition != "vetting → marooned" || !got[2].Exhausted {
+		t.Errorf("exhaustion must resolve via on_exhausted: %+v", got[2])
+	}
+	if got[3].Gate != "crater-scan" || got[3].GateVerdict != "BLOCKED" || got[3].BlockingFindings != 4 {
+		t.Errorf("gate verdict row wrong: %+v", got[3])
+	}
+	if got[4].Stage != "deploy" || got[4].GateVerdict != "success" {
+		t.Errorf("ci stage row wrong: %+v", got[4])
+	}
+	if got[5].Transition != "" || got[5].Gate != "" || got[5].Stage != "" {
+		t.Errorf("unknown kind must pass through unbadged: %+v", got[5])
+	}
+	// nil workflow: rows pass through, gate/ci badges still resolve.
+	bare := AnnotateLedger(nil, entries)
+	if bare[0].Transition != "" || bare[3].Gate != "crater-scan" {
+		t.Errorf("nil-workflow annotation wrong: %+v / %+v", bare[0], bare[3])
+	}
+}

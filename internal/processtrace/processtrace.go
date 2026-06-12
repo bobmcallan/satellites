@@ -276,6 +276,150 @@ func closeOut(currentStatus string, wf *workflow.Workflow, sorted []LedgerEntry,
 	return co
 }
 
+// AnnotatedEntry is one ledger row annotated with the workflow edge it
+// belongs to — the merged Ledger/Log projection (epic:graduated-workflow
+// ledger-log-merge). The ledger stays the spine; the workflow only annotates.
+type AnnotatedEntry struct {
+	LedgerEntry
+	// Transition is the matched edge rendered as "from → to" ("" when the
+	// row belongs to no declared edge).
+	Transition string `json:"transition,omitempty"`
+	// Exhausted marks a client-enacted exhaustion transition (the fail
+	// loop's bound was spent).
+	Exhausted bool `json:"exhausted,omitempty"`
+	// Gate / GateVerdict carry a checkpoint gate's self-written verdict row
+	// (ci_result with a `gate` payload field); Stage carries a CI stage row
+	// (ci_result with a `stage` field).
+	Gate             string `json:"gate,omitempty"`
+	GateVerdict      string `json:"gate_verdict,omitempty"`
+	BlockingFindings int    `json:"blocking_findings,omitempty"`
+	Stage            string `json:"stage,omitempty"`
+}
+
+// annotatePayload is the union of payload fields AnnotateLedger reads —
+// the spine fields plus the checkpoint-gate / CI / exhaustion markers.
+type annotatePayload struct {
+	spinePayload
+	On               string `json:"on"`
+	Exhausted        bool   `json:"exhausted"`
+	GateVerdict      string `json:"verdict"`
+	BlockingFindings int    `json:"blocking_findings"`
+	Stage            string `json:"stage"`
+	Result           string `json:"result"`
+}
+
+// AnnotateLedger projects every ledger row into the merged Ledger/Log view:
+// the row itself plus the workflow transition it belongs to, resolved with
+// the same payload keys Reconcile uses (from_status/to_status + gateMatch).
+// Pure configuration: every state and gate name comes from the parsed
+// workflow and the row payloads — nothing is hardcoded. wf may be nil (no
+// declared process): rows pass through with gate/stage annotations only.
+func AnnotateLedger(wf *workflow.Workflow, entries []LedgerEntry) []AnnotatedEntry {
+	out := make([]AnnotatedEntry, 0, len(entries))
+	for _, e := range entries {
+		ae := AnnotatedEntry{LedgerEntry: e}
+		var p annotatePayload
+		if len(e.Payload) > 0 {
+			_ = json.Unmarshal(e.Payload, &p)
+		}
+		switch e.Kind {
+		case kindStatusTransition:
+			ae.Exhausted = p.Exhausted
+			if tr, ok := matchTransition(wf, p.FromStatus, p.ToStatus, p.Gate, p.On, true); ok {
+				ae.Transition = tr.From + " → " + tr.To
+			} else if fail, ok := matchExhaustion(wf, p.FromStatus, p.ToStatus); ok {
+				ae.Transition = fail.From + " → " + fail.OnExhausted
+				ae.Exhausted = true
+			}
+		case kindReviewRequested, kindReviewAccept, kindReviewReject, kindStepSummary:
+			// A reject loops through the fail edge, an accept through the pass
+			// edge — used only to pick between a state's on-edges when the row
+			// itself does not say (its `on` payload field wins when present).
+			prefer := p.On
+			if prefer == "" {
+				switch e.Kind {
+				case kindReviewReject:
+					prefer = "fail"
+				case kindReviewAccept:
+					prefer = "pass"
+				}
+			}
+			if tr, ok := matchTransition(wf, p.FromStatus, p.ToStatus, p.Gate, prefer, false); ok {
+				ae.Transition = tr.From + " → " + tr.To
+			}
+		case "ci_result":
+			switch {
+			case strings.TrimSpace(p.Gate) != "" && strings.TrimSpace(p.GateVerdict) != "":
+				ae.Gate = strings.TrimSpace(p.Gate)
+				ae.GateVerdict = strings.TrimSpace(p.GateVerdict)
+				ae.BlockingFindings = p.BlockingFindings
+			case strings.TrimSpace(p.Stage) != "":
+				ae.Stage = strings.TrimSpace(p.Stage)
+				ae.GateVerdict = strings.TrimSpace(p.Result)
+			}
+		}
+		out = append(out, ae)
+	}
+	return out
+}
+
+// matchTransition finds the declared edge a spine row belongs to. from is the
+// strong key; to (when present), the `on` discriminator, and the gate name
+// disambiguate multiple outgoing edges. requireTo demands an exact from→to
+// edge (status_transition rows always carry both ends).
+func matchTransition(wf *workflow.Workflow, from, to, gate, on string, requireTo bool) (workflow.Transition, bool) {
+	if wf == nil || strings.TrimSpace(from) == "" {
+		return workflow.Transition{}, false
+	}
+	var candidates []workflow.Transition
+	for _, tr := range wf.Transitions {
+		if tr.From != from {
+			continue
+		}
+		if to != "" && tr.To != to {
+			continue
+		}
+		if requireTo && to == "" {
+			continue
+		}
+		candidates = append(candidates, tr)
+	}
+	if len(candidates) == 0 {
+		return workflow.Transition{}, false
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	if on != "" {
+		for _, tr := range candidates {
+			if tr.On == on {
+				return tr, true
+			}
+		}
+	}
+	for _, tr := range candidates {
+		if gateMatch(gate, tr.ReviewerSkill) && tr.ReviewerSkill != "" {
+			return tr, true
+		}
+	}
+	return candidates[0], true
+}
+
+// matchExhaustion finds the fail edge whose on_exhausted equals the
+// transition's target — the client-enacted escalation move, which has no
+// declared from→to edge of its own.
+func matchExhaustion(wf *workflow.Workflow, from, to string) (workflow.Transition, bool) {
+	if wf == nil || from == "" || to == "" {
+		return workflow.Transition{}, false
+	}
+	for _, tr := range wf.Transitions {
+		if tr.From == from && tr.OnExhausted == to {
+			return tr, true
+		}
+	}
+	return workflow.Transition{}, false
+}
+
 // gateMatch tolerates the two naming forms a gate appears under in the ledger
 // (the bare "done-review" of older rows and the prefixed
 // "satellites-story-done-review" of current ones). An empty declared gate or

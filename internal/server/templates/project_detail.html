@@ -177,10 +177,10 @@
               x-cloak
               data-field="story-detail">
             <td colspan="5">
-              {{/* sty_762730ad: tabbed inline panel (Description/ACs · Progress ·
-                   Ledger/Log) with readable markdown content; Progress + Ledger
-                   lazy-load on first open. Per-row Alpine scope nested inside the
-                   storyPanel root. */}}
+              {{/* sty_762730ad: tabbed inline panel (Description/ACs · Ledger/Log)
+                   with readable markdown content; the merged Ledger/Log lazy-loads
+                   on first open (epic:graduated-workflow ledger-log-merge). Per-row
+                   Alpine scope nested inside the storyPanel root. */}}
               <div class="story-detail-flat" x-data="{ tab: 'description', loaded: {} }">
                 {{/* epic:dynamic-workflow-status order:2: status is DISPLAY-ONLY here.
                      The editable button grid + portal status-write are removed — status
@@ -196,12 +196,9 @@
                   <button type="button" class="story-tab" role="tab" data-tab="description"
                           :class="tab==='description' ? 'is-active' : ''" :aria-selected="tab==='description' ? 'true' : 'false'"
                           @click.stop="tab='description'">Description / ACs</button>
-                  <button type="button" class="story-tab" role="tab" data-tab="result"
-                          :class="tab==='result' ? 'is-active' : ''" :aria-selected="tab==='result' ? 'true' : 'false'"
-                          @click.stop="tab='result'; if(!loaded.result){ loaded.result=true; window.loadStoryFragment('{{.ID}}','trace',$refs.resultPanel); }">Result</button>
                   <button type="button" class="story-tab" role="tab" data-tab="ledger"
                           :class="tab==='ledger' ? 'is-active' : ''" :aria-selected="tab==='ledger' ? 'true' : 'false'"
-                          @click.stop="tab='ledger'; if(!loaded.ledger){ loaded.ledger=true; window.loadStoryFragment('{{.ID}}','ledger',$refs.ledgerPanel); }">Ledger / Log</button>
+                          @click.stop="tab='ledger'; if(!loaded.ledger){ loaded.ledger=true; window.loadStoryFragment('{{.ID}}',$refs.ledgerPanel); }">Ledger / Log</button>
                 </nav>
 
                 <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="tab==='description'">
@@ -213,10 +210,6 @@
                     <h4>acceptance criteria</h4>
                     {{if .AcceptanceCriteriaHTML}}<div class="changelog-content" data-field="story-acceptance-body">{{.AcceptanceCriteriaHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
                   </section>
-                </div>
-
-                <div class="story-tabpanel" role="tabpanel" data-tabpanel="result" x-show="tab==='result'" x-cloak>
-                  <div class="story-detail-block" data-field="story-result" x-ref="resultPanel"><p class="empty">Loading…</p></div>
                 </div>
 
                 <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="tab==='ledger'" x-cloak>

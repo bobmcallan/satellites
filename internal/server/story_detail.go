@@ -43,28 +43,18 @@ var storyDetailTmpl = template.Must(template.ParseFS(assets,
 
 const storyLedgerLimit = 200
 
-type storyTraceRowView struct {
-	From        string
-	To          string
-	Gate        string
-	Status      string // accepted | rejected | pending | fired | not_reached
-	Badge       string // ✓ / ✗ / ● / ◦
-	Verdict     string
-	StepSummary string
-	Actor       string
-	When        string
-	RejectCount int
-	Events      []storyTraceEventView
-}
-
-// storyTraceEventView is one edge event (request/reject/re-request/accept/
-// fire) rendered under its transition so a challenged story visibly loops
-// (sty_a4257811). Pure projection of the generic ledger row kinds.
-type storyTraceEventView struct {
-	Kind  string
-	When  string
-	Actor string
-	Notes string
+// storyMergedRowView is one row of the merged Ledger/Log view
+// (epic:graduated-workflow ledger-log-merge): the append-only ledger entry
+// plus the workflow-edge badge AnnotateLedger resolved for it. The ledger is
+// the spine; the workflow only annotates.
+type storyMergedRowView struct {
+	When       string
+	Kind       string
+	Actor      string
+	Body       string
+	Transition string // "from → to" ("" = no edge)
+	BadgeClass string // exhausted | gate-clean | gate-blocked | ci | ""
+	BadgeLabel string // rendered badge text ("" = none beyond Transition)
 }
 
 // storyCloseOutView is the estimate-vs-actual close-out block. Every field is
@@ -81,16 +71,6 @@ type storyCloseOutView struct {
 	TotalRejects   int
 }
 
-// storyLedgerRowView is one append-only ledger entry for the Ledger/Log tab
-// (sty_fdcf8297): gate decisions, status transitions, and notes, rendered
-// readably as when/kind/actor/detail.
-type storyLedgerRowView struct {
-	When  string
-	Kind  string
-	Actor string
-	Body  string
-}
-
 type storyDetailData struct {
 	Title              string
 	StoryID            string
@@ -103,8 +83,7 @@ type storyDetailData struct {
 	CloseOut           storyCloseOutView
 	Description        template.HTML
 	AcceptanceCriteria template.HTML
-	Rows               []storyTraceRowView
-	LedgerRows         []storyLedgerRowView
+	MergedRows         []storyMergedRowView
 	UserEmail          string
 	UserName           string
 	UserAvatar         string
@@ -171,14 +150,12 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 	if strings.TrimSpace(story.AcceptanceCriteria) != "" {
 		data.AcceptanceCriteria = renderMarkdown(story.AcceptanceCriteria)
 	}
-	// Fetch the ledger once, up front: it feeds BOTH the Ledger/Log tab (the raw
-	// append-only history) and the PROCESS-trace reconciliation below
-	// (sty_fdcf8297).
+	// Fetch the ledger once, up front: it is the spine of the merged
+	// Ledger/Log view and feeds the close-out derivation below.
 	entries, lErr := dispatchStoryLedger(ctx, storyID, time.Time{})
 	if lErr != nil {
 		arbor.WarnCtx(ctx, "story_detail: ledger_list", "id", storyID, "err", lErr)
 	}
-	data.LedgerRows = ledgerRows(entries)
 	// The story's OWN embedded ## Workflow is the declared process — it wins
 	// outright (sty_a4257811; the old type-first resolution reported "no
 	// workflow governs" for stories that carried a complete embedded block).
@@ -197,15 +174,59 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 			data.WorkflowSource = "type"
 		}
 	}
+	// The merged rows render with or without a declared workflow — the
+	// ledger is the spine; the workflow only annotates (nil wf = rows pass
+	// through with gate/CI badges only).
+	data.MergedRows = mergedRows(processtrace.AnnotateLedger(wf, entries))
 	if wf == nil {
 		data.NoWorkflow = true
 		return data, nil
 	}
 	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
 	data.WorkflowName = trace.WorkflowName
-	data.Rows = traceRows(trace)
 	data.CloseOut = closeOutView(trace.CloseOut)
 	return data, nil
+}
+
+// mergedRows maps annotated ledger entries into the merged Ledger/Log view,
+// newest first so the latest activity reads at the top. Badge classes are
+// derived from the annotation, never from state or gate names.
+func mergedRows(entries []processtrace.AnnotatedEntry) []storyMergedRowView {
+	rows := make([]storyMergedRowView, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		when := "—"
+		if !e.CreatedAt.IsZero() {
+			when = e.CreatedAt.UTC().Format("2006-01-02 15:04")
+		}
+		actor := strings.TrimSpace(e.Actor)
+		if actor == "" {
+			actor = "—"
+		}
+		row := storyMergedRowView{
+			When:       when,
+			Kind:       e.Kind,
+			Actor:      actor,
+			Body:       e.Body,
+			Transition: e.Transition,
+		}
+		switch {
+		case e.Exhausted:
+			row.BadgeClass = "exhausted"
+			row.BadgeLabel = "exhausted"
+		case e.Gate != "":
+			row.BadgeLabel = fmt.Sprintf("%s: %s", e.Gate, e.GateVerdict)
+			row.BadgeClass = "gate-clean"
+			if !strings.EqualFold(e.GateVerdict, "clean") {
+				row.BadgeClass = "gate-blocked"
+			}
+		case e.Stage != "":
+			row.BadgeLabel = fmt.Sprintf("ci %s: %s", e.Stage, e.GateVerdict)
+			row.BadgeClass = "ci"
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // closeOutView renders the close-out derivation for the Result view. "—"
@@ -264,36 +285,6 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := storyDetailTmpl.ExecuteTemplate(w, "story-trace", data); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	}
-}
-
-// storyLedgerFragmentHandler renders just the append-only ledger table for a
-// story — the lazy-load target the project-detail inline panel's Ledger/Log tab
-// fetches on first open (sty_762730ad). Read-only; reuses buildStoryDetail's
-// LedgerRows and the shared story-ledger template.
-func storyLedgerFragmentHandler(cfg Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		userID, err := cfg.Sessions.UserID(r)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		ctx := withSessionUser(r.Context(), cfg, userID)
-		storyID := strings.TrimSpace(r.PathValue("id"))
-		if storyID == "" {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := buildStoryDetail(ctx, storyID)
-		if err != nil {
-			arbor.WarnCtx(ctx, "story_ledger_fragment: build", "id", storyID, "err", err)
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := storyDetailTmpl.ExecuteTemplate(w, "story-ledger", data); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}
@@ -463,76 +454,4 @@ func dispatchStoryLedger(ctx context.Context, storyID string, after time.Time) (
 		})
 	}
 	return out, nil
-}
-
-func traceRows(trace processtrace.ProcessTrace) []storyTraceRowView {
-	rows := make([]storyTraceRowView, 0, len(trace.Transitions))
-	for _, t := range trace.Transitions {
-		row := storyTraceRowView{
-			From:        t.From,
-			To:          t.To,
-			Gate:        t.ReviewerSkill,
-			Status:      t.Status,
-			Badge:       statusBadge(t.Status),
-			Verdict:     t.Verdict,
-			StepSummary: t.StepSummary,
-			Actor:       t.Actor,
-			RejectCount: t.RejectCount,
-		}
-		if row.Gate == "" {
-			row.Gate = "—"
-		}
-		if t.At != nil {
-			row.When = t.At.UTC().Format("2006-01-02 15:04")
-		} else {
-			row.When = "—"
-		}
-		for _, ev := range t.Events {
-			row.Events = append(row.Events, storyTraceEventView{
-				Kind:  ev.Kind,
-				When:  ev.At.UTC().Format("2006-01-02 15:04"),
-				Actor: ev.Actor,
-				Notes: ev.Notes,
-			})
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
-// ledgerRows maps the raw ledger entries into the Ledger/Log tab view, newest
-// first so the most recent activity reads at the top (sty_fdcf8297).
-func ledgerRows(entries []processtrace.LedgerEntry) []storyLedgerRowView {
-	rows := make([]storyLedgerRowView, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		when := "—"
-		if !e.CreatedAt.IsZero() {
-			when = e.CreatedAt.UTC().Format("2006-01-02 15:04")
-		}
-		actor := strings.TrimSpace(e.Actor)
-		if actor == "" {
-			actor = "—"
-		}
-		rows = append(rows, storyLedgerRowView{
-			When:  when,
-			Kind:  e.Kind,
-			Actor: actor,
-			Body:  e.Body,
-		})
-	}
-	return rows
-}
-
-func statusBadge(status string) string {
-	switch status {
-	case processtrace.StatusAccepted, processtrace.StatusFired:
-		return "✓"
-	case processtrace.StatusRejected:
-		return "✗"
-	case processtrace.StatusPending:
-		return "●"
-	default:
-		return "◦"
-	}
 }

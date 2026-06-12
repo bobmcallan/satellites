@@ -28,14 +28,14 @@
 (function () {
     'use strict';
 
-    // loadStoryFragment lazy-loads a story sub-fragment (trace or ledger) into
-    // el on first tab open in the inline story panel (sty_762730ad). The fetched
-    // markup is plain HTML (no Alpine directives), so a direct innerHTML swap is
-    // safe. credentials:'same-origin' carries the session cookie.
-    window.loadStoryFragment = function (storyID, kind, el) {
+    // loadStoryFragment lazy-loads the merged Ledger/Log fragment into el on
+    // first tab open in the inline story panel (sty_762730ad; merged view
+    // epic:graduated-workflow ledger-log-merge). The fetched markup is plain
+    // HTML (no Alpine directives), so a direct innerHTML swap is safe.
+    // credentials:'same-origin' carries the session cookie.
+    window.loadStoryFragment = function (storyID, el) {
         if (!el) { return; }
-        var path = kind === 'ledger' ? '/ledger.fragment' : '/trace.fragment';
-        fetch('/stories/' + encodeURIComponent(storyID) + path,
+        fetch('/stories/' + encodeURIComponent(storyID) + '/trace.fragment',
               { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.text() : null; })
             .then(function (html) {
