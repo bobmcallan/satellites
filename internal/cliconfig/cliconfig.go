@@ -37,6 +37,13 @@ type Config struct {
 	LogPath        string `toml:"log_path"`
 	BranchTemplate string `toml:"branch_template"`
 
+	// ReviewerModel, when set, is passed as `--model <value>` to every
+	// reviewer `claude -p` run — the gate dispatcher and the step summariser
+	// (sty_c7a5d741). NOT required in the toml — empty means no flag, so the
+	// reviewer lane inherits the harness default (e.g. the model
+	// .claude/settings.json pins).
+	ReviewerModel string `toml:"reviewer_model"`
+
 	// SkillsRoot overrides where `skill sync` / `deploy` materialise
 	// substrate skills. Empty means the default — <repo>/.claude/skills,
 	// anchored to the directory holding .satellites/, NOT the process CWD.

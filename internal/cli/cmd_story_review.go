@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workstate"
 	"github.com/spf13/cobra"
@@ -276,7 +277,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		}
 		gateOut = runSatellitesActorCommand(ctx, opts, edges.Command)
 	} else {
-		disp := verb.ClaudeCLIGateDispatcher{BinaryPath: strings.TrimSpace(opts.ClaudeBin), DefaultTimeout: gateDispatchTimeout}
+		disp := verb.ClaudeCLIGateDispatcher{
+			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
+			Model:          reviewerModel(opts.ConfigPath),
+			DefaultTimeout: gateDispatchTimeout,
+		}
 		gateOut, err = disp.Dispatch(ctx, verb.GateInput{
 			SkillName:    gateSkill,
 			StoryID:      story.ID,
@@ -395,6 +400,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		}
 		summariser := verb.ClaudeCLISummariser{
 			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
+			Model:          reviewerModel(opts.ConfigPath),
 			DefaultTimeout: summariserTimeout,
 		}
 		summary, sErr := summariser.Summarise(ctx, verb.SummariserInput{
@@ -518,6 +524,14 @@ func fullLedgerViews(ctx context.Context, opts reviewOpts, storyID string) []ver
 		}
 		cursor = resp.NextCursor
 	}
+}
+
+// reviewerModel resolves the reviewer lane's model from satellites.toml
+// (reviewer_model, sty_c7a5d741). Empty — unset key or unloadable config —
+// means no --model flag: the reviewer inherits the harness default.
+func reviewerModel(configPath string) string {
+	cfg, _, _ := cliconfig.Load(configPath)
+	return strings.TrimSpace(cfg.ReviewerModel)
 }
 
 // runSatellitesActorCommand advances an actor:satellites state: it runs the

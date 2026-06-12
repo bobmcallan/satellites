@@ -85,6 +85,11 @@ type ClaudeCLIGateDispatcher struct {
 	// without a real install point this at a shim.
 	BinaryPath string
 
+	// Model, when set, rides the argv as `--model <value>` so the reviewer
+	// lane runs on an operator-chosen model (satellites.toml reviewer_model,
+	// sty_c7a5d741). Empty = no flag = inherit the harness default.
+	Model string
+
 	// DefaultTimeout caps a single dispatch when GateInput.Timeout is
 	// zero. Zero here disables the cap entirely — used by tests that
 	// want fine-grained control.
@@ -129,7 +134,7 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		return GateOutput{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt)...)
+	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
 	cmd.Stdin = strings.NewReader(string(payload))
 	if in.WorktreeRoot != "" {
 		cmd.Dir = in.WorktreeRoot
@@ -175,12 +180,16 @@ const gateAllowedTools = "Bash Read Grep Glob"
 // CLI has no such flag, so every gate run died at dispatch (sty_1312d692).
 // Kept as a standalone function so a test can pin the argv and catch a
 // future invalid flag — or a dropped tool grant — before a live run.
-func gateClaudeArgs(systemPrompt string) []string {
-	return []string{
+func gateClaudeArgs(systemPrompt, model string) []string {
+	args := []string{
 		"-p",
 		"--allowedTools", gateAllowedTools,
 		"--append-system-prompt", systemPrompt,
 	}
+	if m := strings.TrimSpace(model); m != "" {
+		args = append(args, "--model", m)
+	}
+	return args
 }
 
 // resolveGateSkillBody reads the gate skill's SKILL.md from the worktree

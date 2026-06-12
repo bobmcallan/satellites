@@ -48,6 +48,9 @@ type SummariserInput struct {
 type ClaudeCLISummariser struct {
 	// BinaryPath overrides the discovered `claude` binary; empty = `claude`.
 	BinaryPath string
+	// Model, when set, rides the argv as `--model <value>` (satellites.toml
+	// reviewer_model, sty_c7a5d741). Empty = inherit the harness default.
+	Model string
 	// DefaultTimeout caps a run when SummariserInput.Timeout is zero.
 	DefaultTimeout time.Duration
 }
@@ -62,12 +65,16 @@ const summariserAllowedTools = "Read Grep Glob"
 // body is the appended system prompt; the transition payload arrives on
 // stdin. Standalone so a test can pin the argv (and catch a future invalid
 // flag or a widened tool grant) without a live run.
-func summariserClaudeArgs(systemPrompt string) []string {
-	return []string{
+func summariserClaudeArgs(systemPrompt, model string) []string {
+	args := []string{
 		"-p",
 		"--allowedTools", summariserAllowedTools,
 		"--append-system-prompt", systemPrompt,
 	}
+	if m := strings.TrimSpace(model); m != "" {
+		args = append(args, "--model", m)
+	}
+	return args
 }
 
 // Summarise runs the skill and returns its stdout prose, trimmed. Errors are
@@ -110,7 +117,7 @@ func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) 
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, binary, summariserClaudeArgs(systemPrompt)...)
+	cmd := exec.CommandContext(ctx, binary, summariserClaudeArgs(systemPrompt, c.Model)...)
 	cmd.Stdin = strings.NewReader(string(payload))
 	if in.WorktreeRoot != "" {
 		cmd.Dir = in.WorktreeRoot

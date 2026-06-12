@@ -12,7 +12,7 @@ import (
 // fails if the system prompt is dropped, the `--skill` non-flag returns, or
 // the grant widens to include a write/exec tool.
 func TestSummariserClaudeArgs(t *testing.T) {
-	args := summariserClaudeArgs("SUMMARY BODY")
+	args := summariserClaudeArgs("SUMMARY BODY", "")
 	want := []string{"-p", "--allowedTools", summariserAllowedTools, "--append-system-prompt", "SUMMARY BODY"}
 	if len(args) != len(want) {
 		t.Fatalf("argv length = %d, want %d (%v)", len(args), len(want), args)
@@ -38,5 +38,24 @@ func TestSummarise_RequiresSkillName(t *testing.T) {
 	_, err := ClaudeCLISummariser{}.Summarise(nil, SummariserInput{})
 	if err == nil || !strings.Contains(err.Error(), "skill_name required") {
 		t.Fatalf("expected skill_name-required error, got %v", err)
+	}
+}
+
+// TestSummariserClaudeArgs_ReviewerModel pins the reviewer_model rider on the
+// summariser argv (sty_c7a5d741): set → trailing `--model <value>`; unset →
+// byte-identical to today.
+func TestSummariserClaudeArgs_ReviewerModel(t *testing.T) {
+	base := summariserClaudeArgs("SUMMARY BODY", "")
+	withModel := summariserClaudeArgs("SUMMARY BODY", "claude-haiku-4-5-20251001")
+	if len(withModel) != len(base)+2 {
+		t.Fatalf("model argv length = %d, want %d+2 (%v)", len(withModel), len(base), withModel)
+	}
+	if withModel[len(withModel)-2] != "--model" || withModel[len(withModel)-1] != "claude-haiku-4-5-20251001" {
+		t.Fatalf("model must ride as trailing --model <value>: %v", withModel)
+	}
+	for _, a := range base {
+		if a == "--model" {
+			t.Fatalf("unset model must add no --model flag: %v", base)
+		}
 	}
 }
