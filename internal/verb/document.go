@@ -1044,6 +1044,13 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if d.Type != document.TypeStory {
 		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
 	}
+	// Epic membership freezes once a story has started: parent_id may change only
+	// while the story is still backlog/ready (sty_409c0af8). This keeps the epic
+	// objective the re-anchor propagates (sty_a8a6afc7) from being swapped out
+	// from under in-flight work. Every other field stays freely patchable.
+	if reason := epicReparentRefusal(d.Status, d.ParentID, req.ParentID); reason != "" {
+		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
+	}
 	// Status on document_upsert is honoured only for a non-api-key caller — the
 	// portal UI's JWT session, or an in-process call. An api-key caller (the
 	// agent over MCP/exec, or the gate's minted reviewer key) gets the field
@@ -1089,6 +1096,25 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 		Document: d2,
 		Version:  document.Version{DocumentID: d2.ID, Version: d2.LatestVersion, Body: body, Status: document.StatusActive},
 	})
+}
+
+// epicReparentRefusal reports whether a story-patch would change epic membership
+// (parent_id) on a story whose status forbids it, returning a clear refusal
+// reason or "" when the change is allowed. Membership is frozen once a story has
+// started: it may change only while the story is still backlog or ready. A patch
+// that omits parent_id (newParent == nil) or sets it to the current value is not
+// a membership change and is always allowed; clearing parent_id to "" on a
+// started story IS a change and is refused.
+func epicReparentRefusal(currentStatus, currentParent string, newParent *string) string {
+	if newParent == nil || *newParent == currentParent {
+		return "" // not changing epic membership
+	}
+	switch currentStatus {
+	case "backlog", "ready":
+		return "" // not started — free to re-parent
+	default:
+		return fmt.Sprintf("epic membership is frozen once a story has started (status=%s) — reopen it to backlog/ready before re-parenting", currentStatus)
+	}
 }
 
 func strDeref(p *string) string {

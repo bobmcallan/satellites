@@ -11,6 +11,45 @@ import (
 	"github.com/bobmcallan/satellites/internal/document"
 )
 
+// TestEpicReparentRefusal pins sty_409c0af8: epic membership (parent_id) freezes
+// once a story has started — re-parenting is allowed only while backlog/ready,
+// and only a parent change (not a same-parent or absent parent_id) is judged.
+func TestEpicReparentRefusal(t *testing.T) {
+	sp := func(s string) *string { return &s }
+	cases := []struct {
+		name          string
+		status        string
+		currentParent string
+		newParent     *string
+		wantRefused   bool
+	}{
+		{"in_progress A→B refused", "in_progress", "sty_epicA", sp("sty_epicB"), true},
+		{"techdebt-review A→B refused", "techdebt-review", "sty_epicA", sp("sty_epicB"), true},
+		{"done A→B refused", "done", "sty_epicA", sp("sty_epicB"), true},
+		{"blocked A→B refused", "blocked", "sty_epicA", sp("sty_epicB"), true},
+		{"in_progress clear-to-empty refused", "in_progress", "sty_epicA", sp(""), true},
+		{"in_progress add-parent-to-orphan refused", "in_progress", "", sp("sty_epicB"), true},
+		{"in_progress same-parent allowed (no-op)", "in_progress", "sty_epicA", sp("sty_epicA"), false},
+		{"in_progress parent_id absent allowed (other fields)", "in_progress", "sty_epicA", nil, false},
+		{"backlog A→B allowed", "backlog", "sty_epicA", sp("sty_epicB"), false},
+		{"ready A→B allowed", "ready", "sty_epicA", sp("sty_epicB"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reason := epicReparentRefusal(c.status, c.currentParent, c.newParent)
+			if c.wantRefused && reason == "" {
+				t.Errorf("expected refusal, got allowed")
+			}
+			if !c.wantRefused && reason != "" {
+				t.Errorf("expected allowed, got refusal: %q", reason)
+			}
+			if c.wantRefused && !strings.Contains(reason, "frozen once a story has started") {
+				t.Errorf("refusal must name the rule, got: %q", reason)
+			}
+		})
+	}
+}
+
 // TestDocumentUpsert_MCPRefusesContentWrites pins sty_f302bd8b AC3: an
 // operational document/skill content upsert arriving over the MCP transport is
 // refused (ErrForbidden) with a CLI pointer, before any store write — so the
