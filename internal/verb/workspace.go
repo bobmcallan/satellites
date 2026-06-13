@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -306,6 +307,17 @@ func invokeWorkspaceList(ctx context.Context, _ json.RawMessage) (json.RawMessag
 	if ws == nil {
 		ws = []workspace.Workspace{}
 	}
+	// Order alpha-numerically (case-insensitive) by name over the authz-filtered
+	// set, ties broken by id — a stable, deterministic order every client renders
+	// the same regardless of creation order (sty_fe3c7847). The default workspace
+	// sorts inline; is_default still travels on each row for the caller to style.
+	sort.SliceStable(ws, func(i, j int) bool {
+		ni, nj := strings.ToLower(ws[i].Name), strings.ToLower(ws[j].Name)
+		if ni != nj {
+			return ni < nj
+		}
+		return ws[i].ID < ws[j].ID
+	})
 	return json.Marshal(WorkspaceListResponse{Workspaces: ws})
 }
 

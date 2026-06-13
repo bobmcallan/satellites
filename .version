@@ -4,8 +4,8 @@
 # build time; .version is a build-time source file, NEVER deployed in
 # release artifacts or docker images.
 
-satellites.version: 0.0.232
-satellites.build: 2026-06-13-22-57-00
+satellites.version: 0.0.233
+satellites.build: 2026-06-13-23-12-21
 
-satellites-server.version: 0.0.253
-satellites-server.build: 2026-06-13-22-57-00
+satellites-server.version: 0.0.254
+satellites-server.build: 2026-06-13-23-12-21
