@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -39,6 +40,11 @@ const alwaysIndexInstruction = "To discover other documents and principles beyon
 // (the access hook), so an agent deep in an epic is reminded the resident
 // principles still apply without re-streaming their bodies on every fetch.
 const alwaysReanchor = "satellites: the always-resident principles injected at session start remain in effect. Re-read them if unsure, and run `satellites document index` to discover any other document/principle this work needs."
+
+// epicObjectiveCeiling bounds the parent-epic objective pushed alongside the
+// re-anchor. It is a Purpose paragraph (small); this caps a runaway parent body
+// so the lightweight re-anchor never bloats the child's context.
+const epicObjectiveCeiling = 2048
 
 // newHookContextCmd builds the SessionStart always-context injector.
 func newHookContextCmd() *cobra.Command {
@@ -78,16 +84,24 @@ func runHookContext(ctx context.Context, in io.Reader, out, stderr io.Writer) er
 
 	// PreToolUse path: a story document_get. Re-anchor with the lightweight
 	// pointer (not the bodies) so an agent deep in an epic does not drift off
-	// the resident principles as story content fills the context. Only for a
-	// story fetch in a configured repo; otherwise silent.
+	// the resident principles as story content fills the context, and push the
+	// parent epic's objective alongside it so the child keeps the epic's "why"
+	// in view. Only for a story fetch in a configured repo; otherwise silent.
 	if len(ev.ToolInput) > 0 {
-		if storyIDFromToolInput(ev.ToolInput) == "" {
+		storyID := storyIDFromToolInput(ev.ToolInput)
+		if storyID == "" {
 			return nil
 		}
-		if _, ok := findSatellitesRepoRoot(repoStart(ev.Cwd)); !ok {
+		root, ok := findSatellitesRepoRoot(repoStart(ev.Cwd))
+		if !ok {
 			return nil
 		}
-		return emitAdditionalContext(out, "PreToolUse", alwaysReanchor)
+		configPath := filepath.Join(root, ".satellites", "satellites.toml")
+		msg := alwaysReanchor
+		if obj := epicObjectiveForStory(ctx, storyID, configPath, ""); obj != "" {
+			msg = msg + "\n\n" + obj
+		}
+		return emitAdditionalContext(out, "PreToolUse", msg)
 	}
 
 	// SessionStart path: inject the full resident set + the index pointer.
@@ -219,6 +233,119 @@ func fetchDocumentBody(ctx context.Context, name, scope, wsID, pjID, configPath,
 		return got.RenderedBody, nil
 	}
 	return got.RawBody, nil
+}
+
+// storyDoc is the slice of a story row the epic-objective re-anchor needs.
+type storyDoc struct {
+	Name     string
+	ParentID string
+	Body     string
+}
+
+// fetchStoryDoc resolves a story by id via document_get. It is a package var so
+// the re-anchor's formatting can be exercised in unit tests without a live
+// server (the dispatch round-trip is the only un-hermetic part). Any failure is
+// reported as (zero, false) so the caller fails open.
+var fetchStoryDoc = func(ctx context.Context, id, configPath, userID string) (storyDoc, bool) {
+	req, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{ID: id})
+	if err != nil {
+		return storyDoc{}, false
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, configPath, userID)
+	if err != nil {
+		return storyDoc{}, false
+	}
+	var got struct {
+		Document struct {
+			Name     string `json:"name"`
+			ParentID string `json:"parent_id"`
+		} `json:"document"`
+		RenderedBody string `json:"rendered_body"`
+		RawBody      string `json:"raw_body"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return storyDoc{}, false
+	}
+	body := got.RenderedBody
+	if strings.TrimSpace(body) == "" {
+		body = got.RawBody
+	}
+	return storyDoc{Name: got.Document.Name, ParentID: got.Document.ParentID, Body: body}, true
+}
+
+// epicObjectiveForStory resolves the fetched story's immediate parent (the epic
+// anchor) and returns its objective formatted for the re-anchor, or "" when the
+// story has no parent or anything fails. One level only: a child sits directly
+// under its epic in this substrate. Fails open — a missing/deleted parent or an
+// unreachable server yields "", so the hook never errors the tool call.
+func epicObjectiveForStory(ctx context.Context, storyID, configPath, userID string) string {
+	child, ok := fetchStoryDoc(ctx, storyID, configPath, userID)
+	if !ok || strings.TrimSpace(child.ParentID) == "" {
+		return ""
+	}
+	parent, ok := fetchStoryDoc(ctx, child.ParentID, configPath, userID)
+	if !ok {
+		return ""
+	}
+	return formatEpicObjective(parent.Name, parent.Body)
+}
+
+// formatEpicObjective builds the labelled epic-objective block: the parent's
+// title and its Purpose paragraph (the first body paragraph). Returns "" when
+// there is nothing to show. An oversize purpose is truncated with a visible
+// marker — never a silent partial.
+func formatEpicObjective(title, body string) string {
+	title = strings.TrimSpace(title)
+	purpose := firstParagraph(body)
+	if title == "" && purpose == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Epic objective (satellites)\n\n")
+	b.WriteString("The story you are working serves this epic — keep its objective in view:\n\n")
+	if title != "" {
+		b.WriteString("**" + title + "**")
+		if purpose != "" {
+			b.WriteString("\n\n")
+		}
+	}
+	if purpose != "" {
+		b.WriteString(truncateExplicit(purpose, epicObjectiveCeiling))
+	}
+	return b.String()
+}
+
+// firstParagraph returns the first non-empty, non-heading, non-fence block of a
+// markdown body — the convention's Purpose paragraph. Returns "" if none.
+func firstParagraph(body string) string {
+	for _, blk := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n\n") {
+		t := strings.TrimSpace(blk)
+		if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "```") {
+			continue
+		}
+		return t
+	}
+	return ""
+}
+
+// truncateExplicit caps s to ceiling bytes, appending a visible marker when it
+// cuts — so a truncation is never a silent partial. UTF-8 safe: it never splits
+// a rune.
+func truncateExplicit(s string, ceiling int) string {
+	if len(s) <= ceiling {
+		return s
+	}
+	const marker = " … [epic objective truncated]"
+	cut := ceiling - len(marker)
+	if cut < 0 {
+		cut = 0
+	}
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return strings.TrimRight(s[:cut], " \n") + marker
 }
 
 // boundAlwaysParts joins parts under a byte ceiling. It adds whole parts until
