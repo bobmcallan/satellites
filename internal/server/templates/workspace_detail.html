@@ -33,7 +33,8 @@
       {{if .Workspace.IsDefault}}<dt>DEFAULT</dt><dd>yes</dd>{{end}}
       <dt>CREATED</dt><dd>{{.Workspace.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
     </dl>
-    {{if .SeedMD}}<p class="project-card-desc" data-field="workspace-description">{{.SeedMD}}</p>{{end}}
+    {{if .Workspace.Description}}<p class="project-card-desc" data-field="workspace-description">{{.Workspace.Description}}</p>{{end}}
+    {{if .SeedMD}}<p class="project-card-desc" data-field="workspace-seed">{{.SeedMD}}</p>{{end}}
   </section>
 
   <section class="panel" data-section="objective">

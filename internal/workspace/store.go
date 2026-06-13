@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -71,10 +72,53 @@ func (s *Store) Create(ctx context.Context, ownerUserID, name string, now time.T
 	}, nil
 }
 
+// Update field-merges name and/or description onto the workspace at id and
+// bumps updated_at. A nil pointer leaves that column untouched (set-when-
+// present, mirroring document/changelog patch semantics); a non-nil empty
+// string is an explicit clear. Ownership is never touched here — owner moves
+// are out of scope. ErrNotFound when no row matches. With nothing to set it
+// still touches updated_at so the caller reads a consistent row back.
+func (s *Store) Update(ctx context.Context, id string, name, description *string, now time.Time) (Workspace, error) {
+	if id == "" {
+		return Workspace{}, fmt.Errorf("workspace: id required")
+	}
+	now = now.UTC()
+	sets := []string{"updated_at = $1"}
+	args := []any{now}
+	n := 2
+	if name != nil {
+		if *name == "" {
+			return Workspace{}, fmt.Errorf("workspace: name cannot be cleared")
+		}
+		sets = append(sets, fmt.Sprintf("name = $%d", n))
+		args = append(args, *name)
+		n++
+	}
+	if description != nil {
+		sets = append(sets, fmt.Sprintf("description = $%d", n))
+		args = append(args, *description)
+		n++
+	}
+	args = append(args, id)
+	q := "UPDATE workspaces SET " + strings.Join(sets, ", ") + fmt.Sprintf(" WHERE id = $%d", n)
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: update: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: update rows: %w", err)
+	}
+	if rows == 0 {
+		return Workspace{}, ErrNotFound
+	}
+	return s.GetByID(ctx, id)
+}
+
 // GetByID returns the workspace with the given id, or ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id string) (Workspace, error) {
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
+        SELECT id, name, description, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         WHERE id = $1
     `, id)
@@ -84,7 +128,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (Workspace, error) {
 // GetDefault returns the workspace flagged is_default, or ErrNotFound.
 func (s *Store) GetDefault(ctx context.Context) (Workspace, error) {
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
+        SELECT id, name, description, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         WHERE is_default = TRUE
         LIMIT 1
@@ -96,7 +140,7 @@ func (s *Store) GetDefault(ctx context.Context) (Workspace, error) {
 // filtering arrives with the membership PR.
 func (s *Store) List(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
+        SELECT id, name, description, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         ORDER BY created_at DESC, id
     `)
@@ -169,7 +213,7 @@ func (s *Store) GetPersonalForUser(ctx context.Context, userID string) (Workspac
 		return Workspace{}, ErrNotFound
 	}
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, name, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
+        SELECT id, name, description, owner_user_id, status, is_default, created_at, updated_at, seed_md, seed_updated_at
         FROM workspaces
         WHERE owner_user_id = $1 AND is_personal = TRUE
         LIMIT 1
@@ -242,7 +286,7 @@ func scanWorkspaceCommon(s rowScanner) (Workspace, error) {
 		owner     sql.NullString
 		seedAtRow sql.NullTime
 	)
-	if err := s.Scan(&w.ID, &w.Name, &owner, &w.Status, &w.IsDefault, &w.CreatedAt, &w.UpdatedAt, &w.SeedMD, &seedAtRow); err != nil {
+	if err := s.Scan(&w.ID, &w.Name, &w.Description, &owner, &w.Status, &w.IsDefault, &w.CreatedAt, &w.UpdatedAt, &w.SeedMD, &seedAtRow); err != nil {
 		return Workspace{}, err
 	}
 	if owner.Valid {

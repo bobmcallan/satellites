@@ -70,6 +70,7 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"changelog_delete":             typedSchema[verb.ChangelogDeleteRequest](),
 	"semantic_search":              typedSchema[verb.SemanticSearchRequest](),
 	"workspace_objective_generate": typedSchema[verb.WorkspaceObjectiveGenerateRequest](),
+	"workspace_upsert":             typedSchema[verb.WorkspaceUpsertRequest](),
 	"workspace_member_add":         typedSchema[verb.WorkspaceMemberAddRequest](),
 	"workspace_member_list":        typedSchema[verb.WorkspaceMemberListRequest](),
 	"workspace_member_update_role": typedSchema[verb.WorkspaceMemberUpdateRequest](),
@@ -181,6 +182,9 @@ var orientationInstructions = string(documents.MCPLoadContextMarkdown())
 //     build, substrate DB reachability, uptime). A sanctioned exception
 //     to no-new-mcp-verbs (introspection, not substrate CRUD, no
 //     document_* equivalent); see that principle (sty_a847fd3f).
+//   - workspace_upsert: create (no id) or patch (id present) a workspace's
+//     name/description, document_upsert-shaped; workspace-admin tier with a
+//     stricter platform-admin-only create enforced at call-time (sty_7d7f3037).
 //   - workspace_member_add / _update_role / _remove: workspace-admin
 //     membership grants, role-scoped (verb.MCPRoleWorkspaceAdmin) so they
 //     are listed and dispatchable only for a caller who can administer some
@@ -213,6 +217,7 @@ var exposedVerbs = []string{
 	"changelog_delete",
 	"semantic_search",
 	"workspace_objective_generate",
+	"workspace_upsert",
 	"workspace_member_add",
 	"workspace_member_list",
 	"workspace_member_update_role",

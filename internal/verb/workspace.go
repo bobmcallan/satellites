@@ -46,11 +46,29 @@ type WorkspaceListResponse struct {
 	Workspaces []workspace.Workspace `json:"workspaces"`
 }
 
+// WorkspaceUpsertRequest is the input to workspace_upsert. Mode is decided by
+// inspection on ID (document_upsert convention): empty ID + Name → create;
+// ID present → patch the supplied fields. Name/Description are pointers so a
+// patch distinguishes "not supplied" (nil → untouched) from an explicit value.
+// Ownership/created_by is never a request field — it derives from the authed
+// identity on create and is immutable thereafter.
+type WorkspaceUpsertRequest struct {
+	ID          string  `json:"id,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "workspace_create",
 		Description: "Create a new workspace.",
 		Invoke:      invokeWorkspaceCreate,
+	})
+	Register(&Verb{
+		Name:        "workspace_upsert",
+		Description: "Create a workspace (no id) or patch its name/description (id present). Ownership derives from the authed identity; create requires a human platform-admin (no api-key), patch requires the owner or a platform-admin.",
+		Invoke:      invokeWorkspaceUpsert,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
 		Name:        "workspace_list",
@@ -89,6 +107,69 @@ func invokeWorkspaceCreate(ctx context.Context, raw json.RawMessage) (json.RawMe
 		return nil, fmt.Errorf("workspace_create: name required")
 	}
 	w, err := workspaceStore.Create(ctx, callerUserID(ctx), name, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(w)
+}
+
+// invokeWorkspaceUpsert is the single create+patch surface for workspaces,
+// shaped like document_upsert (mode by inspection on id). The role tier gate
+// (MCPRoleWorkspaceAdmin) only controls visibility/dispatch on the MCP surface;
+// the per-mode authz below is the authority.
+func invokeWorkspaceUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if workspaceStore == nil {
+		return nil, fmt.Errorf("workspace_upsert: store not configured")
+	}
+	var req WorkspaceUpsertRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("workspace_upsert: bad request: %w", err)
+		}
+	}
+	now := time.Now().UTC()
+	id := strings.TrimSpace(req.ID)
+
+	// CREATE — no id supplied.
+	if id == "" {
+		// Ownership binds to a human OAuth identity. An executor/agent api-key
+		// is refused so no workspace is owned by an ephemeral token
+		// (orphaned-admin guard). CLI-local (no authStore) is exempt.
+		if authStore != nil {
+			if auth.APIKeyRoleFromContext(ctx) != "" {
+				return nil, fmt.Errorf("workspace_upsert: %w: workspace creation requires a human identity, not an api-key", ErrForbidden)
+			}
+			if !callerIsGlobalAdmin(ctx) {
+				return nil, fmt.Errorf("workspace_upsert: %w: workspace creation requires platform-admin", ErrForbidden)
+			}
+		}
+		if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
+			return nil, fmt.Errorf("workspace_upsert: %w: name required to create", ErrBadRequest)
+		}
+		owner := callerUserID(ctx)
+		w, err := workspaceStore.Create(ctx, owner, strings.TrimSpace(*req.Name), now)
+		if err != nil {
+			return nil, err
+		}
+		// Apply a supplied description in the same call (create + set).
+		if req.Description != nil {
+			w, err = workspaceStore.Update(ctx, w.ID, nil, req.Description, now)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return json.Marshal(w)
+	}
+
+	// PATCH — id present. Authz: platform-admin OR the workspace owner.
+	ws, err := workspaceStore.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if authStore != nil && !canPatchWorkspace(ctx, ws) {
+		return nil, fmt.Errorf("workspace_upsert: %w: not owner or platform-admin of workspace %s", ErrForbidden, id)
+	}
+	w, err := workspaceStore.Update(ctx, id, req.Name, req.Description, now)
 	if err != nil {
 		return nil, err
 	}

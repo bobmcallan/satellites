@@ -30,6 +30,7 @@ const (
 type Workspace struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
+	Description   string     `json:"description,omitempty"`
 	OwnerUserID   string     `json:"owner_user_id,omitempty"`
 	Status        string     `json:"status"`
 	IsDefault     bool       `json:"is_default"`

@@ -78,6 +78,7 @@ func TestMCPCutover(t *testing.T) {
 			"apikey_create", "apikey_list", "apikey_revoke",
 			"changelog_add", "changelog_list", "changelog_update", "changelog_delete",
 			"semantic_search", "workspace_objective_generate",
+			"workspace_upsert",
 			"workspace_member_add", "workspace_member_list",
 			"workspace_member_update_role", "workspace_member_remove",
 			"system_status",

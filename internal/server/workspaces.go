@@ -30,11 +30,12 @@ type workspacesData struct {
 // row (not the workspace domain struct) so this package imports no substrate
 // domain package — the layering guard, same pattern as projectRow.
 type workspaceRow struct {
-	ID        string
-	Name      string
-	Status    string
-	IsDefault bool
-	CreatedAt time.Time
+	ID          string
+	Name        string
+	Description string
+	Status      string
+	IsDefault   bool
+	CreatedAt   time.Time
 }
 
 // workspacesHandler renders the list of workspaces the caller can see

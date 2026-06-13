@@ -249,6 +249,24 @@ func CallerMeetsMCPRole(ctx context.Context, required string) bool {
 	}
 }
 
+// canPatchWorkspace reports whether the caller may patch ws's mutable fields
+// (name/description) via workspace_upsert: a platform-admin, or the workspace
+// owner (owner_user_id). Delegated workspace 'admin' members are intentionally
+// NOT permitted here — workspace settings are owner-or-platform-admin
+// (sty_7d7f3037). An agent-role downscope capped below admin is never an owner.
+func canPatchWorkspace(ctx context.Context, ws workspace.Workspace) bool {
+	if cap, ok := auth.AgentRoleFromContext(ctx); ok {
+		if projectRoleRank(cap.Role) < projectRoleRank(project.RoleAdmin) || len(cap.Projects) > 0 {
+			return false
+		}
+	}
+	if callerIsGlobalAdmin(ctx) {
+		return true
+	}
+	caller := auth.FromContext(ctx)
+	return caller != nil && ws.OwnerUserID != "" && ws.OwnerUserID == caller.ID
+}
+
 // isWorkspaceMember reports whether the caller is a global admin or any member
 // of wsID. Gates read-only workspace surfaces (e.g. the member roster).
 func isWorkspaceMember(ctx context.Context, wsID string) bool {

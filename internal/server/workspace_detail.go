@@ -63,12 +63,13 @@ type workspaceMountRow struct {
 // decoupled from the domain package — the layering guard, same pattern as
 // projectDetailRow.
 type workspaceDetailRow struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	IsDefault bool      `json:"is_default"`
-	CreatedAt time.Time `json:"created_at"`
-	SeedMD    string    `json:"seed_md"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`
+	IsDefault   bool      `json:"is_default"`
+	CreatedAt   time.Time `json:"created_at"`
+	SeedMD      string    `json:"seed_md"`
 }
 
 // workspaceDetailHandler renders one workspace: its name + meta, the objective
@@ -183,7 +184,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 		data := workspaceDetailData{
 			Title: ws.Name + " · workspaces · satellites",
 			Workspace: workspaceRow{
-				ID: ws.ID, Name: ws.Name, Status: ws.Status,
+				ID: ws.ID, Name: ws.Name, Description: ws.Description, Status: ws.Status,
 				IsDefault: ws.IsDefault, CreatedAt: ws.CreatedAt,
 			},
 			SeedMD:        ws.SeedMD,
