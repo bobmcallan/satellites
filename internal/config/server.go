@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,8 +23,20 @@ type Server struct {
 	Dev           bool   `toml:"dev"`
 	SessionSecret string `toml:"session_secret"`
 
-	OAuth ServerOAuth `toml:"oauth"`
-	Log   LogConfig   `toml:"log"`
+	OAuth     ServerOAuth `toml:"oauth"`
+	Log       LogConfig   `toml:"log"`
+	Embedding Embedding   `toml:"embedding"`
+}
+
+// Embedding configures the workspace-corpus embedder (sty_7f4f7e11). An empty
+// GeminiAPIKey disables embeddings (the corpus is stored unembedded). Model,
+// dimension, and chunk window are configuration, not hard-coded.
+type Embedding struct {
+	GeminiAPIKey   string `toml:"gemini_api_key"`
+	Model          string `toml:"model"`
+	Dimension      int    `toml:"dimension"`
+	ChunkMaxTokens int    `toml:"chunk_max_tokens"`
+	ChunkOverlap   int    `toml:"chunk_overlap"`
 }
 
 // ServerOAuth holds OAuth provider credentials + bootstrap policy.
@@ -61,6 +74,12 @@ func ServerDefaults() Server {
 		Log: LogConfig{
 			Level: "info",
 			JSON:  false,
+		},
+		Embedding: Embedding{
+			Model:          "gemini-embedding-001",
+			Dimension:      768,
+			ChunkMaxTokens: 512,
+			ChunkOverlap:   64,
 		},
 	}
 }
@@ -131,5 +150,16 @@ func (s *Server) applyServerEnv() {
 	}
 	if v := os.Getenv("SATELLITES_LOG_JSON"); v != "" {
 		s.Log.JSON = v == "true" || v == "1"
+	}
+	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
+		s.Embedding.GeminiAPIKey = v
+	}
+	if v := os.Getenv("EMBEDDING_MODEL"); v != "" {
+		s.Embedding.Model = v
+	}
+	if v := os.Getenv("EMBEDDING_DIMENSION"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.Embedding.Dimension = n
+		}
 	}
 }

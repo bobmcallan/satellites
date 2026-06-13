@@ -21,6 +21,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/embed"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ingest"
 	"github.com/bobmcallan/satellites/internal/invitation"
@@ -442,6 +443,22 @@ func main() {
 			return live.Scope{}, err
 		}
 		return live.NewScope(false, ids), nil
+	}
+
+	// Workspace corpus embeddings (sty_7f4f7e11): when a Gemini key is present,
+	// start the reconcile worker that chunks + embeds workspace documents and
+	// prunes chunks for deleted ones. Absent key → embeddings disabled and the
+	// corpus is simply stored unembedded (graceful).
+	if key := strings.TrimSpace(cfg.Embedding.GeminiAPIKey); key != "" {
+		embedSvc := embed.NewService(
+			embed.NewGeminiEmbedder(key, cfg.Embedding.Model, cfg.Embedding.Dimension),
+			embed.NewChunkStore(sqlDB), docStore, wsStore,
+			cfg.Embedding.ChunkMaxTokens, cfg.Embedding.ChunkOverlap,
+		)
+		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
+		arbor.Info("embedding worker started", "model", cfg.Embedding.Model, "dim", cfg.Embedding.Dimension)
+	} else {
+		arbor.Info("embeddings disabled — GEMINI_API_KEY unset")
 	}
 
 	handler := server.Build(server.Config{
