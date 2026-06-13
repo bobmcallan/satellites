@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+// TestResolveKey pins sty_c6de961e: project-scoped resolution drops workspace_id
+// (keyed by project_id, name — invariant under a home-workspace move); every
+// other scope keeps its workspace_id.
+func TestResolveKey(t *testing.T) {
+	got := Key{Scope: ScopeProject, WorkspaceID: "wksp_old", ProjectID: "proj_x", Name: "n"}.resolveKey()
+	if got.WorkspaceID != "" {
+		t.Errorf("project scope must drop workspace_id, got %q", got.WorkspaceID)
+	}
+	if got.ProjectID != "proj_x" || got.Name != "n" {
+		t.Errorf("project_id/name must be preserved, got %+v", got)
+	}
+	ws := Key{Scope: ScopeWorkspace, WorkspaceID: "wksp_w", Name: "n"}.resolveKey()
+	if ws.WorkspaceID != "wksp_w" {
+		t.Errorf("workspace scope must keep workspace_id, got %q", ws.WorkspaceID)
+	}
+}
+
 func TestNewID_Format(t *testing.T) {
 	id := NewID()
 	if !strings.HasPrefix(id, "doc_") || len(id) != 12 {

@@ -843,6 +843,14 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return nil, fmt.Errorf("document_upsert: %w: %q content is uploaded with the CLI (`satellites document|skill|principle upload`), not over MCP — MCP is read + setup/init", ErrForbidden, typ)
 	}
 
+	// Workspace is not a valid sharing scope for skills — the "shared across a
+	// workspace's repos" model is unworkable; cross-project reuse is the library's
+	// job (publish/adopt). Project-scoped substrate is keyed by project, not
+	// workspace (sty_c6de961e).
+	if reason := workspaceSkillRefused(req.Type, req.Scope); reason != "" {
+		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
+	}
+
 	// Mode 1: patch by id. Currently only stories support id-addressed
 	// upsert; documents are key-addressed via (scope, name).
 	if strings.TrimSpace(req.ID) != "" {
@@ -1136,6 +1144,18 @@ func epicReparentRefusal(currentStatus, currentParent string, newParent *string)
 // silently reopen finished work. A missing parent (parentFound == false) is left
 // to the reviewer's missing-parent finding — write-time referential integrity is
 // intentionally not enforced (sty_d43af8dc).
+// workspaceSkillRefused reports why a workspace-scoped skill upsert is rejected,
+// or "" when allowed. Skills resolve at system / project / library scope; the
+// workspace scope was the unworkable "shared across a workspace's repos" model
+// (sty_c6de961e). Cross-project skill reuse is the library's job (publish/adopt).
+func workspaceSkillRefused(typ, scope string) string {
+	if strings.EqualFold(strings.TrimSpace(typ), string(document.TypeSkill)) &&
+		strings.EqualFold(strings.TrimSpace(scope), string(document.ScopeWorkspace)) {
+		return "workspace is not a valid scope for skills — use project scope, or publish to the library for cross-project reuse"
+	}
+	return ""
+}
+
 func epicChildRefusal(parentStatus string, parentFound bool) string {
 	if !parentFound {
 		return ""

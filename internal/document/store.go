@@ -687,7 +687,10 @@ func (f ListFilter) addScopePredicate(add func(string, any), ph func(any) string
 		if f.Scope != "" {
 			add("scope = ?", string(f.Scope))
 		}
-		if f.WorkspaceID != "" {
+		// Project-scoped substrate is keyed by project, not workspace: a project
+		// list must not filter on workspace_id, else a moved project's rows (now
+		// workspace_id NULL) drop out (sty_c6de961e).
+		if f.WorkspaceID != "" && f.Scope != ScopeProject {
 			add("workspace_id = ?", f.WorkspaceID)
 		}
 		if f.ProjectID != "" {
@@ -939,7 +942,20 @@ func appendVersion(ctx context.Context, tx *sql.Tx, doc Document, body, by strin
 // subsequent calls return the existing row regardless of its type so
 // the caller can detect type mismatches and reject them at the Upsert
 // boundary.
+// resolveKey normalizes a key for resolution: project-scoped substrate is keyed
+// by (project_id, name), so workspace_id is dropped — making resolution and the
+// upsert identity invariant under a home-workspace move (sty_c6de961e). Stored
+// project rows carry workspace_id = NULL (migration 0041), so the existing
+// `workspace_id IS NOT DISTINCT FROM $` predicates match with the cleared key.
+func (k Key) resolveKey() Key {
+	if k.Scope == ScopeProject {
+		k.WorkspaceID = ""
+	}
+	return k
+}
+
 func lockOrInsertDocument(ctx context.Context, tx *sql.Tx, key Key, docType string, now time.Time) (Document, error) {
+	key = key.resolveKey()
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
 		string(key.Scope), key.WorkspaceID+"\x1f"+key.ProjectID+"\x1f"+key.UserID+"\x1f"+key.Name,
@@ -977,6 +993,7 @@ func lockExistingDocument(ctx context.Context, tx *sql.Tx, key Key) (Document, e
 }
 
 func lockDocumentByKey(ctx context.Context, tx *sql.Tx, key Key) (Document, error) {
+	key = key.resolveKey()
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
 	userArg := nullStr(key.UserID)
@@ -999,6 +1016,7 @@ func lockDocumentByID(ctx context.Context, tx *sql.Tx, id string) (Document, err
 }
 
 func (s *Store) lookupDocument(ctx context.Context, key Key) (Document, error) {
+	key = key.resolveKey()
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
 	userArg := nullStr(key.UserID)

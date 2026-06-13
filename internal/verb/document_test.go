@@ -50,6 +50,32 @@ func TestEpicReparentRefusal(t *testing.T) {
 	}
 }
 
+// TestWorkspaceSkillRefused pins sty_c6de961e AC2: a workspace-scoped skill is
+// refused; project/system/library skills and workspace non-skill docs pass.
+func TestWorkspaceSkillRefused(t *testing.T) {
+	cases := []struct {
+		typ, scope  string
+		wantRefused bool
+	}{
+		{"skill", "workspace", true},
+		{"skill", "Workspace", true}, // case-insensitive
+		{"skill", "project", false},
+		{"skill", "system", false},
+		{"skill", "library", false},
+		{"document", "workspace", false}, // only skills are constrained
+		{"story", "workspace", false},
+	}
+	for _, c := range cases {
+		reason := workspaceSkillRefused(c.typ, c.scope)
+		if c.wantRefused && reason == "" {
+			t.Errorf("type=%q scope=%q: expected refusal", c.typ, c.scope)
+		}
+		if !c.wantRefused && reason != "" {
+			t.Errorf("type=%q scope=%q: expected allowed, got %q", c.typ, c.scope, reason)
+		}
+	}
+}
+
 // TestEpicChildRefusal pins sty_d43af8dc: a story may not be attached to a
 // terminal (done/cancelled) epic anchor; a non-terminal or missing parent is
 // unaffected.
