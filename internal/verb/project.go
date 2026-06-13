@@ -40,6 +40,13 @@ type ProjectListRequest struct {
 type ProjectListResponse struct {
 	Projects   []project.Project `json:"projects"`
 	Principles []Principle       `json:"principles,omitempty"`
+	// Roles maps project_id → the caller's effective role (admin|write|read)
+	// on that project, resolved through effectiveProjectRole. Populated only
+	// when an auth store is wired (the server path); empty for CLI-local
+	// callers, who bypass role resolution. Additive — JSON consumers that
+	// only read Projects are unaffected. Consumed by the workspace detail page
+	// to show per-repo access (sty_67a66574).
+	Roles map[string]string `json:"roles,omitempty"`
 }
 
 type ProjectGetRequest struct {
@@ -183,7 +190,19 @@ func invokeProjectList(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if wsID != "" {
 		principles = LoadPrinciples(ctx, PrincipleScopeRequest{Scope: PrincipleScopeWorkspace, WorkspaceID: wsID})
 	}
-	return json.Marshal(ProjectListResponse{Projects: ps, Principles: principles})
+	// Annotate each project with the caller's effective role so the workspace
+	// detail page can show per-repo access (sty_67a66574). Server path only —
+	// CLI-local callers (no authStore) skip role resolution and get no map.
+	var roles map[string]string
+	if authStore != nil {
+		roles = make(map[string]string, len(ps))
+		for _, p := range ps {
+			if r := effectiveProjectRoleWS(ctx, wsID, p.ID); r != "" {
+				roles[p.ID] = r
+			}
+		}
+	}
+	return json.Marshal(ProjectListResponse{Projects: ps, Principles: principles, Roles: roles})
 }
 
 func invokeProjectGet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

@@ -136,6 +136,12 @@ func Build(cfg Config) http.Handler {
 		mux.Handle("GET /projects/{id}/blobs/{blob}", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(blobDownloadHandler(cfg)))))
 	}
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
+	// Workspace surface (sty_67a66574): the list of the caller's workspaces and
+	// a per-workspace page (home projects + access role + objective placeholder).
+	// "/workspaces/" (trailing slash) catches the detail path under Go 1.22
+	// pattern precedence, exactly as "/projects/" does.
+	mux.HandleFunc("/workspaces", workspacesHandler(cfg))
+	mux.HandleFunc("/workspaces/", workspaceDetailHandler(cfg))
 	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE
 	// (/api/stories/{id}/events); the QA view now refetches off the shared bus.

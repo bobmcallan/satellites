@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="/workspaces" class="nav-item active" data-nav="workspaces">WORKSPACES</a>
+    <a href="/ledger" class="nav-item {{if eq .ActiveNav "ledger"}}active{{end}}" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/help" class="nav-item {{if eq .ActiveNav "help"}}active{{end}}" data-nav="help">HELP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-section="workspace-detail">
+    <div class="panel-header">
+      <h2 data-field="workspace-name">{{.Workspace.Name}}</h2>
+      <span class="project-card-status">{{.Workspace.Status}}</span>
+    </div>
+    <dl class="metadata">
+      <dt>ID</dt><dd data-field="workspace-id">{{.Workspace.ID}}</dd>
+      {{if .Workspace.IsDefault}}<dt>DEFAULT</dt><dd>yes</dd>{{end}}
+      <dt>CREATED</dt><dd>{{.Workspace.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
+    </dl>
+    {{if .SeedMD}}<p class="project-card-desc" data-field="workspace-description">{{.SeedMD}}</p>{{end}}
+  </section>
+
+  <section class="panel" data-section="objective">
+    <div class="panel-header">
+      <h2>objective</h2>
+    </div>
+    <p class="empty" data-field="objective-placeholder">No objective yet — synthesized from the workspace corpus once embeddings land (epic:workspace-engagement).</p>
+  </section>
+
+  <section class="panel" data-section="workspace-projects">
+    <div class="panel-header">
+      <h2>repos</h2>
+    </div>
+
+    {{if .Projects}}
+    <div class="project-grid">
+      {{range .Projects}}
+      <article class="project-card" data-field="workspace-project-row">
+        <header class="project-card-header">
+          <h3 class="project-card-title"><a href="/projects/{{.ID}}" class="project-card-link" data-action="project-open">{{.Name}}</a></h3>
+          <span class="project-card-status">{{.Status}}</span>
+        </header>
+        {{if .Description}}<p class="project-card-desc">{{.Description}}</p>{{end}}
+        <dl class="project-card-meta">
+          <dt>ID</dt><dd>{{.ID}}</dd>
+          {{if .Role}}<dt>ACCESS</dt><dd data-field="project-role">{{.Role}}</dd>{{end}}
+        </dl>
+      </article>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty" data-field="workspace-projects-empty">No repos in this workspace yet.</p>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
