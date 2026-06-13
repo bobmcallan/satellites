@@ -146,6 +146,16 @@ func actualProjectRoleWS(ctx context.Context, wsID, projectID string) string {
 		}
 	}
 
+	// Readonly mount: a member of any workspace that readonly-mounts this
+	// project gets read (capped). The mount never elevates to write — write
+	// needs the home owner/admin, a project_members row, or an api-key binding —
+	// so "no write through a mount" holds by construction (sty_1ede3853).
+	if caller != "" && workspaceStore != nil && best < projectRoleRank(project.RoleRead) {
+		if ok, err := workspaceStore.CallerHasMountAccess(ctx, projectID, caller); err == nil && ok {
+			best = projectRoleRank(project.RoleRead)
+		}
+	}
+
 	return rankToProjectRole(best)
 }
 

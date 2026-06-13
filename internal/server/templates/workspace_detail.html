@@ -85,6 +85,31 @@
     <p class="empty" data-field="workspace-projects-empty">No repos in this workspace yet.</p>
     {{end}}
   </section>
+
+  <section class="panel" data-section="mounted-repos">
+    <div class="panel-header">
+      <h2>mounted repos (read-only)</h2>
+    </div>
+
+    {{if .Mounts}}
+    <div class="project-grid">
+      {{range .Mounts}}
+      <article class="project-card" data-field="workspace-mount-row" data-mount-name="{{.Name}}">
+        <header class="project-card-header">
+          <h3 class="project-card-title"><a href="/projects/{{.ProjectID}}" class="project-card-link" data-action="project-open">{{.Name}}</a></h3>
+          <span class="project-card-status">read-only</span>
+        </header>
+        <dl class="project-card-meta">
+          <dt>ID</dt><dd>{{.ProjectID}}</dd>
+          <dt>ACCESS</dt><dd data-field="mount-access">read</dd>
+        </dl>
+      </article>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty" data-field="mounted-repos-empty">No mounted repos.</p>
+    {{end}}
+  </section>
 </main>
 
 <footer class="site-footer">

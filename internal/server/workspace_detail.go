@@ -23,6 +23,7 @@ type workspaceDetailData struct {
 	Workspace   workspaceRow
 	SeedMD      string
 	Projects    []workspaceProjectRow
+	Mounts      []workspaceMountRow
 	Documents   []workspaceDocRow
 	DevMode     bool
 	FooterName  string
@@ -46,6 +47,14 @@ type workspaceDocRow struct {
 	ID        string
 	Name      string
 	UpdatedAt time.Time
+}
+
+// workspaceMountRow is one readonly repo mounted into the workspace (home
+// elsewhere), rendered in the page's mounted-repos section (sty_1ede3853).
+type workspaceMountRow struct {
+	ProjectID string
+	Name      string
+	Status    string
 }
 
 // workspaceDetailRow is the local shape this handler needs from workspace_get.
@@ -117,6 +126,21 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			})
 		}
 
+		// Readonly mounts: repos whose home is elsewhere, referenced here
+		// read-only (sty_1ede3853). Best-effort, like the doc list below.
+		var mounts []workspaceMountRow
+		mtReq, _ := json.Marshal(verb.WorkspaceMountListRequest{WorkspaceID: wsID})
+		if mtResp, err := verb.Dispatch(ctx, "workspace_mount_list", mtReq); err != nil {
+			arbor.WarnCtx(ctx, "workspace_detail: workspace_mount_list", "id", wsID, "err", err)
+		} else {
+			var ml verb.WorkspaceMountListResponse
+			if err := json.Unmarshal(mtResp, &ml); err == nil {
+				for _, m := range ml.Mounts {
+					mounts = append(mounts, workspaceMountRow{ProjectID: m.ProjectID, Name: m.Name, Status: m.Status})
+				}
+			}
+		}
+
 		// Workspace corpus: the workspace-scoped documents (sty_3c2f02bf).
 		// Best-effort — a list error leaves the section empty rather than
 		// failing the page.
@@ -152,6 +176,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			},
 			SeedMD:      ws.SeedMD,
 			Projects:    projects,
+			Mounts:      mounts,
 			Documents:   docs,
 			UserEmail:   userEmail,
 			UserName:    userName,
