@@ -32,6 +32,7 @@ type projectRow struct {
 	ID          string
 	Name        string
 	Description string
+	Type        string
 	GitURL      string
 	Status      string
 	CreatedAt   time.Time
@@ -100,6 +101,7 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 			ID:          p.ID,
 			Name:        p.Name,
 			Description: p.Description,
+			Type:        p.Type,
 			GitURL:      p.GitURLCanonical,
 			Status:      p.Status,
 			CreatedAt:   p.CreatedAt,

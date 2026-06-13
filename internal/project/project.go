@@ -32,6 +32,7 @@ type Project struct {
 	WorkspaceID     string     `json:"workspace_id"`
 	Name            string     `json:"name"`
 	Description     string     `json:"description,omitempty"`
+	Type            string     `json:"type,omitempty"`
 	GitURLCanonical string     `json:"git_url_canonical,omitempty"`
 	OwnerUserID     string     `json:"owner_user_id,omitempty"`
 	Status          string     `json:"status"`

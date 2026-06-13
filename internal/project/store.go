@@ -128,6 +128,7 @@ func (s *Store) ListByWorkspace(ctx context.Context, workspaceID string) ([]Proj
 type UpdateInput struct {
 	Name        *string
 	Description *string
+	Type        *string
 	GitURL      *string
 }
 
@@ -147,6 +148,10 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 	if in.Description != nil {
 		p.Description = *in.Description
 	}
+	if in.Type != nil {
+		// Opaque freeform — any string accepted; explicit "" clears it.
+		p.Type = *in.Type
+	}
 	if in.GitURL != nil {
 		canon, err := CanonicaliseGitRemote(*in.GitURL)
 		if err != nil {
@@ -157,9 +162,9 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 	p.UpdatedAt = now
 	if _, err := s.DB.ExecContext(ctx, `
         UPDATE projects
-        SET name = $1, description = $2, git_url_canonical = $3, updated_at = $4
-        WHERE id = $5
-    `, p.Name, p.Description, p.GitURLCanonical, now, id); err != nil {
+        SET name = $1, description = $2, type = $3, git_url_canonical = $4, updated_at = $5
+        WHERE id = $6
+    `, p.Name, p.Description, p.Type, p.GitURLCanonical, now, id); err != nil {
 		return Project{}, fmt.Errorf("project: update: %w", err)
 	}
 	// git_url may have changed above; recompute the derived non_repo signal.
@@ -195,7 +200,7 @@ func (s *Store) SetWorkspace(ctx context.Context, id, newWorkspaceID string, now
 	return s.GetByID(ctx, id)
 }
 
-const selectColumns = `SELECT id, workspace_id, name, description,
+const selectColumns = `SELECT id, workspace_id, name, description, type,
     git_url_canonical, owner_user_id, status, created_at, updated_at,
     seed_md, seed_updated_at`
 
@@ -209,7 +214,7 @@ func scanCommon(s rowScanner) (Project, error) {
 		owner     sql.NullString
 		seedAtRow sql.NullTime
 	)
-	if err := s.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description,
+	if err := s.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description, &p.Type,
 		&p.GitURLCanonical, &owner, &p.Status, &p.CreatedAt, &p.UpdatedAt,
 		&p.SeedMD, &seedAtRow); err != nil {
 		return Project{}, err

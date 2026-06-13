@@ -57,6 +57,7 @@ type ProjectUpdateRequest struct {
 	ID          string  `json:"id"`
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	Type        *string `json:"type,omitempty"`
 	GitURL      *string `json:"git_url,omitempty"`
 	// WorkspaceID, when supplied and different from the project's current home,
 	// re-homes the project's single writable workspace (sty_896cebb1). This is
@@ -277,6 +278,7 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 	p, err := projectStore.Update(ctx, req.ID, project.UpdateInput{
 		Name:        req.Name,
 		Description: req.Description,
+		Type:        req.Type,
 		GitURL:      req.GitURL,
 	}, now)
 	if err != nil {

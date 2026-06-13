@@ -151,7 +151,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 		data := projectDetailData{
 			Title: pj.Name + " · projects · satellites",
 			Project: projectRow{
-				ID: pj.ID, Name: pj.Name, Description: pj.Description,
+				ID: pj.ID, Name: pj.Name, Description: pj.Description, Type: pj.Type,
 				GitURL: pj.GitURLCanonical, Status: pj.Status, CreatedAt: pj.CreatedAt,
 			},
 			UserEmail:     userEmail,
@@ -376,6 +376,7 @@ type projectDetailRow struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
+	Type            string    `json:"type"`
 	GitURLCanonical string    `json:"git_url_canonical"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`

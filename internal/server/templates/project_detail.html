@@ -39,6 +39,7 @@
     {{if .Project.Description}}<p class="project-card-desc">{{.Project.Description}}</p>{{end}}
     <dl class="project-card-meta">
       <dt>ID</dt><dd>{{.Project.ID}}</dd>
+      {{if .Project.Type}}<dt>TYPE</dt><dd data-field="project-type">{{.Project.Type}}</dd>{{end}}
       {{if .Project.GitURL}}<dt>GIT</dt><dd>{{.Project.GitURL}}</dd>{{end}}
       <dt>CREATED</dt><dd>{{.Project.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
     </dl>
