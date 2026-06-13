@@ -455,6 +455,7 @@ func main() {
 			embed.NewChunkStore(sqlDB), docStore, wsStore,
 			cfg.Embedding.ChunkMaxTokens, cfg.Embedding.ChunkOverlap,
 		)
+		verb.SetEmbedService(embedSvc) // semantic_search dispatches through this (sty_e8db6032)
 		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
 		arbor.Info("embedding worker started", "model", cfg.Embedding.Model, "dim", cfg.Embedding.Dimension)
 	} else {

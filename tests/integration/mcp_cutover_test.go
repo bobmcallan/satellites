@@ -77,6 +77,7 @@ func TestMCPCutover(t *testing.T) {
 			"project_match", "project_create", "project_list", "project_get", "project_update",
 			"apikey_create", "apikey_list", "apikey_revoke",
 			"changelog_add", "changelog_list", "changelog_update", "changelog_delete",
+			"semantic_search",
 			"system_status",
 		}
 		if len(tools) != len(want) {

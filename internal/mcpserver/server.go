@@ -67,6 +67,7 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"changelog_list":   typedSchema[verb.ChangelogListRequest](),
 	"changelog_update": typedSchema[verb.ChangelogUpdateRequest](),
 	"changelog_delete": typedSchema[verb.ChangelogDeleteRequest](),
+	"semantic_search":  typedSchema[verb.SemanticSearchRequest](),
 	"system_status":    typedSchema[verb.SystemStatusRequest](),
 }
 
@@ -199,6 +200,7 @@ var exposedVerbs = []string{
 	"changelog_list",
 	"changelog_update",
 	"changelog_delete",
+	"semantic_search",
 	"system_status",
 }
 

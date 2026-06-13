@@ -67,6 +67,7 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 		"changelog_list":   true,
 		"changelog_update": true,
 		"changelog_delete": true,
+		"semantic_search":  true,
 		"system_status":    true,
 	}
 	if len(tools) != len(want) {
