@@ -953,6 +953,11 @@ func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessag
 		}
 		wsID = p.WorkspaceID
 	}
+	// A story cannot be created under a terminal (done/cancelled) epic — reopen
+	// the epic first (sty_d43af8dc). A missing/non-terminal parent is unaffected.
+	if reason := refuseTerminalEpicParent(ctx, strDeref(req.ParentID)); reason != "" {
+		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
+	}
 	in := document.CreateStoryInput{
 		ProjectID:          req.ProjectID,
 		WorkspaceID:        wsID,
@@ -1051,6 +1056,13 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if reason := epicReparentRefusal(d.Status, d.ParentID, req.ParentID); reason != "" {
 		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
 	}
+	// ...and never re-parent INTO a terminal epic — even a backlog/ready story the
+	// freeze guard above permits (sty_d43af8dc).
+	if req.ParentID != nil && *req.ParentID != d.ParentID {
+		if reason := refuseTerminalEpicParent(ctx, *req.ParentID); reason != "" {
+			return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
+		}
+	}
 	// Status on document_upsert is honoured only for a non-api-key caller — the
 	// portal UI's JWT session, or an in-process call. An api-key caller (the
 	// agent over MCP/exec, or the gate's minted reviewer key) gets the field
@@ -1115,6 +1127,39 @@ func epicReparentRefusal(currentStatus, currentParent string, newParent *string)
 	default:
 		return fmt.Sprintf("epic membership is frozen once a story has started (status=%s) — reopen it to backlog/ready before re-parenting", currentStatus)
 	}
+}
+
+// epicChildRefusal reports whether a story may be attached to a parent epic with
+// the given status, returning a refusal reason or "". A terminal epic (done or
+// cancelled) cannot acquire new children — it reached done only because every
+// child was terminal (satellites-parent-close-review), so a new child would
+// silently reopen finished work. A missing parent (parentFound == false) is left
+// to the reviewer's missing-parent finding — write-time referential integrity is
+// intentionally not enforced (sty_d43af8dc).
+func epicChildRefusal(parentStatus string, parentFound bool) string {
+	if !parentFound {
+		return ""
+	}
+	switch parentStatus {
+	case "done", "cancelled":
+		return fmt.Sprintf("cannot attach a story to a %s epic — reopen it (e.g. satellites story set-status <epic> backlog) before adding children", parentStatus)
+	default:
+		return ""
+	}
+}
+
+// refuseTerminalEpicParent loads parentID and applies epicChildRefusal. An empty
+// id, or a parent that cannot be loaded, yields "" (fail open to the existing
+// verbatim-parent behaviour); only an existing terminal parent is refused.
+func refuseTerminalEpicParent(ctx context.Context, parentID string) string {
+	if strings.TrimSpace(parentID) == "" {
+		return ""
+	}
+	p, _, err := documentStore.GetByIDWithLatestBody(ctx, parentID)
+	if err != nil {
+		return ""
+	}
+	return epicChildRefusal(p.Status, true)
 }
 
 func strDeref(p *string) string {

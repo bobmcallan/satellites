@@ -50,6 +50,37 @@ func TestEpicReparentRefusal(t *testing.T) {
 	}
 }
 
+// TestEpicChildRefusal pins sty_d43af8dc: a story may not be attached to a
+// terminal (done/cancelled) epic anchor; a non-terminal or missing parent is
+// unaffected.
+func TestEpicChildRefusal(t *testing.T) {
+	cases := []struct {
+		status      string
+		found       bool
+		wantRefused bool
+	}{
+		{"done", true, true},
+		{"cancelled", true, true},
+		{"backlog", true, false},
+		{"ready", true, false},
+		{"in_progress", true, false},
+		{"done", false, false}, // missing parent → not this guard's concern
+		{"cancelled", false, false},
+	}
+	for _, c := range cases {
+		reason := epicChildRefusal(c.status, c.found)
+		if c.wantRefused && reason == "" {
+			t.Errorf("status=%q found=%v: expected refusal, got allowed", c.status, c.found)
+		}
+		if !c.wantRefused && reason != "" {
+			t.Errorf("status=%q found=%v: expected allowed, got refusal: %q", c.status, c.found, reason)
+		}
+		if c.wantRefused && !strings.Contains(reason, "reopen it") {
+			t.Errorf("refusal must point at reopening, got: %q", reason)
+		}
+	}
+}
+
 // TestDocumentUpsert_MCPRefusesContentWrites pins sty_f302bd8b AC3: an
 // operational document/skill content upsert arriving over the MCP transport is
 // refused (ErrForbidden) with a CLI pointer, before any store write — so the
