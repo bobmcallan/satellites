@@ -50,8 +50,11 @@ type BlobRef struct {
 type StoreBlobFunc func(ctx context.Context, up BlobUpload) (BlobRef, error)
 
 // BlobContent is a stored blob's original bytes plus the metadata needed to
-// serve it back as an attachment.
+// serve it back as an attachment. WorkspaceID lets the workspace download route
+// verify the blob belongs to the path workspace (sty_3c2f02bf), mirroring the
+// project route's ProjectID match.
 type BlobContent struct {
+	WorkspaceID string
 	ProjectID   string
 	Filename    string
 	ContentType string

@@ -43,6 +43,23 @@
     <p class="empty" data-field="objective-placeholder">No objective yet — synthesized from the workspace corpus once embeddings land (epic:workspace-engagement).</p>
   </section>
 
+  <section class="panel" data-section="documents">
+    <div class="panel-header">
+      <h2>documents</h2>
+    </div>
+
+    {{if .Documents}}
+    <dl class="metadata" data-field="workspace-docs">
+      {{range .Documents}}
+      <dt><span data-field="workspace-doc-row" data-doc-name="{{.Name}}">{{.Name}}</span></dt>
+      <dd>{{.UpdatedAt.Format "2006-01-02 15:04 MST"}}</dd>
+      {{end}}
+    </dl>
+    {{else}}
+    <p class="empty" data-field="workspace-docs-empty">No documents yet. Upload to the workspace corpus to populate it.</p>
+    {{end}}
+  </section>
+
   <section class="panel" data-section="workspace-projects">
     <div class="panel-header">
       <h2>repos</h2>

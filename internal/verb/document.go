@@ -618,6 +618,12 @@ func authorizeRead(ctx context.Context, key document.Key) error {
 	if wsID == "" {
 		return fmt.Errorf("document_get: %w: %s scope requires workspace_id", ErrBadRequest, key.Scope)
 	}
+	// Global admin is admin everywhere (docs/project-rbac.md) — it may read any
+	// workspace's documents without an explicit membership row, the same
+	// inheritance the project path grants via effectiveProjectRole (sty_3c2f02bf).
+	if callerIsGlobalAdmin(ctx) {
+		return nil
+	}
 	if _, err := workspaceStore.GetRole(ctx, wsID, u.ID); err != nil {
 		if errors.Is(err, workspace.ErrMemberNotFound) {
 			return fmt.Errorf("document_get: %w: user not a member of workspace %s", ErrForbidden, wsID)
@@ -728,6 +734,11 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID, pjID st
 	}
 	if wsID == "" {
 		return fmt.Errorf("document_list: %w: %s scope requires workspace_id", ErrBadRequest, scope)
+	}
+	// Global admin is admin everywhere (docs/project-rbac.md) — it may list any
+	// workspace's documents without an explicit membership row (sty_3c2f02bf).
+	if callerIsGlobalAdmin(ctx) {
+		return nil
 	}
 	if _, err := workspaceStore.GetRole(ctx, wsID, u.ID); err != nil {
 		if errors.Is(err, workspace.ErrMemberNotFound) {

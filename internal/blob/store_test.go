@@ -23,9 +23,10 @@ func TestCreate_Validation(t *testing.T) {
 	if _, err := s.Create(context.Background(), CreateInput{ProjectID: "p"}, []byte("x"), now); err == nil {
 		t.Error("missing workspace_id should error before DB use")
 	}
-	if _, err := s.Create(context.Background(), CreateInput{WorkspaceID: "w"}, []byte("x"), now); err == nil {
-		t.Error("missing project_id should error before DB use")
-	}
+	// project_id is optional (workspace-corpus blob, sty_3c2f02bf): a
+	// workspace-only input passes validation and proceeds to DB use — with a
+	// nil DB that panics rather than returning the validation error, so we only
+	// assert the empty-content guard below still fires before any DB access.
 	if _, err := s.Create(context.Background(), CreateInput{WorkspaceID: "w", ProjectID: "p"}, nil, now); err == nil {
 		t.Error("empty content should error before DB use")
 	}

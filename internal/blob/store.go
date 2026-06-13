@@ -53,11 +53,14 @@ type CreateInput struct {
 }
 
 // Create stores content as a new blob, computing its sha256 and size, and
-// returns the persisted metadata. workspace_id, project_id, and non-empty
-// content are required — validated before any DB use.
+// returns the persisted metadata. workspace_id and non-empty content are
+// required — validated before any DB use. project_id is optional: an empty
+// project_id is a workspace-corpus blob (the engagement's documents, not a
+// repo attachment — sty_3c2f02bf); the column is NOT NULL DEFAULT ” so ”
+// stores cleanly.
 func (s *Store) Create(ctx context.Context, in CreateInput, content []byte, now time.Time) (Blob, error) {
-	if in.WorkspaceID == "" || in.ProjectID == "" {
-		return Blob{}, fmt.Errorf("blob: workspace_id and project_id required")
+	if in.WorkspaceID == "" {
+		return Blob{}, fmt.Errorf("blob: workspace_id required")
 	}
 	if len(content) == 0 {
 		return Blob{}, fmt.Errorf("blob: empty content")

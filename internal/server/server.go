@@ -141,6 +141,16 @@ func Build(cfg Config) http.Handler {
 	// "/workspaces/" (trailing slash) catches the detail path under Go 1.22
 	// pattern precedence, exactly as "/projects/" does.
 	mux.HandleFunc("/workspaces", workspacesHandler(cfg))
+	// Workspace-corpus blob ingestion (sty_3c2f02bf): multipart upload +
+	// download into the workspace (no project). Bearer-gated like the project
+	// blob routes; more specific than "/workspaces/" so they win under Go 1.22
+	// pattern precedence. Registered only when the blob store is wired.
+	if cfg.StoreBlob != nil {
+		mux.Handle("POST /workspaces/{id}/blobs", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(workspaceBlobUploadHandler(cfg)))))
+	}
+	if cfg.GetBlob != nil {
+		mux.Handle("GET /workspaces/{id}/blobs/{blob}", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(workspaceBlobDownloadHandler(cfg)))))
+	}
 	mux.HandleFunc("/workspaces/", workspaceDetailHandler(cfg))
 	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE

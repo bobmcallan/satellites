@@ -21,8 +21,8 @@ import (
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
-	"github.com/bobmcallan/satellites/internal/extract"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
+	"github.com/bobmcallan/satellites/internal/ingest"
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/live"
@@ -466,44 +466,31 @@ func main() {
 		// we persist it through the blob store and hand back the reference. Keeps
 		// internal/blob out of the server package per the layering guard.
 		StoreBlob: func(ctx context.Context, up server.BlobUpload) (server.BlobRef, error) {
-			b, err := blobStore.Create(ctx, blob.CreateInput{
+			// Delegate to the shared ingest path (sty_3c2f02bf): persist the
+			// blob + extract a text document — project-scoped when a project is
+			// named, else workspace-corpus scoped. The integration tests
+			// exercise the identical function.
+			ref, err := ingest.StoreBlobAndExtract(ctx, blobStore, docStore, ingest.Upload{
 				WorkspaceID: up.WorkspaceID,
 				ProjectID:   up.ProjectID,
 				Filename:    up.Filename,
 				ContentType: up.ContentType,
 				CreatedBy:   up.CreatedBy,
-			}, up.Content, time.Now().UTC())
+				Content:     up.Content,
+			})
 			if err != nil {
 				return server.BlobRef{}, err
 			}
-			ref := server.BlobRef{
-				ID:          b.ID,
-				ProjectID:   b.ProjectID,
-				Filename:    b.Filename,
-				ContentType: b.ContentType,
-				SizeBytes:   b.SizeBytes,
-				SHA256:      b.SHA256,
-			}
-			// Extract text → a project text document that retains a pointer to
-			// the blob (sty_52c2393f). Best-effort: a failure never fails the
-			// upload, the original blob is already retained.
-			if text, ok := extract.Text(up.Filename, up.ContentType, up.Content); ok {
-				body := fmt.Sprintf("# %s\n\n> Extracted from attachment `%s` (%s, %d bytes). Original: GET /projects/%s/blobs/%s\n\n%s",
-					b.Filename, b.ID, b.ContentType, b.SizeBytes, b.ProjectID, b.ID, text)
-				doc, _, derr := docStore.Upsert(ctx, document.UpsertInput{
-					Key:       document.Key{Scope: document.ScopeProject, WorkspaceID: up.WorkspaceID, ProjectID: up.ProjectID, Name: "attachment-" + b.ID},
-					Type:      document.TypeDocument,
-					Body:      body,
-					CreatedBy: up.CreatedBy,
-				}, time.Now().UTC())
-				if derr != nil {
-					arbor.WarnCtx(ctx, "blob extract: create document", "blob_id", b.ID, "err", derr)
-				} else {
-					ref.DocumentID = doc.ID
-					ref.Extracted = true
-				}
-			}
-			return ref, nil
+			return server.BlobRef{
+				ID:          ref.ID,
+				ProjectID:   ref.ProjectID,
+				Filename:    ref.Filename,
+				ContentType: ref.ContentType,
+				SizeBytes:   ref.SizeBytes,
+				SHA256:      ref.SHA256,
+				DocumentID:  ref.DocumentID,
+				Extracted:   ref.Extracted,
+			}, nil
 		},
 		GetBlob: func(ctx context.Context, blobID string) (server.BlobContent, error) {
 			b, content, err := blobStore.GetContent(ctx, blobID)
@@ -511,6 +498,7 @@ func main() {
 				return server.BlobContent{}, err
 			}
 			return server.BlobContent{
+				WorkspaceID: b.WorkspaceID,
 				ProjectID:   b.ProjectID,
 				Filename:    b.Filename,
 				ContentType: b.ContentType,

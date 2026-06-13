@@ -23,6 +23,7 @@ type workspaceDetailData struct {
 	Workspace   workspaceRow
 	SeedMD      string
 	Projects    []workspaceProjectRow
+	Documents   []workspaceDocRow
 	DevMode     bool
 	FooterName  string
 	FooterEmail string
@@ -37,6 +38,14 @@ type workspaceProjectRow struct {
 	Description string
 	Status      string
 	Role        string
+}
+
+// workspaceDocRow is one workspace-scoped document (the engagement corpus)
+// rendered in the page's documents section.
+type workspaceDocRow struct {
+	ID        string
+	Name      string
+	UpdatedAt time.Time
 }
 
 // workspaceDetailRow is the local shape this handler needs from workspace_get.
@@ -108,6 +117,24 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			})
 		}
 
+		// Workspace corpus: the workspace-scoped documents (sty_3c2f02bf).
+		// Best-effort — a list error leaves the section empty rather than
+		// failing the page.
+		var docs []workspaceDocRow
+		dlReq, _ := json.Marshal(verb.DocumentListRequest{
+			Scope: "workspace", WorkspaceID: wsID, Type: "document", Limit: 200,
+		})
+		if dlResp, err := verb.Dispatch(ctx, "document_list", dlReq); err != nil {
+			arbor.WarnCtx(ctx, "workspace_detail: document_list", "id", wsID, "err", err)
+		} else {
+			var dl verb.DocumentListResponse
+			if err := json.Unmarshal(dlResp, &dl); err == nil {
+				for _, d := range dl.Items {
+					docs = append(docs, workspaceDocRow{ID: d.ID, Name: d.Name, UpdatedAt: d.UpdatedAt})
+				}
+			}
+		}
+
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -125,6 +152,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			},
 			SeedMD:      ws.SeedMD,
 			Projects:    projects,
+			Documents:   docs,
 			UserEmail:   userEmail,
 			UserName:    userName,
 			UserAvatar:  userAvatar,
