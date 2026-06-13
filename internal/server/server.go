@@ -151,6 +151,13 @@ func Build(cfg Config) http.Handler {
 	if cfg.GetBlob != nil {
 		mux.Handle("GET /workspaces/{id}/blobs/{blob}", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(workspaceBlobDownloadHandler(cfg)))))
 	}
+	// Portal add-document control (sty_5d97b972): session-authenticated upload
+	// into the workspace corpus, reusing the same ingestion path as the
+	// Bearer-gated /blobs route. More specific than "/workspaces/" so it wins
+	// under Go 1.22 pattern precedence; registered only when the blob store is wired.
+	if cfg.StoreBlob != nil {
+		mux.HandleFunc("POST /workspaces/{id}/documents", workspaceDocumentUploadHandler(cfg))
+	}
 	mux.HandleFunc("/workspaces/", workspaceDetailHandler(cfg))
 	// Live trace fragment (sty_96cc0ade) — more specific than /stories/ so it
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE

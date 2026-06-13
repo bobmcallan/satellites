@@ -37,6 +37,14 @@ func Text(filename, contentType string, content []byte) (string, bool) {
 	}
 }
 
+// Supported reports whether a filename/content-type is an extractable document
+// type (PDF or plain text/markdown) — the same set Text can turn into corpus
+// text. A caller can pre-check this to reject an unsupported upload before
+// storing a blob that would yield no document (sty_5d97b972).
+func Supported(filename, contentType string) bool {
+	return isPDF(filename, contentType) || isPlainText(filename, contentType)
+}
+
 func isPDF(filename, contentType string) bool {
 	return strings.Contains(strings.ToLower(contentType), "pdf") ||
 		strings.HasSuffix(strings.ToLower(filename), ".pdf")

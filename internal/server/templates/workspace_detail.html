@@ -78,8 +78,15 @@
       {{end}}
     </dl>
     {{else}}
-    <p class="empty" data-field="workspace-docs-empty">No documents yet. Upload to the workspace corpus to populate it.</p>
+    <p class="empty" data-field="workspace-docs-empty">No documents yet — add one to the workspace corpus below.</p>
     {{end}}
+
+    <div class="dropzone" data-field="doc-upload" data-workspace-id="{{.Workspace.ID}}" role="button" tabindex="0">
+      <span data-field="doc-dropzone-label">Drop a PDF or text/markdown file here, or</span>
+      <button type="button" class="btn secondary" data-action="doc-browse">Browse…</button>
+      <input type="file" data-field="doc-file-input" accept=".pdf,.txt,.md,.markdown,.csv,.log,text/*,application/pdf" hidden>
+    </div>
+    <p class="empty" data-field="doc-upload-error" hidden></p>
   </section>
 
   <section class="panel" data-section="workspace-projects">
@@ -139,6 +146,56 @@
   <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
   <span class="footer-version" data-field="footer-version">{{.Version}}</span>
 </footer>
+
+<script>
+// Workspace corpus document upload (sty_5d97b972): drag-drop + browse, posting
+// to the session-authenticated /workspaces/{id}/documents route and reloading
+// so the new document appears in the panel. Inline per portal convention.
+(function () {
+  var root = document.querySelector('[data-field="doc-upload"]');
+  if (!root) return;
+  var wsID = root.dataset.workspaceId;
+  var input = root.querySelector('[data-field="doc-file-input"]');
+  var browse = root.querySelector('[data-action="doc-browse"]');
+  var err = document.querySelector('[data-field="doc-upload-error"]');
+
+  function showErr(msg) { if (err) { err.textContent = msg; err.hidden = false; } }
+  function clearErr() { if (err) { err.textContent = ''; err.hidden = true; } }
+
+  function upload(file) {
+    if (!file) return;
+    clearErr();
+    root.classList.add('uploading');
+    var form = new FormData();
+    form.append('file', file);
+    fetch('/workspaces/' + encodeURIComponent(wsID) + '/documents', {
+      method: 'POST', body: form, credentials: 'same-origin'
+    }).then(function (resp) {
+      if (resp.ok) { window.location.reload(); return; }
+      return resp.text().then(function (t) {
+        showErr((t && t.trim()) || ('Upload failed (' + resp.status + ')'));
+        root.classList.remove('uploading');
+      });
+    }).catch(function (e) {
+      showErr('Upload failed: ' + e.message);
+      root.classList.remove('uploading');
+    });
+  }
+
+  browse.addEventListener('click', function () { input.click(); });
+  input.addEventListener('change', function () {
+    if (input.files.length) upload(input.files[0]);
+    input.value = '';
+  });
+  root.addEventListener('dragover', function (e) { e.preventDefault(); root.classList.add('dragging'); });
+  root.addEventListener('dragleave', function (e) { e.preventDefault(); root.classList.remove('dragging'); });
+  root.addEventListener('drop', function (e) {
+    e.preventDefault();
+    root.classList.remove('dragging');
+    if (e.dataTransfer.files.length) upload(e.dataTransfer.files[0]);
+  });
+})();
+</script>
 
 </body>
 </html>

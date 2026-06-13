@@ -19,7 +19,10 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/auth"
+	"github.com/bobmcallan/satellites/internal/blob"
 	"github.com/bobmcallan/satellites/internal/db"
+	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/ingest"
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -130,6 +133,10 @@ func SetUpWithServer(t *testing.T) *ServerEnv {
 	// claim) so login paths behave as they do on the server (sty_480dba9b).
 	wsStore := workspace.New(base.DB)
 	invStore := invitation.New(base.DB)
+	// Mirror the production binary-ingestion wiring (cmd/satellites-server) so the
+	// blob/document upload routes register and behave identically in tests.
+	blobStore := blob.New(base.DB)
+	docStore := document.New(base.DB)
 	handler := server.Build(server.Config{
 		Store:   store,
 		DevMode: true,
@@ -139,6 +146,42 @@ func SetUpWithServer(t *testing.T) *ServerEnv {
 			}
 			_, err := invStore.ClaimForEmail(ctx, email, userID, time.Now().UTC())
 			return err
+		},
+		StoreBlob: func(ctx context.Context, up server.BlobUpload) (server.BlobRef, error) {
+			ref, err := ingest.StoreBlobAndExtract(ctx, blobStore, docStore, ingest.Upload{
+				WorkspaceID: up.WorkspaceID,
+				ProjectID:   up.ProjectID,
+				Filename:    up.Filename,
+				ContentType: up.ContentType,
+				CreatedBy:   up.CreatedBy,
+				Content:     up.Content,
+			})
+			if err != nil {
+				return server.BlobRef{}, err
+			}
+			return server.BlobRef{
+				ID:          ref.ID,
+				ProjectID:   ref.ProjectID,
+				Filename:    ref.Filename,
+				ContentType: ref.ContentType,
+				SizeBytes:   ref.SizeBytes,
+				SHA256:      ref.SHA256,
+				DocumentID:  ref.DocumentID,
+				Extracted:   ref.Extracted,
+			}, nil
+		},
+		GetBlob: func(ctx context.Context, blobID string) (server.BlobContent, error) {
+			b, content, err := blobStore.GetContent(ctx, blobID)
+			if err != nil {
+				return server.BlobContent{}, err
+			}
+			return server.BlobContent{
+				WorkspaceID: b.WorkspaceID,
+				ProjectID:   b.ProjectID,
+				Filename:    b.Filename,
+				ContentType: b.ContentType,
+				Content:     content,
+			}, nil
 		},
 	})
 	srv := httptest.NewServer(handler)
