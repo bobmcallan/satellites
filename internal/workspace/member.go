@@ -167,6 +167,28 @@ func (s *Store) ListWorkspaceIDsForUser(ctx context.Context, userID string) ([]s
 	return out, rows.Err()
 }
 
+// HasAdminRole reports whether the user holds an owner or admin role on ANY
+// workspace. It backs the coarse "workspace-admin" MCP surface tier: a caller
+// who can administer some workspace sees the workspace-admin verbs (the verb's
+// own per-workspace check is the fine-grained call-time gate). An empty userID
+// is never an admin.
+func (s *Store) HasAdminRole(ctx context.Context, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, `
+        SELECT EXISTS(
+            SELECT 1 FROM workspace_members
+            WHERE user_id = $1 AND role IN ('owner', 'admin')
+        )
+    `, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("workspace: has admin role: %w", err)
+	}
+	return exists, nil
+}
+
 // GetRole returns the member's role on the workspace, or
 // ErrMemberNotFound.
 func (s *Store) GetRole(ctx context.Context, workspaceID, userID string) (string, error) {

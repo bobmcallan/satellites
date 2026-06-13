@@ -36,6 +36,12 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 // to register a missing project without shelling out to the CLI. The
 // entry was lifted deliberately; see exposedVerbs in server.go.
 //
+// The workspace_member_* verbs were likewise lifted by sty_5ee95426
+// (epic:workspace-admin): membership administration is now an MCP surface,
+// but role-scoped — the write verbs (add/update_role/remove) carry
+// verb.MCPRoleWorkspaceAdmin so they are listed and dispatchable only for a
+// caller who can administer some workspace; workspace_member_list is base.
+//
 // If one of these names appears in exposedVerbs, the change is almost
 // certainly a mistake. Lift the denylist explicitly with a follow-up
 // story rather than relaxing this test.
@@ -43,7 +49,6 @@ func TestExposedVerbsDoNotIncludeCLIOnlyVerbs(t *testing.T) {
 	deny := []string{
 		"variable_get", "variable_set", "variable_list", "variable_delete",
 		"workspace_create", "workspace_list", "workspace_get", "workspace_delete", "workspace_personal",
-		"workspace_member_add", "workspace_member_remove", "workspace_member_list", "workspace_member_update",
 		"project_member_add", "project_member_remove", "project_member_list", "project_member_update_role", "project_access",
 		"invitation_create", "invitation_list", "invitation_revoke",
 		"ledger_append", "ledger_list",

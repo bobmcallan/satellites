@@ -18,11 +18,28 @@ import (
 	"sync"
 )
 
+// MCPRole declares the resolved-role tier a verb requires on the MCP
+// surface. It is the SINGLE source of truth read by both the tools/list
+// responder (visibility) and the dispatcher (call-time enforcement) —
+// visibility is not authz, so both consult the same field. The empty
+// string is the base/public tier every authed caller may see and call.
+const (
+	// MCPRoleWorkspaceAdmin gates a verb to a caller who is a platform
+	// admin OR owner/admin of some workspace. The coarse "some workspace"
+	// check governs listing; a verb's own per-workspace check
+	// (canManageWorkspace) remains the fine-grained call-time gate.
+	MCPRoleWorkspaceAdmin = "workspace-admin"
+)
+
 // Verb is a named entry in the dispatch registry.
 type Verb struct {
 	Name        string
 	Description string
 	Invoke      func(ctx context.Context, req json.RawMessage) (json.RawMessage, error)
+	// MCPRole is the role tier this verb requires on the MCP surface
+	// (see the MCPRole* constants). "" = base/public. Read by both the
+	// tools/list filter and the dispatch-time gate.
+	MCPRole string
 }
 
 var (

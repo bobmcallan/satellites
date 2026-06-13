@@ -216,6 +216,39 @@ func callerIsGlobalAdmin(ctx context.Context) bool {
 	return u != nil && u.Role == auth.RoleAdmin
 }
 
+// CallerMeetsMCPRole reports whether the caller's resolved role satisfies the
+// required MCP role tier. It is the single resolver the MCP surface consults
+// from BOTH the tools/list filter (visibility) and the dispatch gate
+// (call-time enforcement), so the two can never diverge. Fail closed: an
+// unknown tier, an unauthenticated/unresolvable caller, or an unwired store
+// all resolve to false for any non-base tier.
+func CallerMeetsMCPRole(ctx context.Context, required string) bool {
+	switch required {
+	case "":
+		return true // base/public surface
+	case MCPRoleWorkspaceAdmin:
+		// Honour an agent-role downscope (sty_3a1374b5): a session capped below
+		// admin, or scoped to specific projects, is not acting on an admin
+		// surface — mirror canManageWorkspace so listing and dispatch agree.
+		if cap, ok := auth.AgentRoleFromContext(ctx); ok {
+			if projectRoleRank(cap.Role) < projectRoleRank(project.RoleAdmin) || len(cap.Projects) > 0 {
+				return false
+			}
+		}
+		if callerIsGlobalAdmin(ctx) {
+			return true
+		}
+		u := auth.FromContext(ctx)
+		if u == nil || workspaceStore == nil {
+			return false
+		}
+		ok, err := workspaceStore.HasAdminRole(ctx, u.ID)
+		return err == nil && ok
+	default:
+		return false // unrecognised tier — fail closed
+	}
+}
+
 // isWorkspaceMember reports whether the caller is a global admin or any member
 // of wsID. Gates read-only workspace surfaces (e.g. the member roster).
 func isWorkspaceMember(ctx context.Context, wsID string) bool {

@@ -9,6 +9,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/bobmcallan/satellites/config/documents"
@@ -69,6 +70,10 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"changelog_delete":             typedSchema[verb.ChangelogDeleteRequest](),
 	"semantic_search":              typedSchema[verb.SemanticSearchRequest](),
 	"workspace_objective_generate": typedSchema[verb.WorkspaceObjectiveGenerateRequest](),
+	"workspace_member_add":         typedSchema[verb.WorkspaceMemberAddRequest](),
+	"workspace_member_list":        typedSchema[verb.WorkspaceMemberListRequest](),
+	"workspace_member_update_role": typedSchema[verb.WorkspaceMemberUpdateRequest](),
+	"workspace_member_remove":      typedSchema[verb.WorkspaceMemberRemoveRequest](),
 	"system_status":                typedSchema[verb.SystemStatusRequest](),
 }
 
@@ -176,6 +181,11 @@ var orientationInstructions = string(documents.MCPLoadContextMarkdown())
 //     build, substrate DB reachability, uptime). A sanctioned exception
 //     to no-new-mcp-verbs (introspection, not substrate CRUD, no
 //     document_* equivalent); see that principle (sty_a847fd3f).
+//   - workspace_member_add / _update_role / _remove: workspace-admin
+//     membership grants, role-scoped (verb.MCPRoleWorkspaceAdmin) so they
+//     are listed and dispatchable only for a caller who can administer some
+//     workspace; workspace_member_list is base-tier. The surface is filtered
+//     per-caller by WithToolFilter and re-enforced at dispatch (sty_5ee95426).
 //
 // Stories are documents with type='story' post-unification (sty_0dd71f79);
 // there are no story_* verbs on the surface. The CLI offers no typed
@@ -203,6 +213,10 @@ var exposedVerbs = []string{
 	"changelog_delete",
 	"semantic_search",
 	"workspace_objective_generate",
+	"workspace_member_add",
+	"workspace_member_list",
+	"workspace_member_update_role",
+	"workspace_member_remove",
 	"system_status",
 }
 
@@ -222,7 +236,22 @@ func New() *mcpserver.MCPServer {
 	instructions := buildOrientationInstructions(context.Background())
 	s := mcpserver.NewMCPServer("satellites", verb.Version,
 		mcpserver.WithInstructions(instructions),
+		// Advertise tools.listChanged so a role-change broadcast prompts a
+		// connected client to re-list its role-filtered surface.
+		mcpserver.WithToolCapabilities(true),
+		// Role-scope the advertised surface: drop any verb whose declared
+		// MCPRole the per-request caller does not meet. The ctx carries the
+		// authed identity (auth middleware). Visibility only — dispatch
+		// re-enforces the same declaration below (sty_5ee95426).
+		mcpserver.WithToolFilter(roleFilter),
 	)
+
+	// Bind the verb layer's list-changed notifier to a broadcast so a grant
+	// change (workspace membership add/update/remove) nudges connected clients
+	// to re-list. A stale cached list still fails closed at dispatch.
+	verb.SetToolsListChangedNotifier(func() {
+		s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+	})
 
 	for _, name := range exposedVerbs {
 		v := verb.Get(name)
@@ -234,9 +263,17 @@ func New() *mcpserver.MCPServer {
 			panic("mcpserver: exposed verb " + name + " missing input schema")
 		}
 		dispatched := name
+		requiredRole := v.MCPRole
 		s.AddTool(
 			mcp.NewTool(name, mcp.WithDescription(v.Description), schema),
 			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				// Call-time enforcement, independent of listing (sty_5ee95426):
+				// refuse the verb's declared role tier even if the caller
+				// crafted the call without it appearing in their list.
+				if !verb.CallerMeetsMCPRole(ctx, requiredRole) {
+					return mcp.NewToolResultError(fmt.Sprintf(
+						"%s: forbidden: requires %s role", dispatched, requiredRole)), nil
+				}
 				argsJSON, err := json.Marshal(req.GetArguments())
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
@@ -254,6 +291,23 @@ func New() *mcpserver.MCPServer {
 		)
 	}
 	return s
+}
+
+// roleFilter drops every tool whose declared MCPRole the per-request caller
+// does not meet, computed from the authed identity on ctx. It is the
+// discovery/UX half of the role-scoped surface; the dispatch gate in New()
+// re-enforces the same per-verb declaration so visibility is never authority.
+// An unknown tool name (no registry entry) is dropped, fail-closed.
+func roleFilter(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
+	out := tools[:0]
+	for _, t := range tools {
+		v := verb.Get(t.Name)
+		if v == nil || !verb.CallerMeetsMCPRole(ctx, v.MCPRole) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // HTTPHandler returns an http.Handler serving the MCP server over

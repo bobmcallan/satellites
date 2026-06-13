@@ -46,6 +46,7 @@ func init() {
 		Name:        "workspace_member_add",
 		Description: "Add a user to a workspace at the given role (upserts).",
 		Invoke:      invokeWorkspaceMemberAdd,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
 		Name:        "workspace_member_list",
@@ -56,11 +57,13 @@ func init() {
 		Name:        "workspace_member_update_role",
 		Description: "Change a member's role on a workspace.",
 		Invoke:      invokeWorkspaceMemberUpdateRole,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
 		Name:        "workspace_member_remove",
 		Description: "Remove a member from a workspace.",
 		Invoke:      invokeWorkspaceMemberRemove,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 }
 
@@ -94,6 +97,9 @@ func invokeWorkspaceMemberAdd(ctx context.Context, raw json.RawMessage) (json.Ra
 	if err != nil {
 		return nil, err
 	}
+	// A grant change can alter the affected user's role-filtered MCP tool
+	// list — nudge connected clients to re-list (the gate still fails closed).
+	notifyToolsListChanged()
 	return json.Marshal(workspace.Member{
 		WorkspaceID: req.WorkspaceID, UserID: req.UserID, Role: role,
 		AddedAt: time.Now().UTC(), AddedBy: addedBy,
@@ -154,6 +160,7 @@ func invokeWorkspaceMemberUpdateRole(ctx context.Context, raw json.RawMessage) (
 		}
 		return nil, err
 	}
+	notifyToolsListChanged()
 	return json.Marshal(map[string]string{
 		"workspace_id": req.WorkspaceID, "user_id": req.UserID, "role": req.Role,
 	})
@@ -181,6 +188,7 @@ func invokeWorkspaceMemberRemove(ctx context.Context, raw json.RawMessage) (json
 		}
 		return nil, err
 	}
+	notifyToolsListChanged()
 	return json.Marshal(map[string]string{
 		"workspace_id": req.WorkspaceID, "user_id": req.UserID, "removed": "true",
 	})
