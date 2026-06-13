@@ -40,7 +40,11 @@
     <div class="panel-header">
       <h2>objective</h2>
     </div>
-    <p class="empty" data-field="objective-placeholder">No objective yet — synthesized from the workspace corpus once embeddings land (epic:workspace-engagement).</p>
+    {{if .ObjectiveBody}}
+    <div class="objective-body project-card-desc" data-field="objective-body">{{.ObjectiveBody}}</div>
+    {{else}}
+    <p class="empty" data-field="objective-placeholder">No objective yet — generate one from the workspace corpus (`satellites workspace objective &lt;id&gt;` or the workspace_objective_generate MCP tool).</p>
+    {{end}}
   </section>
 
   <section class="panel" data-section="documents">

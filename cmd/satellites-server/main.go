@@ -31,6 +31,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
 	"github.com/bobmcallan/satellites/internal/server"
+	"github.com/bobmcallan/satellites/internal/synth"
 	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -456,6 +457,9 @@ func main() {
 			cfg.Embedding.ChunkMaxTokens, cfg.Embedding.ChunkOverlap,
 		)
 		verb.SetEmbedService(embedSvc) // semantic_search dispatches through this (sty_e8db6032)
+		// Objective synthesis uses Gemini server-side (sty_a0099c04); claude -p
+		// stays the CLI's client-side executor.
+		verb.SetObjectiveService(synth.NewObjectiveService(synth.NewGeminiGenerator(key, ""), docStore))
 		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
 		arbor.Info("embedding worker started", "model", cfg.Embedding.Model, "dim", cfg.Embedding.Dimension)
 	} else {

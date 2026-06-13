@@ -15,20 +15,21 @@ import (
 var workspaceDetailTmpl = template.Must(template.ParseFS(assets, "templates/workspace_detail.html", "templates/_user_menu.html"))
 
 type workspaceDetailData struct {
-	Title       string
-	UserEmail   string
-	UserName    string
-	UserAvatar  string
-	ActiveNav   string
-	Workspace   workspaceRow
-	SeedMD      string
-	Projects    []workspaceProjectRow
-	Mounts      []workspaceMountRow
-	Documents   []workspaceDocRow
-	DevMode     bool
-	FooterName  string
-	FooterEmail string
-	Version     string
+	Title         string
+	UserEmail     string
+	UserName      string
+	UserAvatar    string
+	ActiveNav     string
+	Workspace     workspaceRow
+	SeedMD        string
+	ObjectiveBody string
+	Projects      []workspaceProjectRow
+	Mounts        []workspaceMountRow
+	Documents     []workspaceDocRow
+	DevMode       bool
+	FooterName    string
+	FooterEmail   string
+	Version       string
 }
 
 // workspaceProjectRow is a home repo of the workspace, annotated with the
@@ -126,6 +127,17 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			})
 		}
 
+		// Synthesized objective (sty_a0099c04): the workspace document named
+		// "objective" if present. Best-effort — absence leaves the placeholder.
+		var objectiveBody string
+		objReq, _ := json.Marshal(verb.DocumentGetRequest{Scope: "workspace", WorkspaceID: wsID, Name: "objective"})
+		if objResp, err := verb.Dispatch(ctx, "document_get", objReq); err == nil {
+			var obj verb.DocumentGetResponse
+			if err := json.Unmarshal(objResp, &obj); err == nil {
+				objectiveBody = strings.TrimSpace(obj.RawBody)
+			}
+		}
+
 		// Readonly mounts: repos whose home is elsewhere, referenced here
 		// read-only (sty_1ede3853). Best-effort, like the doc list below.
 		var mounts []workspaceMountRow
@@ -174,18 +186,19 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 				ID: ws.ID, Name: ws.Name, Status: ws.Status,
 				IsDefault: ws.IsDefault, CreatedAt: ws.CreatedAt,
 			},
-			SeedMD:      ws.SeedMD,
-			Projects:    projects,
-			Mounts:      mounts,
-			Documents:   docs,
-			UserEmail:   userEmail,
-			UserName:    userName,
-			UserAvatar:  userAvatar,
-			ActiveNav:   "workspaces",
-			DevMode:     cfg.DevMode,
-			FooterName:  footerName,
-			FooterEmail: footerEmail,
-			Version:     versionString(),
+			SeedMD:        ws.SeedMD,
+			ObjectiveBody: objectiveBody,
+			Projects:      projects,
+			Mounts:        mounts,
+			Documents:     docs,
+			UserEmail:     userEmail,
+			UserName:      userName,
+			UserAvatar:    userAvatar,
+			ActiveNav:     "workspaces",
+			DevMode:       cfg.DevMode,
+			FooterName:    footerName,
+			FooterEmail:   footerEmail,
+			Version:       versionString(),
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

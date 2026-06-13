@@ -50,25 +50,26 @@ func SetInstructionsBudget(n int) {
 // array values — the dispatcher then rejects the call on unmarshal.
 // Reflection-based generation keeps schema and struct in lock-step.
 var inputSchemas = map[string]mcp.ToolOption{
-	"document_get":     typedSchema[verb.DocumentGetRequest](),
-	"document_list":    typedSchema[verb.DocumentListRequest](),
-	"document_count":   typedSchema[verb.DocumentCountRequest](),
-	"document_upsert":  typedSchema[verb.DocumentUpsertRequest](),
-	"document_delete":  typedSchema[verb.DocumentDeleteRequest](),
-	"project_match":    typedSchema[verb.ProjectMatchRequest](),
-	"project_create":   typedSchema[verb.ProjectCreateRequest](),
-	"project_list":     typedSchema[verb.ProjectListRequest](),
-	"project_get":      typedSchema[verb.ProjectGetRequest](),
-	"project_update":   typedSchema[verb.ProjectUpdateRequest](),
-	"apikey_create":    typedSchema[verb.APIKeyCreateRequest](),
-	"apikey_list":      typedSchema[verb.APIKeyListRequest](),
-	"apikey_revoke":    typedSchema[verb.APIKeyRevokeRequest](),
-	"changelog_add":    typedSchema[verb.ChangelogAddRequest](),
-	"changelog_list":   typedSchema[verb.ChangelogListRequest](),
-	"changelog_update": typedSchema[verb.ChangelogUpdateRequest](),
-	"changelog_delete": typedSchema[verb.ChangelogDeleteRequest](),
-	"semantic_search":  typedSchema[verb.SemanticSearchRequest](),
-	"system_status":    typedSchema[verb.SystemStatusRequest](),
+	"document_get":                 typedSchema[verb.DocumentGetRequest](),
+	"document_list":                typedSchema[verb.DocumentListRequest](),
+	"document_count":               typedSchema[verb.DocumentCountRequest](),
+	"document_upsert":              typedSchema[verb.DocumentUpsertRequest](),
+	"document_delete":              typedSchema[verb.DocumentDeleteRequest](),
+	"project_match":                typedSchema[verb.ProjectMatchRequest](),
+	"project_create":               typedSchema[verb.ProjectCreateRequest](),
+	"project_list":                 typedSchema[verb.ProjectListRequest](),
+	"project_get":                  typedSchema[verb.ProjectGetRequest](),
+	"project_update":               typedSchema[verb.ProjectUpdateRequest](),
+	"apikey_create":                typedSchema[verb.APIKeyCreateRequest](),
+	"apikey_list":                  typedSchema[verb.APIKeyListRequest](),
+	"apikey_revoke":                typedSchema[verb.APIKeyRevokeRequest](),
+	"changelog_add":                typedSchema[verb.ChangelogAddRequest](),
+	"changelog_list":               typedSchema[verb.ChangelogListRequest](),
+	"changelog_update":             typedSchema[verb.ChangelogUpdateRequest](),
+	"changelog_delete":             typedSchema[verb.ChangelogDeleteRequest](),
+	"semantic_search":              typedSchema[verb.SemanticSearchRequest](),
+	"workspace_objective_generate": typedSchema[verb.WorkspaceObjectiveGenerateRequest](),
+	"system_status":                typedSchema[verb.SystemStatusRequest](),
 }
 
 // typedSchema generates a JSON Schema from a Go request struct and
@@ -201,6 +202,7 @@ var exposedVerbs = []string{
 	"changelog_update",
 	"changelog_delete",
 	"semantic_search",
+	"workspace_objective_generate",
 	"system_status",
 }
 
