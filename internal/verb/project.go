@@ -58,6 +58,11 @@ type ProjectUpdateRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 	GitURL      *string `json:"git_url,omitempty"`
+	// WorkspaceID, when supplied and different from the project's current home,
+	// re-homes the project's single writable workspace (sty_896cebb1). This is
+	// the patch-convention expression of a home move — it carries a stricter,
+	// two-sided admin authz than the ordinary field patch (see invokeProjectUpdate).
+	WorkspaceID *string `json:"workspace_id,omitempty"`
 }
 
 type ProjectMatchRequest struct {
@@ -248,11 +253,32 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 	if authStore != nil && !effectiveProjectRoleAtLeast(ctx, req.ID, project.RoleAdmin) {
 		return nil, fmt.Errorf("project_update: %w: project admin required for %s", ErrForbidden, req.ID)
 	}
+	now := time.Now().UTC()
+
+	// Home move (sty_896cebb1): a supplied workspace_id that differs from the
+	// project's current home re-points the single writable home. This carries a
+	// stricter, two-sided admin authz than the ordinary field patch above.
+	if req.WorkspaceID != nil {
+		cur, err := projectStore.GetByID(ctx, req.ID)
+		if err != nil {
+			return nil, err
+		}
+		dest := strings.TrimSpace(*req.WorkspaceID)
+		if dest == "" {
+			return nil, fmt.Errorf("project_update: %w: workspace_id cannot be cleared", ErrBadRequest)
+		}
+		if dest != cur.WorkspaceID {
+			if err := moveProjectHome(ctx, cur, dest, now); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	p, err := projectStore.Update(ctx, req.ID, project.UpdateInput{
 		Name:        req.Name,
 		Description: req.Description,
 		GitURL:      req.GitURL,
-	}, time.Now().UTC())
+	}, now)
 	if err != nil {
 		if errors.Is(err, project.ErrInvalidGitRemote) {
 			return nil, fmt.Errorf("project_update: git_url_invalid: %w", err)
@@ -260,6 +286,42 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 		return nil, err
 	}
 	return json.Marshal(p)
+}
+
+// moveProjectHome re-homes p to destWsID, enforcing the home-move invariants
+// (sty_896cebb1). Authz is two-sided: the caller must be able to administer
+// BOTH the source and the destination workspace (or be a platform-admin); the
+// destination must exist and must not already readonly-mount the project (no
+// workspace is simultaneously mount-readonly and home-writable). Readonly
+// mounts into OTHER workspaces are untouched, and project grants re-evaluate
+// against the new home by construction (effectiveProjectRole reads the project's
+// current workspace_id). CLI-local callers (no authStore) bypass the authz.
+func moveProjectHome(ctx context.Context, p project.Project, destWsID string, now time.Time) error {
+	if workspaceStore == nil {
+		return fmt.Errorf("project_update: workspace store not configured")
+	}
+	if authStore != nil {
+		if !canManageWorkspace(ctx, p.WorkspaceID) || !canManageWorkspace(ctx, destWsID) {
+			return fmt.Errorf("project_update: %w: home move requires admin on both the source and destination workspace", ErrForbidden)
+		}
+	}
+	if _, err := workspaceStore.GetByID(ctx, destWsID); err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return fmt.Errorf("project_update: %w: destination workspace %s does not exist", ErrNotFound, destWsID)
+		}
+		return err
+	}
+	mounted, err := workspaceStore.MountExists(ctx, destWsID, p.ID)
+	if err != nil {
+		return err
+	}
+	if mounted {
+		return fmt.Errorf("project_update: %w: destination workspace %s already readonly-mounts this project; remove the mount before re-homing", ErrBadRequest, destWsID)
+	}
+	if _, err := projectStore.SetWorkspace(ctx, p.ID, destWsID, now); err != nil {
+		return err
+	}
+	return nil
 }
 
 func invokeProjectMatch(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -297,7 +359,3 @@ func invokeProjectMatch(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		Principles:  principles,
 	})
 }
-
-// Compile-time reference to keep workspace import meaningful even if
-// the optional workspace_id default path is later refactored out.
-var _ = workspace.StatusActive

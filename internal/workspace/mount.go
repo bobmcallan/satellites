@@ -83,6 +83,25 @@ func (s *Store) ListMounts(ctx context.Context, workspaceID string) ([]Mount, er
 	return out, rows.Err()
 }
 
+// MountExists reports whether workspaceID readonly-mounts projectID. Backs the
+// home-move guard (sty_896cebb1): a project may not be re-homed into a
+// workspace that already mounts it readonly — no workspace is simultaneously
+// mount-readonly and home-writable.
+func (s *Store) MountExists(ctx context.Context, workspaceID, projectID string) (bool, error) {
+	if workspaceID == "" || projectID == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+        SELECT EXISTS (
+            SELECT 1 FROM workspace_mounts WHERE workspace_id = $1 AND project_id = $2
+        )
+    `, workspaceID, projectID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("workspace: mount exists: %w", err)
+	}
+	return exists, nil
+}
+
 // CallerHasMountAccess reports whether userID is a member of ANY workspace that
 // readonly-mounts projectID — the read-grant path the project authz resolver
 // consults (sty_1ede3853). Read access is sufficient on membership in any

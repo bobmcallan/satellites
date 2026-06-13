@@ -167,6 +167,34 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 	return p, nil
 }
 
+// SetWorkspace re-points the project's single writable home to newWorkspaceID
+// and bumps updated_at, returning the updated row. The home is exactly the
+// projects.workspace_id column — there is no "writable in two workspaces"
+// state to reconcile (readonly mounts live in a separate table and are
+// untouched). Callers enforce the cross-workspace admin authz and the
+// mount-conflict guard before invoking this (sty_896cebb1). ErrNotFound on no
+// row.
+func (s *Store) SetWorkspace(ctx context.Context, id, newWorkspaceID string, now time.Time) (Project, error) {
+	if id == "" || newWorkspaceID == "" {
+		return Project{}, fmt.Errorf("project: id and new workspace_id required")
+	}
+	now = now.UTC()
+	res, err := s.DB.ExecContext(ctx, `
+        UPDATE projects SET workspace_id = $1, updated_at = $2 WHERE id = $3
+    `, newWorkspaceID, now, id)
+	if err != nil {
+		return Project{}, fmt.Errorf("project: set workspace: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Project{}, fmt.Errorf("project: set workspace rows: %w", err)
+	}
+	if n == 0 {
+		return Project{}, ErrNotFound
+	}
+	return s.GetByID(ctx, id)
+}
+
 const selectColumns = `SELECT id, workspace_id, name, description,
     git_url_canonical, owner_user_id, status, created_at, updated_at,
     seed_md, seed_updated_at`
