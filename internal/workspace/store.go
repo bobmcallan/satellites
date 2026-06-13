@@ -115,6 +115,31 @@ func (s *Store) Update(ctx context.Context, id string, name, description *string
 	return s.GetByID(ctx, id)
 }
 
+// SetStatus flips the workspace's status (active/archived) and bumps
+// updated_at, returning the refreshed row. ErrNotFound when no row matches.
+// Backs the reversible workspace_archive verb (sty_f5c08ea0): archive is a
+// status flip, not a delete — the record and its data are retained.
+func (s *Store) SetStatus(ctx context.Context, id, status string, now time.Time) (Workspace, error) {
+	if id == "" {
+		return Workspace{}, fmt.Errorf("workspace: id required")
+	}
+	now = now.UTC()
+	res, err := s.DB.ExecContext(ctx, `
+        UPDATE workspaces SET status = $1, updated_at = $2 WHERE id = $3
+    `, status, now, id)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: set status: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return Workspace{}, fmt.Errorf("workspace: set status rows: %w", err)
+	}
+	if rows == 0 {
+		return Workspace{}, ErrNotFound
+	}
+	return s.GetByID(ctx, id)
+}
+
 // GetByID returns the workspace with the given id, or ErrNotFound.
 func (s *Store) GetByID(ctx context.Context, id string) (Workspace, error) {
 	row := s.DB.QueryRowContext(ctx, `

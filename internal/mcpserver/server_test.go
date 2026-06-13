@@ -43,8 +43,8 @@ func TestServerConstructs(t *testing.T) {
 //   - API-key minting (in-band auth for MCP-only agents):
 //     apikey_create, apikey_list, apikey_revoke
 //   - Introspection (sanctioned no-new-mcp-verbs exception): system_status
-//   - Workspace administration (role-scoped): workspace_upsert (sty_7d7f3037)
-//     and workspace_member_* (sty_5ee95426)
+//   - Workspace administration (role-scoped): workspace_upsert (sty_7d7f3037),
+//     workspace_archive (sty_f5c08ea0), and workspace_member_* (sty_5ee95426)
 //   - Project membership allocation (role-scoped): project_member_* (sty_20687710)
 //
 // ListTools() returns the UNFILTERED global surface; the per-caller role
@@ -77,6 +77,7 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 		"semantic_search":              true,
 		"workspace_objective_generate": true,
 		"workspace_upsert":             true,
+		"workspace_archive":            true,
 		"workspace_member_add":         true,
 		"workspace_member_list":        true,
 		"workspace_member_update_role": true,

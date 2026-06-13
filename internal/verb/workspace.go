@@ -58,6 +58,15 @@ type WorkspaceUpsertRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
+// WorkspaceArchiveRequest is the input to workspace_archive. restore defaults
+// to false (soft-archive: status→archived); restore=true un-archives. Archive
+// is reversible by design — there is deliberately no hard-delete verb on the
+// MCP surface (destructive delete stays admin-UI-only).
+type WorkspaceArchiveRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Restore     bool   `json:"restore,omitempty"`
+}
+
 func init() {
 	Register(&Verb{
 		Name:        "workspace_create",
@@ -68,6 +77,12 @@ func init() {
 		Name:        "workspace_upsert",
 		Description: "Create a workspace (no id) or patch its name/description (id present). Ownership derives from the authed identity; create requires a human platform-admin (no api-key), patch requires the owner or a platform-admin.",
 		Invoke:      invokeWorkspaceUpsert,
+		MCPRole:     MCPRoleWorkspaceAdmin,
+	})
+	Register(&Verb{
+		Name:        "workspace_archive",
+		Description: "Reversibly soft-archive a workspace (status→archived), or restore it with restore=true. Archived workspaces drop from normal list/read paths but the record and its data are retained — there is no hard-delete on the MCP surface. Requires the workspace owner or a platform-admin. The default workspace cannot be archived, nor one that still holds home (writable) projects (move them first).",
+		Invoke:      invokeWorkspaceArchive,
 		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
@@ -176,6 +191,86 @@ func invokeWorkspaceUpsert(ctx context.Context, raw json.RawMessage) (json.RawMe
 	return json.Marshal(w)
 }
 
+// invokeWorkspaceArchive reversibly soft-archives a workspace (or restores it).
+// Authz mirrors workspace_upsert patch — owner OR platform-admin; the
+// MCPRoleWorkspaceAdmin tier only gates visibility/dispatch on the MCP surface.
+// There is deliberately no hard-delete: archive is a status flip that retains
+// the record and its data (sty_f5c08ea0).
+func invokeWorkspaceArchive(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if workspaceStore == nil {
+		return nil, fmt.Errorf("workspace_archive: store not configured")
+	}
+	var req WorkspaceArchiveRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("workspace_archive: bad request: %w", err)
+		}
+	}
+	id := strings.TrimSpace(req.WorkspaceID)
+	if id == "" {
+		return nil, fmt.Errorf("workspace_archive: %w: workspace_id required", ErrBadRequest)
+	}
+	now := time.Now().UTC()
+
+	ws, err := workspaceStore.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if authStore != nil && !canPatchWorkspace(ctx, ws) {
+		return nil, fmt.Errorf("workspace_archive: %w: not owner or platform-admin of workspace %s", ErrForbidden, id)
+	}
+
+	// RESTORE — un-archive (idempotent if already active). No guardrails:
+	// restoring never orphans state.
+	if req.Restore {
+		if ws.Status == workspace.StatusActive {
+			return json.Marshal(ws)
+		}
+		w, err := workspaceStore.SetStatus(ctx, id, workspace.StatusActive, now)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(w)
+	}
+
+	// ARCHIVE — idempotent no-op if already archived.
+	if ws.Status == workspace.StatusArchived {
+		return json.Marshal(ws)
+	}
+	// Guardrail: the default workspace anchors the system and cannot be archived.
+	if ws.IsDefault {
+		return nil, fmt.Errorf("workspace_archive: %w: the default workspace cannot be archived", ErrBadRequest)
+	}
+	// Guardrail: no home (writable) project may be left with an archived home —
+	// move them to another workspace first (project home-move).
+	if projectStore != nil {
+		homed, err := projectStore.ListByWorkspace(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(homed) > 0 {
+			return nil, fmt.Errorf("workspace_archive: %w: workspace %s still holds %d home project(s); move them to another workspace before archiving", ErrBadRequest, id, len(homed))
+		}
+	}
+	// Clear any readonly mounts INTO this workspace so no live mount points at
+	// an archived workspace (the mount is only a readonly view; dropping it
+	// loses no home data).
+	mounts, err := workspaceStore.ListMounts(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range mounts {
+		if err := workspaceStore.RemoveMount(ctx, id, m.ProjectID); err != nil {
+			return nil, err
+		}
+	}
+	w, err := workspaceStore.SetStatus(ctx, id, workspace.StatusArchived, now)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(w)
+}
+
 func invokeWorkspaceList(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
 	if workspaceStore == nil {
 		return nil, fmt.Errorf("workspace_list: store not configured")
@@ -197,9 +292,12 @@ func invokeWorkspaceList(ctx context.Context, _ json.RawMessage) (json.RawMessag
 				}
 			}
 		}
+		// Archived workspaces drop from normal list paths; a global platform-admin
+		// keeps visibility (recoverability safety net), so this filter is scoped
+		// to non-admin callers alongside the membership filter (sty_f5c08ea0).
 		filtered := ws[:0]
 		for _, w := range ws {
-			if mine[w.ID] {
+			if mine[w.ID] && w.Status != workspace.StatusArchived {
 				filtered = append(filtered, w)
 			}
 		}
@@ -227,6 +325,12 @@ func invokeWorkspaceGet(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	w, err := workspaceStore.GetByID(ctx, req.ID)
 	if err != nil {
 		return nil, err
+	}
+	// An archived workspace is gone from normal read paths: a non-admin caller
+	// gets ErrNotFound (the portal detail handler maps this to 404), while a
+	// global platform-admin still reads it for recovery (sty_f5c08ea0).
+	if authStore != nil && !callerIsGlobalAdmin(ctx) && w.Status == workspace.StatusArchived {
+		return nil, workspace.ErrNotFound
 	}
 	return json.Marshal(w)
 }
