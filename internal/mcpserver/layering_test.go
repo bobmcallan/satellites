@@ -42,6 +42,10 @@ func TestNoSubstrateDomainImports(t *testing.T) {
 // verb.MCPRoleWorkspaceAdmin so they are listed and dispatchable only for a
 // caller who can administer some workspace; workspace_member_list is base.
 //
+// The project_member_* verbs were lifted the same way by sty_20687710
+// (membership allocation): add/update_role/remove are workspace-admin tier,
+// project_member_list is base; requireProjectAdmin is the call-time authority.
+//
 // If one of these names appears in exposedVerbs, the change is almost
 // certainly a mistake. Lift the denylist explicitly with a follow-up
 // story rather than relaxing this test.
@@ -49,7 +53,7 @@ func TestExposedVerbsDoNotIncludeCLIOnlyVerbs(t *testing.T) {
 	deny := []string{
 		"variable_get", "variable_set", "variable_list", "variable_delete",
 		"workspace_create", "workspace_list", "workspace_get", "workspace_delete", "workspace_personal",
-		"project_member_add", "project_member_remove", "project_member_list", "project_member_update_role", "project_access",
+		"project_access",
 		"invitation_create", "invitation_list", "invitation_revoke",
 		"ledger_append", "ledger_list",
 		"system_seed_set", "system_seed_list", "system_seed_delete",

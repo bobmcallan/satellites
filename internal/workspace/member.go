@@ -189,6 +189,20 @@ func (s *Store) HasAdminRole(ctx context.Context, userID string) (bool, error) {
 	return exists, nil
 }
 
+// CountAdmins returns the number of owner/admin members on the workspace.
+// Backs the no-orphaned-admin guard (sty_20687710): a workspace must keep at
+// least one owner/admin, so the last one may not be removed or demoted.
+func (s *Store) CountAdmins(ctx context.Context, workspaceID string) (int, error) {
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `
+        SELECT COUNT(*) FROM workspace_members
+        WHERE workspace_id = $1 AND role IN ('owner', 'admin')
+    `, workspaceID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("workspace: count admins: %w", err)
+	}
+	return n, nil
+}
+
 // GetRole returns the member's role on the workspace, or
 // ErrMemberNotFound.
 func (s *Store) GetRole(ctx context.Context, workspaceID, userID string) (string, error) {

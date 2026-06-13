@@ -26,6 +26,7 @@ type workspaceDetailData struct {
 	Projects      []workspaceProjectRow
 	Mounts        []workspaceMountRow
 	Documents     []workspaceDocRow
+	Members       []workspaceMemberRow
 	DevMode       bool
 	FooterName    string
 	FooterEmail   string
@@ -56,6 +57,13 @@ type workspaceMountRow struct {
 	ProjectID string
 	Name      string
 	Status    string
+}
+
+// workspaceMemberRow is one member of the workspace (user + role), rendered in
+// the page's members section so the page reflects allocation (sty_20687710).
+type workspaceMemberRow struct {
+	UserID string
+	Role   string
 }
 
 // workspaceDetailRow is the local shape this handler needs from workspace_get.
@@ -172,6 +180,21 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			}
 		}
 
+		// Workspace members (sty_20687710): the roster the page reflects after an
+		// allocation. Best-effort — a non-member caller (forbidden) leaves it empty.
+		var members []workspaceMemberRow
+		mlReq, _ := json.Marshal(verb.WorkspaceMemberListRequest{WorkspaceID: wsID})
+		if mlResp, err := verb.Dispatch(ctx, "workspace_member_list", mlReq); err != nil {
+			arbor.WarnCtx(ctx, "workspace_detail: workspace_member_list", "id", wsID, "err", err)
+		} else {
+			var ml verb.WorkspaceMemberListResponse
+			if err := json.Unmarshal(mlResp, &ml); err == nil {
+				for _, m := range ml.Members {
+					members = append(members, workspaceMemberRow{UserID: m.UserID, Role: m.Role})
+				}
+			}
+		}
+
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -192,6 +215,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			Projects:      projects,
 			Mounts:        mounts,
 			Documents:     docs,
+			Members:       members,
 			UserEmail:     userEmail,
 			UserName:      userName,
 			UserAvatar:    userAvatar,

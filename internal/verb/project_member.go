@@ -1,8 +1,9 @@
 // Project membership verbs — epic:user-admin (sty_3dbd53f0), mirroring the
 // workspace_member_* surface. A project admin (or workspace owner/admin, or
 // global admin — all fold in via effectiveProjectRole) curates a project's
-// member list. CLI + portal handlers only; kept off the MCP surface per
-// no-new-mcp-verbs.
+// member list. The write verbs (add/update_role/remove) are on the role-scoped
+// MCP surface as workspace-admin tier (sty_20687710); project_member_list is
+// base. requireProjectAdmin is the call-time authority either way.
 
 package verb
 
@@ -64,6 +65,7 @@ func init() {
 		Name:        "project_member_add",
 		Description: "Add a user to a project at the given role (read|write|admin); upserts.",
 		Invoke:      invokeProjectMemberAdd,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
 		Name:        "project_member_list",
@@ -74,11 +76,13 @@ func init() {
 		Name:        "project_member_update_role",
 		Description: "Change a member's role on a project.",
 		Invoke:      invokeProjectMemberUpdateRole,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 	Register(&Verb{
 		Name:        "project_member_remove",
 		Description: "Remove a member from a project.",
 		Invoke:      invokeProjectMemberRemove,
+		MCPRole:     MCPRoleWorkspaceAdmin,
 	})
 }
 
@@ -129,6 +133,10 @@ func invokeProjectMemberAdd(ctx context.Context, raw json.RawMessage) (json.RawM
 	}
 	if err := requireProjectAdmin(ctx, req.ProjectID, "project_member_add"); err != nil {
 		return nil, err
+	}
+	// Role ceiling: a granter may not grant above their own role (sty_20687710).
+	if authStore != nil && !callerProjectRoleCeilingOK(ctx, req.ProjectID, req.Role) {
+		return nil, fmt.Errorf("project_member_add: %w: cannot grant a role above your own", ErrForbidden)
 	}
 	addedBy := callerUserID(ctx)
 	if err := projectStore.AddMember(ctx, req.ProjectID, req.UserID, req.Role, addedBy, time.Now().UTC()); err != nil {
@@ -239,6 +247,10 @@ func invokeProjectMemberUpdateRole(ctx context.Context, raw json.RawMessage) (js
 	}
 	if err := requireProjectAdmin(ctx, req.ProjectID, "project_member_update_role"); err != nil {
 		return nil, err
+	}
+	// Role ceiling: cannot promote above the granter's own role (sty_20687710).
+	if authStore != nil && !callerProjectRoleCeilingOK(ctx, req.ProjectID, req.Role) {
+		return nil, fmt.Errorf("project_member_update_role: %w: cannot grant a role above your own", ErrForbidden)
 	}
 	if err := projectStore.UpdateRole(ctx, req.ProjectID, req.UserID, req.Role, time.Now().UTC()); err != nil {
 		if errors.Is(err, project.ErrInvalidRole) {

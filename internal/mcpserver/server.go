@@ -75,6 +75,10 @@ var inputSchemas = map[string]mcp.ToolOption{
 	"workspace_member_list":        typedSchema[verb.WorkspaceMemberListRequest](),
 	"workspace_member_update_role": typedSchema[verb.WorkspaceMemberUpdateRequest](),
 	"workspace_member_remove":      typedSchema[verb.WorkspaceMemberRemoveRequest](),
+	"project_member_add":           typedSchema[verb.ProjectMemberAddRequest](),
+	"project_member_list":          typedSchema[verb.ProjectMemberListRequest](),
+	"project_member_update_role":   typedSchema[verb.ProjectMemberUpdateRequest](),
+	"project_member_remove":        typedSchema[verb.ProjectMemberRemoveRequest](),
 	"system_status":                typedSchema[verb.SystemStatusRequest](),
 }
 
@@ -185,11 +189,12 @@ var orientationInstructions = string(documents.MCPLoadContextMarkdown())
 //   - workspace_upsert: create (no id) or patch (id present) a workspace's
 //     name/description, document_upsert-shaped; workspace-admin tier with a
 //     stricter platform-admin-only create enforced at call-time (sty_7d7f3037).
-//   - workspace_member_add / _update_role / _remove: workspace-admin
-//     membership grants, role-scoped (verb.MCPRoleWorkspaceAdmin) so they
-//     are listed and dispatchable only for a caller who can administer some
-//     workspace; workspace_member_list is base-tier. The surface is filtered
-//     per-caller by WithToolFilter and re-enforced at dispatch (sty_5ee95426).
+//   - workspace_member_* and project_member_* (add/update_role/remove):
+//     workspace- and project-membership allocation grants, role-scoped
+//     (verb.MCPRoleWorkspaceAdmin) so they are listed and dispatchable only
+//     for a caller who can administer some workspace; the _list verbs are
+//     base-tier. The surface is filtered per-caller by WithToolFilter and
+//     re-enforced at dispatch (sty_5ee95426, sty_20687710).
 //
 // Stories are documents with type='story' post-unification (sty_0dd71f79);
 // there are no story_* verbs on the surface. The CLI offers no typed
@@ -222,6 +227,10 @@ var exposedVerbs = []string{
 	"workspace_member_list",
 	"workspace_member_update_role",
 	"workspace_member_remove",
+	"project_member_add",
+	"project_member_list",
+	"project_member_update_role",
+	"project_member_remove",
 	"system_status",
 }
 

@@ -44,7 +44,8 @@ func TestServerConstructs(t *testing.T) {
 //     apikey_create, apikey_list, apikey_revoke
 //   - Introspection (sanctioned no-new-mcp-verbs exception): system_status
 //   - Workspace administration (role-scoped): workspace_upsert (sty_7d7f3037)
-//     and membership add/list/update_role/remove (sty_5ee95426)
+//     and workspace_member_* (sty_5ee95426)
+//   - Project membership allocation (role-scoped): project_member_* (sty_20687710)
 //
 // ListTools() returns the UNFILTERED global surface; the per-caller role
 // filter (WithToolFilter) applies only on the tools/list request path, so
@@ -80,6 +81,10 @@ func TestMCPSurfaceIsExpected(t *testing.T) {
 		"workspace_member_list":        true,
 		"workspace_member_update_role": true,
 		"workspace_member_remove":      true,
+		"project_member_add":           true,
+		"project_member_list":          true,
+		"project_member_update_role":   true,
+		"project_member_remove":        true,
 		"system_status":                true,
 	}
 	if len(tools) != len(want) {

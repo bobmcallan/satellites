@@ -86,6 +86,10 @@ func invokeWorkspaceMemberAdd(ctx context.Context, raw json.RawMessage) (json.Ra
 	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
 		return nil, fmt.Errorf("workspace_member_add: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
 	}
+	// Role ceiling: a granter may not grant above their own role (sty_20687710).
+	if authStore != nil && !callerWorkspaceRoleCeilingOK(ctx, req.WorkspaceID, req.Role) {
+		return nil, fmt.Errorf("workspace_member_add: %w: cannot grant a role above your own", ErrForbidden)
+	}
 	addedBy := callerUserID(ctx)
 	if err := workspaceStore.AddMember(ctx, req.WorkspaceID, req.UserID, req.Role, addedBy, time.Now().UTC()); err != nil {
 		if errors.Is(err, workspace.ErrInvalidRole) {
@@ -151,6 +155,19 @@ func invokeWorkspaceMemberUpdateRole(ctx context.Context, raw json.RawMessage) (
 	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
 		return nil, fmt.Errorf("workspace_member_update_role: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
 	}
+	// Role ceiling: cannot promote above the granter's own role (sty_20687710).
+	if authStore != nil && !callerWorkspaceRoleCeilingOK(ctx, req.WorkspaceID, req.Role) {
+		return nil, fmt.Errorf("workspace_member_update_role: %w: cannot grant a role above your own", ErrForbidden)
+	}
+	// No orphaned admin: refuse demoting the LAST owner/admin below admin.
+	if authStore != nil && workspaceRoleRank(req.Role) < workspaceRoleRank(workspace.RoleAdmin) {
+		if cur, err := workspaceStore.GetRole(ctx, req.WorkspaceID, req.UserID); err == nil &&
+			(cur == workspace.RoleOwner || cur == workspace.RoleAdmin) {
+			if n, err := workspaceStore.CountAdmins(ctx, req.WorkspaceID); err == nil && n <= 1 {
+				return nil, fmt.Errorf("workspace_member_update_role: %w: cannot demote the last owner/admin of workspace %s", ErrForbidden, req.WorkspaceID)
+			}
+		}
+	}
 	if err := workspaceStore.UpdateRole(ctx, req.WorkspaceID, req.UserID, req.Role, time.Now().UTC()); err != nil {
 		if errors.Is(err, workspace.ErrInvalidRole) {
 			return nil, fmt.Errorf("workspace_member_update_role: invalid_role")
@@ -181,6 +198,15 @@ func invokeWorkspaceMemberRemove(ctx context.Context, raw json.RawMessage) (json
 	}
 	if authStore != nil && !canManageWorkspace(ctx, req.WorkspaceID) {
 		return nil, fmt.Errorf("workspace_member_remove: %w: not an admin of workspace %s", ErrForbidden, req.WorkspaceID)
+	}
+	// No orphaned admin: refuse removing the LAST owner/admin of the workspace.
+	if authStore != nil {
+		if cur, err := workspaceStore.GetRole(ctx, req.WorkspaceID, req.UserID); err == nil &&
+			(cur == workspace.RoleOwner || cur == workspace.RoleAdmin) {
+			if n, err := workspaceStore.CountAdmins(ctx, req.WorkspaceID); err == nil && n <= 1 {
+				return nil, fmt.Errorf("workspace_member_remove: %w: cannot remove the last owner/admin of workspace %s", ErrForbidden, req.WorkspaceID)
+			}
+		}
 	}
 	if err := workspaceStore.RemoveMember(ctx, req.WorkspaceID, req.UserID); err != nil {
 		if errors.Is(err, workspace.ErrMemberNotFound) {

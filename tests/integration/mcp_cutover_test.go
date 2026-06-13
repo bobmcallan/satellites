@@ -81,6 +81,8 @@ func TestMCPCutover(t *testing.T) {
 			"workspace_upsert",
 			"workspace_member_add", "workspace_member_list",
 			"workspace_member_update_role", "workspace_member_remove",
+			"project_member_add", "project_member_list",
+			"project_member_update_role", "project_member_remove",
 			"system_status",
 		}
 		if len(tools) != len(want) {

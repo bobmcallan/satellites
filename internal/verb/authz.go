@@ -126,6 +126,13 @@ func actualProjectRoleWS(ctx context.Context, wsID, projectID string) string {
 				if role == workspace.RoleOwner || role == workspace.RoleAdmin {
 					return project.RoleAdmin
 				}
+				// A plain workspace member of the project's home workspace gets
+				// read on the workspace's home projects — the workspace cascade
+				// (sty_20687710). An explicit project_members grant, api-key, or
+				// mount still wins where higher (the max below).
+				if r := projectRoleRank(project.RoleRead); r > best {
+					best = r
+				}
 			}
 		}
 	}
@@ -179,6 +186,48 @@ func enforceProjectScope(ctx context.Context, wsID, projectID, verbName, need st
 		return fmt.Errorf("%s: %w: project role %q insufficient (need %s)", verbName, ErrForbidden, have, need)
 	}
 	return nil
+}
+
+// workspaceRoleRank orders workspace roles so a granter cannot grant above
+// their own: owner > admin > member.
+func workspaceRoleRank(role string) int {
+	switch role {
+	case workspace.RoleOwner:
+		return 3
+	case workspace.RoleAdmin:
+		return 2
+	case workspace.RoleMember:
+		return 1
+	}
+	return 0
+}
+
+// callerWorkspaceRoleCeilingOK reports whether the caller may grant want on
+// wsID without exceeding their OWN workspace role (sty_20687710). A
+// platform-admin is exempt. CLI-local (no authStore) is exempt at the call site.
+func callerWorkspaceRoleCeilingOK(ctx context.Context, wsID, want string) bool {
+	if callerIsGlobalAdmin(ctx) {
+		return true
+	}
+	u := auth.FromContext(ctx)
+	if u == nil || workspaceStore == nil {
+		return false
+	}
+	role, err := workspaceStore.GetRole(ctx, wsID, u.ID)
+	if err != nil {
+		return false
+	}
+	return workspaceRoleRank(want) <= workspaceRoleRank(role)
+}
+
+// callerProjectRoleCeilingOK reports whether the caller may grant want on
+// projectID without exceeding their OWN effective project role (sty_20687710).
+// A platform-admin is exempt.
+func callerProjectRoleCeilingOK(ctx context.Context, projectID, want string) bool {
+	if callerIsGlobalAdmin(ctx) {
+		return true
+	}
+	return projectRoleRank(want) <= projectRoleRank(effectiveProjectRole(ctx, projectID))
 }
 
 // canManageWorkspace reports whether the caller is a global admin or a

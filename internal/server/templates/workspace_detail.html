@@ -48,6 +48,23 @@
     {{end}}
   </section>
 
+  <section class="panel" data-section="workspace-members">
+    <div class="panel-header">
+      <h2>members</h2>
+    </div>
+
+    {{if .Members}}
+    <dl class="metadata" data-field="workspace-members">
+      {{range .Members}}
+      <dt><span data-field="workspace-member-row" data-member-user="{{.UserID}}">{{.UserID}}</span></dt>
+      <dd data-field="workspace-member-role">{{.Role}}</dd>
+      {{end}}
+    </dl>
+    {{else}}
+    <p class="empty" data-field="workspace-members-empty">No members yet.</p>
+    {{end}}
+  </section>
+
   <section class="panel" data-section="documents">
     <div class="panel-header">
       <h2>documents</h2>
