@@ -27,10 +27,14 @@ var ErrInvalidRole = errors.New("workspace: invalid role")
 // row matches (workspace_id, user_id).
 var ErrMemberNotFound = errors.New("workspace: member not found")
 
-// Member binds a user to a workspace at a role.
+// Member binds a user to a workspace at a role. Name is the resolved
+// human-readable display name (sty_fcf5477e); it is populated by the
+// member-list verb from the user record, not by the store query, and is the
+// primary label callers render in place of the raw UserID.
 type Member struct {
 	WorkspaceID string    `json:"workspace_id"`
 	UserID      string    `json:"user_id"`
+	Name        string    `json:"name,omitempty"`
 	Role        string    `json:"role"`
 	AddedAt     time.Time `json:"added_at"`
 	AddedBy     string    `json:"added_by,omitempty"`

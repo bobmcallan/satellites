@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
@@ -132,6 +133,17 @@ func invokeWorkspaceMemberList(ctx context.Context, raw json.RawMessage) (json.R
 	}
 	if ms == nil {
 		ms = []workspace.Member{}
+	}
+	// Resolve each member's human-readable display name server-side from the
+	// persisted user record (sty_fcf5477e). No email is returned — only the
+	// resolved name — so the raw user id is no longer the primary label and no
+	// address leaks. CLI-local (no authStore) falls back to the id via the chain.
+	for i := range ms {
+		var u *auth.User
+		if authStore != nil {
+			u, _ = authStore.GetUserByID(ctx, ms[i].UserID)
+		}
+		ms[i].Name = auth.DisplayName(u, ms[i].UserID)
 	}
 	return json.Marshal(WorkspaceMemberListResponse{Members: ms})
 }

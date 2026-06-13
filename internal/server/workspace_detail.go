@@ -63,6 +63,7 @@ type workspaceMountRow struct {
 // the page's members section so the page reflects allocation (sty_20687710).
 type workspaceMemberRow struct {
 	UserID string
+	Name   string
 	Role   string
 }
 
@@ -190,7 +191,11 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			var ml verb.WorkspaceMemberListResponse
 			if err := json.Unmarshal(mlResp, &ml); err == nil {
 				for _, m := range ml.Members {
-					members = append(members, workspaceMemberRow{UserID: m.UserID, Role: m.Role})
+					name := m.Name
+					if name == "" {
+						name = m.UserID
+					}
+					members = append(members, workspaceMemberRow{UserID: m.UserID, Name: name, Role: m.Role})
 				}
 			}
 		}

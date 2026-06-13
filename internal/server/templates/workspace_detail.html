@@ -56,7 +56,7 @@
     {{if .Members}}
     <dl class="metadata" data-field="workspace-members">
       {{range .Members}}
-      <dt><span data-field="workspace-member-row" data-member-user="{{.UserID}}">{{.UserID}}</span></dt>
+      <dt><span data-field="workspace-member-row" data-member-user="{{.UserID}}" data-member-name="{{.Name}}">{{.Name}}</span></dt>
       <dd data-field="workspace-member-role">{{.Role}}</dd>
       {{end}}
     </dl>
