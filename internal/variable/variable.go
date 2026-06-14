@@ -50,7 +50,10 @@ var ErrComputedName = errors.New("variable: name is computed at request time, no
 // disagree per the scope-coherence rules.
 var ErrScopeMismatch = errors.New("variable: scope coherence violation")
 
-// Variable is one stored name/value row.
+// Variable is one stored name/value row. Secret marks a row whose value
+// is a credential: it is admin-gated on write and NEVER returned by the
+// public read verbs (variable_get / variable_list redact it). A
+// server-internal resolver reads the value directly via the store.
 type Variable struct {
 	ID          string    `json:"id"`
 	Scope       Scope     `json:"scope"`
@@ -58,6 +61,7 @@ type Variable struct {
 	ProjectID   string    `json:"project_id,omitempty"`
 	Name        string    `json:"name"`
 	Value       string    `json:"value"`
+	Secret      bool      `json:"secret,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

@@ -17,10 +17,11 @@ type Store struct {
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
 // SetInput is the write payload for Set. Upsert semantics: replaces
-// the value in place (variables aren't versioned).
+// the value (and secret flag) in place (variables aren't versioned).
 type SetInput struct {
-	Key   Key
-	Value string
+	Key    Key
+	Value  string
+	Secret bool
 }
 
 // Set upserts a (scope, workspace_id, project_id, name) row to the
@@ -36,11 +37,12 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 	switch {
 	case err == nil:
 		if _, err := s.DB.ExecContext(ctx, `
-            UPDATE variables SET value = $1, updated_at = $2 WHERE id = $3
-        `, in.Value, now, v.ID); err != nil {
+            UPDATE variables SET value = $1, secret = $2, updated_at = $3 WHERE id = $4
+        `, in.Value, in.Secret, now, v.ID); err != nil {
 			return Variable{}, fmt.Errorf("variable: update: %w", err)
 		}
 		v.Value = in.Value
+		v.Secret = in.Secret
 		v.UpdatedAt = now
 		return v, nil
 	case errors.Is(err, ErrNotFound):
@@ -48,9 +50,9 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 		wsArg := nullStr(in.Key.WorkspaceID)
 		pjArg := nullStr(in.Key.ProjectID)
 		if _, err := s.DB.ExecContext(ctx, `
-            INSERT INTO variables (id, scope, workspace_id, project_id, name, value, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-        `, id, string(in.Key.Scope), wsArg, pjArg, in.Key.Name, in.Value, now); err != nil {
+            INSERT INTO variables (id, scope, workspace_id, project_id, name, value, secret, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+        `, id, string(in.Key.Scope), wsArg, pjArg, in.Key.Name, in.Value, in.Secret, now); err != nil {
 			return Variable{}, fmt.Errorf("variable: insert: %w", err)
 		}
 		return Variable{
@@ -60,6 +62,7 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 			ProjectID:   in.Key.ProjectID,
 			Name:        in.Key.Name,
 			Value:       in.Value,
+			Secret:      in.Secret,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}, nil
@@ -104,7 +107,7 @@ func (s *Store) Get(ctx context.Context, key Key) (Variable, error) {
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
+        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
         FROM variables
         WHERE scope = $1
           AND workspace_id IS NOT DISTINCT FROM $2
@@ -153,7 +156,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'workspace' AND workspace_id = $1
             ORDER BY name
         `, workspaceID)
@@ -167,7 +170,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id+project_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'project' AND workspace_id = $1 AND project_id = $2
             ORDER BY name
         `, workspaceID, projectID)
@@ -180,7 +183,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 		// Stored-system rows live in the table; the computed-system
 		// resolver lives at the verb layer and is folded in there.
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'system'
             ORDER BY name
         `)
@@ -216,7 +219,7 @@ func scanVariableCommon(rs rowScanner) (Variable, error) {
 		scopeS string
 	)
 	if err := rs.Scan(&v.ID, &scopeS, &v.WorkspaceID, &v.ProjectID,
-		&v.Name, &v.Value, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		&v.Name, &v.Value, &v.Secret, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return Variable{}, err
 	}
 	v.Scope = Scope(scopeS)

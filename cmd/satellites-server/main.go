@@ -28,6 +28,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/ledger"
 	"github.com/bobmcallan/satellites/internal/live"
+	"github.com/bobmcallan/satellites/internal/llmcfg"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/reviewer"
@@ -447,27 +448,53 @@ func main() {
 		return live.NewScope(false, ids), nil
 	}
 
-	// Workspace corpus embeddings (sty_7f4f7e11): when a Gemini key is present,
-	// start the reconcile worker that chunks + embeds workspace documents and
-	// prunes chunks for deleted ones. Absent key → embeddings disabled and the
-	// corpus is simply stored unembedded (graceful).
-	if key := strings.TrimSpace(cfg.Embedding.GeminiAPIKey); key != "" {
+	// LLM config as substrate (epic:workspace-agents, sty_a6983e32): the
+	// Gemini key + model resolve at REQUEST time from the variable store —
+	// the key as a SECRET variable (gemini.api_key), the model as a plain
+	// stored-system knob (<kind>.model) — each with an env fallback so the
+	// deployed fly secret keeps working until the variable is set, and the
+	// variable winning when present. Rotating the key or switching the model
+	// then takes effect without a redeploy.
+	llmResolver := llmcfg.New(variableStore, os.Getenv)
+	geminiKey := func(ctx context.Context) string {
+		return llmResolver.Secret(ctx, "gemini.api_key", "GEMINI_API_KEY")
+	}
+	embedModelDefault := cfg.Embedding.Model
+	if strings.TrimSpace(embedModelDefault) == "" {
+		embedModelDefault = embed.DefaultModel
+	}
+
+	// The agent + objective executors are always wired with the resolver so a
+	// key set as a secret variable, and a model switched via a stored-system
+	// variable, take effect at request time. A blank resolved key surfaces as
+	// the existing clear not-run note from each verb, not a crash.
+	verb.SetObjectiveService(synth.NewObjectiveService(
+		synth.NewGeminiGeneratorFunc(func(ctx context.Context) (string, string) {
+			return geminiKey(ctx), llmResolver.Model(ctx, "synth", synth.DefaultGenerationModel)
+		}), docStore))
+	verb.SetAgentModel(agent.NewGeminiAgentModelFunc(func(ctx context.Context) (string, string) {
+		return geminiKey(ctx), llmResolver.Model(ctx, "agent", agent.DefaultModel)
+	}))
+
+	// Workspace corpus embeddings (sty_7f4f7e11): the reconcile worker is a
+	// long-running goroutine, so it is gated on a key resolved at boot (env or
+	// the secret variable). Absent key → embeddings disabled and the corpus is
+	// stored unembedded (graceful). The embedder itself still resolves key +
+	// model per request; the vector dimension stays fixed.
+	if bootKey := strings.TrimSpace(geminiKey(context.Background())); bootKey != "" {
+		embedder := embed.NewGeminiEmbedderFunc(func(ctx context.Context) (string, string) {
+			return geminiKey(ctx), llmResolver.Model(ctx, "embedding", embedModelDefault)
+		}, cfg.Embedding.Dimension)
 		embedSvc := embed.NewService(
-			embed.NewGeminiEmbedder(key, cfg.Embedding.Model, cfg.Embedding.Dimension),
+			embedder,
 			embed.NewChunkStore(sqlDB), docStore, wsStore,
 			cfg.Embedding.ChunkMaxTokens, cfg.Embedding.ChunkOverlap,
 		)
 		verb.SetEmbedService(embedSvc) // semantic_search dispatches through this (sty_e8db6032)
-		// Objective synthesis uses Gemini server-side (sty_a0099c04); claude -p
-		// stays the CLI's client-side executor.
-		verb.SetObjectiveService(synth.NewObjectiveService(synth.NewGeminiGenerator(key, ""), docStore))
-		// The server-side agent harness (epic:workspace-agents) — the tool-using
-		// executor, same Gemini key.
-		verb.SetAgentModel(agent.NewGeminiAgentModel(key, ""))
 		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
-		arbor.Info("embedding worker started", "model", cfg.Embedding.Model, "dim", cfg.Embedding.Dimension)
+		arbor.Info("embedding worker started", "model", embedModelDefault, "dim", cfg.Embedding.Dimension)
 	} else {
-		arbor.Info("embeddings disabled — GEMINI_API_KEY unset")
+		arbor.Info("embeddings disabled — no gemini.api_key variable and GEMINI_API_KEY unset")
 	}
 
 	handler := server.Build(server.Config{

@@ -12,23 +12,37 @@ import (
 	"time"
 )
 
+// DefaultModel is the generateContent-capable Gemini model used when no
+// substrate override is configured.
+const DefaultModel = "gemini-2.5-flash"
+
 // GeminiAgentModel implements AgentModel against Gemini generateContent with
 // function calling: it declares the tools, parses functionCall parts as tool
 // calls, and replays functionResponse turns. The harness owns the loop; this
 // only renders one model turn. NEVER constructed client-side (Gemini is the
 // server executor; claude -p stays the client's).
+//
+// Credentials resolve per Step via provide, so the api key and model are read
+// at request time (substrate key-values, env fallback) — rotating a key or
+// switching the model takes effect without a redeploy.
 type GeminiAgentModel struct {
-	apiKey string
-	model  string
-	client *http.Client
+	provide func(context.Context) (apiKey, model string)
+	client  *http.Client
 }
 
-// NewGeminiAgentModel builds the model; an empty model falls back to the default.
+// NewGeminiAgentModel builds the model from fixed credentials; an empty model
+// falls back to the default. Kept for tests and callers with static config.
 func NewGeminiAgentModel(apiKey, model string) *GeminiAgentModel {
 	if strings.TrimSpace(model) == "" {
-		model = "gemini-2.5-flash"
+		model = DefaultModel
 	}
-	return &GeminiAgentModel{apiKey: apiKey, model: model, client: &http.Client{Timeout: 120 * time.Second}}
+	return NewGeminiAgentModelFunc(func(context.Context) (string, string) { return apiKey, model })
+}
+
+// NewGeminiAgentModelFunc builds the model from a per-request credential
+// provider (api key + model resolved at Step time).
+func NewGeminiAgentModelFunc(provide func(context.Context) (apiKey, model string)) *GeminiAgentModel {
+	return &GeminiAgentModel{provide: provide, client: &http.Client{Timeout: 120 * time.Second}}
 }
 
 type geminiFunctionCall struct {
@@ -76,7 +90,11 @@ type geminiAgentResp struct {
 
 // Step renders one model turn over the full history (Gemini is stateless).
 func (m *GeminiAgentModel) Step(ctx context.Context, system string, history []Turn, tools []Tool) (AgentStep, error) {
-	if strings.TrimSpace(m.apiKey) == "" {
+	apiKey, model := m.provide(ctx)
+	if strings.TrimSpace(model) == "" {
+		model = DefaultModel
+	}
+	if strings.TrimSpace(apiKey) == "" {
 		return AgentStep{}, fmt.Errorf("agent: gemini api key not configured")
 	}
 	reqBody := geminiAgentReq{
@@ -86,7 +104,7 @@ func (m *GeminiAgentModel) Step(ctx context.Context, system string, history []Tu
 	if strings.TrimSpace(system) != "" {
 		reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: system}}}
 	}
-	respBytes, err := m.post(ctx, reqBody)
+	respBytes, err := m.post(ctx, reqBody, apiKey, model)
 	if err != nil {
 		return AgentStep{}, err
 	}
@@ -150,12 +168,12 @@ func toolDeclarations(tools []Tool) []geminiToolDecl {
 }
 
 // post sends one generateContent request with 429 backoff, returning the body.
-func (m *GeminiAgentModel) post(ctx context.Context, body geminiAgentReq) ([]byte, error) {
+func (m *GeminiAgentModel) post(ctx context.Context, body geminiAgentReq, apiKey, model string) ([]byte, error) {
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("agent: marshal request: %w", err)
 	}
-	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", m.model)
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 		if err != nil {
@@ -163,7 +181,7 @@ func (m *GeminiAgentModel) post(ctx context.Context, body geminiAgentReq) ([]byt
 		}
 		req.Header.Set("Content-Type", "application/json")
 		q := req.URL.Query()
-		q.Set("key", m.apiKey)
+		q.Set("key", apiKey)
 		req.URL.RawQuery = q.Encode()
 
 		resp, err := m.client.Do(req)

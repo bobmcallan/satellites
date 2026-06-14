@@ -27,10 +27,13 @@ type Embedder interface {
 	Dimension() int
 }
 
-// GeminiEmbedder calls Gemini's batchEmbedContents API.
+// GeminiEmbedder calls Gemini's batchEmbedContents API. Credentials resolve
+// per Embed via provide, so the api key and model are read at request time
+// (substrate key-values, env fallback). The vector dimension stays fixed at
+// construction — it is coupled to the stored vectors and must not change
+// under a populated corpus.
 type GeminiEmbedder struct {
-	apiKey    string
-	model     string
+	provide   func(context.Context) (apiKey, model string)
 	dimension int
 	baseURL   string
 	client    *http.Client
@@ -45,18 +48,24 @@ const (
 	defaultBaseURL   = "https://generativelanguage.googleapis.com"
 )
 
-// NewGeminiEmbedder builds a Gemini embedding client. An empty model/dimension
-// falls back to the text-embedding-004 defaults.
+// NewGeminiEmbedder builds a Gemini embedding client from fixed credentials.
+// An empty model/dimension falls back to the defaults. Kept for callers with
+// static config.
 func NewGeminiEmbedder(apiKey, model string, dimension int) *GeminiEmbedder {
 	if strings.TrimSpace(model) == "" {
 		model = DefaultModel
 	}
+	return NewGeminiEmbedderFunc(func(context.Context) (string, string) { return apiKey, model }, dimension)
+}
+
+// NewGeminiEmbedderFunc builds an embedder from a per-request credential
+// provider (api key + model resolved at Embed time). The dimension is fixed.
+func NewGeminiEmbedderFunc(provide func(context.Context) (apiKey, model string), dimension int) *GeminiEmbedder {
 	if dimension <= 0 {
 		dimension = DefaultDimension
 	}
 	return &GeminiEmbedder{
-		apiKey:    apiKey,
-		model:     model,
+		provide:   provide,
 		dimension: dimension,
 		baseURL:   defaultBaseURL,
 		client:    &http.Client{Timeout: 60 * time.Second},
@@ -92,9 +101,16 @@ func (e *GeminiEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 	if len(texts) == 0 {
 		return nil, nil
 	}
+	apiKey, model := e.provide(ctx)
+	if strings.TrimSpace(model) == "" {
+		model = DefaultModel
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, fmt.Errorf("embed: gemini api key not configured")
+	}
 	out := make([][]float32, 0, len(texts))
 	for _, t := range texts {
-		v, err := e.embedOne(ctx, t)
+		v, err := e.embedOne(ctx, t, apiKey, model)
 		if err != nil {
 			return nil, err
 		}
@@ -109,16 +125,16 @@ const (
 	embedBackoffFactor = 2
 )
 
-func (e *GeminiEmbedder) embedOne(ctx context.Context, text string) ([]float32, error) {
+func (e *GeminiEmbedder) embedOne(ctx context.Context, text, apiKey, model string) ([]float32, error) {
 	bodyBytes, err := json.Marshal(geminiEmbedRequest{
-		Model:                "models/" + e.model,
+		Model:                "models/" + model,
 		Content:              geminiContent{Parts: []geminiPart{{Text: text}}},
 		OutputDimensionality: e.dimension,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("embed: marshal gemini request: %w", err)
 	}
-	endpoint := fmt.Sprintf("%s/v1beta/models/%s:embedContent", e.baseURL, e.model)
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:embedContent", e.baseURL, model)
 
 	var respBytes []byte
 	for attempt := 0; ; attempt++ {
@@ -128,7 +144,7 @@ func (e *GeminiEmbedder) embedOne(ctx context.Context, text string) ([]float32, 
 		}
 		req.Header.Set("Content-Type", "application/json")
 		q := req.URL.Query()
-		q.Set("key", e.apiKey)
+		q.Set("key", apiKey)
 		req.URL.RawQuery = q.Encode()
 
 		resp, err := e.client.Do(req)

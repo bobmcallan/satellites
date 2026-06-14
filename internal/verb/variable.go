@@ -26,6 +26,20 @@ import (
 
 var variableStore *variable.Store
 
+// reservedSecretNames are system-scope names that hold LLM credentials and
+// MUST be written as secrets — a plain (non-secret) variable cannot hold a
+// key. The server-internal LLM-config resolver reads them directly; the
+// public read verbs redact them. Keep in sync with the resolver's env
+// fallbacks in cmd/satellites-server.
+var reservedSecretNames = map[string]bool{
+	"gemini.api_key":    true,
+	"anthropic.api_key": true,
+}
+
+// redactedSecretValue replaces a secret's plaintext on every public read
+// path. The resolver bypasses the verbs and reads the store directly.
+const redactedSecretValue = ""
+
 // SetVariableStore wires the server's variable.Store into the verb
 // package. Called from cmd/satellites-server on boot.
 func SetVariableStore(s *variable.Store) { variableStore = s }
@@ -91,6 +105,7 @@ type VariableGetResponse struct {
 	Name          string `json:"name"`
 	Value         string `json:"value"`
 	ResolvedScope string `json:"resolved_scope"`
+	Secret        bool   `json:"secret,omitempty"`
 }
 
 // VariableSetRequest is upsert-shaped: same value re-set is a no-op
@@ -101,6 +116,10 @@ type VariableSetRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
 	Value       string `json:"value"`
+	// Secret marks the row as a credential: admin-gated on write, never
+	// echoed by variable_get / variable_list. Reserved key names (see
+	// reservedSecretNames) MUST be written with secret:true.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // VariableListRequest selects what to enumerate. Inherit=true folds in
@@ -115,11 +134,13 @@ type VariableListRequest struct {
 	Inherit     bool   `json:"inherit,omitempty"`
 }
 
-// VariableListEntry pairs a variable with the layer it resolved at.
+// VariableListEntry pairs a variable with the layer it resolved at. A
+// secret entry carries its name + secret:true but never its value.
 type VariableListEntry struct {
 	Name          string `json:"name"`
 	Value         string `json:"value"`
 	ResolvedScope string `json:"resolved_scope"`
+	Secret        bool   `json:"secret,omitempty"`
 }
 
 // VariableListResponse is the merged listing.
@@ -183,7 +204,7 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			// and falls through to the resolver below.
 			v, lookupErr := variableStore.Get(ctx, key)
 			if lookupErr == nil {
-				return json.Marshal(VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: "system"})
+				return json.Marshal(variableGetResponse(v, "system"))
 			}
 			if !errors.Is(lookupErr, variable.ErrNotFound) {
 				return nil, mapVariableStoreError(lookupErr, "variable_get")
@@ -198,13 +219,22 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 		v, lookupErr := variableStore.Get(ctx, key)
 		if lookupErr == nil {
-			return json.Marshal(VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: string(v.Scope)})
+			return json.Marshal(variableGetResponse(v, string(v.Scope)))
 		}
 		if !errors.Is(lookupErr, variable.ErrNotFound) {
 			return nil, mapVariableStoreError(lookupErr, "variable_get")
 		}
 	}
 	return nil, fmt.Errorf("variable_get: %w: %s/%s", ErrNotFound, scope, req.Name)
+}
+
+// variableGetResponse builds the read response, blanking a secret's value
+// so its plaintext is never returned by variable_get.
+func variableGetResponse(v variable.Variable, resolvedScope string) VariableGetResponse {
+	if v.Secret {
+		return VariableGetResponse{Name: v.Name, Value: redactedSecretValue, ResolvedScope: resolvedScope, Secret: true}
+	}
+	return VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: resolvedScope}
 }
 
 func invokeVariableSet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -237,11 +267,44 @@ func invokeVariableSet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			return nil, fmt.Errorf("variable_set: %w: %q is a computed system variable (read-only)", ErrForbidden, req.Name)
 		}
 	}
-	v, err := variableStore.Set(ctx, variable.SetInput{Key: key, Value: req.Value}, time.Now().UTC())
+	// A reserved key name (gemini.api_key, …) is a credential — it may
+	// only be written as a secret. A plain variable cannot hold a key.
+	if reservedSecretNames[req.Name] && !req.Secret {
+		return nil, fmt.Errorf("variable_set: %w: %q is a reserved credential name and must be written with secret:true", ErrBadRequest, req.Name)
+	}
+	// Secret writes are admin-gated (global admin). CLI-local dispatch
+	// without an auth store is exempt, like the other authz call sites.
+	if req.Secret {
+		if err := requireSecretWriteAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
+	v, err := variableStore.Set(ctx, variable.SetInput{Key: key, Value: req.Value, Secret: req.Secret}, time.Now().UTC())
 	if err != nil {
 		return nil, mapVariableStoreError(err, "variable_set")
 	}
+	// Never echo the stored plaintext back on write either.
+	if v.Secret {
+		v.Value = redactedSecretValue
+	}
 	return json.Marshal(v)
+}
+
+// requireSecretWriteAdmin enforces that secret variable writes come from a
+// global admin. CLI-local in-process dispatch (no auth store wired) is
+// exempt, consistent with the rest of the authz surface.
+func requireSecretWriteAdmin(ctx context.Context) error {
+	if authStore == nil {
+		return nil
+	}
+	u := auth.FromContext(ctx)
+	if u == nil {
+		return fmt.Errorf("variable_set: %w: bearer required to write a secret", ErrUnauthorized)
+	}
+	if u.Role != auth.RoleAdmin {
+		return fmt.Errorf("variable_set: %w: secret writes require a global admin", ErrForbidden)
+	}
+	return nil
 }
 
 func invokeVariableDelete(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -296,13 +359,17 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	}
 
 	merged := map[string]VariableListEntry{}
-	addRow := func(name, value string, layer variable.Scope) {
+	addRow := func(name, value string, layer variable.Scope, secret bool) {
 		// Higher-precedence layers come first in the cascade; don't let
 		// a lower layer overwrite an existing entry.
 		if _, exists := merged[name]; exists {
 			return
 		}
-		merged[name] = VariableListEntry{Name: name, Value: value, ResolvedScope: string(layer)}
+		// A secret's plaintext is never listed — only its name + marker.
+		if secret {
+			value = redactedSecretValue
+		}
+		merged[name] = VariableListEntry{Name: name, Value: value, ResolvedScope: string(layer), Secret: secret}
 	}
 
 	for _, layerKey := range buildVariableResolutionChain("", scope, req.WorkspaceID, req.ProjectID, req.Inherit) {
@@ -316,11 +383,11 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 				return nil, mapVariableStoreError(err, "variable_list")
 			}
 			for _, v := range vs {
-				addRow(v.Name, v.Value, variable.ScopeSystem)
+				addRow(v.Name, v.Value, variable.ScopeSystem, v.Secret)
 			}
 			for _, name := range systemVariableNames(ctx) {
 				if v, ok := systemVariableResolve(ctx, name); ok {
-					addRow(name, v, variable.ScopeSystem)
+					addRow(name, v, variable.ScopeSystem, false)
 				}
 			}
 		default:
@@ -329,7 +396,7 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 				return nil, mapVariableStoreError(err, "variable_list")
 			}
 			for _, v := range vs {
-				addRow(v.Name, v.Value, v.Scope)
+				addRow(v.Name, v.Value, v.Scope, v.Secret)
 			}
 		}
 	}

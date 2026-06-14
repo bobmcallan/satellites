@@ -88,19 +88,27 @@ const (
 )
 
 // GeminiGenerator calls Gemini's generateContent. Server-side: the autonomous
-// executor used when no operator/client is driving.
+// executor used when no operator/client is driving. Credentials resolve per
+// Generate via provide, so the api key and model are read at request time
+// (substrate key-values, env fallback).
 type GeminiGenerator struct {
-	apiKey string
-	model  string
-	client *http.Client
+	provide func(context.Context) (apiKey, model string)
+	client  *http.Client
 }
 
-// NewGeminiGenerator builds a generator; an empty model falls back to the default.
+// NewGeminiGenerator builds a generator from fixed credentials; an empty model
+// falls back to the default. Kept for callers with static config.
 func NewGeminiGenerator(apiKey, model string) *GeminiGenerator {
 	if strings.TrimSpace(model) == "" {
 		model = DefaultGenerationModel
 	}
-	return &GeminiGenerator{apiKey: apiKey, model: model, client: &http.Client{Timeout: 120 * time.Second}}
+	return NewGeminiGeneratorFunc(func(context.Context) (string, string) { return apiKey, model })
+}
+
+// NewGeminiGeneratorFunc builds a generator from a per-request credential
+// provider (api key + model resolved at Generate time).
+func NewGeminiGeneratorFunc(provide func(context.Context) (apiKey, model string)) *GeminiGenerator {
+	return &GeminiGenerator{provide: provide, client: &http.Client{Timeout: 120 * time.Second}}
 }
 
 type genReq struct {
@@ -120,14 +128,18 @@ type genResp struct {
 
 // Generate sends one generateContent request and returns the concatenated text.
 func (g *GeminiGenerator) Generate(ctx context.Context, prompt string) (string, error) {
-	if strings.TrimSpace(g.apiKey) == "" {
+	apiKey, model := g.provide(ctx)
+	if strings.TrimSpace(model) == "" {
+		model = DefaultGenerationModel
+	}
+	if strings.TrimSpace(apiKey) == "" {
 		return "", fmt.Errorf("synth: gemini api key not configured")
 	}
 	bodyBytes, err := json.Marshal(genReq{Contents: []genContent{{Parts: []genPart{{Text: prompt}}}}})
 	if err != nil {
 		return "", fmt.Errorf("synth: marshal request: %w", err)
 	}
-	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent", geminiBaseURL, g.model)
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent", geminiBaseURL, model)
 
 	var respBytes []byte
 	for attempt := 0; ; attempt++ {
@@ -137,7 +149,7 @@ func (g *GeminiGenerator) Generate(ctx context.Context, prompt string) (string, 
 		}
 		req.Header.Set("Content-Type", "application/json")
 		q := req.URL.Query()
-		q.Set("key", g.apiKey)
+		q.Set("key", apiKey)
 		req.URL.RawQuery = q.Encode()
 
 		resp, err := g.client.Do(req)

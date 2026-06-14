@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/variable"
 )
 
@@ -109,5 +110,44 @@ func TestSystemVariableResolver_Defaults(t *testing.T) {
 	// Default resolver is empty — no system var resolves.
 	if _, ok := systemVariableResolve(context.Background(), "version"); ok {
 		t.Fatal("expected default resolver to return ok=false")
+	}
+}
+
+// TestVariableSet_ReservedNameRequiresSecret asserts a reserved credential
+// name (gemini.api_key) cannot be written as a plain variable — the check
+// fires before the store is touched (sty_a6983e32 AC2).
+func TestVariableSet_ReservedNameRequiresSecret(t *testing.T) {
+	prev := variableStore
+	variableStore = &variable.Store{}
+	defer func() { variableStore = prev }()
+
+	_, err := Get("variable_set").Invoke(context.Background(),
+		json.RawMessage(`{"name":"gemini.api_key","scope":"system","value":"sk-leak"}`))
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("expected ErrBadRequest for plain reserved name, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "reserved credential") {
+		t.Fatalf("error should mention 'reserved credential', got %v", err)
+	}
+}
+
+// TestVariableSet_SecretRequiresAdmin asserts a secret write by a
+// non-admin authenticated caller is refused before the store is touched
+// (sty_a6983e32 AC2).
+func TestVariableSet_SecretRequiresAdmin(t *testing.T) {
+	prevVar := variableStore
+	variableStore = &variable.Store{}
+	defer func() { variableStore = prevVar }()
+	SetAuthStore(&auth.Store{})
+	defer SetAuthStore(nil)
+
+	ctx := auth.WithUser(context.Background(), &auth.User{ID: "u1"}) // no admin role
+	_, err := Get("variable_set").Invoke(ctx,
+		json.RawMessage(`{"name":"test.secret","scope":"system","value":"v","secret":true}`))
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden for non-admin secret write, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "admin") {
+		t.Fatalf("error should mention 'admin', got %v", err)
 	}
 }
