@@ -766,6 +766,10 @@ func chromedpHeadlessOpts() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		// CI runners have a tiny /dev/shm; without this Chrome's DevTools
+		// websocket hangs ("websocket url timeout reached") and chromedp tests
+		// fail. Route shared memory to /tmp instead (sty_ae474ca3).
+		chromedp.Flag("disable-dev-shm-usage", true),
 	)
 }
 
