@@ -79,6 +79,7 @@ which executes the remaining atomic gates pre-commit and honours their verdicts
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
+- [[satellites-agent-architecture-review]] — when the change touches the agent/executor surface (internal/agent, the agent executor in internal/verb, agent operating documents); a judgment gate critiquing the change for configuration-over-code.
 
 ```yaml
 states:

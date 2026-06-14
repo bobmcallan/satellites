@@ -39,6 +39,14 @@ latest pushed commit, not the local tree. A change not committed + pushed +
      configuration (skills, principles, workflows, story workflows):
      `satellites workflow check`. Exit 0 → proceed; exit 1 → **do not commit**,
      resolve per the gate skill, re-run.
+   - **[[satellites-agent-architecture-review]]** — when the change touches the
+     agent/executor surface (`internal/agent`, the agent executor in
+     `internal/verb`, agent operating documents): a judgment gate (not a CLI
+     check) — `satellites story status_transition --skill
+     satellites-agent-architecture-review <story-id>`. It critiques the change
+     for configuration-over-code (agent behaviour in the substrate, only
+     mechanism in code). accept → proceed; reject → **do not commit**, move the
+     flagged behaviour into the substrate, re-run.
 
 2. **Configure + stage**
 
