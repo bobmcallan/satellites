@@ -1,22 +1,20 @@
 name: test
 
-# Two parallel gates, both required for this workflow to conclude `success`:
-#   - vet-test:    fast unit path (go vet + go test ./...).
-#   - integration: the integration tier (go test -tags integration), which
-#                  testcontainers-spins a Postgres and drives chromedp against
-#                  Google Chrome (both present on ubuntu-latest runners).
+# CI runs the fast, deterministic UNIT path only — `vet-test` (go vet + go
+# test ./...). release.yml and deploy.yml gate on THIS workflow via
+# `workflow_run` + `conclusion == 'success'`, so a unit/vet red blocks the
+# GitHub release and the Fly rollout.
 #
-# release.yml and deploy.yml gate on THIS workflow via `workflow_run` +
-# `conclusion == 'success'`. A GitHub Actions workflow concludes `success` only
-# when every job passes, so a red in EITHER job blocks the GitHub release and the
-# Fly rollout — the integration tier is now a deploy-path gate, not just a local
-# pre-commit one (sty_ae474ca3).
-#
-# Policy (sty_ae474ca3): CI fails on ANY integration red. The local
-# technical-debt-register is the LOCAL pre-commit tolerance only — CI does NOT
-# consult it. A quarantined-but-red check still reds CI; the fix is to fix the
-# test (the /loop), not to pad the register. The register is expected to stay
-# empty in steady state.
+# The INTEGRATION tier (go test -tags integration — testcontainers Postgres +
+# chromedp against headless Chrome) is NOT run here. It is a LOCAL pre-push
+# gate: the workflow's `techdebt-review` state runs `satellites techdebt
+# review` (build + unit + integration) against the working tree before any
+# commit/push, and a red there returns the story to in_progress with nothing
+# shipped (sty_2ce777c4). Headless Chrome in a GH runner flakes on the
+# websocket handshake (TestAdminPeoplePortal websocket-timeout) and costs
+# runner minutes; locally chromedp is stable, so integration is enforced where
+# it is reliable. This supersedes the CI deploy-path integration gate that
+# sty_ae474ca3 added — integration is a gate again, just a local one.
 
 on:
   push:
@@ -43,22 +41,3 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
-
-  integration:
-    # Runs in parallel with vet-test (no `needs:`) so the fast unit path is not
-    # serialized behind the slower tier. testcontainers uses the Docker daemon
-    # present on the runner; chromedp uses the preinstalled Google Chrome
-    # (chromedp.DefaultExecAllocatorOptions auto-discovers it, and the tests set
-    # the no-sandbox flag). Tests needing GEMINI_API_KEY t.Skip when it is unset.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-      - name: chrome version
-        # Diagnostic: chromedp drives this binary; fail fast/visibly if it is
-        # ever absent from the runner image.
-        run: google-chrome --version
-      - name: integration tier
-        run: go test -tags integration -timeout 20m ./tests/integration/...

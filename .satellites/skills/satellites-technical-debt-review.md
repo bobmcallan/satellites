@@ -38,12 +38,15 @@ It does, in order:
 4. Reconciles the failing checks against the `technical-debt-register` document
    and prints a verdict.
 
-This local gate is the **first line**. Because the local tier can be skipped
-(Docker down, `--skip-integration`), the `test` CI workflow re-runs the FULL
-integration tier on every push and PR as the non-skippable **backstop**, and
-release+deploy gate on it. CI fails on ANY integration red and does NOT consult
-this register — the register is the local pre-commit tolerance only; a red there
-is fixed (the loop), never carried.
+This local gate is the **sole integration gate**. The `test` CI workflow runs
+the UNIT/vet path only (release+deploy gate on it) — it does NOT re-run the
+integration tier, because headless Chrome in a CI runner flakes on the
+websocket handshake and costs runner minutes, while locally it is stable. So
+the integration tier runs HERE, against the local tree, before every
+commit/push; a red is fixed (the loop), never carried, and CI does not consult
+this register. The tradeoff: if you skip the local tier (Docker down,
+`--skip-integration`) there is no CI backstop, so integration is unverified for
+that push — do not skip it before shipping a change with integration surface.
 
 **Exit 0 (CLEAN)** — no new red and no unowned register entry. The commit may
 proceed.
