@@ -40,6 +40,11 @@ type CorpusDoc struct {
 // is written to (and excluded from its own corpus).
 const ObjectiveDocName = "objective"
 
+// AgentTaskNamePrefix is the reserved workspace-document name namespace holding
+// workspace agent-task CONFIGS (epic:workspace-agents). These are configuration,
+// not corpus content, so a generation run never feeds them into its prompt.
+const AgentTaskNamePrefix = "agent-task/"
+
 // objectiveSpec is the objective TASK's instruction — the one spec the objective
 // generation runs. It is now one caller of BuildTaskPrompt (epic:workspace-agents):
 // the objective is just a task whose spec happens to be embedded here, while other
@@ -273,6 +278,9 @@ func (s *ObjectiveService) GenerateOverCorpus(ctx context.Context, workspaceID, 
 	for _, d := range res.Items {
 		if excludeName != "" && d.Name == excludeName {
 			continue // never feed the task's own output back into the run
+		}
+		if strings.HasPrefix(d.Name, AgentTaskNamePrefix) {
+			continue // agent-task configs are configuration, not corpus content
 		}
 		got, err := s.docs.Get(ctx, document.Key{Scope: document.ScopeWorkspace, WorkspaceID: workspaceID, Name: d.Name}, document.GetOptions{})
 		if err != nil || len(got.Versions) == 0 {
