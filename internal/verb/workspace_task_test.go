@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/bobmcallan/satellites/internal/document"
@@ -82,12 +83,34 @@ func TestWorkspaceTaskUpsertValidation(t *testing.T) {
 	}
 }
 
-// The agent tool dispatcher refuses any tool outside the allowlist before
-// reaching the verb registry.
-func TestWorkspaceAgentToolsRefusesUnknown(t *testing.T) {
-	_, disp := workspaceAgentTools("ws1")
-	if _, err := disp(context.Background(), "document_delete", json.RawMessage(`{}`)); err == nil {
-		t.Fatal("expected refusal of a non-allowlisted tool")
+// The agent tool set is built from the skill-declared allowlist (configuration):
+// an unknown declared tool errors, and the dispatcher refuses any tool the skill
+// did not declare.
+func TestAgentToolsFromSkill(t *testing.T) {
+	if _, _, err := agentToolsFromSkill("ws1", []string{"document_delete"}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("unknown declared tool: want ErrBadRequest, got %v", err)
+	}
+	tools, disp, err := agentToolsFromSkill("ws1", []string{"document_get"})
+	if err != nil || len(tools) != 1 || tools[0].Name != "document_get" {
+		t.Fatalf("tools=%v err=%v", tools, err)
+	}
+	if _, derr := disp(context.Background(), "semantic_search", json.RawMessage(`{}`)); derr == nil {
+		t.Fatal("dispatcher must refuse a tool the skill did not declare")
+	}
+}
+
+// composeTaskMessage interprets the skill's Spec/Verifier/Environment headings,
+// and falls back to the whole body when they are absent.
+func TestComposeTaskMessage(t *testing.T) {
+	body := "## Spec\nProduce a summary.\n\n## Verifier\nCites sources.\n\n## Environment\nRead-only.\n"
+	msg := composeTaskMessage(body)
+	for _, want := range []string{"Produce a summary.", "Cites sources.", "Read-only."} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("composed message missing %q: %q", want, msg)
+		}
+	}
+	if got := composeTaskMessage("just do it"); got != "just do it" {
+		t.Fatalf("freeform fallback: %q", got)
 	}
 }
 

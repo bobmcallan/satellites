@@ -45,6 +45,12 @@ type Frontmatter struct {
 	Kind      string   `yaml:"kind"`
 	AppliesTo []string `yaml:"applies_to"`
 	When      string   `yaml:"when"`
+
+	// Tools is the agent capability allowlist a kind:task skill declares
+	// (epic:workspace-agents): the policy of which tools the server agent may
+	// call lives in configuration here, not in the binary. Names are resolved
+	// against the harness's tool catalogue at run time.
+	Tools []string `yaml:"tools"`
 }
 
 // frontmatterDelim is the literal `---` line that opens and closes a

@@ -21,6 +21,7 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/agent"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/synth"
 )
 
@@ -189,8 +190,22 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 		if agentModel == nil {
 			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "no server-side agent model (GEMINI_API_KEY unset)"})
 		}
-		tools, dispatch := workspaceAgentTools(wsID)
-		out, rerr := agent.Run(ctx, agentModel, agentSystemPrompt(wsID, outName), spec, tools, dispatch, agent.DefaultMaxSteps)
+		// The agent envelope is configuration, not code: the skill declares its
+		// tools (frontmatter), the operating prompt is a system document, and the
+		// task message is composed from the skill's Spec/Verifier/Environment.
+		fm, _, ferr := frontmatter.Parse([]byte(got.Versions[0].Body))
+		if ferr != nil {
+			return nil, fmt.Errorf("workspace_task_run: %w: parse task skill frontmatter: %v", ErrBadRequest, ferr)
+		}
+		tools, dispatch, terr := agentToolsFromSkill(wsID, fm.Tools)
+		if terr != nil {
+			return nil, fmt.Errorf("workspace_task_run: %w", terr)
+		}
+		sys, perr := readAgentSystemPrompt(ctx)
+		if perr != nil {
+			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: perr.Error()})
+		}
+		out, rerr := agent.Run(ctx, agentModel, sys, composeTaskMessage(spec), tools, dispatch, agent.DefaultMaxSteps)
 		if rerr != nil {
 			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: rerr.Error()})
 		}
@@ -375,36 +390,68 @@ func loadTaskConfig(ctx context.Context, wsID, name string) (taskConfig, error) 
 	return cfg, nil
 }
 
-// workspaceAgentTools builds the agent's read-only tool allowlist and a
-// dispatcher that forces the task's workspace_id (and the fixed scope/type) into
-// every call — so the agent can read only its own workspace's corpus, through
-// the existing verb registry, and cannot reach any other verb.
-func workspaceAgentTools(wsID string) ([]agent.Tool, agent.ToolDispatcher) {
-	fixed := map[string]map[string]string{
-		"semantic_search": {"workspace_id": wsID},
-		"document_get":    {"workspace_id": wsID, "scope": "workspace"},
-		"document_list":   {"workspace_id": wsID, "scope": "workspace", "type": "document"},
+// agentToolDef is one capability the harness CAN expose: its parameter schema,
+// the fixed workspace-scoping forced into every call (a guardrail), and a
+// description. This is mechanism — the catalogue of what exists. WHICH tools a
+// task may use is configuration (the skill's frontmatter `tools`).
+type agentToolDef struct {
+	description string
+	schema      json.RawMessage
+	fixed       map[string]string
+}
+
+// agentToolCatalog is the harness's capability catalogue (mechanism), bound to
+// the read-only verbs and scoped to one workspace. A kind:task skill selects from
+// it by name; the binary never decides the policy.
+func agentToolCatalog(wsID string) map[string]agentToolDef {
+	return map[string]agentToolDef{
+		"semantic_search": {
+			description: "Search the workspace corpus by semantic similarity. Args: {query (string, required), limit (integer, optional)}.",
+			schema:      json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}`),
+			fixed:       map[string]string{"workspace_id": wsID},
+		},
+		"document_get": {
+			description: "Fetch a workspace document by name. Args: {name (string, required)}.",
+			schema:      json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`),
+			fixed:       map[string]string{"workspace_id": wsID, "scope": "workspace"},
+		},
+		"document_list": {
+			description: "List workspace documents, optionally filtered by name_prefix. Args: {name_prefix (string, optional)}.",
+			schema:      json.RawMessage(`{"type":"object","properties":{"name_prefix":{"type":"string"}}}`),
+			fixed:       map[string]string{"workspace_id": wsID, "scope": "workspace", "type": "document"},
+		},
 	}
-	tools := []agent.Tool{
-		{Name: "semantic_search", Description: "Search the workspace corpus by semantic similarity. Args: {query (string, required), limit (integer, optional)}.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}`)},
-		{Name: "document_get", Description: "Fetch a workspace document by name. Args: {name (string, required)}.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)},
-		{Name: "document_list", Description: "List workspace documents, optionally filtered by name_prefix. Args: {name_prefix (string, optional)}.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"name_prefix":{"type":"string"}}}`)},
+}
+
+// agentToolsFromSkill builds the agent's tool set from the skill-declared
+// allowlist (configuration) against the catalogue (mechanism). The dispatcher
+// forces the workspace scoping into every call — so the agent reads only its own
+// workspace, through the existing verb registry, and a tool the skill did not
+// declare is unavailable.
+func agentToolsFromSkill(wsID string, declared []string) ([]agent.Tool, agent.ToolDispatcher, error) {
+	catalog := agentToolCatalog(wsID)
+	allowed := map[string]agentToolDef{}
+	tools := make([]agent.Tool, 0, len(declared))
+	for _, name := range declared {
+		def, ok := catalog[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("%w: task skill declares unknown tool %q", ErrBadRequest, name)
+		}
+		allowed[name] = def
+		tools = append(tools, agent.Tool{Name: name, Description: def.description, Parameters: def.schema})
 	}
 	dispatch := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
-		f, ok := fixed[name]
+		def, ok := allowed[name]
 		if !ok {
 			return nil, fmt.Errorf("tool %q not permitted", name)
 		}
-		body, err := forceArgs(f, args)
+		body, err := forceArgs(def.fixed, args)
 		if err != nil {
 			return nil, err
 		}
 		return Dispatch(ctx, name, body)
 	}
-	return tools, dispatch
+	return tools, dispatch, nil
 }
 
 // forceArgs merges model-supplied args with the fixed args, fixed winning — so
@@ -423,12 +470,72 @@ func forceArgs(fixed map[string]string, args json.RawMessage) (json.RawMessage, 
 	return json.Marshal(merged)
 }
 
-func agentSystemPrompt(wsID, outName string) string {
-	return "You are a workspace agent operating server-side on workspace " + wsID + ". " +
-		"Use the provided read-only tools to gather information from the workspace corpus before answering; " +
-		"ground every statement in tool results and do not fabricate. When you have gathered enough, produce the " +
-		"final deliverable described by the task as plain markdown with no preamble — it is stored as the workspace " +
-		"document \"" + outName + "\"."
+// agentOperatingPromptName is the system-scope document holding the agent's
+// operating framing — configuration, read at run time, not a Go literal.
+const agentOperatingPromptName = "agent-operating-prompt"
+
+// readAgentSystemPrompt loads the agent operating prompt from the substrate.
+func readAgentSystemPrompt(ctx context.Context) (string, error) {
+	got, err := documentStore.Get(ctx, document.Key{Scope: document.ScopeSystem, Name: agentOperatingPromptName}, document.GetOptions{})
+	if err != nil || len(got.Versions) == 0 {
+		return "", fmt.Errorf("agent operating prompt not configured (system/%s)", agentOperatingPromptName)
+	}
+	body := strings.TrimSpace(got.Versions[0].Body)
+	if body == "" {
+		return "", fmt.Errorf("agent operating prompt (system/%s) is empty", agentOperatingPromptName)
+	}
+	return body, nil
+}
+
+// composeTaskMessage builds the agent's task message from the kind:task skill's
+// structure: the Spec is the deliverable, the Verifier a self-check, the
+// Environment the operating constraints — interpreted, not dumped. A skill
+// without those headings falls back to its whole body.
+func composeTaskMessage(skillBody string) string {
+	spec := extractMarkdownSection(skillBody, "Spec")
+	verifier := extractMarkdownSection(skillBody, "Verifier")
+	environment := extractMarkdownSection(skillBody, "Environment")
+	if spec == "" && verifier == "" && environment == "" {
+		return strings.TrimSpace(skillBody)
+	}
+	var b strings.Builder
+	if spec != "" {
+		b.WriteString(spec)
+	} else {
+		b.WriteString(strings.TrimSpace(skillBody))
+	}
+	if environment != "" {
+		b.WriteString("\n\nOperating constraints:\n")
+		b.WriteString(environment)
+	}
+	if verifier != "" {
+		b.WriteString("\n\nBefore finalizing, self-check against:\n")
+		b.WriteString(verifier)
+	}
+	return b.String()
+}
+
+// extractMarkdownSection returns the body under a `## <heading>` line, up to the
+// next `## ` heading or end of document; empty when the heading is absent.
+func extractMarkdownSection(body, heading string) string {
+	lines := strings.Split(body, "\n")
+	want := "## " + heading
+	var out []string
+	in := false
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !in {
+			if t == want {
+				in = true
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "## ") {
+			break
+		}
+		out = append(out, ln)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // taskSpecFromSkillBody extracts the instruction text from a kind:task skill body:

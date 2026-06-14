@@ -90,12 +90,24 @@ func TestWorkspaceTaskRun_AgentMode(t *testing.T) {
 	}, now); err != nil {
 		t.Fatalf("seed note: %v", err)
 	}
-	// The kind:task skill whose body is the task spec.
+	// The kind:task skill declares its tools (config) and its Spec; the agent
+	// envelope is derived from these, not from Go literals.
+	skillBody := "---\nname: summarise\nkind: task\ntools: [document_get]\n---\n## Spec\nSummarise the workspace corpus.\n"
 	if _, _, err := docStore.Upsert(context.Background(), document.UpsertInput{
 		Key:  document.Key{Scope: document.ScopeWorkspace, WorkspaceID: ws.ID, Name: "summarise"},
-		Type: document.TypeSkill, Body: "Summarise the workspace corpus.", CreatedBy: admin.ID,
+		Type: document.TypeSkill, Body: skillBody, CreatedBy: admin.ID,
 	}, now); err != nil {
 		t.Fatalf("seed skill: %v", err)
+	}
+	// The agent operating prompt is a system-scope document (config), not code —
+	// seeded via the system-seed path (system scope is read-only to Upsert), the
+	// same path the server boot uses for config/documents/agent-operating-prompt.md.
+	sysSeed := document.NewSystemSeedStore(env.DB)
+	if _, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeed, docStore,
+		document.TypeDocument, "agent-operating-prompt",
+		"You are a workspace agent. Use the read-only tools, ground in results, produce the deliverable.",
+		nil, "", "system:test", now); err != nil {
+		t.Fatalf("seed agent prompt: %v", err)
 	}
 
 	raw, err := verb.Dispatch(ctx, "workspace_task_run", json.RawMessage(
