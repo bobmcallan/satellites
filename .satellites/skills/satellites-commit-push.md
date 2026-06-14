@@ -90,7 +90,11 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    **separate** workflows. Check ALL THREE conclusions, especially **release**: it
    does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
    `satellites.version` bump, and that red is invisible if you only watch `test` +
-   `deploy`.
+   `deploy`. The **`test`** workflow now runs TWO parallel jobs — `vet-test`
+   (unit) and `integration` (the full `-tags integration` tier, incl. chromedp);
+   either job red fails `test` and blocks release+deploy, so CI is the
+   non-skippable backstop to the local [[satellites-technical-debt-review]] gate.
+   When `test` is red, `gh run view <id> --log-failed` shows which job.
 
    ```bash
    HEAD=$(git rev-parse HEAD)

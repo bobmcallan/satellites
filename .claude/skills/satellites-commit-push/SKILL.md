@@ -6,7 +6,7 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_e12fad56","version":11,"hash":"9fcf77c9762325ccb62b3ebe02f0482dce513ca2b180e0fe35a004ce53e1ce87"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":2,"hash":"56f77e2a2e9539b95207f523a862c29587643660ab40b5b6b001d2f9948eb44e"} satellites-sync:end -->
 
 # satellites-commit-push
 
@@ -91,7 +91,11 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    **separate** workflows. Check ALL THREE conclusions, especially **release**: it
    does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
    `satellites.version` bump, and that red is invisible if you only watch `test` +
-   `deploy`.
+   `deploy`. The **`test`** workflow now runs TWO parallel jobs — `vet-test`
+   (unit) and `integration` (the full `-tags integration` tier, incl. chromedp);
+   either job red fails `test` and blocks release+deploy, so CI is the
+   non-skippable backstop to the local [[satellites-technical-debt-review]] gate.
+   When `test` is red, `gh run view <id> --log-failed` shows which job.
 
    ```bash
    HEAD=$(git rev-parse HEAD)

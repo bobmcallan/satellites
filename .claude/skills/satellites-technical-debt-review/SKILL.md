@@ -6,7 +6,7 @@ when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
 description: The technical-debt gate (broken-windows enforcement). Runs as the techdebt-review state's command on the workflow's checkpoint traverse, against the local tree BEFORE anything ships — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. At commit the tree must be clean OR its debt must be a story.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_4732f444","version":7,"hash":"bd891e9d4163c07955b85a931f7c7156d71527d4458e5993df76f7c905d3fa6c"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_87d669a2","version":2,"hash":"ef5ed87f341b596dbc91c58ec55c124c067c05fb826e02ee09b780c0eeb5472d"} satellites-sync:end -->
 
 # satellites-technical-debt-review
 
@@ -38,6 +38,13 @@ It does, in order:
    warning** (not blocked). Pass `--skip-integration` to force-skip.
 4. Reconciles the failing checks against the `technical-debt-register` document
    and prints a verdict.
+
+This local gate is the **first line**. Because the local tier can be skipped
+(Docker down, `--skip-integration`), the `test` CI workflow re-runs the FULL
+integration tier on every push and PR as the non-skippable **backstop**, and
+release+deploy gate on it. CI fails on ANY integration red and does NOT consult
+this register — the register is the local pre-commit tolerance only; a red there
+is fixed (the loop), never carried.
 
 **Exit 0 (CLEAN)** — no new red and no unowned register entry. The commit may
 proceed.
