@@ -76,8 +76,15 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	// WAL for concurrent readers + a single writer; busy_timeout so a contended
-	// write waits rather than erroring under parallel agents.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	// write waits rather than erroring under parallel agents. _txlock=immediate
+	// makes every write transaction take its lock at BEGIN (sty_3683308d): a
+	// deferred read-then-write txn (e.g. ClaimWork's SELECT-then-UPSERT) that
+	// upgrades a read snapshot to a write lock while ANOTHER process has written
+	// gets SQLITE_BUSY *immediately* — busy_timeout does not cover that upgrade.
+	// BEGIN IMMEDIATE acquires the write lock up front, where busy_timeout DOES
+	// apply, so cross-process writers serialise (wait) instead of erroring.
+	// Read-only queries stay deferred and concurrent under WAL.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("workstate: open %s: %w", path, err)
