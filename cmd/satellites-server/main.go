@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/config/documents"
+	"github.com/bobmcallan/satellites/internal/agent"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/blob"
@@ -460,6 +461,9 @@ func main() {
 		// Objective synthesis uses Gemini server-side (sty_a0099c04); claude -p
 		// stays the CLI's client-side executor.
 		verb.SetObjectiveService(synth.NewObjectiveService(synth.NewGeminiGenerator(key, ""), docStore))
+		// The server-side agent harness (epic:workspace-agents) — the tool-using
+		// executor, same Gemini key.
+		verb.SetAgentModel(agent.NewGeminiAgentModel(key, ""))
 		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
 		arbor.Info("embedding worker started", "model", cfg.Embedding.Model, "dim", cfg.Embedding.Dimension)
 	} else {

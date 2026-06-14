@@ -81,3 +81,29 @@ func TestWorkspaceTaskUpsertValidation(t *testing.T) {
 		}
 	}
 }
+
+// The agent tool dispatcher refuses any tool outside the allowlist before
+// reaching the verb registry.
+func TestWorkspaceAgentToolsRefusesUnknown(t *testing.T) {
+	_, disp := workspaceAgentTools("ws1")
+	if _, err := disp(context.Background(), "document_delete", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("expected refusal of a non-allowlisted tool")
+	}
+}
+
+// forceArgs forces the workspace scoping over anything the model supplies — the
+// agent cannot read another workspace by passing its own workspace_id.
+func TestForceArgs(t *testing.T) {
+	out, err := forceArgs(map[string]string{"workspace_id": "ws_real", "scope": "workspace"},
+		json.RawMessage(`{"name":"x","workspace_id":"ws_EVIL"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["workspace_id"] != "ws_real" || got["scope"] != "workspace" || got["name"] != "x" {
+		t.Fatalf("forced args wrong: %+v", got)
+	}
+}

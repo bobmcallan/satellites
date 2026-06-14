@@ -288,6 +288,16 @@ func (s *ObjectiveService) GenerateOverCorpus(ctx context.Context, workspaceID, 
 		}
 		corpus = append(corpus, CorpusDoc{Name: d.Name, Body: got.Versions[0].Body})
 	}
+	return s.GenerateFromCorpus(ctx, spec, corpus)
+}
+
+// GenerateFromCorpus builds the task prompt from an already-gathered corpus and
+// runs the generator. Split from GenerateOverCorpus so the generation half is
+// unit-testable with a fake Generator, no document store required.
+func (s *ObjectiveService) GenerateFromCorpus(ctx context.Context, spec string, corpus []CorpusDoc) (string, error) {
+	if !s.Enabled() {
+		return "", fmt.Errorf("no generator configured")
+	}
 	if len(corpus) == 0 {
 		return "", fmt.Errorf("no corpus documents to synthesize from")
 	}

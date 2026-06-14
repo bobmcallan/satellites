@@ -19,8 +19,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/agent"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/synth"
+)
+
+// agentModel is the server-side agent executor, wired at boot when a Gemini key
+// is present (nil otherwise → agent-mode runs report a clear not-run result).
+var agentModel agent.AgentModel
+
+// SetAgentModel wires the server-side agent harness model.
+func SetAgentModel(m agent.AgentModel) { agentModel = m }
+
+// Executor modes for a task run.
+const (
+	executorSingleShot = "single_shot"
+	executorAgent      = "agent"
 )
 
 // taskSkillRef points at the kind:task skill whose body is the task spec. The key
@@ -37,6 +51,7 @@ type taskConfig struct {
 	TaskSkill  taskSkillRef `json:"task_skill"`
 	OutputName string       `json:"output_name"`
 	Trigger    string       `json:"trigger"`
+	Executor   string       `json:"executor,omitempty"` // single_shot (default) | agent
 }
 
 // triggerOnDemand is the only trigger supported in this slice; schedule and
@@ -98,6 +113,7 @@ type WorkspaceTaskRunRequest struct {
 	TaskName    string       `json:"task_name,omitempty"`
 	TaskSkill   taskSkillRef `json:"task_skill"`
 	OutputName  string       `json:"output_name"`
+	Executor    string       `json:"executor,omitempty"` // overrides the task's executor
 }
 
 type WorkspaceTaskRunResponse struct {
@@ -128,7 +144,8 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 
 	skill := req.TaskSkill
 	outName := strings.TrimSpace(req.OutputName)
-	// A stored task name resolves its skill + output from the config document.
+	executor := strings.TrimSpace(req.Executor)
+	// A stored task name resolves its skill + output + executor from the config.
 	if tn := strings.TrimSpace(req.TaskName); tn != "" {
 		cfg, err := loadTaskConfig(ctx, wsID, tn)
 		if err != nil {
@@ -136,9 +153,18 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 		}
 		skill = cfg.TaskSkill
 		outName = cfg.OutputName
+		if executor == "" {
+			executor = cfg.Executor
+		}
 	}
 	if outName == "" {
 		return nil, fmt.Errorf("workspace_task_run: %w: output_name required (or task_name)", ErrBadRequest)
+	}
+	if executor == "" {
+		executor = executorSingleShot
+	}
+	if executor != executorSingleShot && executor != executorAgent {
+		return nil, fmt.Errorf("workspace_task_run: %w: unsupported executor %q", ErrBadRequest, executor)
 	}
 
 	key, err := resolveTaskSkillKey(skill, wsID)
@@ -154,17 +180,33 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 		return nil, fmt.Errorf("workspace_task_run: %w: task skill %s/%s has an empty spec", ErrBadRequest, key.Scope, key.Name)
 	}
 
-	// No generator wired (no GEMINI_API_KEY) → a clear not-run result, never a crash.
-	if objectiveService == nil || !objectiveService.Enabled() {
-		return json.Marshal(WorkspaceTaskRunResponse{
-			Ran:  false,
-			Note: "no server-side generator (GEMINI_API_KEY unset)",
-		})
+	// Generate via the selected executor. A missing generator/model (no
+	// GEMINI_API_KEY) or a generation hiccup is a reportable not-run result,
+	// never a crash.
+	var text string
+	switch executor {
+	case executorAgent:
+		if agentModel == nil {
+			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "no server-side agent model (GEMINI_API_KEY unset)"})
+		}
+		tools, dispatch := workspaceAgentTools(wsID)
+		out, rerr := agent.Run(ctx, agentModel, agentSystemPrompt(wsID, outName), spec, tools, dispatch, agent.DefaultMaxSteps)
+		if rerr != nil {
+			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: rerr.Error()})
+		}
+		text = out
+	default: // executorSingleShot
+		if objectiveService == nil || !objectiveService.Enabled() {
+			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "no server-side generator (GEMINI_API_KEY unset)"})
+		}
+		out, gerr := objectiveService.GenerateOverCorpus(ctx, wsID, spec, outName)
+		if gerr != nil {
+			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: gerr.Error()})
+		}
+		text = out
 	}
-
-	text, err := objectiveService.GenerateOverCorpus(ctx, wsID, spec, outName)
-	if err != nil {
-		return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: err.Error()})
+	if strings.TrimSpace(text) == "" {
+		return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "executor returned empty output"})
 	}
 
 	doc, _, err := documentStore.Upsert(ctx, document.UpsertInput{
@@ -185,6 +227,7 @@ type WorkspaceTaskUpsertRequest struct {
 	TaskSkill   taskSkillRef `json:"task_skill"`
 	OutputName  string       `json:"output_name"`
 	Trigger     string       `json:"trigger,omitempty"`
+	Executor    string       `json:"executor,omitempty"`
 }
 
 // WorkspaceTaskView is the wire shape for a task in upsert/list responses.
@@ -193,6 +236,7 @@ type WorkspaceTaskView struct {
 	TaskSkill  taskSkillRef `json:"task_skill"`
 	OutputName string       `json:"output_name"`
 	Trigger    string       `json:"trigger"`
+	Executor   string       `json:"executor"`
 }
 
 func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -230,12 +274,19 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 	if trigger != triggerOnDemand {
 		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported trigger %q (only %q in this slice)", ErrBadRequest, trigger, triggerOnDemand)
 	}
+	executor := strings.TrimSpace(req.Executor)
+	if executor == "" {
+		executor = executorSingleShot
+	}
+	if executor != executorSingleShot && executor != executorAgent {
+		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported executor %q (single_shot|agent)", ErrBadRequest, executor)
+	}
 
 	if authStore != nil && !canManageWorkspace(ctx, wsID) {
 		return nil, fmt.Errorf("workspace_task_upsert: %w: not an admin of workspace %s", ErrForbidden, wsID)
 	}
 
-	cfg := taskConfig{TaskSkill: req.TaskSkill, OutputName: outName, Trigger: trigger}
+	cfg := taskConfig{TaskSkill: req.TaskSkill, OutputName: outName, Trigger: trigger, Executor: executor}
 	body, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("workspace_task_upsert: marshal config: %w", err)
@@ -248,7 +299,7 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 	}, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("workspace_task_upsert: store task: %w", err)
 	}
-	return json.Marshal(WorkspaceTaskView{Name: name, TaskSkill: cfg.TaskSkill, OutputName: cfg.OutputName, Trigger: cfg.Trigger})
+	return json.Marshal(WorkspaceTaskView{Name: name, TaskSkill: cfg.TaskSkill, OutputName: cfg.OutputName, Trigger: cfg.Trigger, Executor: cfg.Executor})
 }
 
 type WorkspaceTaskListRequest struct {
@@ -296,11 +347,16 @@ func invokeWorkspaceTaskList(ctx context.Context, raw json.RawMessage) (json.Raw
 		if json.Unmarshal([]byte(got.Versions[0].Body), &cfg) != nil {
 			continue // skip a malformed config rather than failing the whole list
 		}
+		executor := cfg.Executor
+		if executor == "" {
+			executor = executorSingleShot
+		}
 		tasks = append(tasks, WorkspaceTaskView{
 			Name:       strings.TrimPrefix(d.Name, synth.AgentTaskNamePrefix),
 			TaskSkill:  cfg.TaskSkill,
 			OutputName: cfg.OutputName,
 			Trigger:    cfg.Trigger,
+			Executor:   executor,
 		})
 	}
 	return json.Marshal(WorkspaceTaskListResponse{Tasks: tasks})
@@ -317,6 +373,62 @@ func loadTaskConfig(ctx context.Context, wsID, name string) (taskConfig, error) 
 		return taskConfig{}, fmt.Errorf("%w: task %q has a malformed config", ErrBadRequest, name)
 	}
 	return cfg, nil
+}
+
+// workspaceAgentTools builds the agent's read-only tool allowlist and a
+// dispatcher that forces the task's workspace_id (and the fixed scope/type) into
+// every call — so the agent can read only its own workspace's corpus, through
+// the existing verb registry, and cannot reach any other verb.
+func workspaceAgentTools(wsID string) ([]agent.Tool, agent.ToolDispatcher) {
+	fixed := map[string]map[string]string{
+		"semantic_search": {"workspace_id": wsID},
+		"document_get":    {"workspace_id": wsID, "scope": "workspace"},
+		"document_list":   {"workspace_id": wsID, "scope": "workspace", "type": "document"},
+	}
+	tools := []agent.Tool{
+		{Name: "semantic_search", Description: "Search the workspace corpus by semantic similarity. Args: {query (string, required), limit (integer, optional)}.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}`)},
+		{Name: "document_get", Description: "Fetch a workspace document by name. Args: {name (string, required)}.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)},
+		{Name: "document_list", Description: "List workspace documents, optionally filtered by name_prefix. Args: {name_prefix (string, optional)}.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"name_prefix":{"type":"string"}}}`)},
+	}
+	dispatch := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+		f, ok := fixed[name]
+		if !ok {
+			return nil, fmt.Errorf("tool %q not permitted", name)
+		}
+		body, err := forceArgs(f, args)
+		if err != nil {
+			return nil, err
+		}
+		return Dispatch(ctx, name, body)
+	}
+	return tools, dispatch
+}
+
+// forceArgs merges model-supplied args with the fixed args, fixed winning — so
+// the agent can never override the workspace scoping (workspace_id/scope/type).
+func forceArgs(fixed map[string]string, args json.RawMessage) (json.RawMessage, error) {
+	merged := map[string]json.RawMessage{}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &merged); err != nil {
+			return nil, err
+		}
+	}
+	for k, v := range fixed {
+		b, _ := json.Marshal(v)
+		merged[k] = b
+	}
+	return json.Marshal(merged)
+}
+
+func agentSystemPrompt(wsID, outName string) string {
+	return "You are a workspace agent operating server-side on workspace " + wsID + ". " +
+		"Use the provided read-only tools to gather information from the workspace corpus before answering; " +
+		"ground every statement in tool results and do not fabricate. When you have gathered enough, produce the " +
+		"final deliverable described by the task as plain markdown with no preamble — it is stored as the workspace " +
+		"document \"" + outName + "\"."
 }
 
 // taskSpecFromSkillBody extracts the instruction text from a kind:task skill body:
