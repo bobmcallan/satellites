@@ -82,6 +82,9 @@ var validSkillKinds = map[string]bool{
 	"function":   true,
 	"gate":       true,
 	"capability": true,
+	// task (epic:workspace-agents): a workspace agent's unit of work — a spec a
+	// server-side run executes over the workspace corpus (workspace_task_run).
+	"task": true,
 }
 
 // documentTarget describes one .md file scheduled for a dispatch. Every
@@ -415,9 +418,9 @@ func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) 
 				// workflow additionally declares the story types it binds.
 				switch k := strings.TrimSpace(fm.Kind); {
 				case k == "":
-					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|capability)"})
+					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|capability|task)"})
 				case !validSkillKinds[k]:
-					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|capability", k)})
+					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|capability|task", k)})
 				case k == "workflow" && len(fm.AppliesTo) == 0:
 					vs = append(vs, violation{p, "skill-dispatch", "workflow skill missing required frontmatter: applies_to"})
 				}

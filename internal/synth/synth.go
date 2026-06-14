@@ -40,14 +40,22 @@ type CorpusDoc struct {
 // is written to (and excluded from its own corpus).
 const ObjectiveDocName = "objective"
 
-// BuildObjectivePrompt is the TASK spec: it renders the corpus into the prompt
-// both executors run. Shared data, not executor-specific logic.
-func BuildObjectivePrompt(corpus []CorpusDoc) string {
+// objectiveSpec is the objective TASK's instruction — the one spec the objective
+// generation runs. It is now one caller of BuildTaskPrompt (epic:workspace-agents):
+// the objective is just a task whose spec happens to be embedded here, while other
+// task specs come from kind:task skills.
+const objectiveSpec = "You are assisting a delivery/project manager. Below are the documents collected for a client engagement (a workspace corpus). " +
+	"Synthesize a concise engagement OBJECTIVE: 2–4 short paragraphs stating what this engagement is about, its goal, and the current focus — grounded only in the documents. " +
+	"Do not invent facts not supported by the documents. Output the objective as plain markdown, no preamble."
+
+// BuildTaskPrompt renders a task spec + the workspace corpus into the prompt the
+// generator runs. The spec is the task's instruction (an objective spec, or a
+// kind:task skill body); the corpus is enveloped the same way for every task.
+// Shared data, not executor-specific logic.
+func BuildTaskPrompt(spec string, corpus []CorpusDoc) string {
 	var b strings.Builder
-	b.WriteString("You are assisting a delivery/project manager. Below are the documents collected for a client engagement (a workspace corpus). ")
-	b.WriteString("Synthesize a concise engagement OBJECTIVE: 2–4 short paragraphs stating what this engagement is about, its goal, and the current focus — grounded only in the documents. ")
-	b.WriteString("Do not invent facts not supported by the documents. Output the objective as plain markdown, no preamble.\n\n")
-	b.WriteString("--- DOCUMENTS ---\n")
+	b.WriteString(strings.TrimSpace(spec))
+	b.WriteString("\n\n--- DOCUMENTS ---\n")
 	for _, d := range corpus {
 		b.WriteString("\n## ")
 		b.WriteString(d.Name)
@@ -57,6 +65,13 @@ func BuildObjectivePrompt(corpus []CorpusDoc) string {
 	}
 	b.WriteString("\n--- END DOCUMENTS ---\n")
 	return b.String()
+}
+
+// BuildObjectivePrompt is the objective TASK spec rendered over the corpus —
+// BuildTaskPrompt with the objective instruction. Preserved for callers that
+// build the objective prompt directly (client-side claude -p executor).
+func BuildObjectivePrompt(corpus []CorpusDoc) string {
+	return BuildTaskPrompt(objectiveSpec, corpus)
 }
 
 // ---- Gemini generator (server-side, autonomous) ----
@@ -235,6 +250,16 @@ func (s *ObjectiveService) Enabled() bool { return s != nil && s.gen != nil }
 // error when there is no corpus or no generator, so the caller can report a
 // clear not-generated result.
 func (s *ObjectiveService) GenerateText(ctx context.Context, workspaceID string) (string, error) {
+	return s.GenerateOverCorpus(ctx, workspaceID, objectiveSpec, ObjectiveDocName)
+}
+
+// GenerateOverCorpus runs an arbitrary task spec over a workspace's corpus: it
+// gathers the workspace documents (excluding excludeName — the task's own output,
+// so a run never feeds its previous result into itself), builds the task prompt,
+// and runs the generator. The objective generation is one caller (spec =
+// objectiveSpec, excludeName = ObjectiveDocName); workspace_task_run is another
+// (spec = a kind:task skill body, excludeName = the run's output document).
+func (s *ObjectiveService) GenerateOverCorpus(ctx context.Context, workspaceID, spec, excludeName string) (string, error) {
 	if !s.Enabled() {
 		return "", fmt.Errorf("no generator configured")
 	}
@@ -246,8 +271,8 @@ func (s *ObjectiveService) GenerateText(ctx context.Context, workspaceID string)
 	}
 	var corpus []CorpusDoc
 	for _, d := range res.Items {
-		if d.Name == ObjectiveDocName {
-			continue // never feed the objective into its own regeneration
+		if excludeName != "" && d.Name == excludeName {
+			continue // never feed the task's own output back into the run
 		}
 		got, err := s.docs.Get(ctx, document.Key{Scope: document.ScopeWorkspace, WorkspaceID: workspaceID, Name: d.Name}, document.GetOptions{})
 		if err != nil || len(got.Versions) == 0 {
@@ -258,5 +283,5 @@ func (s *ObjectiveService) GenerateText(ctx context.Context, workspaceID string)
 	if len(corpus) == 0 {
 		return "", fmt.Errorf("no corpus documents to synthesize from")
 	}
-	return s.gen.Generate(ctx, BuildObjectivePrompt(corpus))
+	return s.gen.Generate(ctx, BuildTaskPrompt(spec, corpus))
 }
