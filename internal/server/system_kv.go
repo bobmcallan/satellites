@@ -24,8 +24,7 @@ type systemKVData struct {
 	UserName    string
 	UserAvatar  string
 	ActiveNav   string
-	Stored      []systemKVRow
-	Computed    []systemKVRow
+	Rows        []systemKVRow
 	FlashError  string
 	FlashOK     string
 	DevMode     bool
@@ -34,9 +33,16 @@ type systemKVData struct {
 	Version     string
 }
 
+// systemKVRow is one variable in the unified table. Scope makes a value's
+// layer visible at a glance (system/user, plus workspace/project when those
+// are surfaced); Computed marks a read-only derived system value; Secret marks
+// a redacted credential row whose value is never rendered.
 type systemKVRow struct {
+	Scope     string
 	Name      string
 	Value     string
+	Secret    bool
+	Computed  bool
 	UpdatedAt time.Time
 }
 
@@ -67,6 +73,12 @@ func handleSystemKVPost(w http.ResponseWriter, r *http.Request, cfg Config, user
 	}
 	action := r.FormValue("action")
 	name := r.FormValue("name")
+	// Scope defaults to system (the page's primary surface); a user-override
+	// row posts scope=user, which the verb keys to the caller's own user_id.
+	scope := r.FormValue("scope")
+	if scope == "" {
+		scope = "system"
+	}
 	switch action {
 	case "set":
 		if name == "" {
@@ -75,12 +87,12 @@ func handleSystemKVPost(w http.ResponseWriter, r *http.Request, cfg Config, user
 		}
 		req := verb.VariableSetRequest{
 			Name:  name,
-			Scope: "system",
+			Scope: scope,
 			Value: r.FormValue("value"),
 		}
 		body, _ := json.Marshal(req)
 		if _, err := verb.Dispatch(r.Context(), "variable_set", body); err != nil {
-			arbor.WarnCtx(r.Context(), "system_kv: set", "name", name, "err", err)
+			arbor.WarnCtx(r.Context(), "system_kv: set", "name", name, "scope", scope, "err", err)
 			renderSystemKV(w, r, cfg, userID, err.Error(), "")
 			return
 		}
@@ -90,10 +102,10 @@ func handleSystemKVPost(w http.ResponseWriter, r *http.Request, cfg Config, user
 			renderSystemKV(w, r, cfg, userID, "name required", "")
 			return
 		}
-		req := verb.VariableDeleteRequest{Name: name, Scope: "system"}
+		req := verb.VariableDeleteRequest{Name: name, Scope: scope}
 		body, _ := json.Marshal(req)
 		if _, err := verb.Dispatch(r.Context(), "variable_delete", body); err != nil {
-			arbor.WarnCtx(r.Context(), "system_kv: delete", "name", name, "err", err)
+			arbor.WarnCtx(r.Context(), "system_kv: delete", "name", name, "scope", scope, "err", err)
 			renderSystemKV(w, r, cfg, userID, err.Error(), "")
 			return
 		}
@@ -106,7 +118,7 @@ func handleSystemKVPost(w http.ResponseWriter, r *http.Request, cfg Config, user
 func renderSystemKV(w http.ResponseWriter, r *http.Request, cfg Config, userID string, flashErr, flashOK string) {
 	ctx := r.Context()
 
-	stored, computed, err := loadSystemKV(ctx)
+	rows, err := loadSystemKV(ctx)
 	if err != nil {
 		arbor.ErrorCtx(ctx, "system_kv: list", "user_id", userID, "err", err)
 		http.Error(w, "could not list system kv", http.StatusInternalServerError)
@@ -128,8 +140,7 @@ func renderSystemKV(w http.ResponseWriter, r *http.Request, cfg Config, userID s
 		UserName:    userName,
 		UserAvatar:  userAvatar,
 		ActiveNav:   "system-kv",
-		Stored:      stored,
-		Computed:    computed,
+		Rows:        rows,
 		FlashError:  flashErr,
 		FlashOK:     flashOK,
 		DevMode:     cfg.DevMode,
@@ -144,33 +155,57 @@ func renderSystemKV(w http.ResponseWriter, r *http.Request, cfg Config, userID s
 	}
 }
 
-// loadSystemKV dispatches variable_list at scope=system and splits the
-// entries into stored vs computed by name. variable_list folds in both
-// kinds; the split here is by the well-known computed-name registry
-// (mirrored from cmd/satellites-server/main.go's systemVars).
-func loadSystemKV(ctx context.Context) ([]systemKVRow, []systemKVRow, error) {
-	body, _ := json.Marshal(verb.VariableListRequest{Scope: "system"})
-	raw, err := verb.Dispatch(ctx, "variable_list", body)
+// loadSystemKV builds the unified row set: every variable visible on this page
+// across scopes, each tagged with its scope so the layer is visible in one
+// table. It folds system rows (stored + computed) and the caller's user-scope
+// overrides; workspace/project values live on their own pages and are not
+// duplicated here. Secret rows arrive already redacted from variable_list.
+func loadSystemKV(ctx context.Context) ([]systemKVRow, error) {
+	rows := make([]systemKVRow, 0)
+
+	sysBody, _ := json.Marshal(verb.VariableListRequest{Scope: "system"})
+	sysRaw, err := verb.Dispatch(ctx, "variable_list", sysBody)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	var resp verb.VariableListResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, nil, err
+	var sysResp verb.VariableListResponse
+	if err := json.Unmarshal(sysRaw, &sysResp); err != nil {
+		return nil, err
 	}
-	stored := make([]systemKVRow, 0)
-	computed := make([]systemKVRow, 0)
-	for _, e := range resp.Variables {
-		row := systemKVRow{Name: e.Name, Value: e.Value}
-		if isComputedSystemName(e.Name) {
-			computed = append(computed, row)
-		} else {
-			stored = append(stored, row)
+	for _, e := range sysResp.Variables {
+		rows = append(rows, systemKVRow{
+			Scope:    "system",
+			Name:     e.Name,
+			Value:    e.Value,
+			Secret:   e.Secret,
+			Computed: isComputedSystemName(e.Name),
+		})
+	}
+
+	// The caller's user-scope overrides (top of the cascade, sty_6cdf1cd0).
+	// A missing caller identity simply yields no user rows.
+	userBody, _ := json.Marshal(verb.VariableListRequest{Scope: "user"})
+	if userRaw, uErr := verb.Dispatch(ctx, "variable_list", userBody); uErr == nil {
+		var userResp verb.VariableListResponse
+		if err := json.Unmarshal(userRaw, &userResp); err == nil {
+			for _, e := range userResp.Variables {
+				rows = append(rows, systemKVRow{
+					Scope:  "user",
+					Name:   e.Name,
+					Value:  e.Value,
+					Secret: e.Secret,
+				})
+			}
 		}
 	}
-	sort.Slice(stored, func(i, j int) bool { return stored[i].Name < stored[j].Name })
-	sort.Slice(computed, func(i, j int) bool { return computed[i].Name < computed[j].Name })
-	return stored, computed, nil
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Scope != rows[j].Scope {
+			return rows[i].Scope < rows[j].Scope
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	return rows, nil
 }
 
 // isComputedSystemName lists the names served by the computed resolver

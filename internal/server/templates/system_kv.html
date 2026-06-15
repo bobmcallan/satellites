@@ -22,51 +22,72 @@
   </nav>
 </header>
 
-<main data-page="system-kv">
-  <section class="panel" data-section="system-kv-stored">
+<main data-page="system-kv" x-data="{ query: '' }">
+  <section class="panel" data-section="system-kv">
     <div class="panel-header">
-      <h2>system kv · stored</h2>
+      <h2>key-values</h2>
     </div>
-    <p class="muted">Operator-tunable values persisted at scope=<code>system</code>. Edits round-trip through <code>variable_set</code> and survive server restart.</p>
+    <p class="muted">Every key-value visible to you, one row per name with its <code>SCOPE</code> layer
+      (system / user). Stored values round-trip through <code>variable_set</code>; computed system
+      values are derived per request and read-only; secret rows are redacted.</p>
     {{if .FlashError}}<p class="error" data-field="system-kv-error">{{.FlashError}}</p>{{end}}
     {{if .FlashOK}}<p class="success" data-field="system-kv-ok">{{.FlashOK}}</p>{{end}}
 
-    {{if .Stored}}
+    <div data-field="system-kv-filter">
+      <input type="text" class="panel-search" placeholder="filter by name…"
+             x-model="query" autocomplete="off"
+             data-field="system-kv-search">
+    </div>
+
+    {{if .Rows}}
     <table class="panel-table" data-field="system-kv-table">
       <thead>
         <tr>
+          <th>SCOPE</th>
           <th>NAME</th>
           <th>VALUE</th>
-          <th>UPDATED</th>
           <th>ACTION</th>
         </tr>
       </thead>
       <tbody>
-        {{range .Stored}}
-        <tr class="kv-row" data-field="kv-row" data-kv-name="{{.Name}}">
+        {{range .Rows}}
+        <tr class="kv-row" data-field="kv-row" data-kv-name="{{.Name}}" data-kv-scope="{{.Scope}}"
+            x-show="query === '' || $el.dataset.kvName.toLowerCase().includes(query.toLowerCase())">
+          <td class="kv-scope"><code data-field="kv-scope">{{.Scope}}</code></td>
           <td class="kv-name"><code>{{.Name}}</code></td>
           <td class="kv-value">
-            <form method="POST" action="/settings/system-kv" class="kv-edit-form" data-form="kv-edit">
-              <input type="hidden" name="action" value="set">
-              <input type="hidden" name="name" value="{{.Name}}">
-              <input type="text" name="value" value="{{.Value}}" class="kv-input" data-field="kv-value-input">
-              <button type="submit" class="btn primary kv-save" data-action="kv-save">SAVE</button>
-            </form>
+            {{if .Computed}}
+              <code>{{.Value}}</code> <span class="muted kv-readonly" data-field="kv-readonly">read-only</span>
+            {{else if .Secret}}
+              <span class="kv-secret muted" data-field="kv-secret">••• secret</span>
+            {{else}}
+              <form method="POST" action="/settings/system-kv" class="kv-edit-form" data-form="kv-edit">
+                <input type="hidden" name="action" value="set">
+                <input type="hidden" name="scope" value="{{.Scope}}">
+                <input type="hidden" name="name" value="{{.Name}}">
+                <input type="text" name="value" value="{{.Value}}" class="kv-input" data-field="kv-value-input">
+                <button type="submit" class="btn primary kv-save" data-action="kv-save">SAVE</button>
+              </form>
+            {{end}}
           </td>
-          <td class="kv-updated muted">{{formatTime .UpdatedAt}}</td>
           <td class="kv-action">
-            <form method="POST" action="/settings/system-kv" class="kv-delete-form">
-              <input type="hidden" name="action" value="delete">
-              <input type="hidden" name="name" value="{{.Name}}">
-              <button type="submit" class="btn danger" data-action="kv-delete">DELETE</button>
-            </form>
+            {{if .Computed}}
+              <span class="muted">—</span>
+            {{else}}
+              <form method="POST" action="/settings/system-kv" class="kv-delete-form">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="scope" value="{{.Scope}}">
+                <input type="hidden" name="name" value="{{.Name}}">
+                <button type="submit" class="btn danger" data-action="kv-delete">DELETE</button>
+              </form>
+            {{end}}
           </td>
         </tr>
         {{end}}
       </tbody>
     </table>
     {{else}}
-    <p class="empty" data-field="system-kv-empty">No stored system KV values. Boot seeds populate <code>stories.page_size</code> on first start.</p>
+    <p class="empty" data-field="system-kv-empty">No key-values. Boot seeds populate <code>stories.page_size</code> on first start.</p>
     {{end}}
   </section>
 
@@ -76,6 +97,13 @@
     </div>
     <form method="POST" action="/settings/system-kv" class="form-stack" data-form="kv-add">
       <input type="hidden" name="action" value="set">
+      <label>
+        <span>SCOPE</span>
+        <select name="scope" data-field="kv-add-scope">
+          <option value="system">system</option>
+          <option value="user">user</option>
+        </select>
+      </label>
       <label>
         <span>NAME</span>
         <input type="text" name="name" placeholder="my.knob" autocomplete="off" required>
@@ -89,26 +117,6 @@
       </div>
     </form>
   </section>
-
-  {{if .Computed}}
-  <section class="panel" data-section="system-kv-computed">
-    <div class="panel-header">
-      <h2>computed · read-only</h2>
-    </div>
-    <p class="muted">Derived per-request by the templating layer — not editable. Listed for completeness.</p>
-    <table class="panel-table" data-field="system-kv-computed-table">
-      <thead><tr><th>NAME</th><th>VALUE</th></tr></thead>
-      <tbody>
-        {{range .Computed}}
-        <tr data-field="kv-computed-row" data-kv-name="{{.Name}}">
-          <td class="kv-name"><code>{{.Name}}</code></td>
-          <td class="kv-value"><code>{{.Value}}</code></td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </section>
-  {{end}}
 </main>
 
 <footer class="site-footer">

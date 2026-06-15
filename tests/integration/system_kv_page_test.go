@@ -88,7 +88,7 @@ func TestSystemKVAdminPage(t *testing.T) {
 		return rec.Code, string(body)
 	}
 
-	t.Run("page lists stored rows + computed section", func(t *testing.T) {
+	t.Run("page lists all scopes in one table with a scope column + filter", func(t *testing.T) {
 		code, body := get(t, "/settings/system-kv")
 		if code != http.StatusOK {
 			t.Fatalf("status %d body=%s", code, body)
@@ -96,21 +96,28 @@ func TestSystemKVAdminPage(t *testing.T) {
 		for _, want := range []string{
 			`data-page="system-kv"`,
 			`data-field="system-kv-table"`,
+			`data-field="system-kv-search"`, // the name filter
+			`data-field="kv-scope"`,         // the scope column cell
+			`data-kv-scope="system"`,
 			`data-kv-name="stories.page_size"`,
 			`data-kv-name="feature.flag.x"`,
-			`data-section="system-kv-computed"`,
-			`data-kv-name="version"`,
+			`data-kv-name="version"`,   // computed row, now in the unified table
+			`data-field="kv-readonly"`, // computed read-only marker
 			`v0.test`,
 			`data-form="kv-add"`,
+			`data-field="kv-add-scope"`, // scope selector on the add form
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body missing %q", want)
 			}
 		}
-		// Computed rows have no edit form — assert kv-row data-field
-		// is used only for stored rows.
-		if strings.Count(body, `data-field="kv-row"`) != 2 {
-			t.Errorf("expected 2 kv-row entries (stored), got %d", strings.Count(body, `data-field="kv-row"`))
+		// The page no longer splits stored vs computed into separate sections.
+		if strings.Contains(body, `data-section="system-kv-computed"`) {
+			t.Error("page still renders a separate computed section; expected one unified table")
+		}
+		// All three rows (2 stored + 1 computed) live in the one table.
+		if got := strings.Count(body, `data-field="kv-row"`); got != 3 {
+			t.Errorf("expected 3 kv-row entries (2 stored + 1 computed), got %d", got)
 		}
 	})
 
