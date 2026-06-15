@@ -68,12 +68,14 @@ func TestWorkspaceTaskUpsertValidation(t *testing.T) {
 
 	good := taskSkillRef{Scope: "library", Name: "corpus-summarise", ProjectID: "proj_1"}
 	cases := []WorkspaceTaskUpsertRequest{
-		{Name: "t", TaskSkill: good, OutputName: "o"},                                        // missing workspace_id
-		{WorkspaceID: "w", TaskSkill: good, OutputName: "o"},                                 // missing name
-		{WorkspaceID: "w", Name: "a/b", TaskSkill: good, OutputName: "o"},                    // name has '/'
-		{WorkspaceID: "w", Name: "t", TaskSkill: good},                                       // missing output_name
-		{WorkspaceID: "w", Name: "t", TaskSkill: good, OutputName: "o", Trigger: "schedule"}, // unsupported trigger
-		{WorkspaceID: "w", Name: "t", OutputName: "o"},                                       // bad skill ref (no scope/name)
+		{Name: "t", TaskSkill: good, OutputName: "o"},                                                                                     // missing workspace_id
+		{WorkspaceID: "w", TaskSkill: good, OutputName: "o"},                                                                              // missing name
+		{WorkspaceID: "w", Name: "a/b", TaskSkill: good, OutputName: "o"},                                                                 // name has '/'
+		{WorkspaceID: "w", Name: "t", TaskSkill: good},                                                                                    // missing output_name
+		{WorkspaceID: "w", Name: "t", TaskSkill: good, OutputName: "o", Trigger: "schedule"},                                              // schedule trigger with no interval
+		{WorkspaceID: "w", Name: "t", TaskSkill: good, OutputName: "o", Trigger: "schedule", Schedule: &taskSchedule{IntervalSeconds: 5}}, // interval below the floor
+		{WorkspaceID: "w", Name: "t", TaskSkill: good, OutputName: "o", Trigger: "bogus", Schedule: &taskSchedule{IntervalSeconds: 120}},  // unsupported trigger
+		{WorkspaceID: "w", Name: "t", OutputName: "o"},                                                                                    // bad skill ref (no scope/name)
 	}
 	for i, c := range cases {
 		raw, _ := json.Marshal(c)

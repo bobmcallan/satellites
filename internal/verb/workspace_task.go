@@ -47,17 +47,34 @@ type taskSkillRef struct {
 	ProjectID string `json:"project_id,omitempty"`
 }
 
-// taskConfig is the persisted body of an agent-task document.
-type taskConfig struct {
-	TaskSkill  taskSkillRef `json:"task_skill"`
-	OutputName string       `json:"output_name"`
-	Trigger    string       `json:"trigger"`
-	Executor   string       `json:"executor,omitempty"` // single_shot (default) | agent
+// taskSchedule is the cadence for a trigger:"schedule" task. IntervalSeconds is
+// the gap between runs; the scheduler worker computes next_run_at from it.
+type taskSchedule struct {
+	IntervalSeconds int `json:"interval_seconds"`
 }
 
-// triggerOnDemand is the only trigger supported in this slice; schedule and
-// document-change triggers arrive in later epic-order stories.
-const triggerOnDemand = "on_demand"
+// taskConfig is the persisted body of an agent-task document.
+type taskConfig struct {
+	TaskSkill  taskSkillRef  `json:"task_skill"`
+	OutputName string        `json:"output_name"`
+	Trigger    string        `json:"trigger"`
+	Executor   string        `json:"executor,omitempty"` // single_shot (default) | agent
+	Schedule   *taskSchedule `json:"schedule,omitempty"` // required when trigger=schedule
+}
+
+// Task triggers. on_demand runs only on an explicit workspace_task_run;
+// schedule runs autonomously on a cadence via the scheduler worker. The
+// document-change trigger arrives in a later epic-order story.
+const (
+	triggerOnDemand = "on_demand"
+	triggerSchedule = "schedule"
+)
+
+// minScheduleIntervalSeconds floors a scheduled cadence — autonomous LLM runs
+// cost compute, so a too-frequent schedule is refused at upsert. Integration
+// tests drive the worker with an injected clock, so this floor does not slow
+// them.
+const minScheduleIntervalSeconds = 60
 
 func init() {
 	Register(&Verb{
@@ -158,27 +175,44 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 			executor = cfg.Executor
 		}
 	}
-	if outName == "" {
-		return nil, fmt.Errorf("workspace_task_run: %w: output_name required (or task_name)", ErrBadRequest)
+
+	resp, err := runWorkspaceTask(ctx, wsID, skill, outName, executor, callerUserID(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("workspace_task_run: %w", err)
 	}
+	return json.Marshal(resp)
+}
+
+// runWorkspaceTask is the executor-agnostic run core: resolve the task skill,
+// generate via the selected executor, and store the result as the named
+// workspace document. It carries NO auth — the verb gates membership before
+// calling it, and the scheduler worker calls it with a system context. A
+// missing generator/model or a generation hiccup is a reportable not-run
+// result (Ran:false + Note), never an error; only malformed input is an error.
+func runWorkspaceTask(ctx context.Context, wsID string, skill taskSkillRef, outName, executor, createdBy string) (WorkspaceTaskRunResponse, error) {
+	outName = strings.TrimSpace(outName)
+	if outName == "" {
+		return WorkspaceTaskRunResponse{}, fmt.Errorf("%w: output_name required (or task_name)", ErrBadRequest)
+	}
+	executor = strings.TrimSpace(executor)
 	if executor == "" {
 		executor = executorSingleShot
 	}
 	if executor != executorSingleShot && executor != executorAgent {
-		return nil, fmt.Errorf("workspace_task_run: %w: unsupported executor %q", ErrBadRequest, executor)
+		return WorkspaceTaskRunResponse{}, fmt.Errorf("%w: unsupported executor %q", ErrBadRequest, executor)
 	}
 
 	key, err := resolveTaskSkillKey(skill, wsID)
 	if err != nil {
-		return nil, fmt.Errorf("workspace_task_run: %w", err)
+		return WorkspaceTaskRunResponse{}, err
 	}
 	got, err := documentStore.Get(ctx, key, document.GetOptions{})
 	if err != nil || len(got.Versions) == 0 {
-		return nil, fmt.Errorf("workspace_task_run: %w: task skill %s/%s not found", ErrNotFound, key.Scope, key.Name)
+		return WorkspaceTaskRunResponse{}, fmt.Errorf("%w: task skill %s/%s not found", ErrNotFound, key.Scope, key.Name)
 	}
 	spec := taskSpecFromSkillBody(got.Versions[0].Body)
 	if spec == "" {
-		return nil, fmt.Errorf("workspace_task_run: %w: task skill %s/%s has an empty spec", ErrBadRequest, key.Scope, key.Name)
+		return WorkspaceTaskRunResponse{}, fmt.Errorf("%w: task skill %s/%s has an empty spec", ErrBadRequest, key.Scope, key.Name)
 	}
 
 	// Generate via the selected executor. A missing generator/model (no
@@ -188,70 +222,72 @@ func invokeWorkspaceTaskRun(ctx context.Context, raw json.RawMessage) (json.RawM
 	switch executor {
 	case executorAgent:
 		if agentModel == nil {
-			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "no server-side agent model (GEMINI_API_KEY unset)"})
+			return WorkspaceTaskRunResponse{Ran: false, Note: "no server-side agent model (GEMINI_API_KEY unset)"}, nil
 		}
 		// The agent envelope is configuration, not code: the skill declares its
 		// tools (frontmatter), the operating prompt is a system document, and the
 		// task message is composed from the skill's Spec/Verifier/Environment.
 		fm, _, ferr := frontmatter.Parse([]byte(got.Versions[0].Body))
 		if ferr != nil {
-			return nil, fmt.Errorf("workspace_task_run: %w: parse task skill frontmatter: %v", ErrBadRequest, ferr)
+			return WorkspaceTaskRunResponse{}, fmt.Errorf("%w: parse task skill frontmatter: %v", ErrBadRequest, ferr)
 		}
 		tools, dispatch, terr := agentToolsFromSkill(wsID, fm.Tools)
 		if terr != nil {
-			return nil, fmt.Errorf("workspace_task_run: %w", terr)
+			return WorkspaceTaskRunResponse{}, terr
 		}
 		sys, perr := readAgentSystemPrompt(ctx)
 		if perr != nil {
-			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: perr.Error()})
+			return WorkspaceTaskRunResponse{Ran: false, Note: perr.Error()}, nil
 		}
 		out, rerr := agent.Run(ctx, agentModel, sys, composeTaskMessage(spec), tools, dispatch, agent.DefaultMaxSteps)
 		if rerr != nil {
-			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: rerr.Error()})
+			return WorkspaceTaskRunResponse{Ran: false, Note: rerr.Error()}, nil
 		}
 		text = out
 	default: // executorSingleShot
 		if objectiveService == nil || !objectiveService.Enabled() {
-			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "no server-side generator (GEMINI_API_KEY unset)"})
+			return WorkspaceTaskRunResponse{Ran: false, Note: "no server-side generator (GEMINI_API_KEY unset)"}, nil
 		}
 		out, gerr := objectiveService.GenerateOverCorpus(ctx, wsID, spec, outName)
 		if gerr != nil {
-			return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: gerr.Error()})
+			return WorkspaceTaskRunResponse{Ran: false, Note: gerr.Error()}, nil
 		}
 		text = out
 	}
 	if strings.TrimSpace(text) == "" {
-		return json.Marshal(WorkspaceTaskRunResponse{Ran: false, Note: "executor returned empty output"})
+		return WorkspaceTaskRunResponse{Ran: false, Note: "executor returned empty output"}, nil
 	}
 
 	doc, _, err := documentStore.Upsert(ctx, document.UpsertInput{
 		Key:       document.Key{Scope: document.ScopeWorkspace, WorkspaceID: wsID, Name: outName},
 		Type:      document.TypeDocument,
 		Body:      text,
-		CreatedBy: callerUserID(ctx),
+		CreatedBy: createdBy,
 	}, time.Now().UTC())
 	if err != nil {
-		return nil, fmt.Errorf("workspace_task_run: store result: %w", err)
+		return WorkspaceTaskRunResponse{}, fmt.Errorf("store result: %w", err)
 	}
-	return json.Marshal(WorkspaceTaskRunResponse{Ran: true, OutputName: outName, DocumentID: doc.ID, Result: text})
+	return WorkspaceTaskRunResponse{Ran: true, OutputName: outName, DocumentID: doc.ID, Result: text}, nil
 }
 
 type WorkspaceTaskUpsertRequest struct {
-	WorkspaceID string       `json:"workspace_id"`
-	Name        string       `json:"name"`
-	TaskSkill   taskSkillRef `json:"task_skill"`
-	OutputName  string       `json:"output_name"`
-	Trigger     string       `json:"trigger,omitempty"`
-	Executor    string       `json:"executor,omitempty"`
+	WorkspaceID string        `json:"workspace_id"`
+	Name        string        `json:"name"`
+	TaskSkill   taskSkillRef  `json:"task_skill"`
+	OutputName  string        `json:"output_name"`
+	Trigger     string        `json:"trigger,omitempty"`
+	Executor    string        `json:"executor,omitempty"`
+	Schedule    *taskSchedule `json:"schedule,omitempty"`
 }
 
 // WorkspaceTaskView is the wire shape for a task in upsert/list responses.
 type WorkspaceTaskView struct {
-	Name       string       `json:"name"`
-	TaskSkill  taskSkillRef `json:"task_skill"`
-	OutputName string       `json:"output_name"`
-	Trigger    string       `json:"trigger"`
-	Executor   string       `json:"executor"`
+	Name       string        `json:"name"`
+	TaskSkill  taskSkillRef  `json:"task_skill"`
+	OutputName string        `json:"output_name"`
+	Trigger    string        `json:"trigger"`
+	Executor   string        `json:"executor"`
+	Schedule   *taskSchedule `json:"schedule,omitempty"`
 }
 
 func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -286,8 +322,20 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 	if trigger == "" {
 		trigger = triggerOnDemand
 	}
-	if trigger != triggerOnDemand {
-		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported trigger %q (only %q in this slice)", ErrBadRequest, trigger, triggerOnDemand)
+	var schedule *taskSchedule
+	switch trigger {
+	case triggerOnDemand:
+		// no schedule
+	case triggerSchedule:
+		if req.Schedule == nil || req.Schedule.IntervalSeconds <= 0 {
+			return nil, fmt.Errorf("workspace_task_upsert: %w: trigger %q requires schedule.interval_seconds > 0", ErrBadRequest, triggerSchedule)
+		}
+		if req.Schedule.IntervalSeconds < minScheduleIntervalSeconds {
+			return nil, fmt.Errorf("workspace_task_upsert: %w: schedule.interval_seconds must be >= %d", ErrBadRequest, minScheduleIntervalSeconds)
+		}
+		schedule = &taskSchedule{IntervalSeconds: req.Schedule.IntervalSeconds}
+	default:
+		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported trigger %q (%q|%q)", ErrBadRequest, trigger, triggerOnDemand, triggerSchedule)
 	}
 	executor := strings.TrimSpace(req.Executor)
 	if executor == "" {
@@ -301,7 +349,7 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 		return nil, fmt.Errorf("workspace_task_upsert: %w: not an admin of workspace %s", ErrForbidden, wsID)
 	}
 
-	cfg := taskConfig{TaskSkill: req.TaskSkill, OutputName: outName, Trigger: trigger, Executor: executor}
+	cfg := taskConfig{TaskSkill: req.TaskSkill, OutputName: outName, Trigger: trigger, Executor: executor, Schedule: schedule}
 	body, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("workspace_task_upsert: marshal config: %w", err)
@@ -314,7 +362,7 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 	}, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("workspace_task_upsert: store task: %w", err)
 	}
-	return json.Marshal(WorkspaceTaskView{Name: name, TaskSkill: cfg.TaskSkill, OutputName: cfg.OutputName, Trigger: cfg.Trigger, Executor: cfg.Executor})
+	return json.Marshal(WorkspaceTaskView{Name: name, TaskSkill: cfg.TaskSkill, OutputName: cfg.OutputName, Trigger: cfg.Trigger, Executor: cfg.Executor, Schedule: cfg.Schedule})
 }
 
 type WorkspaceTaskListRequest struct {
@@ -372,6 +420,7 @@ func invokeWorkspaceTaskList(ctx context.Context, raw json.RawMessage) (json.Raw
 			OutputName: cfg.OutputName,
 			Trigger:    cfg.Trigger,
 			Executor:   executor,
+			Schedule:   cfg.Schedule,
 		})
 	}
 	return json.Marshal(WorkspaceTaskListResponse{Tasks: tasks})

@@ -493,6 +493,13 @@ func main() {
 		verb.SetEmbedService(embedSvc) // semantic_search dispatches through this (sty_e8db6032)
 		go embed.NewWorker(embedSvc, 30*time.Second).Run(context.Background())
 		arbor.Info("embedding worker started", "model", embedModelDefault, "dim", cfg.Embedding.Dimension)
+
+		// Scheduled agent-tasks (sty_7bf60667): the scheduler ticks every 30s,
+		// running trigger:"schedule" tasks on their interval through the shared
+		// run path. Gated with the embed worker — a scheduled run needs the
+		// server executor (Gemini key present).
+		go verb.NewTaskScheduler(30*time.Second, ledgerStore).Run(context.Background())
+		arbor.Info("task scheduler started", "tick", "30s")
 	} else {
 		arbor.Info("embeddings disabled — no gemini.api_key variable and GEMINI_API_KEY unset")
 	}
