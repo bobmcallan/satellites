@@ -39,6 +39,7 @@ type workspaceProjectRow struct {
 	ID          string
 	Name        string
 	Description string
+	Type        string
 	Status      string
 	Role        string
 }
@@ -132,7 +133,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 		projects := make([]workspaceProjectRow, 0, len(pl.Projects))
 		for _, p := range pl.Projects {
 			projects = append(projects, workspaceProjectRow{
-				ID: p.ID, Name: p.Name, Description: p.Description,
+				ID: p.ID, Name: p.Name, Description: p.Description, Type: p.Type,
 				Status: p.Status, Role: pl.Roles[p.ID],
 			})
 		}

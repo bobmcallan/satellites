@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
@@ -21,11 +23,20 @@ type projectsData struct {
 	UserAvatar  string
 	ActiveNav   string
 	Projects    []projectRow
+	Types       []projectTypeChip
+	ActiveType  string
 	FlashError  string
 	DevMode     bool
 	FooterName  string
 	FooterEmail string
 	Version     string
+}
+
+// projectTypeChip is one entry in the projects-page type-filter strip: a `type`
+// value present in the data, flagged active when it is the selected filter.
+type projectTypeChip struct {
+	Type   string
+	Active bool
 }
 
 type projectRow struct {
@@ -49,7 +60,7 @@ func projectsHandler(cfg Config) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
-			renderProjects(w, ctx, cfg, userID, "")
+			renderProjects(w, ctx, cfg, userID, "", strings.TrimSpace(r.URL.Query().Get("type")))
 		case http.MethodPost:
 			handleProjectsPost(w, r.WithContext(ctx), cfg, userID)
 		default:
@@ -60,7 +71,7 @@ func projectsHandler(cfg Config) http.HandlerFunc {
 
 func handleProjectsPost(w http.ResponseWriter, r *http.Request, cfg Config, userID string) {
 	if err := r.ParseForm(); err != nil {
-		renderProjects(w, r.Context(), cfg, userID, "bad form")
+		renderProjects(w, r.Context(), cfg, userID, "bad form", "")
 		return
 	}
 	switch r.FormValue("action") {
@@ -73,16 +84,16 @@ func handleProjectsPost(w http.ResponseWriter, r *http.Request, cfg Config, user
 		body, _ := json.Marshal(req)
 		if _, err := verb.Dispatch(r.Context(), "project_create", body); err != nil {
 			arbor.WarnCtx(r.Context(), "projects: create", "user_id", userID, "err", err)
-			renderProjects(w, r.Context(), cfg, userID, err.Error())
+			renderProjects(w, r.Context(), cfg, userID, err.Error(), "")
 			return
 		}
 		http.Redirect(w, r, "/projects", http.StatusSeeOther)
 	default:
-		renderProjects(w, r.Context(), cfg, userID, "unknown action")
+		renderProjects(w, r.Context(), cfg, userID, "unknown action", "")
 	}
 }
 
-func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, userID string, flashErr string) {
+func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, userID string, flashErr string, activeType string) {
 	resp, err := verb.Dispatch(ctx, "project_list", nil)
 	if err != nil {
 		arbor.ErrorCtx(ctx, "projects: list", "user_id", userID, "err", err)
@@ -95,8 +106,17 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 		http.Error(w, "could not decode projects", http.StatusInternalServerError)
 		return
 	}
+	// Build rows, applying the type filter, while collecting the full set of
+	// types present (computed before filtering so clearing always restores).
 	rows := make([]projectRow, 0, len(listResp.Projects))
+	typeSet := map[string]bool{}
 	for _, p := range listResp.Projects {
+		if t := strings.TrimSpace(p.Type); t != "" {
+			typeSet[t] = true
+		}
+		if activeType != "" && p.Type != activeType {
+			continue
+		}
 		rows = append(rows, projectRow{
 			ID:          p.ID,
 			Name:        p.Name,
@@ -107,6 +127,11 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 			CreatedAt:   p.CreatedAt,
 		})
 	}
+	types := make([]projectTypeChip, 0, len(typeSet))
+	for t := range typeSet {
+		types = append(types, projectTypeChip{Type: t, Active: t == activeType})
+	}
+	sort.Slice(types, func(i, j int) bool { return types[i].Type < types[j].Type })
 
 	var userEmail, userName, userAvatar string
 	if cfg.Store != nil && cfg.Store.DB != nil {
@@ -124,6 +149,8 @@ func renderProjects(w http.ResponseWriter, ctx context.Context, cfg Config, user
 		UserAvatar:  userAvatar,
 		ActiveNav:   "projects",
 		Projects:    rows,
+		Types:       types,
+		ActiveType:  activeType,
 		FlashError:  flashErr,
 		DevMode:     cfg.DevMode,
 		FooterName:  footerName,

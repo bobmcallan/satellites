@@ -103,6 +103,7 @@
           <h3 class="project-card-title"><a href="/projects/{{.ID}}" class="project-card-link" data-action="project-open">{{.Name}}</a></h3>
           <span class="project-card-status">{{.Status}}</span>
         </header>
+        {{if .Type}}<a href="/projects?type={{.Type}}" class="type-chip" data-field="project-type">{{.Type}}</a>{{end}}
         {{if .Description}}<p class="project-card-desc">{{.Description}}</p>{{end}}
         <dl class="project-card-meta">
           <dt>ID</dt><dd>{{.ID}}</dd>

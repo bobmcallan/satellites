@@ -30,6 +30,15 @@
       <button type="button" class="btn primary" @click="createOpen = true" data-action="projects-add-open">ADD PROJECT</button>
     </div>
 
+    {{if .Types}}
+    <div class="type-filter" data-field="project-type-filter">
+      <a href="/projects" class="type-chip {{if not .ActiveType}}is-active{{end}}" data-type-filter="all">ALL</a>
+      {{range .Types}}
+      <a href="/projects?type={{.Type}}" class="type-chip {{if .Active}}is-active{{end}}" data-type-filter="{{.Type}}">{{.Type}}</a>
+      {{end}}
+    </div>
+    {{end}}
+
     {{if .Projects}}
     <div class="project-grid">
       {{range .Projects}}
@@ -38,10 +47,10 @@
           <h3 class="project-card-title"><a href="/projects/{{.ID}}" class="project-card-link" data-action="project-open">{{.Name}}</a></h3>
           <span class="project-card-status">{{.Status}}</span>
         </header>
+        {{if .Type}}<a href="/projects?type={{.Type}}" class="type-chip" data-field="project-type">{{.Type}}</a>{{end}}
         {{if .Description}}<p class="project-card-desc">{{.Description}}</p>{{end}}
         <dl class="project-card-meta">
           <dt>ID</dt><dd>{{.ID}}</dd>
-          {{if .Type}}<dt>TYPE</dt><dd data-field="project-type">{{.Type}}</dd>{{end}}
           {{if .GitURL}}<dt>GIT</dt><dd>{{.GitURL}}</dd>{{end}}
           <dt>CREATED</dt><dd>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</dd>
         </dl>
@@ -49,7 +58,7 @@
       {{end}}
     </div>
     {{else}}
-    <p class="empty" data-field="projects-empty">No projects yet. Use ADD PROJECT to create one.</p>
+    <p class="empty" data-field="projects-empty">{{if .ActiveType}}No projects of type <code>{{.ActiveType}}</code>.{{else}}No projects yet. Use ADD PROJECT to create one.{{end}}</p>
     {{end}}
   </section>
 
