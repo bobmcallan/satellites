@@ -6,7 +6,7 @@ when: status==ready
 tags: [kind:gate]
 description: Gate skill for the start-work transition (ready → in_progress). Decides whether a story is genuinely ready for an executor to begin — plan accepted, no open blockers. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_deeff521","version":6,"hash":"6a642f2d785664aea6cd8fa455d13be2269c6e32a164501a78de98ba37155a0a"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e176db0f","version":1,"hash":"6a642f2d785664aea6cd8fa455d13be2269c6e32a164501a78de98ba37155a0a"} satellites-sync:end -->
 
 Decide whether the conditions to START work are met. This is a lightweight readiness gate, not a re-review of the plan (plan-review already accepted it to reach `ready`). Do not run the build or tests, and do not re-litigate plan quality.
 

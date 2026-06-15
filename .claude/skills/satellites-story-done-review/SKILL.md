@@ -6,7 +6,7 @@ when: status==in_progress
 tags: [kind:gate]
 description: Gate skill for the in_progress → done transition. Decides whether a story's change actually satisfies its acceptance criteria before completion. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_a80c6434","version":11,"hash":"2204e867f6a40b5a901273819b4014de5f276598a713221b1643554097da9a76"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_6392e319","version":1,"hash":"2204e867f6a40b5a901273819b4014de5f276598a713221b1643554097da9a76"} satellites-sync:end -->
 
 Decide whether the change is genuinely complete — every acceptance criterion met and verified against the real tree, not asserted.
 

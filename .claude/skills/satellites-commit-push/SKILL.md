@@ -6,7 +6,7 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":2,"hash":"56f77e2a2e9539b95207f523a862c29587643660ab40b5b6b001d2f9948eb44e"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":3,"hash":"c23e019253743387081284b8b5ec555a956d466a15bc859db95c628ef40efd9b"} satellites-sync:end -->
 
 # satellites-commit-push
 
@@ -40,6 +40,14 @@ latest pushed commit, not the local tree. A change not committed + pushed +
      configuration (skills, principles, workflows, story workflows):
      `satellites workflow check`. Exit 0 → proceed; exit 1 → **do not commit**,
      resolve per the gate skill, re-run.
+   - **[[satellites-agent-architecture-review]]** — when the change touches the
+     agent/executor surface (`internal/agent`, the agent executor in
+     `internal/verb`, agent operating documents): a judgment gate (not a CLI
+     check) — `satellites story status_transition --skill
+     satellites-agent-architecture-review <story-id>`. It critiques the change
+     for configuration-over-code (agent behaviour in the substrate, only
+     mechanism in code). accept → proceed; reject → **do not commit**, move the
+     flagged behaviour into the substrate, re-run.
 
 2. **Configure + stage**
 

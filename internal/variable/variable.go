@@ -30,6 +30,12 @@ const (
 	ScopeSystem    Scope = "system"
 	ScopeWorkspace Scope = "workspace"
 	ScopeProject   Scope = "project"
+	// ScopeUser is the highest-precedence override layer (sty_6cdf1cd0).
+	// A user-scope row is keyed (user_id, name) and shadows the same-named
+	// project/workspace/system value for that caller, so an individual can
+	// override any key-value for themselves without editing the shared rows.
+	// user_id carries the caller identity; workspace_id/project_id are empty.
+	ScopeUser Scope = "user"
 )
 
 // ErrNotFound is returned when a variable lookup misses.
@@ -59,6 +65,7 @@ type Variable struct {
 	Scope       Scope     `json:"scope"`
 	WorkspaceID string    `json:"workspace_id,omitempty"`
 	ProjectID   string    `json:"project_id,omitempty"`
+	UserID      string    `json:"user_id,omitempty"`
 	Name        string    `json:"name"`
 	Value       string    `json:"value"`
 	Secret      bool      `json:"secret,omitempty"`
@@ -72,7 +79,10 @@ type Key struct {
 	Scope       Scope
 	WorkspaceID string
 	ProjectID   string
-	Name        string
+	// UserID keys a user-scope override row (sty_6cdf1cd0). Set only for
+	// ScopeUser; empty for every other scope. It carries the caller identity.
+	UserID string
+	Name   string
 }
 
 // Validate enforces the scope-coherence rules the DB CHECK also
@@ -86,15 +96,19 @@ func (k Key) Validate() error {
 		// system scope is read-only and never reaches the DB; we still
 		// accept the Key shape for variable_get(inherit=true) where the
 		// resolver layer terminates at scope=system.
-		if k.WorkspaceID != "" || k.ProjectID != "" {
+		if k.WorkspaceID != "" || k.ProjectID != "" || k.UserID != "" {
 			return ErrScopeMismatch
 		}
 	case ScopeWorkspace:
-		if k.WorkspaceID == "" || k.ProjectID != "" {
+		if k.WorkspaceID == "" || k.ProjectID != "" || k.UserID != "" {
 			return ErrScopeMismatch
 		}
 	case ScopeProject:
-		if k.WorkspaceID == "" || k.ProjectID == "" {
+		if k.WorkspaceID == "" || k.ProjectID == "" || k.UserID != "" {
+			return ErrScopeMismatch
+		}
+	case ScopeUser:
+		if k.UserID == "" || k.WorkspaceID != "" || k.ProjectID != "" {
 			return ErrScopeMismatch
 		}
 	default:

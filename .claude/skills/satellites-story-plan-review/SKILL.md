@@ -6,7 +6,7 @@ when: status==backlog
 tags: [kind:gate]
 description: The comprehensive story review — the workflow's FIRST gate. Decides in one verdict whether a story is a sound contract before an executor picks it up - story shape, plan, acceptance criteria, embedded workflow, and code grounding. A story is created freely (it is user intent, no review on upsert); THIS gate is where it is judged. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_f8a325b0","version":10,"hash":"e645dbdb8716c03a526170c69c3ed25320cb4e42cd83d9c223d0169f09ccafa9"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_c0405c25","version":1,"hash":"e645dbdb8716c03a526170c69c3ed25320cb4e42cd83d9c223d0169f09ccafa9"} satellites-sync:end -->
 
 Decide whether the story is a sound contract — its shape conforms, its workflow is correctly embedded, its plan is ready to execute, and that plan is grounded in the code it claims to change. A story is created with no review (intent is free to land); this gate is the single point where everything is judged. Gate the contract, not the work: do not run the build or tests, and do not penalise the absence of code.
 

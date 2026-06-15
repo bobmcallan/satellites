@@ -6,7 +6,7 @@ when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
 description: Run before every commit that touches the CLI. The command-surface drift gate fails closed when a live `satellites` command is not named in the command-surface reference doc, so an update that adds, renames, or removes a command cannot ship while the docs read stale. The commit-push routine names it among its pre-commit gates.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_ead0d53a","version":5,"hash":"10ead2b72f4fe3dd22c7c1d05253d26cce691415ae8e164b9faf9f0fd20e6c66"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_2e78a136","version":1,"hash":"10ead2b72f4fe3dd22c7c1d05253d26cce691415ae8e164b9faf9f0fd20e6c66"} satellites-sync:end -->
 
 # satellites-doc-drift-review
 

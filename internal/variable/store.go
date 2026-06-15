@@ -49,10 +49,11 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 		id := NewID()
 		wsArg := nullStr(in.Key.WorkspaceID)
 		pjArg := nullStr(in.Key.ProjectID)
+		userArg := nullStr(in.Key.UserID)
 		if _, err := s.DB.ExecContext(ctx, `
-            INSERT INTO variables (id, scope, workspace_id, project_id, name, value, secret, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-        `, id, string(in.Key.Scope), wsArg, pjArg, in.Key.Name, in.Value, in.Secret, now); err != nil {
+            INSERT INTO variables (id, scope, workspace_id, project_id, user_id, name, value, secret, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+        `, id, string(in.Key.Scope), wsArg, pjArg, userArg, in.Key.Name, in.Value, in.Secret, now); err != nil {
 			return Variable{}, fmt.Errorf("variable: insert: %w", err)
 		}
 		return Variable{
@@ -60,6 +61,7 @@ func (s *Store) Set(ctx context.Context, in SetInput, now time.Time) (Variable, 
 			Scope:       in.Key.Scope,
 			WorkspaceID: in.Key.WorkspaceID,
 			ProjectID:   in.Key.ProjectID,
+			UserID:      in.Key.UserID,
 			Name:        in.Key.Name,
 			Value:       in.Value,
 			Secret:      in.Secret,
@@ -106,14 +108,16 @@ func (s *Store) Get(ctx context.Context, key Key) (Variable, error) {
 	}
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
+	userArg := nullStr(key.UserID)
 	row := s.DB.QueryRowContext(ctx, `
-        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
+        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''), name, value, secret, created_at, updated_at
         FROM variables
         WHERE scope = $1
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id IS NOT DISTINCT FROM $3
-          AND name = $4
-    `, string(key.Scope), wsArg, pjArg, key.Name)
+          AND user_id IS NOT DISTINCT FROM $4
+          AND name = $5
+    `, string(key.Scope), wsArg, pjArg, userArg, key.Name)
 	return scanVariableRow(row)
 }
 
@@ -126,13 +130,15 @@ func (s *Store) Delete(ctx context.Context, key Key) error {
 	}
 	wsArg := nullStr(key.WorkspaceID)
 	pjArg := nullStr(key.ProjectID)
+	userArg := nullStr(key.UserID)
 	res, err := s.DB.ExecContext(ctx, `
         DELETE FROM variables
         WHERE scope = $1
           AND workspace_id IS NOT DISTINCT FROM $2
           AND project_id IS NOT DISTINCT FROM $3
-          AND name = $4
-    `, string(key.Scope), wsArg, pjArg, key.Name)
+          AND user_id IS NOT DISTINCT FROM $4
+          AND name = $5
+    `, string(key.Scope), wsArg, pjArg, userArg, key.Name)
 	if err != nil {
 		return fmt.Errorf("variable: delete: %w", err)
 	}
@@ -156,7 +162,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'workspace' AND workspace_id = $1
             ORDER BY name
         `, workspaceID)
@@ -170,7 +176,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 			return nil, fmt.Errorf("variable: workspace_id+project_id required")
 		}
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'project' AND workspace_id = $1 AND project_id = $2
             ORDER BY name
         `, workspaceID, projectID)
@@ -183,7 +189,7 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 		// Stored-system rows live in the table; the computed-system
 		// resolver lives at the verb layer and is folded in there.
 		rows, err := s.DB.QueryContext(ctx, `
-            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), name, value, secret, created_at, updated_at
+            SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''), name, value, secret, created_at, updated_at
             FROM variables WHERE scope = 'system'
             ORDER BY name
         `)
@@ -195,6 +201,25 @@ func (s *Store) ListByScope(ctx context.Context, scope Scope, workspaceID, proje
 	default:
 		return nil, fmt.Errorf("variable: unknown scope %q", scope)
 	}
+}
+
+// ListByUser returns every user-scope variable for the given user_id. Kept
+// separate from ListByScope, whose signature is (scope, workspaceID,
+// projectID) — the user scope keys on user_id, not those columns.
+func (s *Store) ListByUser(ctx context.Context, userID string) ([]Variable, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("variable: user_id required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+        SELECT id, scope, COALESCE(workspace_id,''), COALESCE(project_id,''), COALESCE(user_id,''), name, value, secret, created_at, updated_at
+        FROM variables WHERE scope = 'user' AND user_id = $1
+        ORDER BY name
+    `, userID)
+	if err != nil {
+		return nil, fmt.Errorf("variable: list user: %w", err)
+	}
+	defer rows.Close()
+	return collectRows(rows)
 }
 
 func collectRows(rows *sql.Rows) ([]Variable, error) {
@@ -218,7 +243,7 @@ func scanVariableCommon(rs rowScanner) (Variable, error) {
 		v      Variable
 		scopeS string
 	)
-	if err := rs.Scan(&v.ID, &scopeS, &v.WorkspaceID, &v.ProjectID,
+	if err := rs.Scan(&v.ID, &scopeS, &v.WorkspaceID, &v.ProjectID, &v.UserID,
 		&v.Name, &v.Value, &v.Secret, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return Variable{}, err
 	}

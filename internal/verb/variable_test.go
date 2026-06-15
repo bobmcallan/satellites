@@ -71,6 +71,7 @@ func TestBuildVariableResolutionChain(t *testing.T) {
 		name       string
 		scope      variable.Scope
 		wsID, pjID string
+		userID     string
 		inherit    bool
 		want       []variable.Scope
 	}{
@@ -79,30 +80,74 @@ func TestBuildVariableResolutionChain(t *testing.T) {
 			want: []variable.Scope{variable.ScopeProject},
 		},
 		{
-			name: "project inherit", scope: variable.ScopeProject, wsID: "w", pjID: "p", inherit: true,
+			name: "project inherit (no caller)", scope: variable.ScopeProject, wsID: "w", pjID: "p", inherit: true,
 			want: []variable.Scope{variable.ScopeProject, variable.ScopeWorkspace, variable.ScopeSystem},
+		},
+		{
+			name: "project inherit prepends caller user layer", scope: variable.ScopeProject, wsID: "w", pjID: "p", userID: "u1", inherit: true,
+			want: []variable.Scope{variable.ScopeUser, variable.ScopeProject, variable.ScopeWorkspace, variable.ScopeSystem},
 		},
 		{
 			name: "workspace inherit", scope: variable.ScopeWorkspace, wsID: "w", inherit: true,
 			want: []variable.Scope{variable.ScopeWorkspace, variable.ScopeSystem},
 		},
 		{
+			name: "workspace inherit prepends caller user layer", scope: variable.ScopeWorkspace, wsID: "w", userID: "u1", inherit: true,
+			want: []variable.Scope{variable.ScopeUser, variable.ScopeWorkspace, variable.ScopeSystem},
+		},
+		{
 			name: "system inherit no-op", scope: variable.ScopeSystem, inherit: true,
 			want: []variable.Scope{variable.ScopeSystem},
+		},
+		{
+			name: "user scope resolves the single user key", scope: variable.ScopeUser, userID: "u1", inherit: true,
+			want: []variable.Scope{variable.ScopeUser},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			chain := buildVariableResolutionChain("v", tc.scope, tc.wsID, tc.pjID, tc.inherit)
+			chain := buildVariableResolutionChain("v", tc.scope, tc.wsID, tc.pjID, tc.userID, tc.inherit)
 			if len(chain) != len(tc.want) {
-				t.Fatalf("chain len: got %d want %d", len(chain), len(tc.want))
+				t.Fatalf("chain len: got %d want %d (%v)", len(chain), len(tc.want), chain)
 			}
 			for i, k := range chain {
 				if k.Scope != tc.want[i] {
 					t.Fatalf("step %d scope=%s want %s", i, k.Scope, tc.want[i])
 				}
+				if k.Scope == variable.ScopeUser && k.UserID != tc.userID {
+					t.Fatalf("step %d user layer UserID=%q want %q", i, k.UserID, tc.userID)
+				}
 			}
 		})
+	}
+}
+
+// TestVariableSet_UserScopeRequiresCaller asserts a user-scope write with no
+// caller identity is refused before the store is touched (sty_6cdf1cd0 AC2).
+func TestVariableSet_UserScopeRequiresCaller(t *testing.T) {
+	prev := variableStore
+	variableStore = &variable.Store{}
+	defer func() { variableStore = prev }()
+
+	_, err := Get("variable_set").Invoke(context.Background(),
+		json.RawMessage(`{"name":"k","scope":"user","value":"v"}`))
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("expected ErrBadRequest for user write with no caller, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "caller identity") {
+		t.Fatalf("error should mention 'caller identity', got %v", err)
+	}
+}
+
+// TestParseVariableScope_User asserts the wire string "user" parses to
+// ScopeUser (sty_6cdf1cd0 AC2).
+func TestParseVariableScope_User(t *testing.T) {
+	s, err := parseVariableScope("user")
+	if err != nil {
+		t.Fatalf("parse user scope: %v", err)
+	}
+	if s != variable.ScopeUser {
+		t.Fatalf("got %s want %s", s, variable.ScopeUser)
 	}
 }
 

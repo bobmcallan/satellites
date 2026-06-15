@@ -25,6 +25,11 @@ func TestKey_Validate(t *testing.T) {
 		{"project without project_id rejected", Key{Scope: ScopeProject, WorkspaceID: "wksp_1", Name: "x"}, true},
 		{"system bare ok (resolver-only)", Key{Scope: ScopeSystem, Name: "x"}, false},
 		{"system with workspace_id rejected", Key{Scope: ScopeSystem, WorkspaceID: "wksp_1", Name: "x"}, true},
+		{"user ok", Key{Scope: ScopeUser, UserID: "usr_1", Name: "x"}, false},
+		{"user without user_id rejected", Key{Scope: ScopeUser, Name: "x"}, true},
+		{"user with workspace_id rejected", Key{Scope: ScopeUser, UserID: "usr_1", WorkspaceID: "wksp_1", Name: "x"}, true},
+		{"user with project_id rejected", Key{Scope: ScopeUser, UserID: "usr_1", ProjectID: "proj_1", Name: "x"}, true},
+		{"project with user_id rejected", Key{Scope: ScopeProject, WorkspaceID: "wksp_1", ProjectID: "proj_1", UserID: "usr_1", Name: "x"}, true},
 		{"empty name rejected", Key{Scope: ScopeSystem}, true},
 		{"unknown scope rejected", Key{Scope: "other", Name: "x"}, true},
 	}

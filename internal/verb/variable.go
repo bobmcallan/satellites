@@ -196,7 +196,7 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range buildVariableResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, req.Inherit) {
+	for _, key := range buildVariableResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, callerUserID(ctx), req.Inherit) {
 		if key.Scope == variable.ScopeSystem {
 			// Stored-system rows take precedence over the computed
 			// resolver. A seeded knob like stories.page_size lives in
@@ -255,6 +255,14 @@ func invokeVariableSet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		return nil, err
 	}
 	key := variable.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	// A user-scope write is keyed to the caller's own identity — never an
+	// arbitrary user_id from the request.
+	if scope == variable.ScopeUser {
+		key.UserID = callerUserID(ctx)
+		if key.UserID == "" {
+			return nil, fmt.Errorf("variable_set: %w: user scope requires a caller identity", ErrBadRequest)
+		}
+	}
 	if err := authorizeVariableWrite(ctx, key); err != nil {
 		return nil, err
 	}
@@ -325,6 +333,12 @@ func invokeVariableDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 	key := variable.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	if scope == variable.ScopeUser {
+		key.UserID = callerUserID(ctx)
+		if key.UserID == "" {
+			return nil, fmt.Errorf("variable_delete: %w: user scope requires a caller identity", ErrBadRequest)
+		}
+	}
 	if err := authorizeVariableWrite(ctx, key); err != nil {
 		return nil, err
 	}
@@ -352,6 +366,9 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	// most restrictive layer in the cascade and the one whose membership
 	// matters. system listing alone needs no auth.
 	deepest := variable.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: "__list__"}
+	if scope == variable.ScopeUser {
+		deepest.UserID = callerUserID(ctx)
+	}
 	if deepest.Scope != variable.ScopeSystem {
 		if err := authorizeVariableRead(ctx, deepest); err != nil {
 			return nil, err
@@ -372,8 +389,21 @@ func invokeVariableList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		merged[name] = VariableListEntry{Name: name, Value: value, ResolvedScope: string(layer), Secret: secret}
 	}
 
-	for _, layerKey := range buildVariableResolutionChain("", scope, req.WorkspaceID, req.ProjectID, req.Inherit) {
+	for _, layerKey := range buildVariableResolutionChain("", scope, req.WorkspaceID, req.ProjectID, callerUserID(ctx), req.Inherit) {
 		switch layerKey.Scope {
+		case variable.ScopeUser:
+			// The caller's user-override layer keys on user_id, not the
+			// workspace/project columns ListByScope expects.
+			if layerKey.UserID == "" {
+				continue
+			}
+			vs, err := variableStore.ListByUser(ctx, layerKey.UserID)
+			if err != nil {
+				return nil, mapVariableStoreError(err, "variable_list")
+			}
+			for _, v := range vs {
+				addRow(v.Name, v.Value, variable.ScopeUser, v.Secret)
+			}
 		case variable.ScopeSystem:
 			// Stored-system rows take precedence over computed names
 			// (addRow is first-wins). A seeded knob like
@@ -428,6 +458,8 @@ func parseVariableScope(s string) (variable.Scope, error) {
 		return variable.ScopeWorkspace, nil
 	case "project":
 		return variable.ScopeProject, nil
+	case "user":
+		return variable.ScopeUser, nil
 	case "":
 		return "", fmt.Errorf("variable: %w: scope required", ErrBadRequest)
 	default:
@@ -436,12 +468,25 @@ func parseVariableScope(s string) (variable.Scope, error) {
 }
 
 // buildVariableResolutionChain mirrors the documents cascade, including
-// the scope=system terminator. Empty name means "list at each layer";
-// callers stamp the requested name otherwise.
-func buildVariableResolutionChain(name string, scope variable.Scope, wsID, pjID string, inherit bool) []variable.Key {
-	chain := []variable.Key{{Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Name: name}}
+// the scope=system terminator and the highest-precedence user override
+// layer (sty_6cdf1cd0). Empty name means "list at each layer"; callers
+// stamp the requested name otherwise. userID is the caller's identity: a
+// non-user inherited read prepends the caller's user layer at the top of
+// the cascade (user → project → workspace → system); a scope=user read
+// resolves the single user key.
+func buildVariableResolutionChain(name string, scope variable.Scope, wsID, pjID, userID string, inherit bool) []variable.Key {
+	base := variable.Key{Scope: scope, WorkspaceID: wsID, ProjectID: pjID, Name: name}
+	if scope == variable.ScopeUser {
+		base.UserID = userID
+	}
+	chain := []variable.Key{base}
 	if !inherit {
 		return chain
+	}
+	// Prepend the caller's user override layer at highest precedence for
+	// non-user reads.
+	if userID != "" && scope != variable.ScopeUser {
+		chain = append([]variable.Key{{Scope: variable.ScopeUser, UserID: userID, Name: name}}, chain...)
 	}
 	switch scope {
 	case variable.ScopeProject:
@@ -465,6 +510,13 @@ func authorizeVariableRead(ctx context.Context, key variable.Key) error {
 	u := auth.FromContext(ctx)
 	if u == nil {
 		return fmt.Errorf("variable: %w: bearer required for %s scope", ErrUnauthorized, key.Scope)
+	}
+	// A user-scope row is readable only by its owner — never another caller.
+	if key.Scope == variable.ScopeUser {
+		if key.UserID != u.ID {
+			return fmt.Errorf("variable: %w: user scope is readable only by its owner", ErrForbidden)
+		}
+		return nil
 	}
 	if workspaceStore == nil {
 		return nil

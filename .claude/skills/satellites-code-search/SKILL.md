@@ -6,7 +6,7 @@ when: code-discovery
 tags: [kind:capability]
 description: Prefer the in-client code index for code discovery — use `satellites code search`/`code symbol` over Read/Grep to find where a symbol is defined, read a declaration's body, or navigate code. Index once per session with `satellites code index`. Invoke whenever a task means locating or reading code by name (where is X / what is X's body / what is this type).
 ---
-<!-- satellites-sync:begin {"document_id":"doc_b6d7819b","version":2,"hash":"802779d956c0e14f31ac1220f4a9a45b123b8b993aca2a972fe2818dcdf9b8b3"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_a6442a14","version":1,"hash":"802779d956c0e14f31ac1220f4a9a45b123b8b993aca2a972fe2818dcdf9b8b3"} satellites-sync:end -->
 
 # satellites-code-search
 

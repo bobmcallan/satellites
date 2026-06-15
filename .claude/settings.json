@@ -1,53 +1,53 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "satellites hook gate || exit 2",
-            "type": "command"
-          }
+    "hooks": {
+        "PreToolUse": [
+            {
+                "hooks": [
+                    {
+                        "command": "satellites hook gate || exit 2",
+                        "type": "command"
+                    }
+                ],
+                "matcher": "Edit|Write|MultiEdit|NotebookEdit"
+            },
+            {
+                "hooks": [
+                    {
+                        "command": "satellites hook access",
+                        "type": "command"
+                    }
+                ],
+                "matcher": "mcp__satellites__document_get"
+            },
+            {
+                "hooks": [
+                    {
+                        "command": "satellites hook codenudge",
+                        "type": "command"
+                    }
+                ],
+                "matcher": "Read"
+            }
         ],
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit"
-      },
-      {
-        "hooks": [
-          {
-            "command": "satellites hook access",
-            "type": "command"
-          }
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "command": "satellites code index",
+                        "type": "command"
+                    }
+                ]
+            }
         ],
-        "matcher": "mcp__satellites__document_get"
-      },
-      {
-        "hooks": [
-          {
-            "command": "satellites hook codenudge",
-            "type": "command"
-          }
-        ],
-        "matcher": "Read"
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "satellites code index",
-            "type": "command"
-          }
+        "UserPromptSubmit": [
+            {
+                "hooks": [
+                    {
+                        "command": "satellites hook prompt",
+                        "type": "command"
+                    }
+                ]
+            }
         ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "satellites hook prompt",
-            "type": "command"
-          }
-        ]
-      }
-    ]
-  }
+    }
 }
