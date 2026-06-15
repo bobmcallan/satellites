@@ -63,11 +63,12 @@ type taskConfig struct {
 }
 
 // Task triggers. on_demand runs only on an explicit workspace_task_run;
-// schedule runs autonomously on a cadence via the scheduler worker. The
-// document-change trigger arrives in a later epic-order story.
+// schedule runs autonomously on a cadence; on_document_change runs when the
+// workspace corpus changes. The last two are driven by the scheduler worker.
 const (
-	triggerOnDemand = "on_demand"
-	triggerSchedule = "schedule"
+	triggerOnDemand    = "on_demand"
+	triggerSchedule    = "schedule"
+	triggerOnDocChange = "on_document_change"
 )
 
 // minScheduleIntervalSeconds floors a scheduled cadence — autonomous LLM runs
@@ -324,8 +325,9 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 	}
 	var schedule *taskSchedule
 	switch trigger {
-	case triggerOnDemand:
-		// no schedule
+	case triggerOnDemand, triggerOnDocChange:
+		// no schedule — on_demand runs explicitly, on_document_change reacts
+		// to the corpus (the scheduler worker polls for changes).
 	case triggerSchedule:
 		if req.Schedule == nil || req.Schedule.IntervalSeconds <= 0 {
 			return nil, fmt.Errorf("workspace_task_upsert: %w: trigger %q requires schedule.interval_seconds > 0", ErrBadRequest, triggerSchedule)
@@ -335,7 +337,7 @@ func invokeWorkspaceTaskUpsert(ctx context.Context, raw json.RawMessage) (json.R
 		}
 		schedule = &taskSchedule{IntervalSeconds: req.Schedule.IntervalSeconds}
 	default:
-		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported trigger %q (%q|%q)", ErrBadRequest, trigger, triggerOnDemand, triggerSchedule)
+		return nil, fmt.Errorf("workspace_task_upsert: %w: unsupported trigger %q (%q|%q|%q)", ErrBadRequest, trigger, triggerOnDemand, triggerSchedule, triggerOnDocChange)
 	}
 	executor := strings.TrimSpace(req.Executor)
 	if executor == "" {

@@ -31,19 +31,22 @@ type scheduledTask struct {
 	Config      taskConfig
 }
 
-// TaskScheduler runs scheduled agent-tasks on their interval. Its seams (list,
-// run, record, now) are injectable so tests drive it deterministically without
-// a database, network, or real clock.
+// TaskScheduler runs trigger-driven agent-tasks: schedule (on an interval) and
+// on_document_change (when the workspace corpus changes). Its seams (list,
+// probe, run, record, now) are injectable so tests drive it deterministically
+// without a database, network, or real clock.
 type TaskScheduler struct {
 	interval time.Duration // tick granularity
 	now      func() time.Time
 	list     func(ctx context.Context) ([]scheduledTask, error)
+	probe    func(ctx context.Context, wsID, excludeName string) (time.Time, error)
 	run      func(ctx context.Context, t scheduledTask) (WorkspaceTaskRunResponse, error)
 	record   func(ctx context.Context, t scheduledTask, resp WorkspaceTaskRunResponse, runErr error)
 
-	mu      sync.Mutex
-	nextRun map[string]time.Time
-	running map[string]bool
+	mu           sync.Mutex
+	nextRun      map[string]time.Time // schedule trigger: next interval due time
+	docWatermark map[string]time.Time // on_document_change: last corpus-change time acted on
+	running      map[string]bool
 }
 
 // NewTaskScheduler wires the production scheduler: it discovers agent-task
@@ -58,12 +61,14 @@ func NewTaskScheduler(tickInterval time.Duration, ledgerStore *ledger.Store) *Ta
 		interval: tickInterval,
 		now:      time.Now,
 		list:     defaultScheduledTaskLister,
+		probe:    defaultDocChangeProbe,
 		run: func(ctx context.Context, t scheduledTask) (WorkspaceTaskRunResponse, error) {
 			return runWorkspaceTask(ctx, t.WorkspaceID, t.Config.TaskSkill, t.Config.OutputName, t.Config.Executor, "scheduler")
 		},
-		record:  defaultRunRecorder(ledgerStore),
-		nextRun: map[string]time.Time{},
-		running: map[string]bool{},
+		record:       defaultRunRecorder(ledgerStore),
+		nextRun:      map[string]time.Time{},
+		docWatermark: map[string]time.Time{},
+		running:      map[string]bool{},
 	}
 	return s
 }
@@ -82,56 +87,105 @@ func (s *TaskScheduler) Run(ctx context.Context) {
 	}
 }
 
-// tick discovers scheduled tasks and launches a single-flight run for each that
-// is due. A task seen for the first time is scheduled one interval out (no
-// immediate run, so a restart does not re-fire every task); thereafter it runs
-// when now ≥ its next_run_at and is not already running.
+// tick discovers trigger-driven tasks and launches a single-flight run for each
+// that is due, dispatching by trigger. ticks do not overlap (Run calls tick
+// synchronously), so the check-then-mark below races only against the launched
+// runs, which only ever clear `running` and advance state under the lock.
 func (s *TaskScheduler) tick(ctx context.Context) {
 	tasks, err := s.list(ctx)
 	if err != nil {
 		arbor.WarnCtx(ctx, "task scheduler: list", "err", err)
 		return
 	}
-	now := s.now()
 	for _, t := range tasks {
-		if t.Config.Trigger != triggerSchedule || t.Config.Schedule == nil || t.Config.Schedule.IntervalSeconds <= 0 {
-			continue
+		switch t.Config.Trigger {
+		case triggerSchedule:
+			s.considerSchedule(ctx, t)
+		case triggerOnDocChange:
+			s.considerDocChange(ctx, t)
 		}
-		key := t.WorkspaceID + "/" + t.Name
-		s.mu.Lock()
-		if s.running[key] {
-			s.mu.Unlock()
-			continue // single-flight: a prior run is still in flight
-		}
-		next, seen := s.nextRun[key]
-		if !seen {
-			// First sighting: defer the first run one interval out.
-			s.nextRun[key] = now.Add(s.intervalOf(t))
-			s.mu.Unlock()
-			continue
-		}
-		if now.Before(next) {
-			s.mu.Unlock()
-			continue // not due yet
-		}
-		s.running[key] = true
-		s.mu.Unlock()
-		go s.runOne(ctx, t, key)
 	}
 }
 
-// runOne executes a single scheduled run, records it, then advances next_run_at
-// and releases the single-flight lock — even when the run errors or reports
-// not-run, so a failure never wedges the schedule.
-func (s *TaskScheduler) runOne(ctx context.Context, t scheduledTask, key string) {
-	resp, runErr := s.run(ctx, t)
-	if s.record != nil {
-		s.record(ctx, t, resp, runErr)
+// considerSchedule runs an interval task when now ≥ its next_run_at. A task seen
+// for the first time is deferred one interval out (no immediate run, so a
+// restart does not re-fire every task).
+func (s *TaskScheduler) considerSchedule(ctx context.Context, t scheduledTask) {
+	if t.Config.Schedule == nil || t.Config.Schedule.IntervalSeconds <= 0 {
+		return
+	}
+	key := t.WorkspaceID + "/" + t.Name
+	now := s.now()
+	s.mu.Lock()
+	if s.running[key] {
+		s.mu.Unlock()
+		return // single-flight
+	}
+	next, seen := s.nextRun[key]
+	if !seen {
+		s.nextRun[key] = now.Add(s.intervalOf(t)) // defer first run
+		s.mu.Unlock()
+		return
+	}
+	if now.Before(next) {
+		s.mu.Unlock()
+		return // not due yet
+	}
+	s.running[key] = true
+	s.mu.Unlock()
+	interval := s.intervalOf(t)
+	s.launch(ctx, t, key, func() { s.nextRun[key] = s.now().Add(interval) })
+}
+
+// considerDocChange runs a reactive task when the workspace corpus has changed
+// since the last run. A task seen for the first time establishes a baseline (no
+// run); thereafter a probed change time later than the watermark fires one run.
+// The probe excludes the task's own output, so writing the result never
+// re-fires (no self-trigger loop).
+func (s *TaskScheduler) considerDocChange(ctx context.Context, t scheduledTask) {
+	key := t.WorkspaceID + "/" + t.Name
+	s.mu.Lock()
+	running := s.running[key]
+	s.mu.Unlock()
+	if running {
+		return // single-flight
+	}
+	latest, err := s.probe(ctx, t.WorkspaceID, t.Config.OutputName)
+	if err != nil {
+		arbor.WarnCtx(ctx, "task scheduler: change probe", "workspace_id", t.WorkspaceID, "task", t.Name, "err", err)
+		return
 	}
 	s.mu.Lock()
-	s.nextRun[key] = s.now().Add(s.intervalOf(t))
-	delete(s.running, key)
+	wm, seen := s.docWatermark[key]
+	if !seen {
+		s.docWatermark[key] = latest // baseline, no run
+		s.mu.Unlock()
+		return
+	}
+	if !latest.After(wm) {
+		s.mu.Unlock()
+		return // no change since last run
+	}
+	s.running[key] = true
 	s.mu.Unlock()
+	s.launch(ctx, t, key, func() { s.docWatermark[key] = latest })
+}
+
+// launch runs a task in its own goroutine, records it, then advances the
+// trigger's per-task state and releases the single-flight lock — even when the
+// run errors or reports not-run, so a failure never wedges the task. advance
+// runs under the lock.
+func (s *TaskScheduler) launch(ctx context.Context, t scheduledTask, key string, advance func()) {
+	go func() {
+		resp, runErr := s.run(ctx, t)
+		if s.record != nil {
+			s.record(ctx, t, resp, runErr)
+		}
+		s.mu.Lock()
+		advance()
+		delete(s.running, key)
+		s.mu.Unlock()
+	}()
 }
 
 func (s *TaskScheduler) intervalOf(t scheduledTask) time.Duration {
@@ -139,8 +193,10 @@ func (s *TaskScheduler) intervalOf(t scheduledTask) time.Duration {
 }
 
 // defaultScheduledTaskLister discovers agent-task documents across every
-// workspace (no workspace_id filter) and returns those whose trigger is
-// "schedule". The config body is read per task (List does not carry bodies).
+// workspace (no workspace_id filter) and returns those with a worker-driven
+// trigger (schedule or on_document_change). on_demand tasks are skipped — they
+// run only on an explicit verb call. The config body is read per task (List
+// does not carry bodies).
 func defaultScheduledTaskLister(ctx context.Context) ([]scheduledTask, error) {
 	if documentStore == nil {
 		return nil, nil
@@ -163,7 +219,7 @@ func defaultScheduledTaskLister(ctx context.Context) ([]scheduledTask, error) {
 		if json.Unmarshal([]byte(got.Versions[0].Body), &cfg) != nil {
 			continue // skip a malformed config rather than failing the whole pass
 		}
-		if cfg.Trigger != triggerSchedule {
+		if cfg.Trigger != triggerSchedule && cfg.Trigger != triggerOnDocChange {
 			continue
 		}
 		out = append(out, scheduledTask{
@@ -173,6 +229,34 @@ func defaultScheduledTaskLister(ctx context.Context) ([]scheduledTask, error) {
 		})
 	}
 	return out, nil
+}
+
+// defaultDocChangeProbe returns the most recent change time across a
+// workspace's corpus documents, EXCLUDING the task's own output (so writing the
+// result never re-fires the task) and the agent-task/* config namespace (config
+// edits are not corpus changes). A zero time means no eligible document.
+func defaultDocChangeProbe(ctx context.Context, wsID, excludeName string) (time.Time, error) {
+	if documentStore == nil {
+		return time.Time{}, nil
+	}
+	res, err := documentStore.List(ctx, document.ListFilter{
+		Type:        document.TypeDocument,
+		Scope:       document.ScopeWorkspace,
+		WorkspaceID: wsID,
+	}, document.ListOptions{Limit: 1000})
+	if err != nil {
+		return time.Time{}, err
+	}
+	var latest time.Time
+	for _, d := range res.Items {
+		if d.Name == excludeName || strings.HasPrefix(d.Name, synth.AgentTaskNamePrefix) {
+			continue
+		}
+		if d.UpdatedAt.After(latest) {
+			latest = d.UpdatedAt
+		}
+	}
+	return latest, nil
 }
 
 // defaultRunRecorder appends one ledger row per scheduled run (success,
