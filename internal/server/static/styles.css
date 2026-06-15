@@ -1338,8 +1338,16 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   border-color: rgba(229, 72, 77, 0.4);
   border-top-color: rgba(229, 72, 77, 0.4);
 }
+/* A lapsed lease (engaged but quiet) degrades the dot to a visible DORMANT
+   state — grey, not spinning — rather than hiding it, so a long-running
+   engagement keeps an affordance (sty_a7253546). The dot clears only when the
+   engagement is genuinely idle (closed / aged out of the window), handled
+   server-side by the fold, not here. */
 .activity-spinner.is-stale {
-  display: none;
+  animation: none;
+  border-color: rgba(120, 120, 120, 0.35);
+  border-top-color: rgba(120, 120, 120, 0.35);
+  opacity: 0.6;
 }
 @keyframes activity-spin {
   to { transform: rotate(360deg); }

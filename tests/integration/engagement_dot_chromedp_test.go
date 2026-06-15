@@ -25,7 +25,8 @@ import (
 //     AFTER the title (inside .story-row-title), with no row-height change
 //   - a quiet engagement degrades (is-red at render past the threshold) and
 //     the client aging pass turns a fresh one orange then red with NO reload
-//   - an expired lease is stale (hidden)
+//   - an expired lease is stale but DORMANT (visible grey, not hidden) so a
+//     long-running engagement keeps its affordance (sty_a7253546)
 //   - a candidate-only story (read access) renders NO indicator
 //   - a closed engagement renders NO indicator
 //   - backlog and done rows render NO indicator even with engagement rows
@@ -156,10 +157,17 @@ func TestEngagementDot_Chromedp(t *testing.T) {
 	if cls := spinnerClass(staleID); !strings.Contains(cls, "is-stale") {
 		t.Errorf("an expired lease must mark is-stale, got %q", cls)
 	}
+	// sty_a7253546: a lapsed lease is DORMANT, not hidden — the dot stays
+	// visible (grey) so a long-running engagement keeps its affordance.
 	var staleDisplay string
 	eval(fmt.Sprintf(`getComputedStyle(document.querySelector('tr[data-id=%q] .activity-spinner')).display`, staleID), &staleDisplay)
-	if staleDisplay != "none" {
-		t.Errorf("a stale spinner must not be shown (display none), got %q", staleDisplay)
+	if staleDisplay == "none" {
+		t.Errorf("a stale spinner must remain visible (dormant), got display %q", staleDisplay)
+	}
+	var staleVisible bool
+	eval(fmt.Sprintf(`(function(){var d=document.querySelector('tr[data-id=%q] .activity-spinner');return !!(d && d.offsetParent !== null)})()`, staleID), &staleVisible)
+	if !staleVisible {
+		t.Errorf("a stale (lapsed-lease) engaged story must still SHOW a dormant indicator")
 	}
 	for storyID, why := range map[string]string{
 		candID:    "candidate-only (read access) story",

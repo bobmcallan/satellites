@@ -732,7 +732,9 @@
 // Activity-spinner aging (sty_07bb85b6, supersedes the sty_25e2e8ac dot).
 // Color is a pure function of now − data-last-seen against the panel's
 // data-eng-*-secs thresholds; a lease_until in the past marks the spinner
-// stale (hidden). Runs at load, on a 30s aging timer, and after every
+// stale — a DORMANT, still-visible grey dot (sty_a7253546), not hidden, so a
+// long-running engagement keeps its affordance. Runs at load, on a 30s aging
+// timer, and after every
 // liveRefresh tbody swap; exposed on window so the integration tier drives
 // aging deterministically (no reload).
 (function () {
