@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -60,5 +61,57 @@ func TestRunSatellitesActorCommand(t *testing.T) {
 	}
 	if !strings.Contains(out.Notes, "broken-window") || !strings.Contains(out.Notes, "failed") {
 		t.Fatalf("reject notes must carry command evidence: %q", out.Notes)
+	}
+}
+
+// TestParseMaxIterations pins the KV-bound fallback safety property (sty_0c98760e):
+// a clean positive integer in the variable_get response overrides the yaml
+// bound, and EVERYTHING else — malformed JSON, absent/empty value, non-numeric,
+// zero, or negative — yields 0 so the caller keeps the yaml value. A
+// misconfigured KV must never weaken or break the fail-loop bound.
+func TestParseMaxIterations(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{"positive value overrides", `{"value":"5"}`, 5},
+		{"whitespace trimmed", `{"value":" 7 "}`, 7},
+		{"empty value falls back", `{"value":""}`, 0},
+		{"missing value field falls back", `{"other":"5"}`, 0},
+		{"non-numeric falls back", `{"value":"lots"}`, 0},
+		{"zero falls back", `{"value":"0"}`, 0},
+		{"negative falls back", `{"value":"-3"}`, 0},
+		{"malformed json falls back", `not json`, 0},
+		{"empty response falls back", ``, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := parseMaxIterations(json.RawMessage(c.raw)); got != c.want {
+				t.Fatalf("parseMaxIterations(%q) = %d, want %d", c.raw, got, c.want)
+			}
+		})
+	}
+}
+
+// TestResolveWorkflowMaxIterations_IDGuard pins that the KV lookup is skipped —
+// returning 0 so the yaml bound stands — when the story carries no project or
+// workspace scope to root the variable cascade. This short-circuits before any
+// dispatch.
+func TestResolveWorkflowMaxIterations_IDGuard(t *testing.T) {
+	cases := []struct {
+		name  string
+		story reviewStory
+	}{
+		{"no project", reviewStory{WorkspaceID: "wksp_1"}},
+		{"no workspace", reviewStory{ProjectID: "proj_1"}},
+		{"neither", reviewStory{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := resolveWorkflowMaxIterations(context.Background(), reviewOpts{}, c.story); got != 0 {
+				t.Fatalf("resolveWorkflowMaxIterations(%+v) = %d, want 0 (yaml stands)", c.story, got)
+			}
+		})
 	}
 }

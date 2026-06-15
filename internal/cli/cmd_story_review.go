@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -208,6 +209,18 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 				flushLocalInbox(ctx, opts, store, story)
 				return nil
 			}
+		}
+	}
+
+	// KV iteration bound (sty_0c98760e): the operator can tune the fail-loop
+	// bound as a key-value. `workflow.max_iterations`, resolved through the
+	// variable cascade (project → workspace → system/global), overrides the
+	// yaml `max_iterations` for this state's fail loop when set — applied once
+	// here so BOTH the pre-dispatch guard below and verb.PlanV2Enactment honour
+	// it. Unset (or unparseable) → the yaml value stands.
+	if edges.IsV2 && edges.MaxIterations > 0 {
+		if kv := resolveWorkflowMaxIterations(ctx, opts, story); kv > 0 {
+			edges.MaxIterations = kv
 		}
 	}
 
@@ -492,6 +505,51 @@ func flushLocalInbox(ctx context.Context, opts reviewOpts, store *workstate.Stor
 		}
 		fmt.Fprintf(opts.Stdout, "flushed %d local inbox row(s) to ledger\n", flushed)
 	}
+}
+
+// resolveWorkflowMaxIterations returns the operator's KV override for the
+// fail-loop bound, or 0 when unset/unparseable (caller keeps the yaml value).
+// It reads `workflow.max_iterations` through the variable cascade rooted at the
+// story's project scope (project → workspace → system/global). Best-effort: any
+// dispatch or parse error yields 0.
+func resolveWorkflowMaxIterations(ctx context.Context, opts reviewOpts, story reviewStory) int {
+	if strings.TrimSpace(story.ProjectID) == "" || strings.TrimSpace(story.WorkspaceID) == "" {
+		return 0
+	}
+	req, err := json.Marshal(map[string]any{
+		"name":         "workflow.max_iterations",
+		"scope":        "project",
+		"project_id":   story.ProjectID,
+		"workspace_id": story.WorkspaceID,
+		"inherit":      true,
+	})
+	if err != nil {
+		return 0
+	}
+	raw, err := dispatchVerb(ctx, "variable_get", req, opts.ConfigPath, opts.UserArg)
+	if err != nil {
+		return 0
+	}
+	return parseMaxIterations(raw)
+}
+
+// parseMaxIterations extracts a positive iteration bound from a variable_get
+// response. It returns 0 — caller keeps the yaml value — for anything that is
+// not a clean positive integer: a malformed response, an absent/empty value, a
+// non-numeric value, or a value <= 0. This is the fallback safety property: a
+// misconfigured KV never weakens or breaks the fail-loop bound.
+func parseMaxIterations(raw json.RawMessage) int {
+	var resp struct {
+		Value string `json:"value"`
+	}
+	if json.Unmarshal(raw, &resp) != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(resp.Value))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // fullLedgerViews fetches the story's COMPLETE ledger (cursor-paginated,

@@ -17,9 +17,11 @@ import (
 )
 
 // waitUntil polls cond until true or a deadline, failing the test on timeout.
+// The deadline is generous so the time-driven assertions stay green even when
+// the full integration tier contends for CPU/Docker.
 func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(6 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -120,9 +122,15 @@ func TestTaskScheduler_OnDocumentChange(t *testing.T) {
 		return len(res.Entries)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go verb.NewTaskScheduler(150*time.Millisecond, ledgerStore).Run(ctx)
+	// Stop the scheduler and WAIT for it to drain (Run returns only after its
+	// in-flight task runs finish) before the test ends — so no leaked tick
+	// goroutine writes through the shared verb stores into a later test on the
+	// reused container (sty_0c98760e). Registered after the store-clearing
+	// cleanup so it runs first (LIFO): drain, then the stores are cleared.
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	schedDone := make(chan struct{})
+	go func() { defer close(schedDone); verb.NewTaskScheduler(150*time.Millisecond, ledgerStore).Run(schedCtx) }()
+	t.Cleanup(func() { schedCancel(); <-schedDone })
 
 	// Baseline: with no corpus change, several ticks must NOT run the task.
 	time.Sleep(700 * time.Millisecond)
@@ -142,12 +150,17 @@ func TestTaskScheduler_OnDocumentChange(t *testing.T) {
 		t.Fatalf("reactive output not produced: err=%v versions=%d", err, len(got.Versions))
 	}
 
-	// Two rapid edits before the next tick coalesce into a single additional run.
+	// Further corpus edits trigger more reactive runs, bounded (no runaway).
+	// Strict 1-run-per-burst COALESCING is covered deterministically by the
+	// unit test TestTaskScheduler_DocChange_Coalesce — at the integration level
+	// a real ticker makes the exact per-burst count timing-dependent (two rapid
+	// upserts may land in one tick window or straddle a tick boundary), so the
+	// integration test asserts the robust, non-racy invariants instead.
 	upsertDoc("burst-a", "edit one")
 	upsertDoc("burst-b", "edit two")
-	waitUntil(t, "coalesced run after burst", func() bool { return countRuns() == 2 })
-	time.Sleep(700 * time.Millisecond) // let further ticks settle
-	if n := countRuns(); n != 2 {
-		t.Fatalf("coalesce failed: expected 2 total runs (1 + coalesced burst), got %d", n)
+	waitUntil(t, "reactive run after further edits", func() bool { return countRuns() >= 2 })
+	time.Sleep(1 * time.Second) // let further ticks settle
+	if n := countRuns(); n > 3 {
+		t.Fatalf("reactive runs should be bounded (no runaway), got %d", n)
 	}
 }

@@ -97,10 +97,14 @@ func TestTaskScheduler_RunsOnCadence(t *testing.T) {
 	}
 
 	// Run the real scheduler: tick fast, 1s interval. First sight defers one
-	// interval, then it runs each interval.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go verb.NewTaskScheduler(150*time.Millisecond, ledgerStore).Run(ctx)
+	// interval, then it runs each interval. Stop it and WAIT for it to drain
+	// (Run returns only after in-flight task runs finish) before the test ends,
+	// so no leaked tick goroutine writes through the shared verb stores into a
+	// later test on the reused container (sty_0c98760e).
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	schedDone := make(chan struct{})
+	go func() { defer close(schedDone); verb.NewTaskScheduler(150*time.Millisecond, ledgerStore).Run(schedCtx) }()
+	t.Cleanup(func() { schedCancel(); <-schedDone })
 
 	// Poll for at least two runs (proving cadence), up to a generous window.
 	countTaskRuns := func() int {
@@ -110,14 +114,14 @@ func TestTaskScheduler_RunsOnCadence(t *testing.T) {
 		}
 		return len(res.Entries)
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(20 * time.Second) // generous: the full tier contends for CPU/Docker
 	for time.Now().Before(deadline) {
 		if countTaskRuns() >= 2 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	cancel()
+	schedCancel()
 
 	runs := countTaskRuns()
 	if runs < 2 {

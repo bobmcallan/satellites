@@ -185,7 +185,11 @@ func runTechdebtReview(ctx context.Context, opts techdebtOpts) error {
 		complete = false
 		fmt.Fprintln(opts.Stdout, "integration: skipped (--skip-integration)")
 	} else {
-		intOut, intCode := runGo(ctx, dir, "test", "-tags", "integration", opts.IntegrationPkgs)
+		// -p 1: run integration test packages serially (sty_0c98760e). The tier
+		// is already effectively sequential (no test calls t.Parallel), but this
+		// makes the intent explicit and keeps timing/chromedp tests from
+		// contending if more integration packages are ever added.
+		intOut, intCode := runGo(ctx, dir, "test", "-p", "1", "-tags", "integration", opts.IntegrationPkgs)
 		intFails := techdebt.ParseFailures(intOut)
 		switch {
 		case intCode != 0 && len(intFails) == 0 && looksLikeInfra(intOut):

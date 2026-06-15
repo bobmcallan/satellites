@@ -6,7 +6,7 @@ tags: [kind:workflow]
 applies_to: ["*"]
 description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_67945dca","version":6,"hash":"e412313d08fbc4c5384a6b4d213d668606a900a8a97f80331c9afacb585ed21f"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_e99ba77f","version":3,"hash":"827e2693e6b153b05784ed3dbc53e9611a4c3dd9a57217f746969f3385a96e13"} satellites-sync:end -->
 
 # Satellites workflow
 
@@ -47,7 +47,13 @@ status itself answers "whose turn is it, and was the gate run?".
 A rejected gate returns notes; fix and request again — each reject is a real
 transition back to `in_progress`, visible on the ledger. Only reviewers and the
 client's deterministic enactment advance status — never hand-patch it. A story
-in `blocked` is the operator's: not your state → stop.
+in `blocked` is the operator's: stop, surface it, and do not work around it.
+When the ×N exhaustion that landed it there was a recoverable FLAKE (not a
+genuine product failure) and you have fixed it, you may request recovery —
+`satellites story status_transition <id> --skill satellites-loop-recovery-review`
+— which judges a `## Recovery` rationale in the body and, on accept, returns the
+story to `in_progress` with a fresh quota (the `exhausted` marker already reset
+the reject count). A genuine failure stays blocked for the operator.
 
 A client/server change is invisible to the gate until it is built, tested,
 committed, pushed through CI, and the client refreshed; the gate runs the local
@@ -59,7 +65,7 @@ binary, so an unshipped change is not seen.
 - `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
 - `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
 - `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
-- `blocked` (operator) — fail-loop exhaustion lands here; only the operator moves a story out.
+- `blocked` (operator) — fail-loop exhaustion lands here; the operator moves a story out, or the agent requests `satellites-loop-recovery-review` (blocked → in_progress) when the exhaustion was a recoverable, fixed flake — a genuine failure stays the operator's.
 
 ## Checkpoint gates
 
@@ -80,6 +86,7 @@ which executes the remaining atomic gates pre-commit and honours their verdicts
 - [[satellites-doc-drift-review]] — when the change touches the CLI.
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
+- [[satellites-agent-architecture-review]] — when the change touches the agent/executor surface (internal/agent, the agent executor in internal/verb, agent operating documents); a judgment gate critiquing the change for configuration-over-code.
 
 ```yaml
 states:
@@ -102,6 +109,7 @@ transitions:
   - {from: integration-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-integration-test-review"}
   - {from: done-review,        on: pass, to: done, reviewer_skill: "satellites-story-done-review"}
   - {from: done-review,        on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
+  - {from: blocked,            to: in_progress,     reviewer_skill: "satellites-loop-recovery-review"}
   - {from: backlog,            to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: ready,              to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: in_progress,        to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}

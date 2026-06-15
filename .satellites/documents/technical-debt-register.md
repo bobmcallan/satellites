@@ -19,6 +19,4 @@ story-backed capture of a failure that cannot be fixed in the moment.
 
 | check_id | story_id | reason |
 | --- | --- | --- |
-<!-- empty: the four portal chromedp UI checks were resolved by sty_b7ba18b3
-     (test modernization to the server-authoritative model). The register is
-     clear; add a row only as a deliberate, story-backed quarantine. -->
+| TestStoryPanel_FilterBugs | sty_b8aac474 | Residual chromedp websocket/render timing flake under full-tier CPU contention — passes deterministically in isolation and in small batches; not a product defect. The systemic tier instability (per-test container churn saturating the Docker daemon) was fixed in sty_0c98760e via a shared container; this lone chromedp flake is the known class scoped out of that story (AC4). Quarantined until sty_b8aac474 hardens the test's readiness wait, then this row is removed. |

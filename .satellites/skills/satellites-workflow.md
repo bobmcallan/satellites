@@ -46,7 +46,13 @@ status itself answers "whose turn is it, and was the gate run?".
 A rejected gate returns notes; fix and request again — each reject is a real
 transition back to `in_progress`, visible on the ledger. Only reviewers and the
 client's deterministic enactment advance status — never hand-patch it. A story
-in `blocked` is the operator's: not your state → stop.
+in `blocked` is the operator's: stop, surface it, and do not work around it.
+When the ×N exhaustion that landed it there was a recoverable FLAKE (not a
+genuine product failure) and you have fixed it, you may request recovery —
+`satellites story status_transition <id> --skill satellites-loop-recovery-review`
+— which judges a `## Recovery` rationale in the body and, on accept, returns the
+story to `in_progress` with a fresh quota (the `exhausted` marker already reset
+the reject count). A genuine failure stays blocked for the operator.
 
 A client/server change is invisible to the gate until it is built, tested,
 committed, pushed through CI, and the client refreshed; the gate runs the local
@@ -58,7 +64,7 @@ binary, so an unshipped change is not seen.
 - `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
 - `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
 - `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
-- `blocked` (operator) — fail-loop exhaustion lands here; only the operator moves a story out.
+- `blocked` (operator) — fail-loop exhaustion lands here; the operator moves a story out, or the agent requests `satellites-loop-recovery-review` (blocked → in_progress) when the exhaustion was a recoverable, fixed flake — a genuine failure stays the operator's.
 
 ## Checkpoint gates
 
@@ -102,6 +108,7 @@ transitions:
   - {from: integration-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-integration-test-review"}
   - {from: done-review,        on: pass, to: done, reviewer_skill: "satellites-story-done-review"}
   - {from: done-review,        on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
+  - {from: blocked,            to: in_progress,     reviewer_skill: "satellites-loop-recovery-review"}
   - {from: backlog,            to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: ready,              to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: in_progress,        to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}

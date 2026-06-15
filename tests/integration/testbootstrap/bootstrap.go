@@ -14,7 +14,9 @@ package testbootstrap
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,57 +50,128 @@ type ServerEnv struct {
 	ServerURL string
 }
 
-// SetUp boots a Postgres container, applies migrations, opens a
-// database/sql handle, and registers teardown via t.Cleanup. Used from
-// every integration test — the single source of truth for setup.
-func SetUp(t *testing.T) *Env {
-	t.Helper()
-	ctx := context.Background()
+// One Postgres container is shared by every test in the package: booting a
+// fresh container per test (~88/run) churns the Docker daemon until its API
+// calls (`docker inspect`) time out under load, reddening a rotating victim
+// test at SetUp (sty_0c98760e). Reusing one container removes that churn; each
+// test's clean-data guarantee is preserved by Reset (a full TRUNCATE) at SetUp.
+// Sequential execution (the tier uses no t.Parallel) makes the shared handle
+// race-free.
+var (
+	sharedOnce      sync.Once
+	sharedEnv       *Env
+	sharedTerminate func()
+	sharedErr       error
+)
 
-	container, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("satellites"),
-		postgres.WithUsername("satellites"),
-		postgres.WithPassword("satellites"),
-		tc.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := container.Terminate(ctx); err != nil {
-			t.Logf("terminate postgres container: %v", err)
+// StartShared boots the one shared Postgres container, applies migrations, and
+// opens a database/sql handle — idempotent (sync.Once). Called from the
+// package's TestMain; SetUp also calls it so a run without TestMain still works.
+func StartShared() error {
+	sharedOnce.Do(func() {
+		ctx := context.Background()
+		container, err := postgres.Run(ctx,
+			"postgres:16-alpine",
+			postgres.WithDatabase("satellites"),
+			postgres.WithUsername("satellites"),
+			postgres.WithPassword("satellites"),
+			tc.WithWaitStrategy(
+				// Wait for BOTH the readiness log AND the host port mapping. A
+				// log-only wait replaces testcontainers' default port wait, so
+				// the log can appear before the 5432 host mapping is
+				// established and ConnectionString then races on a missing
+				// port; ForListeningPort gates readiness on the mapping.
+				wait.ForAll(
+					wait.ForLog("database system is ready to accept connections").
+						WithOccurrence(2),
+					wait.ForListeningPort("5432/tcp"),
+				).WithStartupTimeout(120*time.Second),
+			),
+		)
+		if err != nil {
+			sharedErr = fmt.Errorf("start shared postgres container: %w", err)
+			return
+		}
+		dsn, err := container.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			_ = container.Terminate(ctx)
+			sharedErr = fmt.Errorf("shared connection string: %w", err)
+			return
+		}
+		if err := db.MigrateUp(dsn); err != nil {
+			_ = container.Terminate(ctx)
+			sharedErr = fmt.Errorf("shared migrate up: %w", err)
+			return
+		}
+		sqlDB, err := sql.Open("postgres", dsn)
+		if err != nil {
+			_ = container.Terminate(ctx)
+			sharedErr = fmt.Errorf("shared open db: %w", err)
+			return
+		}
+		sharedEnv = &Env{DSN: dsn, DB: sqlDB}
+		sharedTerminate = func() {
+			_ = sqlDB.Close()
+			_ = container.Terminate(context.Background())
 		}
 	})
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("connection string: %v", err)
-	}
-
-	if err := db.MigrateUp(dsn); err != nil {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	sqlDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-
-	return &Env{DSN: dsn, DB: sqlDB}
+	return sharedErr
 }
 
-// Reset truncates every V5 schema table, restoring the DB to its
-// post-migration empty state. Call between subtests / sections for
-// clean data injection.
+// Shutdown terminates the shared container and closes its handle. Called once
+// from the package TestMain after all tests complete.
+func Shutdown() {
+	if sharedTerminate != nil {
+		sharedTerminate()
+	}
+}
+
+// SetUp returns the shared Postgres env with a clean (truncated) schema, so
+// every test starts from empty data exactly as a fresh container would. The
+// container itself is reused (started once, torn down by Shutdown).
+func SetUp(t *testing.T) *Env {
+	t.Helper()
+	if err := StartShared(); err != nil {
+		t.Fatalf("shared postgres: %v", err)
+	}
+	resetAll(t, sharedEnv)
+	return sharedEnv
+}
+
+// resetAll truncates EVERY mutable table, giving each top-level test the same
+// fully-empty start a fresh container used to provide — the cross-test
+// isolation guarantee on the shared container (sty_0c98760e). It is the full
+// superset of Reset; SetUp calls it so no test inherits a prior test's auth,
+// workspaces, or projects. Reset (the narrower, content-only truncate) stays
+// the intra-test reset so a test that seeds auth fixtures once and Resets per
+// subtest keeps those fixtures. schema_migrations is never truncated.
+func resetAll(t *testing.T, env *Env) {
+	t.Helper()
+	if _, err := env.DB.Exec(`
+        TRUNCATE api_keys, blobs, changelog,
+                 documents, document_versions, evidence,
+                 invitations, oauth_clients, oauth_codes,
+                 oauth_refresh_tokens, oauth_sessions, oauth_states,
+                 project_members, projects, reviews,
+                 server_settings, system_seeds, tools,
+                 users, variables, workspace_members, workspaces
+        RESTART IDENTITY CASCADE
+    `); err != nil {
+		t.Fatalf("reset all tables: %v", err)
+	}
+}
+
+// Reset truncates the content tables, restoring document/review/variable data
+// to empty while PRESERVING auth + workspace fixtures (users, workspaces,
+// members, api_keys). Call it between subtests / sections for clean data
+// injection: a test that seeds users + a workspace once at the top and Resets
+// per subtest keeps those fixtures, getting only fresh content each time. For a
+// full empty slate use SetUp (which calls resetAll); this is the intra-test
+// narrower reset — its table list is unchanged from before the shared-container
+// move, so existing tests behave identically.
 //
-// evidence carries an append-only trigger on UPDATE/DELETE; TRUNCATE
-// bypasses row-level triggers, so it's the supported reset path.
+// evidence carries an append-only trigger on UPDATE/DELETE; TRUNCATE bypasses
+// row-level triggers, so it's the supported reset path.
 func Reset(t *testing.T, env *Env) {
 	t.Helper()
 	// stories were unified into documents in migration 0017; type='story'

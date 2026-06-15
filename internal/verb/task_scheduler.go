@@ -47,6 +47,7 @@ type TaskScheduler struct {
 	nextRun      map[string]time.Time // schedule trigger: next interval due time
 	docWatermark map[string]time.Time // on_document_change: last corpus-change time acted on
 	running      map[string]bool
+	launches     sync.WaitGroup // in-flight task-run goroutines; Run drains these on shutdown
 }
 
 // NewTaskScheduler wires the production scheduler: it discovers agent-task
@@ -80,6 +81,12 @@ func (s *TaskScheduler) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Drain in-flight task runs before returning so a cancelled
+			// scheduler leaves no goroutine still reading the verb stores or
+			// writing the ledger — a graceful shutdown in production, and the
+			// guarantee the integration tests rely on to stop cleanly before
+			// the next test reuses the shared substrate (sty_0c98760e).
+			s.launches.Wait()
 			return
 		case <-t.C:
 			s.tick(ctx)
@@ -176,7 +183,9 @@ func (s *TaskScheduler) considerDocChange(ctx context.Context, t scheduledTask) 
 // run errors or reports not-run, so a failure never wedges the task. advance
 // runs under the lock.
 func (s *TaskScheduler) launch(ctx context.Context, t scheduledTask, key string, advance func()) {
+	s.launches.Add(1)
 	go func() {
+		defer s.launches.Done()
 		resp, runErr := s.run(ctx, t)
 		if s.record != nil {
 			s.record(ctx, t, resp, runErr)
