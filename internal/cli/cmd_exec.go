@@ -49,7 +49,12 @@ func init() {
 (.satellites/satellites.toml with server_url, plus an api-key in the
 credential store from 'satellites auth'), the verb is posted to POST
 /api/v1/exec/<name> on that server. When no config is found, the verb is
-dispatched in-process against the local registry.`,
+dispatched in-process against the local registry.
+
+The api-key resolves from the credential store ('satellites auth'), OR from
+the SATELLITES_API_KEY environment variable for headless/CI use. When both are
+present the environment variable wins; when neither is, exec reports a clear
+no-api-key error naming both paths.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

@@ -108,6 +108,54 @@ branch_template = "client-{task_id}"
 	}
 }
 
+// TestLoad_APIKeyEnvOverride covers sty_1121f1b2: SATELLITES_API_KEY takes
+// precedence over the credential store, and makes the client configured even
+// with no credential file present.
+func TestLoad_APIKeyEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+	path := filepath.Join(dir, "satellites.toml")
+	body := "server_url = \"https://example.com\"\nproject_id = \"proj_x\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No credential, env key set → Token is the env key, client configured.
+	t.Setenv("SATELLITES_API_KEY", "env-key-123")
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Token != "env-key-123" {
+		t.Errorf("token = %q, want the env override", cfg.Token)
+	}
+	if !cfg.IsConfigured() {
+		t.Error("IsConfigured should be true with server_url + env key, no credential file")
+	}
+
+	// With a stored credential too, the env key still wins.
+	if err := SaveCredential(Credential{ServerURL: "https://example.com", Token: "stored-key", Role: "executor"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load with credential + env: %v", err)
+	}
+	if cfg.Token != "env-key-123" {
+		t.Errorf("env override should win over the credential store, got %q", cfg.Token)
+	}
+
+	// Unset → behaviour reverts to the credential store.
+	t.Setenv("SATELLITES_API_KEY", "")
+	cfg, _, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load with env unset: %v", err)
+	}
+	if cfg.Token != "stored-key" {
+		t.Errorf("with env unset, token should be the stored credential, got %q", cfg.Token)
+	}
+}
+
 func TestStripAuthBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "satellites.toml")

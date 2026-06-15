@@ -61,7 +61,7 @@ func httpDispatchWithToken(cfg cliconfig.Config, name string, req json.RawMessag
 		return nil, fmt.Errorf("cli: server_url missing in config")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("cli: no api-key — run 'satellites auth' to authenticate")
+		return nil, fmt.Errorf("cli: no api-key — run 'satellites auth' to authenticate, OR set SATELLITES_API_KEY for headless/CI use")
 	}
 	if strings.ContainsAny(name, "/?#") {
 		return nil, fmt.Errorf("cli: invalid verb name %q", name)

@@ -56,7 +56,11 @@ func init() {
 		Long: `auth runs a browser login against the satellites-server and stores a
 durable executor-role api-key in the user-level credential store
 ($XDG_CONFIG_HOME/satellites/credentials.toml). Running 'satellites auth'
-with no subcommand is equivalent to 'satellites auth login'.`,
+with no subcommand is equivalent to 'satellites auth login'.
+
+For headless/CI use where a browser login is impossible, set SATELLITES_API_KEY
+to a minted executor key instead; it takes precedence over the credential store
+and needs no credential file.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAuthLogin(cmd, configArg, serverArg, projectArg, noBrowser, timeout)
 		},

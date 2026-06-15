@@ -351,6 +351,12 @@ func Load(explicitPath string) (Config, string, error) {
 	if cred, err := LoadCredential(cfg.ServerURL); err == nil {
 		cfg.Token = cred.Token
 	}
+	// Headless/CI override (sty_1121f1b2): SATELLITES_API_KEY takes precedence
+	// over the credential store, so non-interactive automation authenticates
+	// with no `satellites auth` credential file present.
+	if v := strings.TrimSpace(os.Getenv("SATELLITES_API_KEY")); v != "" {
+		cfg.Token = v
+	}
 	return cfg, path, nil
 }
 

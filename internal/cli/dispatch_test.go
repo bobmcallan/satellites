@@ -61,3 +61,60 @@ func TestDispatchVerb_UsesOperatorToken(t *testing.T) {
 		t.Fatalf("bearer = %q, want the operator TOML token", *lastBearer)
 	}
 }
+
+// headlessTestServer is dispatchTestServer without a stored credential: a stub
+// server recording the bearer + a TOML naming it, under an isolated XDG dir so
+// no credential file exists. Exercises the SATELLITES_API_KEY headless path.
+func headlessTestServer(t *testing.T) (configPath string, lastBearer *string) {
+	t.Helper()
+	var seen string
+	lastBearer = &seen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // isolated → no credential present
+	dir := t.TempDir()
+	configPath = filepath.Join(dir, "satellites.toml")
+	toml := "server_url = \"" + srv.URL + "\"\nproject_id = \"proj_t\"\n"
+	if err := os.WriteFile(configPath, []byte(toml), 0o600); err != nil {
+		t.Fatalf("write toml: %v", err)
+	}
+	return configPath, lastBearer
+}
+
+// TestDispatchVerb_APIKeyEnvOverride confirms the headless path (sty_1121f1b2):
+// with a server_url TOML, no credential file, and SATELLITES_API_KEY set, the
+// call routes remote and authenticates with the env key.
+func TestDispatchVerb_APIKeyEnvOverride(t *testing.T) {
+	configPath, lastBearer := headlessTestServer(t)
+	t.Setenv("SATELLITES_API_KEY", "env-executor-key")
+
+	if _, err := dispatchVerb(context.Background(), "system_status",
+		json.RawMessage(`{}`), configPath, ""); err != nil {
+		t.Fatalf("dispatchVerb: %v", err)
+	}
+	if *lastBearer != "env-executor-key" {
+		t.Fatalf("bearer = %q, want the SATELLITES_API_KEY value", *lastBearer)
+	}
+}
+
+// TestDispatchVerb_NoTokenSurfacesError confirms a server_url config with no
+// token (no credential, no env) routes remote and returns the no-api-key error
+// naming both auth paths — not a silent in-process fallback (sty_1121f1b2 AC5).
+func TestDispatchVerb_NoTokenSurfacesError(t *testing.T) {
+	configPath, _ := headlessTestServer(t)
+	t.Setenv("SATELLITES_API_KEY", "")
+
+	_, err := dispatchVerb(context.Background(), "system_status",
+		json.RawMessage(`{}`), configPath, "")
+	if err == nil {
+		t.Fatal("expected a no-api-key error, got nil")
+	}
+	if !strings.Contains(err.Error(), "SATELLITES_API_KEY") || !strings.Contains(err.Error(), "satellites auth") {
+		t.Fatalf("error should name both auth paths, got: %v", err)
+	}
+}

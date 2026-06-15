@@ -35,6 +35,15 @@ func dispatchVerb(ctx context.Context, name string, req json.RawMessage, configP
 		resp, derr := httpDispatch(cfg, name, req)
 		measureLogVerb(configFound, cfg, path, name, derr)
 		return resp, derr
+	case err == nil && strings.TrimSpace(cfg.ServerURL) != "":
+		// The config names a server but no token resolved (no credential
+		// store, no SATELLITES_API_KEY) — the caller intends remote, so go
+		// over HTTP and let httpDispatch surface the no-api-key error naming
+		// both auth paths, rather than a cryptic in-process fallback
+		// (sty_1121f1b2).
+		resp, derr := httpDispatch(cfg, name, req)
+		measureLogVerb(configFound, cfg, path, name, derr)
+		return resp, derr
 	case err != nil && !errors.Is(err, cliconfig.ErrNotFound):
 		return nil, err
 	}
