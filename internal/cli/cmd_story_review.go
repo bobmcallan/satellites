@@ -160,10 +160,19 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	edges, _ := verb.ResolveV2Edges(body, story.Status)
 
 	// Actor handoff stop: an operator state takes no review dispatch at all —
-	// it is a human decision point, and the executor's move is to stop.
+	// it is a human decision point, and the executor's move is to stop. THE
+	// EXCEPTION (sty_0c98760e): when the story's workflow authorizes the gate
+	// being run to leave this state via an unconditional reviewer_skill edge
+	// (the recovery shape, {from: blocked, to: in_progress, reviewer_skill:
+	// satellites-loop-recovery-review}), that named reviewer gate IS the
+	// sanctioned path out — so let it dispatch. Any other gate on an operator
+	// state still stops. Without this, a fail-loop-blocked story has no CLI exit
+	// and the recovery gate (its reason to exist) can never run.
 	if edges.Actor == "operator" {
-		return fmt.Errorf("status_transition: story %s is in state %q whose actor is %q — it is the operator's turn; not your state → stop",
-			story.ID, story.Status, edges.Actor)
+		if _, ok := verb.RecoveryEdgeFrom(body, story.Status, gateSkill); !ok {
+			return fmt.Errorf("status_transition: story %s is in state %q whose actor is %q — it is the operator's turn; not your state → stop",
+				story.ID, story.Status, edges.Actor)
+		}
 	}
 
 	// 1b. Open the per-repo working-state store (sty_676e070c) — the inbox +

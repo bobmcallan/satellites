@@ -67,6 +67,32 @@ func ResolveV2Edges(storyBody, status string) (V2Edges, error) {
 	return out, nil
 }
 
+// RecoveryEdgeFrom reports whether the story's workflow defines an
+// unconditional reviewer-gated transition out of `status` whose reviewer_skill
+// is `skill` — the recovery-edge shape ({from: blocked, to: in_progress,
+// reviewer_skill: ...}: no on:pass|fail, no trigger). Such an edge authorizes
+// that one named reviewer gate to leave an otherwise operator-owned state
+// (blocked is the operator's), so the dispatcher must NOT stop on the operator
+// actor when the gate being run is exactly that gate — it is the sanctioned
+// recovery path, not a hijack of the operator's turn (sty_0c98760e). Returns
+// the edge's target status. A non-matching gate still stops at the operator.
+func RecoveryEdgeFrom(storyBody, status, skill string) (string, bool) {
+	skill = strings.TrimSpace(skill)
+	if skill == "" {
+		return "", false
+	}
+	wf, err := workflow.ParseBody([]byte(storyBody))
+	if err != nil {
+		return "", false
+	}
+	for _, t := range wf.TransitionsFrom(strings.TrimSpace(status)) {
+		if t.On == "" && t.Trigger == "" && strings.TrimSpace(t.ReviewerSkill) == skill {
+			return t.To, true
+		}
+	}
+	return "", false
+}
+
 // CheckpointEdge resolves the single ungated `trigger: checkpoint` edge out
 // of the current status — the edge the executor's checkpoint enacts
 // deterministically (no gate, no judgment). ok is false when the state has
