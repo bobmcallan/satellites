@@ -165,6 +165,8 @@ func Build(cfg Config) http.Handler {
 	mux.HandleFunc("GET /stories/{id}/trace.fragment", storyTraceFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
+	// Global skill-library browse page (epic:workspace-agents, sty_b2f77307).
+	mux.HandleFunc("GET /library", libraryHandler(cfg))
 	// Engagement processing view (sty_84c55d0d): latest engagement signal per
 	// (session, story) for a project — the portal indicator's data source.
 	mux.HandleFunc("GET /api/engagements", engagementsHandler(cfg))

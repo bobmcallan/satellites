@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item" data-nav="projects">PROJECTS</a>
+    <a href="/workspaces" class="nav-item {{if eq .ActiveNav "workspaces"}}active{{end}}" data-nav="workspaces">WORKSPACES</a>
+    <a href="/library" class="nav-item {{if eq .ActiveNav "library"}}active{{end}}" data-nav="library">LIBRARY</a>
+    <a href="/ledger" class="nav-item {{if eq .ActiveNav "ledger"}}active{{end}}" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    {{if .DevMode}}<span class="dev-flag" data-field="dev-flag" title="dev mode active">●</span>{{end}}
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="library">
+  <section class="panel" data-section="library">
+    <div class="panel-header">
+      <h2>skill library</h2>
+    </div>
+    <p class="muted">Global skills published to the <code>library</code> scope and adoptable across workspaces. Browse by kind.</p>
+
+    <div class="library-filter" data-field="library-filter">
+      <a href="/library" class="btn {{if .ActiveKind}}secondary{{else}}primary{{end}}" data-kind-filter="all">ALL</a>
+      {{range .Kinds}}
+      <a href="/library?kind={{.Kind}}" class="btn {{if .Active}}primary{{else}}secondary{{end}}" data-kind-filter="{{.Kind}}">{{.Kind}}</a>
+      {{end}}
+    </div>
+
+    {{if .Skills}}
+    <table class="panel-table" data-field="library-table">
+      <thead>
+        <tr>
+          <th>NAME</th>
+          <th>KIND</th>
+          <th>DESCRIPTION</th>
+          <th>PUBLISHER</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Skills}}
+        <tr data-field="skill-row" data-skill-name="{{.Name}}" data-skill-kind="{{.Kind}}">
+          <td class="skill-name"><code>{{.Name}}</code></td>
+          <td class="skill-kind">{{.Kind}}</td>
+          <td class="skill-desc muted">{{.Description}}</td>
+          <td class="skill-publisher"><code>{{.Publisher}}</code></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="library-empty">No library skills{{if .ActiveKind}} of kind <code>{{.ActiveKind}}</code>{{end}}. Publish one with <code>satellites skill publish</code>.</p>
+    {{end}}
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
