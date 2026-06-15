@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -43,25 +44,137 @@ const (
 // newSkillPublishCmd builds the `skill publish <name>` command.
 func newSkillPublishCmd(configArg, userArg *string) *cobra.Command {
 	var (
-		dryRun     bool
-		skipReview bool
+		dryRun       bool
+		skipReview   bool
+		all          bool
+		changedSince string
 	)
 	cmd := &cobra.Command{
-		Use:   "publish <name>",
-		Short: "Promote a .satellites/skills/ skill into the shared library under this project's publisher namespace",
-		Args:  cobra.ExactArgs(1),
+		Use:   "publish [name]",
+		Short: "Promote .satellites/skills/ skill(s) into the shared library under this project's publisher namespace",
+		Long: `publish promotes a skill (or a batch) into the shared library.
+
+  publish <name>                 one named skill
+  publish --all                  every skill under .satellites/skills/
+  publish --changed-since <ref>  only skills whose files differ from <ref>
+
+A batch reuses the single-publish path per skill (review + library stamp +
+provenance), prints a per-skill outcome line, and exits non-zero if any skill
+fails — the others still publish. A batch with nothing to publish is a clean
+no-op (exit 0). --dryrun and --skip-review apply across the batch.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			return publishSkill(ctx, out, args[0], *configArg, *userArg, dryRun, skipReview)
+			// Exactly one selector: a name, --all, or --changed-since.
+			selectors := 0
+			if len(args) == 1 {
+				selectors++
+			}
+			if all {
+				selectors++
+			}
+			if strings.TrimSpace(changedSince) != "" {
+				selectors++
+			}
+			switch {
+			case selectors == 0:
+				return fmt.Errorf("publish: provide a skill <name>, --all, or --changed-since <ref>")
+			case selectors > 1:
+				return fmt.Errorf("publish: <name>, --all, and --changed-since are mutually exclusive")
+			case len(args) == 1:
+				return publishSkill(ctx, out, args[0], *configArg, *userArg, dryRun, skipReview)
+			}
+			var (
+				names []string
+				err   error
+			)
+			if all {
+				names, err = allSkillNames()
+			} else {
+				names, err = changedSkillNames(changedSince)
+			}
+			if err != nil {
+				return err
+			}
+			return publishBatch(ctx, out, names, *configArg, *userArg, dryRun, skipReview)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dryrun", false, "Print the identity, version, and provenance that would be published — dispatch nothing")
 	cmd.Flags().BoolVar(&skipReview, "skip-review", false, "Skip the strict content review (drift-prone reference check) — use only after running the per-type review skill")
+	cmd.Flags().BoolVar(&all, "all", false, "Publish every skill under .satellites/skills/")
+	cmd.Flags().StringVar(&changedSince, "changed-since", "", "Publish only skills whose files differ from the given git ref")
 	return cmd
+}
+
+// publishBatch publishes each named skill through the single-publish path,
+// reporting per-skill outcomes. A skill's failure is recorded and printed but
+// does not stop the batch; any failure makes the batch exit non-zero. An empty
+// set is a clean no-op (exit 0).
+func publishBatch(ctx context.Context, out io.Writer, names []string, configArg, userArg string, dryRun, skipReview bool) error {
+	if len(names) == 0 {
+		fmt.Fprintln(out, "no skills to publish")
+		return nil
+	}
+	var failures int
+	for _, name := range names {
+		if err := publishSkill(ctx, out, name, configArg, userArg, dryRun, skipReview); err != nil {
+			fmt.Fprintf(out, "✗ %s: %v\n", name, err)
+			failures++
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("publish: %d of %d skill(s) failed", failures, len(names))
+	}
+	fmt.Fprintf(out, "published %d skill(s)\n", len(names))
+	return nil
+}
+
+// allSkillNames returns every skill base name under .satellites/skills/, sorted.
+func allSkillNames() ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(substrateRoot, "skills", "*.md"))
+	if err != nil {
+		return nil, fmt.Errorf("publish: scan skills: %w", err)
+	}
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, strings.TrimSuffix(filepath.Base(m), ".md"))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// changedSkillNames returns the base names of skill files that differ from ref,
+// keeping only files that still exist (a deletion cannot be published). A git
+// failure (e.g. an unknown ref) is an error, distinct from an empty diff.
+func changedSkillNames(ref string) ([]string, error) {
+	skillsDir := filepath.Join(substrateRoot, "skills")
+	outBytes, err := exec.Command("git", "diff", "--name-only", ref, "--", skillsDir).Output()
+	if err != nil {
+		return nil, fmt.Errorf("publish: git diff against %q: %w", ref, err)
+	}
+	seen := map[string]bool{}
+	names := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(string(outBytes)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasSuffix(line, ".md") {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(line), ".md")
+		if seen[name] {
+			continue
+		}
+		if _, e := os.Stat(filepath.Join(skillsDir, name+".md")); e != nil {
+			continue // deleted/renamed-away — nothing to publish
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // publishSkill resolves, reviews, stamps, and dispatches one library publish.
