@@ -109,7 +109,17 @@ func searchSkills(ctx context.Context, dispatch verbDispatch, configArg, userArg
 			return nil, fmt.Errorf("search: decode %s list: %w", sk.scope, err)
 		}
 		for _, it := range listed.Items {
-			desc, err := skillDescription(ctx, dispatch, it)
+			// Build the body-fetch key from the queried scope binding, not the
+			// list item's own (possibly under-populated) workspace_id/project_id
+			// — a project/workspace row whose item omits workspace_id would
+			// otherwise fail document_get's scope-coherence check. Library is the
+			// exception: it spans every publisher, so the publisher namespace
+			// comes from the item's project_id.
+			getWS, getPJ := sk.ws, sk.pj
+			if sk.scope == "library" {
+				getPJ = it.ProjectID
+			}
+			desc, err := skillDescription(ctx, dispatch, sk.scope, getWS, getPJ, it.Name)
 			if err != nil {
 				return nil, err
 			}
@@ -140,26 +150,28 @@ func searchSkills(ctx context.Context, dispatch verbDispatch, configArg, userArg
 }
 
 // skillDescription fetches one candidate's body and returns its frontmatter
-// description (the search-matchable text the row itself does not carry).
-func skillDescription(ctx context.Context, dispatch verbDispatch, it searchListItem) (string, error) {
+// description (the search-matchable text the row itself does not carry). The
+// caller passes a scope-coherent key (scope + the workspace_id/project_id that
+// scope requires) so the document_get never trips the coherence check.
+func skillDescription(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID, name string) (string, error) {
 	getReq, err := json.Marshal(struct {
 		Name        string `json:"name"`
 		Scope       string `json:"scope"`
 		WorkspaceID string `json:"workspace_id,omitempty"`
 		ProjectID   string `json:"project_id,omitempty"`
-	}{Name: it.Name, Scope: it.Scope, WorkspaceID: it.WorkspaceID, ProjectID: it.ProjectID})
+	}{Name: name, Scope: scope, WorkspaceID: wsID, ProjectID: pjID})
 	if err != nil {
 		return "", err
 	}
 	raw, err := dispatch(ctx, "document_get", getReq)
 	if err != nil {
-		return "", fmt.Errorf("search: get %s/%s: %w", it.Scope, it.Name, err)
+		return "", fmt.Errorf("search: get %s/%s: %w", scope, name, err)
 	}
 	var got struct {
 		RawBody string `json:"raw_body"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
-		return "", fmt.Errorf("search: decode get %s: %w", it.Name, err)
+		return "", fmt.Errorf("search: decode get %s: %w", name, err)
 	}
 	fm, _, ferr := frontmatter.Parse([]byte(got.RawBody))
 	if ferr != nil {
