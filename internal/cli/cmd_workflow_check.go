@@ -340,6 +340,35 @@ func checkFirstGateComprehensive(skills []matSkill, wfs map[string]*workflow.Wor
 	return out
 }
 
+// checkAmbiguousGovernance (multi-workflow resolution, sty_0889de7a): the
+// governing workflow for a story resolves by applies_to ↔ category, so a
+// category must map to exactly ONE non-wildcard workflow. Two workflows both
+// claiming the same specific category make resolution ambiguous — fail closed
+// (the "*" wildcard is the shared default and never conflicts).
+func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding {
+	byCat := map[string][]string{}
+	for name, wf := range wfs {
+		for _, at := range wf.AppliesTo {
+			at = strings.TrimSpace(at)
+			if at == "" || at == "*" {
+				continue
+			}
+			cat := strings.ToLower(at)
+			byCat[cat] = append(byCat[cat], name)
+		}
+	}
+	var out []driftFinding
+	for cat, names := range byCat {
+		if len(names) > 1 {
+			sort.Strings(names)
+			out = append(out, driftFinding{"block", "ambiguous-governance", strings.Join(names, ","),
+				fmt.Sprintf("category %q is covered by %d workflows (%s) — applies_to↔category resolution is ambiguous; a category maps to exactly one governing workflow", cat, len(names), strings.Join(names, ", "))})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Artifact < out[j].Artifact })
+	return out
+}
+
 // runWorkflowChecks composes every drift check over the supplied corpus —
 // the pure core the unit fixtures replay.
 func runWorkflowChecks(skills []matSkill, stories []storyLite) []driftFinding {
@@ -347,6 +376,7 @@ func runWorkflowChecks(skills []matSkill, stories []storyLite) []driftFinding {
 	out = append(out, checkSyncedSkillUsable(skills)...)
 	wfs, wfFindings := parseWorkflows(skills)
 	out = append(out, wfFindings...)
+	out = append(out, checkAmbiguousGovernance(wfs)...)
 	out = append(out, checkGateCoverage(skills, wfs)...)
 	out = append(out, checkGatePlacementConflict(skills, wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
@@ -417,6 +447,7 @@ func newWorkflowCheckCmd(configArg, userArg *string) *cobra.Command {
   nonatomic-candidate   (advisory) a non-gate skill carrying fail-closed verdict markers
   host-coupled-system   a system-scope skill referencing repo-dev specifics
   ungoverned-story      a non-terminal story with no embedded workflow and no applies_to cover
+  ambiguous-governance  two non-wildcard workflows cover the same story category
   unresolvable-gate     a story's embedded workflow names a non-materialised reviewer
   first-gate-shallow    a workflow's entry gate skips comprehensive-review layers
 

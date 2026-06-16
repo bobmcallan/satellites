@@ -26,6 +26,27 @@ func healthyCorpus() []matSkill {
 	}
 }
 
+// TestWorkflowCheck_AmbiguousGovernance: two non-wildcard workflows claiming
+// the same story category make applies_to↔category resolution ambiguous and
+// must fail closed (sty_0889de7a).
+func TestWorkflowCheck_AmbiguousGovernance(t *testing.T) {
+	wfRaw := func(name string) matSkill {
+		body := "# " + name + "\n\n```yaml\nstates:\n  - backlog\n  - doing\n  - done\ntransitions:\n  - {from: backlog, to: doing, reviewer_skill: \"entry-review\"}\n  - {from: doing, to: done, reviewer_skill: \"exit-review\"}\n```\n"
+		raw := "---\nname: " + name + "\nkind: workflow\napplies_to: [\"dup\"]\ndescription: d\n---\n" + body
+		return matSkill{name: name, kind: "workflow", description: "d", body: body, raw: raw}
+	}
+	skills := append(healthyCorpus(), wfRaw("wf-one"), wfRaw("wf-two"))
+	hit := false
+	for _, f := range runWorkflowChecks(skills, nil) {
+		if f.Code == "ambiguous-governance" && f.Severity == "block" && f.Artifact == "wf-one,wf-two" {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Fatalf("two workflows covering category 'dup' must raise ambiguous-governance")
+	}
+}
+
 // TestWorkflowCheck_CleanCorpus: a healthy corpus and governed stories yield
 // zero blocking findings.
 func TestWorkflowCheck_CleanCorpus(t *testing.T) {

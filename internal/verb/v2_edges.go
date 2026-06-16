@@ -47,9 +47,17 @@ func ResolveV2Edges(storyBody, status string) (V2Edges, error) {
 	if err != nil {
 		return V2Edges{}, nil // no/invalid workflow → legacy path, plan-review owns the shape
 	}
+	return edgesFromWorkflow(wf, status), nil
+}
+
+// edgesFromWorkflow projects the current status's v2 edge set out of a parsed
+// workflow — the shared core of ResolveV2Edges (embedded body) and
+// GoverningReconcile (resolved authoritative workflow). A status the workflow
+// does not declare yields the zero (legacy) edge set.
+func edgesFromWorkflow(wf *workflow.Workflow, status string) V2Edges {
 	st, ok := wf.StateOf(strings.TrimSpace(status))
 	if !ok {
-		return V2Edges{}, nil
+		return V2Edges{}
 	}
 	out := V2Edges{Actor: st.Actor, Command: st.Command}
 	for _, t := range wf.TransitionsFrom(st.Name) {
@@ -64,7 +72,7 @@ func ResolveV2Edges(storyBody, status string) (V2Edges, error) {
 			out.OnExhausted = t.OnExhausted
 		}
 	}
-	return out, nil
+	return out
 }
 
 // RecoveryEdgeFrom reports whether the story's workflow defines an

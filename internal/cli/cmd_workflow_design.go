@@ -245,6 +245,20 @@ type matSkill struct {
 	raw         string // full on-disk file content (stamp + frontmatter + body)
 }
 
+// materialisedWorkflowSources projects the materialised kind:workflow skills
+// into the verb resolver's input — the registry's governing-workflow candidates
+// for a story's category (sty_0889de7a). The .claude/skills set is already
+// scope-cascade-resolved by sync, so resolving over it honours the cascade.
+func materialisedWorkflowSources() []verb.WorkflowSource {
+	var out []verb.WorkflowSource
+	for _, s := range materialisedSkills() {
+		if s.kind == "workflow" {
+			out = append(out, verb.WorkflowSource{Name: s.name, Body: s.raw})
+		}
+	}
+	return out
+}
+
 // materialisedSkills reads the .claude/skills set (name, kind, description, body).
 func materialisedSkills() []matSkill {
 	var out []matSkill

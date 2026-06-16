@@ -448,6 +448,59 @@ func (w *Workflow) EditableStates() []string {
 // it to distinguish "unknown status" (don't classify) from "non-editable".
 func (w *Workflow) HasState(s string) bool { return w.hasState(s) }
 
+// Equivalent reports whether two workflows define the same state machine —
+// the same set of states (name + actor + command) and the same set of
+// transitions (every field). Order-independent; Name and AppliesTo are
+// ignored (they are identity/selection, not the machine). Used to reconcile a
+// story's embedded `## Workflow` against the resolved governing workflow: a
+// false result is drift — the embedded copy has been changed away from the
+// authoritative definition (e.g. a weakened gate), which must be surfaced, not
+// honoured (sty_0889de7a).
+func (w *Workflow) Equivalent(other *Workflow) bool {
+	if w == nil || other == nil {
+		return w == other
+	}
+	stateKey := func(s State) string { return s.Name + "\x00" + s.Actor + "\x00" + s.Command }
+	transKey := func(t Transition) string {
+		return strings.Join([]string{t.From, t.To, t.ReviewerSkill, t.On, t.Trigger, t.OnExhausted,
+			fmt.Sprintf("%d", t.MaxIterations), fmt.Sprintf("%t", t.Dynamic)}, "\x00")
+	}
+	sameSet := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		m := make(map[string]int, len(a))
+		for _, k := range a {
+			m[k]++
+		}
+		for _, k := range b {
+			m[k]--
+			if m[k] < 0 {
+				return false
+			}
+		}
+		return true
+	}
+	wa, oa := make([]string, len(w.States)), make([]string, len(other.States))
+	for i, s := range w.States {
+		wa[i] = stateKey(s)
+	}
+	for i, s := range other.States {
+		oa[i] = stateKey(s)
+	}
+	if !sameSet(wa, oa) {
+		return false
+	}
+	wt, ot := make([]string, len(w.Transitions)), make([]string, len(other.Transitions))
+	for i, t := range w.Transitions {
+		wt[i] = transKey(t)
+	}
+	for i, t := range other.Transitions {
+		ot[i] = transKey(t)
+	}
+	return sameSet(wt, ot)
+}
+
 // ParseBody parses just the fenced ```yaml workflow block from a story BODY (no
 // skill frontmatter required) into states + transitions — for callers that have
 // a story whose `## Workflow` section pins the workflow but not a full skill file.

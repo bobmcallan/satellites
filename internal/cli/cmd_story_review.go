@@ -157,7 +157,18 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// fail loops and exhaustion. The resolution itself lives in internal/verb
 	// (this file's layering guard: no internal/workflow import). A story with
 	// no v2 edges from its current status follows the legacy path untouched.
-	edges, _ := verb.ResolveV2Edges(body, story.Status)
+	//
+	// The gate trusts the RESOLVED governing workflow (sty_0889de7a): the edges
+	// come from the workflow whose `applies_to` covers this story's category in
+	// the materialised (scope-cascaded) set, NOT the story's embedded `##
+	// Workflow` copy — so an embedded copy cannot weaken the gate. A divergent
+	// embedded copy is surfaced as drift, not honoured.
+	wfSources := materialisedWorkflowSources()
+	edges, governing, drift := verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+	if drift != "" {
+		fmt.Fprintf(opts.Stderr, "workflow drift: %s\n", drift)
+	}
+	_ = governing
 
 	// Actor handoff stop: an operator state takes no review dispatch at all —
 	// it is a human decision point, and the executor's move is to stop. THE
@@ -200,13 +211,13 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// and enacts pass/fail; a reviewer or operator state stops the traverse —
 	// their move is a separate request / a human's turn).
 	if !edges.IsV2 && edges.Actor != "operator" {
-		if to, ok := verb.CheckpointEdge(body, story.Status); ok {
+		if to, ok := verb.GoverningCheckpoint(body, story.Status, story.Category, wfSources); ok {
 			reviewAppendLedger(ctx, opts, story, "status_transition",
 				fmt.Sprintf("%s → %s (checkpoint)", story.Status, to),
 				map[string]any{"from_status": story.Status, "to_status": to, "trigger": "checkpoint"})
 			fmt.Fprintf(opts.Stdout, "checkpoint: %s → %s\n", story.Status, to)
 			story.Status = to
-			edges, _ = verb.ResolveV2Edges(body, story.Status)
+			edges, _, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
 			if edges.Actor != "satellites" {
 				// Landed where someone else acts (reviewer gate = its own
 				// request; operator = a human's turn; terminal = done).
