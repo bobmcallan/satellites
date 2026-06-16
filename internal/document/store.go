@@ -105,7 +105,13 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	// SetDocumentTags, which has its own equality check.
 	if doc.LatestVersion > 0 {
 		existing, lookupErr := latestVersionInTx(ctx, tx, doc.ID)
-		if lookupErr == nil && existing.Status == StatusActive && existing.Body == in.Body {
+		// Short-circuit only when there is genuinely nothing to do: the ROW is
+		// active AND its latest version is active with the same body. A
+		// soft-deleted row (doc.Status != active) must fall through to the
+		// revive below even when its latest version/body already match — else a
+		// re-push of an identical body would leave the tombstone in place
+		// (sty_f0b2dcc8).
+		if lookupErr == nil && doc.Status == string(StatusActive) && existing.Status == StatusActive && existing.Body == in.Body {
 			if err := tx.Commit(); err != nil {
 				return Document{}, Version{}, fmt.Errorf("document: commit: %w", err)
 			}
@@ -119,6 +125,22 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	doc, v, err := appendVersion(ctx, tx, doc, in.Body, in.CreatedBy, now, StatusActive)
 	if err != nil {
 		return Document{}, Version{}, err
+	}
+
+	// Revive a soft-deleted row. Delete sets the row-level documents.status to
+	// 'deleted' (List/Count/sync filter on it, sty_4148d3fa), while appendVersion
+	// only writes the version + latest_version. Without resetting the row status
+	// here, a re-upsert / `skill publish` of a tombstoned document writes active
+	// versions that stay invisible to List and sync — and there is no other
+	// un-delete path. Mirror of the row-status UPDATE that Delete already does
+	// (sty_f0b2dcc8).
+	if doc.Status != string(StatusActive) {
+		if _, err := tx.ExecContext(ctx, `
+        UPDATE documents SET status = $1 WHERE id = $2
+    `, string(StatusActive), doc.ID); err != nil {
+			return Document{}, Version{}, fmt.Errorf("document: revive row status: %w", err)
+		}
+		doc.Status = string(StatusActive)
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -395,6 +395,91 @@ func TestDocumentList_ExcludesTombstones(t *testing.T) {
 	}
 }
 
+// TestDocumentList_RevivesTombstoneOnReupsert covers sty_f0b2dcc8: a
+// re-upsert (e.g. `skill publish`) of a soft-deleted document must clear the
+// row-level tombstone, so the revived row reappears in List/Count and sync.
+// Delete flips documents.status down; Upsert must flip it back up — including
+// when the re-pushed body is byte-identical (the short-circuit must not swallow
+// the revive).
+func TestDocumentList_RevivesTombstoneOnReupsert(t *testing.T) {
+	env := testbootstrap.SetUp(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+
+	docStore := document.New(env.DB)
+	wsStore := workspace.New(env.DB)
+	pjStore := project.New(env.DB)
+	ws, err := wsStore.Create(ctx, "", "revive-ws", now)
+	if err != nil {
+		t.Fatalf("ws: %v", err)
+	}
+	pj, err := pjStore.Create(ctx, project.CreateInput{WorkspaceID: ws.ID, Name: "revive-pj"}, now)
+	if err != nil {
+		t.Fatalf("pj: %v", err)
+	}
+
+	key := document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: "revive-skill"}
+	body := "---\nname: revive-skill\n---\nbody\n"
+	upsert := func(b string, at time.Time) document.Document {
+		d, _, err := docStore.Upsert(ctx, document.UpsertInput{Key: key, Type: "skill", Body: b, CreatedBy: "test"}, at)
+		if err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+		return d
+	}
+	filter := document.ListFilter{Type: "skill", Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID}
+	inList := func() bool {
+		res, err := docStore.List(ctx, filter, document.ListOptions{})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, d := range res.Items {
+			if d.Name == "revive-skill" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Seed → delete: gone from the default list, row tombstoned.
+	upsert(body, now)
+	if _, _, err := docStore.Delete(ctx, key, "test", false, now.Add(time.Minute)); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if inList() {
+		t.Fatalf("precondition: deleted skill still in list")
+	}
+
+	// Re-upsert with the SAME body (the body-equality short-circuit path): the
+	// revive must still happen — row active, present in List, latest version active.
+	revived := upsert(body, now.Add(2*time.Minute))
+	if revived.Status != string(document.StatusActive) {
+		t.Errorf("after revive (same body), document.Status = %q, want %q", revived.Status, document.StatusActive)
+	}
+	if !inList() {
+		t.Errorf("revived skill (same body) absent from default list")
+	}
+	res, err := docStore.Get(ctx, key, document.GetOptions{})
+	if err != nil {
+		t.Fatalf("get after revive: %v", err)
+	}
+	if res.Versions[0].Status != document.StatusActive {
+		t.Errorf("revived latest version status = %q, want %q", res.Versions[0].Status, document.StatusActive)
+	}
+	if n, err := docStore.Count(ctx, filter); err != nil || n != 1 {
+		t.Errorf("Count after revive = %d (err %v), want 1", n, err)
+	}
+
+	// And a delete → re-upsert with a CHANGED body also revives (non-short-circuit path).
+	if _, _, err := docStore.Delete(ctx, key, "test", false, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("delete 2: %v", err)
+	}
+	upsert(body+"# changed\n", now.Add(4*time.Minute))
+	if !inList() {
+		t.Errorf("revived skill (changed body) absent from default list")
+	}
+}
+
 // TestDocumentList_ScopeAll covers sty_2eccc1ea AC#2: scope:"all"
 // cross-lists system + workspace + project rows in one call, with cursor
 // pagination preserved. The three seed rows share a "zz-" name prefix so a
