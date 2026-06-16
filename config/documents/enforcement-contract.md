@@ -1,5 +1,8 @@
 ---
-tags: [principles:project, process, enforcement]
+name: enforcement-contract
+type: document
+scope: system
+tags: [principles:global, process, enforcement]
 ---
 # Enforcement contract: satellites enforces, the user defines
 

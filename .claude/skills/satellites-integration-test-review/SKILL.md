@@ -6,7 +6,8 @@ when: status==integration-review
 tags: [kind:gate]
 description: Gate skill for the integration-review state (after techdebt-review pass, before done-review). Judges whether UI/DOGFOOD acceptance criteria are evidenced by the repo's own integration tier — named tests in tests/integration/, run green by the techdebt traverse, conforming to the tier's architecture; trivial accept when the story has no browser/UI surface. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_b71e7e4a","version":1,"hash":"e184e97338daf3b7e301e90ad02eb8ea3f6f6e63441b3c82d5e9b2dffdd888c4"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_36e4abc2","version":1,"hash":"2d7fb621de79de853dc936035923bcc4aec1be58131076dd8bf7f0ad1691fb8f","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 Judge whether the story's UI/DOGFOOD acceptance criteria are evidenced by the
 repo's OWN integration tier — named tests in `tests/integration/`, run green by

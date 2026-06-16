@@ -1,6 +1,8 @@
 ---
 name: principle-configuration-over-code
-tags: [principles:project]
+type: document
+scope: system
+tags: [principles:global]
 ---
 # Configuration over code
 

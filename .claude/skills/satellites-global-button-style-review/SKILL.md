@@ -6,7 +6,8 @@ when: pre-commit
 tags: [kind:gate, area:portal]
 description: Run before a commit that touches the portal UI (internal/server/templates, internal/server/static/styles.css). The global-button-style gate fails closed when an action button does not use the canonical `.btn` component — a bare button, an inline `style=` on a button, or per-form one-off button CSS — so the shared button convention cannot drift. Pairs with the `.btn` definition documented in styles.css.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_8e1a1f1a","version":1,"hash":"2c226324b10a2e7c1f80448462b0de9cecc41b3d38ca84f18809d161b20f913d"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_4ccc92bf","version":1,"hash":"6dc5a740d672acb234004b1af76ed11c0325d0d533c99e1f5caf5d8822b524fe","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # satellites-global-button-style-review
 

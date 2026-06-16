@@ -1,6 +1,8 @@
 ---
 name: commit-push-after-each-story
-tags: [principles:project]
+type: document
+scope: system
+tags: [principles:global]
 ---
 # Run the commit-push checkpoint after each story
 

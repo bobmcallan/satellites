@@ -1,6 +1,8 @@
 ---
 name: reviewer-process
-tags: [principles:project]
+type: document
+scope: system
+tags: [principles:global]
 ---
 
 # Reviewer judges and enacts its own verdict

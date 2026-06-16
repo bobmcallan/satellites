@@ -6,7 +6,8 @@ when: checkpoint
 tags: [kind:capability]
 description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":3,"hash":"c23e019253743387081284b8b5ec555a956d466a15bc859db95c628ef40efd9b"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_bfea47b2","version":1,"hash":"a6f3a2e0808b9ca0308a04df1ab43121a8ad722b6186c29f057c3d14b73cee02","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # satellites-commit-push
 

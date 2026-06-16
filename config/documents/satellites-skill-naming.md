@@ -1,7 +1,8 @@
 ---
 name: satellites-skill-naming
 type: document
-tags: [principles:project]
+scope: system
+tags: [principles:global]
 ---
 
 # Satellites naming encodes ownership

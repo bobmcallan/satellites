@@ -1,6 +1,8 @@
 ---
 name: story-execution-process
-tags: ["principles:project", "principles:always"]
+type: document
+scope: system
+tags: ["principles:global", "principles:always"]
 ---
 # Story execution process
 

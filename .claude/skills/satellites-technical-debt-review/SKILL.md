@@ -6,7 +6,8 @@ when: pre-commit
 tags: [kind:gate, content-review:allow-refs]
 description: The technical-debt gate (broken-windows enforcement). Runs as the techdebt-review state's command on the workflow's checkpoint traverse, against the local tree BEFORE anything ships — build + unit + the integration tier reconciled against the quarantine register, fail closed on any unregistered red. At commit the tree must be clean OR its debt must be a story.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_87d669a2","version":3,"hash":"944d6ef1b3af639e4a19c0ddb6146f6db7d9b654135c4a8f973c43df91519447"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_13de88e7","version":1,"hash":"aedd77f36b8e0151388b25de5d872b31597f5599caf44b7d07edc466469a7cbc","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # satellites-technical-debt-review
 

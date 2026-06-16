@@ -1,7 +1,8 @@
 ---
 name: no-default-workflow
 type: document
-tags: [principles:project, area:workflow, area:reviewer]
+scope: system
+tags: [principles:global, area:workflow, area:reviewer]
 ---
 
 # No default workflow — design the lifecycle from the requirement

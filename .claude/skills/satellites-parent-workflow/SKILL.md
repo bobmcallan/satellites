@@ -6,7 +6,8 @@ tags: [kind:workflow]
 applies_to: [parent]
 description: The lifecycle a `parent` (epic/anchor) story follows — backlog → done, gated by satellites-parent-close-review which assesses that every child has reached a terminal status. Invoke for an anchor story that groups children and carries no executable work of its own.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_1dbaa297","version":1,"hash":"c6fee7d0ff404ca8392132f49378a6492b64d188661b909eca0ea69757f14317"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_bdd868dc","version":1,"hash":"db95eb57ddb128a028f70e4b9f219c50048135bdf15fff5e40b73f2a5f79e225","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # Parent (epic / anchor) workflow
 

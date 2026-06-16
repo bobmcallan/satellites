@@ -1,7 +1,8 @@
 ---
 name: fail-closed-gate
 type: document
-tags: [principles:project]
+scope: system
+tags: [principles:global]
 ---
 
 # A gate fails closed

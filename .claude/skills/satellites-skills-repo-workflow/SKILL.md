@@ -5,8 +5,8 @@ tags: [kind:workflow]
 applies_to: ["skill"]
 description: The lifecycle a skills-repo story follows — author → review → publish. A kind:workflow composed by reference of the existing authoring/review capabilities, selected by applies_to for skills-repo (category "skill") stories. Distinct from the product satellites-workflow; invoke when driving a story that authors and publishes a skill or principle.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_81248e06","version":1,"hash":"dc00398ff0be78b5d03d17c46323cbe735d5fa9f696922b114281a64bc6e72d6","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"9bab7865f152116a142d8f8b256b8e73224ca2c7"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_81248e06","version":2,"hash":"044d1cd6179703ce8d08326525274e35d12be3f30890feccaaacdcd77e215581","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 # Skills-repo workflow
 
 The governing workflow for a **skills repo** — a `type:skills` publisher whose

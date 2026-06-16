@@ -1,7 +1,8 @@
 ---
 name: process-as-configuration
 type: document
-tags: [principles:project]
+scope: system
+tags: [principles:global]
 ---
 
 # The process is configuration, not code

@@ -6,7 +6,8 @@ tags: [kind:workflow]
 applies_to: ["*"]
 description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_e99ba77f","version":3,"hash":"827e2693e6b153b05784ed3dbc53e9611a4c3dd9a57217f746969f3385a96e13"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_a48357d5","version":1,"hash":"874250fd487e80c31606bc12121b8a18594be7e4e71e743dfe7ef7a0eddd0db6","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # Satellites workflow
 

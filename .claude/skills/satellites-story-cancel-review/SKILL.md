@@ -6,7 +6,8 @@ when: cancel-requested
 tags: [kind:gate]
 description: Gate skill for cancelling a story — accepts a move to terminal `cancelled` only when the story is non-terminal and its body carries a concrete cancellation rationale. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_88c87ec2","version":1,"hash":"a30836fc8a5027943c115663dccd490ddfd06554f38d3da9c4f5464a0972fda3"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_00347726","version":1,"hash":"1d000fa1ea5c9f191cce80516b42a4baf5542a13eb29e0b27265c6fe6d69daa4","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 Decide whether a story's cancellation is justified, and if so enact it by moving the story to the terminal status `cancelled`. Cancellation is orthogonal to the forward workflow — do NOT resolve a target from `## Workflow`; the target is fixed: `to_status` is always `cancelled`, `from_status` is the story's current `story_status`.
 

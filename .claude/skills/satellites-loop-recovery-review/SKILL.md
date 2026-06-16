@@ -6,7 +6,8 @@ when: recovery-requested
 tags: [kind:gate]
 description: Gate skill for recovering a fail-loop-exhausted story — accepts a move blocked → in_progress only when the story is blocked AND its body carries a concrete recovery rationale showing the block was a recoverable FLAKE (named, and fixed), not a genuine ×3 product failure. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_6700a1d7","version":1,"hash":"943f97e26322464b2fb1923135e5993cfa55c19c8aaffd5468153db3fd7485af"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_fff68d21","version":1,"hash":"b096b1679c2792ab6c2678950804411745364b36df7593f114e1758dc76a1513","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 Decide whether a `blocked` story should be returned to `in_progress` to fix and re-run. A story reaches `blocked` only by exhausting a review fail loop (×N rejects). That escalation is the operator's to lift — this gate is the sanctioned, reviewer-judged path back, so a flake-blocked story is not a dead end. Recovery is orthogonal to the forward workflow — the target is fixed: `from_status` is `blocked`, `to_status` is `in_progress`. The reject count auto-resets (the `exhausted` marker already zeroes it), so the recovered story re-enters its review loop with a fresh quota.
 
