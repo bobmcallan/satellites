@@ -114,7 +114,8 @@ func init() {
   - the documented global_publishers consumption block in the toml,
   - the PreToolUse START-door + advisory hooks in .claude/settings.json,
   - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
-    code symbol index is refreshed deterministically each session.
+    code symbol index is refreshed deterministically each session,
+  - a .gitignore managed block keeping .satellites/ local state out of git.
 
 init configures CONSUMPTION, not authoring: it writes NO local governance
 (workflow/gates/principles) into .satellites/. The system baseline (the
@@ -206,6 +207,15 @@ func runInit(out io.Writer, repoRoot string) error {
 			return err
 		}
 		fmt.Fprintln(out, initLine(added, h.label))
+	}
+
+	// 4. .gitignore — keep the client's per-repo local state (config/state, not
+	//    substrate) out of git. Created if absent; otherwise a managed block is
+	//    appended once. Never clobbers a user's own .gitignore (sty_b47c758c).
+	if added, gerr := ensureGitignore(repoRoot); gerr != nil {
+		return gerr
+	} else {
+		fmt.Fprintln(out, initLine(added, ".gitignore (.satellites local-state block)"))
 	}
 	return nil
 }
@@ -311,6 +321,64 @@ func ensureUngatedDirsBlock(tomlPath string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// gitignoreMarker opens the managed block ensureGitignore maintains. Its
+// presence (anywhere in the file) means the block is already installed, so a
+// re-run is a no-op — the same idempotency contract as the toml knobs.
+const gitignoreMarker = "# >>> satellites (managed) >>>"
+
+// gitignoreBlock is the managed .gitignore section. It uses the allowlist shape:
+// ignore EVERYTHING under .satellites/ (the client's config/state home —
+// state.db*/index.db* + WAL sidecars, logs/, the work/ engagement store,
+// worktree/), then re-include the substrate AUTHORING dirs + the non-secret toml
+// so those ARE committed. This is more future-proof than a denylist of known
+// state files (a new state file is ignored by default), and it keeps the
+// repo-owned baseline workflow under .satellites/workflows/ committable.
+const gitignoreBlock = gitignoreMarker + `
+# .satellites/ is the satellites client's config/state home — ignore it all
+# (state.db*/index.db* + WAL sidecars, logs/, work/ engagement store, worktree/),
+# then re-include the substrate authoring dirs + the non-secret toml so THOSE are
+# committed. Local state is config/state, not substrate.
+.satellites/*
+!.satellites/documents/
+!.satellites/principles/
+!.satellites/skills/
+!.satellites/workflows/
+!.satellites/seeds/
+!.satellites/satellites.toml
+# <<< satellites (managed) <<<
+`
+
+// ensureGitignore writes the managed local-state block to the repo's .gitignore,
+// idempotently and non-destructively: it creates the file with the block when
+// absent, appends the block when the file exists without the marker, and is a
+// no-op when the marker is already present. A user's own entries are preserved.
+// Returns whether it wrote anything.
+func ensureGitignore(repoRoot string) (bool, error) {
+	path := filepath.Join(repoRoot, ".gitignore")
+	raw, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if strings.Contains(string(raw), gitignoreMarker) {
+			return false, nil // managed block already present
+		}
+		body := string(raw)
+		if !strings.HasSuffix(body, "\n") {
+			body += "\n"
+		}
+		if werr := os.WriteFile(path, []byte(body+"\n"+gitignoreBlock), 0o644); werr != nil {
+			return false, fmt.Errorf("init: append %s: %w", path, werr)
+		}
+		return true, nil
+	case os.IsNotExist(err):
+		if werr := os.WriteFile(path, []byte(gitignoreBlock), 0o644); werr != nil {
+			return false, fmt.Errorf("init: write %s: %w", path, werr)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("init: read %s: %w", path, err)
+	}
 }
 
 // initLine renders a one-line report: "+ created" or "= present".

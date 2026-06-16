@@ -185,6 +185,67 @@ func TestRunInit_LeavesExistingTomlAndSettings(t *testing.T) {
 	}
 }
 
+// TestEnsureGitignore covers the managed-block contract (sty_b47c758c): a fresh
+// repo gets a .gitignore with every local-state pattern; an existing .gitignore
+// gains the block once with the user's own lines preserved; a re-run is a no-op.
+func TestEnsureGitignore(t *testing.T) {
+	// Allowlist shape: ignore all of .satellites/* (covers state.db*/index.db*/
+	// logs/work/worktree — the local-state set the AC names), then re-include the
+	// committable authoring dirs + toml.
+	wantPatterns := []string{
+		".satellites/*",
+		"!.satellites/documents/",
+		"!.satellites/workflows/",
+		"!.satellites/satellites.toml",
+	}
+
+	// Absent → created with all patterns.
+	repo := t.TempDir()
+	added, err := ensureGitignore(repo)
+	if err != nil || !added {
+		t.Fatalf("fresh ensureGitignore: added=%v err=%v, want added=true", added, err)
+	}
+	gi := filepath.Join(repo, ".gitignore")
+	body, _ := os.ReadFile(gi)
+	for _, p := range wantPatterns {
+		if !strings.Contains(string(body), p) {
+			t.Errorf("fresh .gitignore missing pattern %q\n%s", p, body)
+		}
+	}
+
+	// Re-run → idempotent no-op.
+	added2, err := ensureGitignore(repo)
+	if err != nil {
+		t.Fatalf("re-run err: %v", err)
+	}
+	if added2 {
+		t.Errorf("re-run wrote the block again — must be idempotent")
+	}
+	body2, _ := os.ReadFile(gi)
+	if n := strings.Count(string(body2), gitignoreMarker); n != 1 {
+		t.Errorf("marker appears %d times after re-run, want 1", n)
+	}
+
+	// Existing user .gitignore → block appended once, user lines preserved.
+	repo2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo2, ".gitignore"), []byte("node_modules/\n*.log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := ensureGitignore(repo2); err != nil || !added {
+		t.Fatalf("append into existing: added=%v err=%v", added, err)
+	}
+	merged, _ := os.ReadFile(filepath.Join(repo2, ".gitignore"))
+	if !strings.Contains(string(merged), "node_modules/") || !strings.Contains(string(merged), "*.log") {
+		t.Errorf("user .gitignore lines were lost:\n%s", merged)
+	}
+	if !strings.Contains(string(merged), ".satellites/*") || !strings.Contains(string(merged), gitignoreMarker) {
+		t.Errorf("managed block not appended to existing .gitignore:\n%s", merged)
+	}
+	if added, _ := ensureGitignore(repo2); added {
+		t.Errorf("second append into existing — must be idempotent")
+	}
+}
+
 // commandUnderEvent reports whether a settings doc carries `command` under the
 // named hook event (with the expected matcher, "" = any/none).
 func commandUnderEvent(t *testing.T, raw []byte, event, matcher, command string) bool {
