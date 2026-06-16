@@ -59,12 +59,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// substrateRoot is the repo-local substrate source tree, relative to CWD.
-// Hard-coded for the same reason `satellites seed push` hard-codes its
-// root — the convention IS the contract. The walker only ever descends
-// into the per-kind subdirectories below it, so the operational siblings
-// (work/, logs/, worktree/, seeds/, satellites.toml) are never touched.
-const substrateRoot = ".satellites"
+// substrateRoot is the repo-local substrate source tree, relative to CWD —
+// the REPO ROOT (sty_a75dd8c5). Authoring sources live in TOP-LEVEL folders
+// (documents/, principles/, skills/), first-class repo content. `.satellites/`
+// is the client's config/state home only (satellites.toml, logs, state.db,
+// work, worktree, index.db) — it no longer holds authoring sources. The walker
+// only ever descends into the per-kind subdirectories named in kindDirs, so the
+// repo's other top-level dirs (internal/, cmd/, config/, …) are never touched.
+const substrateRoot = "."
+
+// legacySubstrateRoot is the retired authoring location. A command that finds a
+// stale `.satellites/<kind>/` with sources nudges the operator to move it to the
+// top-level folder — the client no longer reads it (no silent dual-read).
+const legacySubstrateRoot = ".satellites"
+
+// nudgeStaleSubstrateDir warns (one line, non-fatal) when the retired
+// `.satellites/<kind>/` still holds .md sources — the client no longer reads
+// it (sty_a75dd8c5). Surfacing it stops a silent "nothing uploaded" when the
+// operator has not yet moved the sources to the top-level folder.
+func nudgeStaleSubstrateDir(out io.Writer, kind string) {
+	legacy := filepath.Join(legacySubstrateRoot, kind)
+	entries, err := os.ReadDir(legacy)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+			fmt.Fprintf(out, "note: %s/ is no longer read — authoring sources moved to the top-level %s/ folder. Move them: `git mv %s/* %s/`\n", legacy, kind, legacy, kind)
+			return
+		}
+	}
+}
 
 // kindDirs are the per-scope source subdirectories. Each maps to the
 // default upsert type applied when a file omits `type:` in frontmatter.
@@ -153,7 +178,7 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "upload",
-		Short: fmt.Sprintf("Walk .satellites/%s and upsert each file via document_upsert", cfg.Kind),
+		Short: fmt.Sprintf("Walk the top-level %s/ folder and upsert each file via document_upsert", cfg.Kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			ctx := cmd.Context()
@@ -220,7 +245,8 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		return err
 	}
 	if len(targets) == 0 {
-		fmt.Fprintf(out, "no %s found under %s/%s/ — nothing to upload\n", kind, substrateRoot, kind)
+		fmt.Fprintf(out, "no %s found under %s/ — nothing to upload\n", kind, kind)
+		nudgeStaleSubstrateDir(out, kind)
 		return nil
 	}
 	reviewSkill := reviewSkillForKind(kind)
@@ -461,20 +487,28 @@ func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) 
 		return nil, fmt.Errorf("validate: scan %s: %w", skillsRoot, serr)
 	}
 	for _, l := range stamped {
-		// Only a project-scoped stamped skill is expected to have a
-		// .satellites/skills/ source. A system- or workspace-scoped skill is
-		// materialised here by `skill sync` (which reconciles every scope the
-		// repo can see) and legitimately has no project source — flagging it is
-		// a false positive. Scope empty/unset is treated as project, so a real
-		// project orphan still fails closed.
+		// Only a project-scoped stamped skill is expected to have a top-level
+		// skills/ source. A system- or workspace-scoped skill is materialised
+		// here by `skill sync` (which reconciles every scope the repo can see)
+		// and legitimately has no project source — flagging it is a false
+		// positive. Scope empty/unset is treated as project, so a real project
+		// orphan still fails closed.
 		if sc := strings.TrimSpace(l.Scope); sc != "" && sc != "project" {
+			continue
+		}
+		// A LIBRARY-PINNED skill (carries a publisher in its stamp) is CONSUMED
+		// via library_pins — it has no local source by design (epic:skills-
+		// registry consumer model). Exempt it like a system/workspace skill;
+		// otherwise a consumer repo whose governance is registry-pinned cannot
+		// upload any document (sty_a75dd8c5 dogfood exposed this).
+		if strings.TrimSpace(l.Stamp.Publisher) != "" {
 			continue
 		}
 		if !configSkillNames[l.Name] {
 			vs = append(vs, violation{
 				filepath.Join(skillsRoot, l.Name),
 				"orphan-skill",
-				"project-owned (stamped) skill in .claude/skills/ with no .satellites/skills/ source",
+				"project-owned (stamped) skill in .claude/skills/ with no top-level skills/ source",
 			})
 		}
 	}

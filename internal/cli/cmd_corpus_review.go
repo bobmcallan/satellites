@@ -204,7 +204,7 @@ type corpusReviewEngine struct {
 // recorded on the result and the sweep continues (fail-soft).
 func (e corpusReviewEngine) run(ctx context.Context, out io.Writer, targets []documentTarget) error {
 	if len(targets) == 0 {
-		fmt.Fprintf(out, "no %s found under %s/%s/ — nothing to review\n", e.kind, substrateRoot, e.kind)
+		fmt.Fprintf(out, "no %s found under %s/ — nothing to review\n", e.kind, e.kind)
 		return nil
 	}
 	results := make([]reviewResult, 0, len(targets))

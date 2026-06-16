@@ -36,11 +36,10 @@ go.work.sum
 /bin/
 /dist/
 
-# Satellites
+# Satellites — .satellites/ is the client's config/state home (ignored).
+# Authoring sources (documents/, principles/, skills/) are TOP-LEVEL repo
+# folders (sty_a75dd8c5), tracked by default — not under .satellites/.
 .satellites/*
-!.satellites/documents/
-!.satellites/skills/
-!.satellites/principles/
 !.satellites/seeds/
 
 /scripts/satellites-server.toml

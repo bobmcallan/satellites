@@ -258,7 +258,7 @@ func buildSemanticBundle(storyBody string) string {
 		Body string `json:"body"`
 	}
 	var principles []principle
-	dir := filepath.Join(".satellites", "principles")
+	dir := filepath.Join(substrateRoot, "principles")
 	if entries, derr := os.ReadDir(dir); derr == nil {
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {

@@ -106,7 +106,10 @@ func TestSkillPublishHeadless(t *testing.T) {
 	mustGit("config", "user.email", "ci@example.com")
 	mustGit("config", "user.name", "ci")
 	mustGit("remote", "add", "origin", "https://github.com/example/skills.git")
-	if err := os.MkdirAll(filepath.Join(repo, ".satellites", "skills"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".satellites"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	toml := fmt.Sprintf("server_url = %q\nproject_id = %q\n", env.ServerURL, pj.ID)
@@ -114,7 +117,7 @@ func TestSkillPublishHeadless(t *testing.T) {
 	if err := os.WriteFile(tomlPath, []byte(toml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".satellites", "skills", "lib-smoke.md"), []byte(publishTestSkill), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "skills", "lib-smoke.md"), []byte(publishTestSkill), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mustGit("add", "-A")
@@ -178,7 +181,7 @@ func TestSkillPublishHeadless(t *testing.T) {
 	t.Run("re-publish advances the version with a single stamp", func(t *testing.T) {
 		// Same-content re-publish is an idempotent no-op (upload semantics);
 		// a content change is what lands a new version.
-		if err := os.WriteFile(filepath.Join(repo, ".satellites", "skills", "lib-smoke.md"),
+		if err := os.WriteFile(filepath.Join(repo, "skills", "lib-smoke.md"),
 			[]byte(publishTestSkill+"\nRevised.\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +203,7 @@ func TestSkillPublishHeadless(t *testing.T) {
 
 	t.Run("content review blocks a drift-prone skill before dispatch", func(t *testing.T) {
 		drifty := "---\nname: lib-drifty\ndescription: Carries a drift-prone reference.\n---\n\nTracked in sty_deadbeef; see scripts/run-checks.sh for the loop.\n"
-		if err := os.WriteFile(filepath.Join(repo, ".satellites", "skills", "lib-drifty.md"), []byte(drifty), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, "skills", "lib-drifty.md"), []byte(drifty), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		out, err := runCLI("skill", "publish", "lib-drifty", "--config", tomlPath)

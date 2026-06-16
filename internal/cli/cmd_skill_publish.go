@@ -185,7 +185,8 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	}
 	path := filepath.Join(substrateRoot, "skills", name+".md")
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("publish: no skill at %s — author it under %s/skills/ first", path, substrateRoot)
+		nudgeStaleSubstrateDir(out, "skills")
+		return fmt.Errorf("publish: no skill at %s — author it under the top-level skills/ folder first", path)
 	}
 	t := classifyDocumentFile(path, "skills", publisher)
 	if strings.TrimSpace(t.Body) == "" {

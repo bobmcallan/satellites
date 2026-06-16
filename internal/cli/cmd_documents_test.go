@@ -14,6 +14,49 @@ import (
 // validateUpload in place of the retired path-encoded identity.
 const testProjectID = "proj_test"
 
+// TestSubstrateRoot_IsRepoRoot pins the order-1 contract (sty_a75dd8c5): the
+// authoring source root is the repo root, so planUpload resolves the TOP-LEVEL
+// kind folders (skills/, principles/, documents/), not .satellites/<kind>/.
+func TestSubstrateRoot_IsRepoRoot(t *testing.T) {
+	if substrateRoot != "." {
+		t.Fatalf("substrateRoot = %q, want \".\" (authoring sources are top-level repo folders)", substrateRoot)
+	}
+	// A skill authored at the top-level skills/ folder is found.
+	root := t.TempDir()
+	writeSource(t, root, "skills/g.md", "---\nname: g\nkind: gate\n---\n# G\n")
+	targets, err := planUpload(filepath.Join(root, substrateRoot), "skills", testProjectID)
+	if err != nil {
+		t.Fatalf("planUpload: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target under top-level skills/, got %d", len(targets))
+	}
+}
+
+// TestNudgeStaleSubstrateDir pins AC3: a stale `.satellites/<kind>/` with .md
+// sources surfaces a one-line move nudge; an absent/empty legacy dir is silent.
+func TestNudgeStaleSubstrateDir(t *testing.T) {
+	prev, _ := os.Getwd()
+	repo := t.TempDir()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+
+	var quiet strings.Builder
+	nudgeStaleSubstrateDir(&quiet, "skills")
+	if quiet.Len() != 0 {
+		t.Fatalf("no legacy dir should be silent, got: %s", quiet.String())
+	}
+
+	writeSource(t, repo, ".satellites/skills/old.md", "---\nname: old\nkind: gate\n---\n# Old\n")
+	var loud strings.Builder
+	nudgeStaleSubstrateDir(&loud, "skills")
+	if !strings.Contains(loud.String(), "no longer read") || !strings.Contains(loud.String(), "skills/") {
+		t.Fatalf("stale .satellites/skills/ should nudge, got: %s", loud.String())
+	}
+}
+
 // writeSource creates rootDir/<relPath> with content, making parents.
 func writeSource(t *testing.T, rootDir, relPath, content string) {
 	t.Helper()

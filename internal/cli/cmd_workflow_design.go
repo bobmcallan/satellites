@@ -291,7 +291,7 @@ func materialisedSkills() []matSkill {
 // failClosedGatePrinciple reads the fail-closed-gate principle body — from the
 // repo-local source if present (it may not be uploaded yet), best-effort.
 func failClosedGatePrinciple() string {
-	raw, err := os.ReadFile(filepath.Join(".satellites", "principles", "fail-closed-gate.md"))
+	raw, err := os.ReadFile(filepath.Join(substrateRoot, "principles", "fail-closed-gate.md"))
 	if err != nil {
 		return ""
 	}
