@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,6 +28,31 @@ import (
 	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
 )
+
+// markLocalAuthorship flags each skill authored in THIS repo's skill authoring
+// dir (<skills_root>/skills/<name>.md) as repo-owned (matSkill.local). A skill
+// only present under .claude/skills (materialised by sync from a publisher or
+// the system baseline) is INHERITED — a palette. The orphan-gate rule flags
+// only repo-owned, unwired gates; inherited gates a workflow names none of are
+// an opt-in palette, not drift (sty_f8f88f92). Mutates and returns skills.
+func markLocalAuthorship(skills []matSkill, configArg string) []matSkill {
+	dir := filepath.Join(resolveSubstrateRoot("skills", configArg), "skills")
+	local := map[string]bool{}
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			local[strings.TrimSuffix(e.Name(), ".md")] = true
+		}
+	}
+	for i := range skills {
+		if local[skills[i].name] {
+			skills[i].local = true
+		}
+	}
+	return skills
+}
 
 // driftFinding is one reported drift. Severity is "block" or "advise".
 type driftFinding struct {
@@ -143,9 +170,14 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []d
 		if s.kind != "gate" {
 			continue
 		}
-		if !named[s.name] {
+		// An INHERITED gate (materialised by sync from a publisher/system) that
+		// no workflow names is an opt-in PALETTE entry, not drift — under the
+		// gateless baseline a clean consumer inherits gates it names none of.
+		// Only a REPO-OWNED gate (authored here, s.local) that nothing wires is a
+		// genuine shadow gate (sty_f8f88f92).
+		if !named[s.name] && s.local {
 			out = append(out, driftFinding{"block", "orphan-gate", s.name,
-				"kind:gate skill no workflow definition names (transition or Checkpoint gates) — a shadow gate runs outside the defined process"})
+				"repo-owned kind:gate skill no workflow definition names (transition or Checkpoint gates) — a shadow gate runs outside the defined process; wire it into a workflow or remove it"})
 		}
 	}
 	for g := range named {
@@ -471,7 +503,7 @@ pinned by integration tests — they are out of a client check's reach.`,
 			if err != nil {
 				return err
 			}
-			findings := runWorkflowChecks(materialisedSkills(), clientWorkflows(*configArg), stories)
+			findings := runWorkflowChecks(markLocalAuthorship(materialisedSkills(), *configArg), clientWorkflows(*configArg), stories)
 			blocking := 0
 			for _, f := range findings {
 				if f.Severity == "block" {

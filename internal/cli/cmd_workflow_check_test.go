@@ -135,10 +135,21 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 	})
 
 	t.Run("class1_shadow_gate", func(t *testing.T) {
-		skills := append(healthyCorpus(), matSkill{name: "lonely-gate", kind: "gate", description: "d",
+		// A REPO-OWNED gate (local:true) that no workflow names is a shadow gate.
+		skills := append(healthyCorpus(), matSkill{name: "lonely-gate", kind: "gate", description: "d", local: true,
 			body: "one rule\n", raw: "---\nname: lonely-gate\nkind: gate\ndescription: d\n---\none rule\n"})
 		if !find(runWorkflowChecks(skills, nil, nil), "orphan-gate", "lonely-gate") {
-			t.Error("a gate no workflow names must report orphan-gate (the techdebt case)")
+			t.Error("a repo-owned gate no workflow names must report orphan-gate (the techdebt case)")
+		}
+	})
+
+	t.Run("class1_inherited_gate_is_palette", func(t *testing.T) {
+		// An INHERITED gate (local:false — materialised by sync from a publisher)
+		// that no workflow names is an opt-in palette, NOT drift (sty_f8f88f92).
+		skills := append(healthyCorpus(), matSkill{name: "inherited-gate", kind: "gate", description: "d", local: false,
+			body: "one rule\n", raw: "---\nname: inherited-gate\nkind: gate\ndescription: d\n---\none rule\n"})
+		if find(runWorkflowChecks(skills, nil, nil), "orphan-gate", "inherited-gate") {
+			t.Error("an inherited (palette) gate no workflow names must NOT report orphan-gate")
 		}
 	})
 

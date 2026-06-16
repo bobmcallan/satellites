@@ -246,6 +246,11 @@ type matSkill struct {
 	description string
 	body        string
 	raw         string // full on-disk file content (stamp + frontmatter + body)
+	// local marks a skill AUTHORED in this repo's skill authoring dir
+	// (repo-owned), as opposed to one INHERITED by sync from a publisher/system
+	// (a palette). Populated by markLocalAuthorship on the workflow-check path
+	// only; the orphan-gate rule uses it (sty_f8f88f92).
+	local bool
 }
 
 // materialisedWorkflowSources projects the materialised kind:workflow skills
