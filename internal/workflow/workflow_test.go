@@ -25,8 +25,11 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// cancellation edges + 1 blocked→in_progress recovery edge
 		// (sty_0c98760e). Ungated edges are the deterministic client-enacted
 		// ones (trigger/on) — every other edge is gated.
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-workflow", "SKILL.md"), "satellites-workflow", 13},
-		{filepath.Join("..", "..", ".claude", "skills", "satellites-parent-workflow", "SKILL.md"), "satellites-parent-workflow", 1},
+		// The product workflows are now repo-owned client-dir config under
+		// .satellites/workflows/ (epic:client-dir-separation order-2), no longer
+		// materialised kind:workflow skills — Parse reads the same shape.
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 13},
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)

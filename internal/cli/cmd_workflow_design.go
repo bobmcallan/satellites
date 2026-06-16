@@ -82,6 +82,7 @@ is refused, and the command errors when none validates).`,
 	workflowCmd.AddCommand(design)
 	workflowCmd.AddCommand(newWorkflowCheckCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowShowCmd(configArg, userArg))
+	workflowCmd.AddCommand(newWorkflowEmbedCmd(configArg, userArg))
 	return workflowCmd
 }
 
@@ -108,7 +109,7 @@ func runWorkflowDesign(ctx context.Context, storyID string, apply int, asJSON bo
 		_, e := os.Stat(filepath.Join(".claude", "skills", name, "SKILL.md"))
 		return e == nil
 	}
-	designContext := buildDesignContext(replaceSection(body, "## Workflow", ""))
+	designContext := buildDesignContext(replaceSection(body, "## Workflow", ""), configPath)
 
 	skillBody, err := skillBodyOf(workflowDesignSkill)
 	if err != nil {
@@ -191,10 +192,10 @@ func runWorkflowDesign(ctx context.Context, storyID string, apply int, asJSON bo
 }
 
 // buildDesignContext marshals the isolated inputs the design agent receives.
-func buildDesignContext(requirement string) string {
+func buildDesignContext(requirement, configPath string) string {
 	payload := map[string]any{
 		"requirement":                requirement,
-		"available_workflow_skills":  availableWorkflowSkills(),
+		"available_workflow_skills":  availableWorkflowSkills(configPath),
 		"available_gate_skills":      availableGateSkills(),
 		"fail_closed_gate_principle": failClosedGatePrinciple(),
 	}
@@ -202,11 +203,13 @@ func buildDesignContext(requirement string) string {
 	return string(b)
 }
 
-// availableWorkflowSkills returns each materialised kind:workflow skill's name +
-// its workflow yaml, so the design agent can reuse a canonical shape when it fits.
-func availableWorkflowSkills() []map[string]string {
+// availableWorkflowSkills returns each available workflow's name + its workflow
+// yaml — client-dir workflows (.satellites/workflows) and materialised
+// kind:workflow skills — so the design agent can reuse a canonical shape when it
+// fits.
+func availableWorkflowSkills(configPath string) []map[string]string {
 	var out []map[string]string
-	for _, s := range materialisedSkills() {
+	for _, s := range append(clientWorkflows(configPath), materialisedSkills()...) {
 		if s.kind != "workflow" {
 			continue
 		}

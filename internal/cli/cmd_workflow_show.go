@@ -93,17 +93,20 @@ func resolveShowTarget(ctx context.Context, configPath, userArg, target string) 
 		}
 		return wf, nil, nil
 	}
-	for _, s := range materialisedSkills() {
+	// Client-dir workflows first (they win an applies_to tie at resolution, so
+	// `show` should render the same definition the dispatcher would enact), then
+	// the materialised kind:workflow skills.
+	for _, s := range append(clientWorkflows(configPath), materialisedSkills()...) {
 		if s.name != target {
 			continue
 		}
 		wf, perr := workflow.Parse([]byte(s.raw))
 		if perr != nil {
-			return nil, nil, fmt.Errorf("workflow show: skill %q carries no parseable workflow: %w", target, perr)
+			return nil, nil, fmt.Errorf("workflow show: %q carries no parseable workflow: %w", target, perr)
 		}
 		return wf, checkpointGates(s.body), nil
 	}
-	return nil, nil, fmt.Errorf("workflow show: %q is neither a sty_ id nor a materialised skill under .claude/skills", target)
+	return nil, nil, fmt.Errorf("workflow show: %q is neither a sty_ id nor a workflow under .satellites/workflows or .claude/skills", target)
 }
 
 func printWorkflowTable(out io.Writer, wf *workflow.Workflow, gates []string) {

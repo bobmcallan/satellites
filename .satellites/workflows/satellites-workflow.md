@@ -1,13 +1,10 @@
 ---
 name: satellites-workflow
-type: skill
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
 description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_a48357d5","version":1,"hash":"874250fd487e80c31606bc12121b8a18594be7e4e71e743dfe7ef7a0eddd0db6","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"45628d3a97a4328fdd77aa83cb11ec77ee432dd0"} satellites-library:end -->
 
 # Satellites workflow
 
@@ -18,9 +15,13 @@ that group children and carry no executable work — follow
 status itself answers "whose turn is it, and was the gate run?".
 
 1. `document_get` the story; read its acceptance criteria.
-2. Before starting, `document_upsert` two sections into the story body:
-   - **`## Workflow`** — the fenced ```yaml block below, copied verbatim. Later gates parse the story's copy.
-   - **The plan** — Purpose / Approach / numbered Acceptance criteria.
+2. Before starting, prepare the story body:
+   - **`## Workflow`** — run `satellites workflow embed <story-id>`. It resolves
+     this workflow by the story's category (the `applies_to` match over
+     `.satellites/workflows/` then the materialised skills), stamps the fenced
+     ```yaml block into the story, and prints the workflow + the next gate. Do
+     NOT hand-copy the yaml. Later gates parse the embedded copy.
+   - **The plan** — `document_upsert` Purpose / Approach / numbered Acceptance criteria.
 3. Request the entry gates: `satellites story status_transition <story-id> --skill <gate>`
    for plan-review (backlog → ready) and start-review (ready → in_progress).
 4. Do the work. At every natural checkpoint request the traverse FIRST:

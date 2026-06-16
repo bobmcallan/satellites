@@ -1,0 +1,47 @@
+server_url = "https://satellites-pprod.fly.dev"
+project_id = "proj_fc7d72d8"
+repo_path = "."
+worktree_root = "./.satellites/worktree"
+log_path = "./.satellites/logs"
+branch_template = "client-{task_id}-from-{base_sha}"
+
+# library_pins — shared-library skills this repo consumes as-is, each
+# "<publisher>/<name>". Materialised by `skill sync` at lowest precedence
+# (a same-named project/local skill wins). epic:skills-registry consumes the
+# skills-repo workflow from the public skills-publisher (order-3).
+#
+# NOTE (epic:client-dir-separation order-2): the product WORKFLOWS
+# (satellites-workflow, satellites-parent-workflow) are no longer pinned here —
+# they are repo-owned client-dir config under .satellites/workflows/, resolved
+# by the governing-workflow resolver ahead of any materialised skill.
+# satellites-skills-repo-workflow stays pinned (it governs the *skills* repo);
+# full pin-retirement is order-4's visibility model.
+library_pins = [
+  "proj_682cfeed/satellites-skills-repo-workflow",
+  "proj_682cfeed/satellites-story-plan-review",
+  "proj_682cfeed/satellites-story-start-review",
+  "proj_682cfeed/satellites-story-done-review",
+  "proj_682cfeed/satellites-story-cancel-review",
+  "proj_682cfeed/satellites-technical-debt-review",
+  "proj_682cfeed/satellites-integration-test-review",
+  "proj_682cfeed/satellites-loop-recovery-review",
+  "proj_682cfeed/satellites-parent-close-review",
+  "proj_682cfeed/satellites-commit-push",
+  "proj_682cfeed/satellites-doc-drift-review",
+  "proj_682cfeed/satellites-global-button-style-review",
+  "proj_682cfeed/satellites-workflow-drift-review",
+  "proj_682cfeed/satellites-agent-architecture-review",
+  "proj_682cfeed/satellites-context-conflict-review",
+  "proj_682cfeed/satellites-audit-agent-prose",
+  "proj_682cfeed/satellites-code-search",
+]
+
+# reviewer_model — model for reviewer claude -p runs (gate dispatcher + step
+# summariser). Unset = inherit the harness default (sty_c7a5d741).
+reviewer_model = "claude-opus-4-8"
+
+# ungated_dirs — paths the START-door (satellites hook gate) will NOT gate.
+# By default the door only gates edits INSIDE this repo; anything outside the
+# repo root (e.g. ~/.claude — Claude's own config + memory) is already ungated.
+# List extra dirs here to also ungate them (globs; a leading ~ expands to $HOME):
+# ungated_dirs = ["~/.claude", "docs/scratch"]

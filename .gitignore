@@ -40,11 +40,18 @@ go.work.sum
 # DEFAULT authoring locations .satellites/{documents,principles,skills}/ are the
 # tracked exceptions; a repo that RELOCATES a kind via [substrate_roots] (e.g. a
 # skills repo with skills = ".") tracks it at the configured path instead.
+# Workflows are repo-owned config (epic:client-dir-separation order-2), tracked
+# at .satellites/workflows/ — the governing-workflow resolver's client-dir home.
 .satellites/*
 !.satellites/documents/
 !.satellites/principles/
 !.satellites/skills/
+!.satellites/workflows/
 !.satellites/seeds/
+# This repo's own client config is committed (non-secret: the api-key lives in
+# the user credential store, never the toml) so its consumption — notably the
+# library_pins (workflows unpinned per order-2) — is shared, not per-clone.
+!.satellites/satellites.toml
 
 /scripts/satellites-server.toml
 /satellites.toml

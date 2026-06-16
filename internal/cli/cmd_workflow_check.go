@@ -370,19 +370,26 @@ func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding 
 }
 
 // runWorkflowChecks composes every drift check over the supplied corpus —
-// the pure core the unit fixtures replay.
-func runWorkflowChecks(skills []matSkill, stories []storyLite) []driftFinding {
+// the pure core the unit fixtures replay. `skills` is the materialised
+// .claude/skills set; `clientWorkflows` is the client-dir workflow config set
+// (.satellites/workflows, kind:workflow). Skill-only checks (synced-usable,
+// non-atomic, system-coupling) run over `skills`; every workflow-bearing check
+// runs over the merged set so a client-dir workflow is governed, its named
+// gates are covered, and its checkpoint-gate references resolve — exactly as a
+// kind:workflow skill was (epic:client-dir-separation order-2).
+func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []storyLite) []driftFinding {
+	wfBearing := append(append([]matSkill{}, skills...), clientWorkflows...)
 	var out []driftFinding
 	out = append(out, checkSyncedSkillUsable(skills)...)
-	wfs, wfFindings := parseWorkflows(skills)
+	wfs, wfFindings := parseWorkflows(wfBearing)
 	out = append(out, wfFindings...)
 	out = append(out, checkAmbiguousGovernance(wfs)...)
-	out = append(out, checkGateCoverage(skills, wfs)...)
-	out = append(out, checkGatePlacementConflict(skills, wfs)...)
+	out = append(out, checkGateCoverage(wfBearing, wfs)...)
+	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
-	out = append(out, checkStoryGovernance(stories, skills, wfs)...)
-	out = append(out, checkFirstGateComprehensive(skills, wfs)...)
+	out = append(out, checkStoryGovernance(stories, wfBearing, wfs)...)
+	out = append(out, checkFirstGateComprehensive(wfBearing, wfs)...)
 	return out
 }
 
@@ -464,7 +471,7 @@ pinned by integration tests — they are out of a client check's reach.`,
 			if err != nil {
 				return err
 			}
-			findings := runWorkflowChecks(materialisedSkills(), stories)
+			findings := runWorkflowChecks(materialisedSkills(), clientWorkflows(*configArg), stories)
 			blocking := 0
 			for _, f := range findings {
 				if f.Severity == "block" {

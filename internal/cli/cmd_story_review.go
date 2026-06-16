@@ -163,7 +163,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// the materialised (scope-cascaded) set, NOT the story's embedded `##
 	// Workflow` copy — so an embedded copy cannot weaken the gate. A divergent
 	// embedded copy is surfaced as drift, not honoured.
-	wfSources := materialisedWorkflowSources()
+	wfSources := governingWorkflowSources(opts.ConfigPath)
 	edges, governing, drift := verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
 	if drift != "" {
 		fmt.Fprintf(opts.Stderr, "workflow drift: %s\n", drift)

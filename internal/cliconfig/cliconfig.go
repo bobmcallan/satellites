@@ -80,6 +80,15 @@ type Config struct {
 	// resolve through ResolveWorkDir so they always agree.
 	WorkDir string `toml:"work_dir"`
 
+	// WorkflowsDir overrides where client-dir WORKFLOW config files live — the
+	// `.satellites/workflows/*.md` set the governing-workflow resolver reads
+	// (epic:client-dir-separation order-2). A workflow is repo-owned CONFIG, not
+	// a published/synced skill: each file reuses the workflow-skill shape
+	// (frontmatter name + applies_to, a fenced ```yaml state machine). NOT
+	// required in the toml — empty means the default <repo>/.satellites/workflows.
+	// A relative value resolves against the repo root; absolute is used verbatim.
+	WorkflowsDir string `toml:"workflows_dir"`
+
 	// DataDir is the single home for the client's per-repo data stores —
 	// state.db (engagement cache) and index.db (code symbol index). NOT required
 	// in the toml — empty means the default <repo>/.satellites. A relative value
@@ -218,6 +227,33 @@ func (c Config) ResolveDataDir(repoRoot string) string {
 	p := strings.TrimSpace(c.DataDir)
 	if p == "" {
 		p = DefaultDataDir
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	if strings.TrimSpace(repoRoot) == "" {
+		repoRoot = "."
+	}
+	return filepath.Join(repoRoot, p)
+}
+
+// DefaultWorkflowsDir is where client-dir workflow config files live when
+// workflows_dir is unset — the repo's .satellites/workflows directory, beside
+// the committed substrate. A workflow is repo-owned config (not a synced skill);
+// the governing-workflow resolver reads this set (epic:client-dir-separation
+// order-2).
+const DefaultWorkflowsDir = ".satellites/workflows"
+
+// ResolveWorkflowsDir is the ONE authoritative computation of the directory
+// holding the client-dir workflow config files. An explicit workflows_dir wins
+// (repo-relative or absolute); otherwise it defaults to <repo>/.satellites/workflows.
+// Mirrors ResolveDataDir/ResolveWorkDir: a relative value resolves against the
+// repo root — the directory that HOLDS .satellites/ — never the process CWD. The
+// zero-value Config resolves to the default (zero-config).
+func (c Config) ResolveWorkflowsDir(repoRoot string) string {
+	p := strings.TrimSpace(c.WorkflowsDir)
+	if p == "" {
+		p = DefaultWorkflowsDir
 	}
 	if filepath.IsAbs(p) {
 		return p
