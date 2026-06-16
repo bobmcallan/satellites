@@ -101,24 +101,28 @@ func TestWorkCloseGuard(t *testing.T) {
 	})
 }
 
-// TestStopCheckAdvisory pins AC2: the Stop hook flags a non-terminal engagement
-// with commits, stays silent for a terminal one, and never errors.
-func TestStopCheckAdvisory(t *testing.T) {
+// TestStopCheckGoalKeeper: the Stop hook BLOCKS a non-terminal engagement in a
+// governed repo (re-injecting the goal), stays silent + releases for a terminal
+// one, and never errors (epic:satellites-backbone 1.2).
+func TestStopCheckGoalKeeper(t *testing.T) {
 	repo := gitRepoWithSatellites(t)
 	now := time.Now().UTC()
 	past := now.Add(-time.Hour)
 	lease := now.Add(time.Hour)
 	gitExec(t, repo, "commit", "--allow-empty", "-m", "work")
 
-	t.Run("flags non-terminal with commits", func(t *testing.T) {
+	t.Run("blocks non-terminal in a governed repo", func(t *testing.T) {
+		if _, err := ensureBaselineWorkflow(repo); err != nil { // make the goal reachable
+			t.Fatal(err)
+		}
 		seedEngagementAt(t, repo, "sessA", "sty_open", "in_progress", true, past, lease)
 		in := bytes.NewBufferString(`{"session_id":"sessA","cwd":"` + repo + `"}`)
 		var out bytes.Buffer
-		if err := runHookStopCheck(in, &out); err != nil {
-			t.Fatalf("stopcheck: %v", err)
+		if block := runHookStopCheck(in, &out); !block {
+			t.Fatalf("a non-terminal engaged story in a governed repo must block the stop")
 		}
 		if !bytes.Contains(out.Bytes(), []byte("sty_open")) || !bytes.Contains(out.Bytes(), []byte("not done")) {
-			t.Errorf("expected advisory naming the ungated story, got %q", out.String())
+			t.Errorf("expected the re-injected goal naming the story, got %q", out.String())
 		}
 	})
 
@@ -126,19 +130,19 @@ func TestStopCheckAdvisory(t *testing.T) {
 		seedEngagementAt(t, repo, "sessB", "sty_fin", "done", false, past, lease)
 		in := bytes.NewBufferString(`{"session_id":"sessB","cwd":"` + repo + `"}`)
 		var out bytes.Buffer
-		if err := runHookStopCheck(in, &out); err != nil {
-			t.Fatalf("stopcheck: %v", err)
+		if block := runHookStopCheck(in, &out); block {
+			t.Fatalf("terminal story must not block")
 		}
 		if out.Len() != 0 {
-			t.Errorf("terminal story should produce no advisory, got %q", out.String())
+			t.Errorf("terminal story should produce no output, got %q", out.String())
 		}
 	})
 
 	t.Run("silent when unconfigured", func(t *testing.T) {
 		in := bytes.NewBufferString(`{"session_id":"sessC","cwd":"` + t.TempDir() + `"}`)
 		var out bytes.Buffer
-		if err := runHookStopCheck(in, &out); err != nil {
-			t.Fatalf("stopcheck: %v", err)
+		if block := runHookStopCheck(in, &out); block {
+			t.Fatalf("unconfigured repo must not block")
 		}
 		if out.Len() != 0 {
 			t.Errorf("unconfigured repo should be silent, got %q", out.String())

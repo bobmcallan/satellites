@@ -1,13 +1,18 @@
-// `satellites hook stopcheck` — the Stop advisory (epic:enforcement-surface,
-// sty_b713f886). At the end of a turn it checks whether the session committed
-// work while its engaged story is still non-terminal, and emits a loud advisory
-// pointing at the ungated work. It is the backstop to the commit-gate + the
-// work-close guard: it cannot un-push, so it NEVER blocks (a Stop hook that
-// exits non-zero would block the stop) — it only surfaces the gap.
+// `satellites hook stopcheck` — the GOAL-KEEPER Stop hook (epic:satellites-backbone
+// 1.2, supersedes the sty_b713f886 advisory). Engaging a story sets the goal
+// "drive it to a terminal state"; this hook holds the agent to it. While a
+// session has a live, non-terminal engagement AND the goal is reachable (a
+// governing workflow resolves in the repo), it BLOCKS the stop (exit 2) and
+// re-injects the goal, so the agent loops back instead of quietly stopping —
+// the satellites equivalent of Claude Code's built-in `/goal`.
 //
-// Silent unless there is something to say: an unconfigured repo, no live
-// engagement, a terminal story, or no commits since engagement all produce no
-// output. Reads the per-repo engagement store only — no server round-trip.
+// It RELEASES the stop (exit 0) when: the story is terminal; there is no live
+// engagement; or the goal is UNREACHABLE (no governing workflow resolves) — in
+// which case it does NOT loop but prints a report-to-operator note (the
+// deadlock escape, so an ungoverned story can never trap the agent). Commits
+// left ungated stay as a louder sub-message. Reads the per-repo engagement store
+// only — no server round-trip — and any infra hiccup RELEASES the stop (fail
+// open: a Stop hook must never trap the agent on an error).
 
 package cli
 
@@ -16,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,25 +40,34 @@ type stopInput struct {
 func newStopCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stopcheck",
-		Short: "Stop advisory — flag commits made this session while the engaged story stayed non-terminal",
-		Long: `stopcheck is the Stop handler. At end of turn it warns when the session
-committed work but its engaged story is still non-terminal — shared work that
-never reached done. It NEVER blocks the stop (it cannot un-push); it only
-surfaces the gap. Silent when there is nothing to flag.`,
+		Short: "Goal-keeper Stop hook — block the stop while the engaged story is non-terminal (reachable goal)",
+		Long: `stopcheck is the Stop handler and goal-keeper. Engaging a story sets the
+goal "drive it to done"; while a live engagement is non-terminal and the goal is
+reachable (a governing workflow resolves), it BLOCKS the stop and re-injects the
+goal so the agent keeps going. It releases when the story is terminal, when there
+is no engagement, or when the goal is unreachable (no governing workflow — it
+reports instead of looping). Fails open: any infra hiccup releases the stop.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHookStopCheck(cmd.InOrStdin(), cmd.ErrOrStderr())
+			if runHookStopCheck(cmd.InOrStdin(), cmd.ErrOrStderr()) {
+				os.Exit(2) // block the stop — the agent loops back to the unmet goal
+			}
+			return nil
 		},
 	}
 }
 
-// runHookStopCheck emits an advisory (never an error, never a block) for each
-// live, non-terminal engagement of the session that has commits since it was
-// engaged. Always returns nil so the stop is never blocked.
-func runHookStopCheck(in io.Reader, out io.Writer) error {
+// runHookStopCheck is the goal-keeper. It returns true to BLOCK the stop — when
+// the session holds a live, non-terminal engagement whose goal is reachable (a
+// governing workflow resolves) — after writing the re-injected goal to out
+// (stderr, fed back to the agent on exit 2). It returns false to RELEASE on:
+// unconfigured repo, no session, store/infra hiccup (fail open), no live
+// engagement, a terminal story, or an UNREACHABLE goal (no governing workflow —
+// it prints a report note instead of looping). Never errors.
+func runHookStopCheck(in io.Reader, out io.Writer) (block bool) {
 	raw, _ := io.ReadAll(in)
 	var ev stopInput
-	_ = json.Unmarshal(raw, &ev) // tolerate empty/garbage → silent
+	_ = json.Unmarshal(raw, &ev) // tolerate empty/garbage → release
 
 	start := strings.TrimSpace(ev.Cwd)
 	if start == "" {
@@ -62,31 +77,49 @@ func runHookStopCheck(in io.Reader, out io.Writer) error {
 	}
 	root, ok := findSatellitesRepoRoot(start)
 	if !ok {
-		return nil // unconfigured repo — advisory does nothing
+		return false // unconfigured repo — nothing to keep
 	}
 	session := sessionKey(ev.SessionID, ev.ParentSessionID)
 	if strings.TrimSpace(session) == "" {
-		return nil
+		return false
 	}
 	store, err := workstate.Open(stateDBForRoot(root))
 	if err != nil {
-		return nil // store hiccup must never block a stop
+		return false // store hiccup must never trap a stop (fail open)
 	}
 	defer store.Close()
 	engs, err := store.LiveEngagement(session)
 	if err != nil {
-		return nil
+		return false
 	}
+	governed := len(governingWorkflowSources(filepath.Join(root, ".satellites", "satellites.toml"))) > 0
 	now := time.Now().UTC()
 	for _, e := range engs {
 		if e.Phase == phaseCandidate || !e.IsLeaseFresh(now) || isTerminalPhase(e.Phase) {
 			continue
 		}
-		if n := commitsSince(root, e.UpdatedAt); n > 0 {
-			fmt.Fprintf(out, "satellites: %d commit(s) were made this session but story %s is still %q (not done). "+
-				"Drive it to done through its gates before ending, or `satellites work close %s --force` to deliberately abandon it — don't leave shared work ungated.\n",
-				n, e.Story, phaseOrUnset(e.Phase), e.Story)
+		b, msg := stopGoalDecision(e.Story, e.Phase, commitsSince(root, e.UpdatedAt), governed)
+		fmt.Fprintln(out, msg)
+		if b {
+			block = true
 		}
 	}
-	return nil
+	return block
+}
+
+// stopGoalDecision decides, for one live non-terminal engagement, whether to
+// block the stop and the message to emit. Pure for tests. A reachable goal
+// (governed) blocks with the goal re-injected; commits left ungated add a louder
+// sub-message. An UNREACHABLE goal (no governing workflow) does NOT block — it
+// returns the report-to-operator note so an ungoverned story cannot trap the
+// agent.
+func stopGoalDecision(story, phase string, commits int, governed bool) (bool, string) {
+	if !governed {
+		return false, fmt.Sprintf("satellites: story %s is engaged but %q (not done) and NO governing workflow resolves in this repo — the goal is unreachable. Report the deadlock to the operator (or run `satellites init` to scaffold the gateless baseline). Not blocking.", story, phaseOrUnset(phase))
+	}
+	msg := fmt.Sprintf("satellites: GOAL NOT MET — story %s is %q, not done. You engaged it to drive it to done: advance it to a terminal state (satellites story status_transition through its gates, or set-status along the gateless baseline), or `satellites work close %s --force` to deliberately abandon it. Do not stop with the goal unmet.", story, phaseOrUnset(phase), story)
+	if commits > 0 {
+		msg += fmt.Sprintf(" (%d commit(s) were already made this session — shared work left ungated.)", commits)
+	}
+	return true, msg
 }
