@@ -117,12 +117,15 @@ func init() {
     code symbol index is refreshed deterministically each session,
   - a .gitignore managed block keeping .satellites/ local state out of git.
 
-init configures CONSUMPTION, not authoring: it writes NO local governance
-(workflow/gates/principles) into .satellites/. The system baseline (the
-authoring/review capabilities + principles shipped with satellites) is inherited
-automatically; CONSUME a publisher's global workflow + gates by adding its
-` + "`<publisher>`" + ` to global_publishers, then ` + "`satellites skill sync`" + ` to
-materialise them into .claude/skills/ (sync-owned — never hand-write there).
+init scaffolds the gateless BASELINE workflow (backlog → in_progress → done, no
+gates) into .satellites/workflows/ so a fresh repo is governable out of the box —
+create-if-absent, so a repo that already owns a workflow keeps it. It writes no
+gates/principles/skills: those are CONSUMED. The system baseline (authoring/review
+capabilities + principles shipped with satellites) is inherited automatically;
+CONSUME a publisher's gates by adding its ` + "`<publisher>`" + ` to global_publishers,
+then ` + "`satellites skill sync`" + ` to materialise them into .claude/skills/
+(sync-owned — never hand-write there). Gates are an opt-in palette: compose them
+into a richer repo-owned workflow when you want them.
 
 Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
@@ -196,7 +199,7 @@ func runInit(out io.Writer, repoRoot string) error {
 	} else if appended {
 		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added global_publishers consumption note)"))
 	}
-	fmt.Fprintln(out, "  → governance: the system baseline (authoring/review capabilities + principles) is inherited automatically. CONSUME a publisher's global workflow + gates by adding its `<publisher>` to global_publishers, then `satellites skill sync`. Author no governance locally.")
+	fmt.Fprintln(out, "  → governance: the gateless baseline workflow is scaffolded below; gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`. Gates are an opt-in palette; the baseline names none.")
 
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
@@ -216,6 +219,17 @@ func runInit(out io.Writer, repoRoot string) error {
 		return gerr
 	} else {
 		fmt.Fprintln(out, initLine(added, ".gitignore (.satellites local-state block)"))
+	}
+
+	// 5. Baseline workflow — scaffold the gateless backlog→in_progress→done
+	//    baseline so a fresh repo is governable out of the box (no
+	//    ungoverned-story). Create-if-absent: a repo that already owns a workflow
+	//    keeps it (no overwrite, no ambiguous-governance). Gates stay an opt-in
+	//    palette this baseline names none of (sty_1174c0b9).
+	if added, berr := ensureBaselineWorkflow(repoRoot); berr != nil {
+		return berr
+	} else {
+		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (gateless baseline)"))
 	}
 	return nil
 }
@@ -379,6 +393,94 @@ func ensureGitignore(repoRoot string) (bool, error) {
 	default:
 		return false, fmt.Errorf("init: read %s: %w", path, err)
 	}
+}
+
+// baselineWorkflowDoc is the gateless baseline workflow init scaffolds into a
+// fresh repo: backlog → in_progress → done with NO gates, all bare ungated
+// edges. It makes a clean repo governable (no ungoverned-story) without
+// hand-authoring; gates remain an opt-in palette a richer repo-owned workflow
+// composes. The ```yaml fences are concatenated (a Go raw string can't hold a
+// backtick). Advance via `satellites story set-status` along the ungated edges.
+const baselineWorkflowDoc = `---
+name: satellites-baseline-workflow
+kind: workflow
+tags: [kind:workflow]
+applies_to: ["*"]
+description: The gateless baseline lifecycle — backlog to in_progress to done, no gates. Open a story, do the work, close it to done; the only enforcement is the goal-keeper holding the agent to a terminal state. Gates are an opt-in palette a richer repo-owned workflow composes; this baseline names none.
+---
+
+# Baseline workflow (gateless)
+
+The simplest governing workflow: a story moves backlog to in_progress to done
+with NO gates. Open the story, do the work, close it to done. The only thing
+holding you to it is the goal-keeper — an engaged, non-terminal story blocks the
+stop. Gates (plan / start / techdebt / done review, and so on) remain available
+as an opt-in palette; compose them into a richer repo-owned workflow when you
+want them. This baseline names none.
+
+Advance along an edge with: satellites story set-status <story-id> <status>. A
+non-parent move is permitted only along an UNGATED edge of the governing
+workflow — here, every forward edge is ungated.
+
+## Workflow
+
+- backlog to in_progress — open (ungated).
+- in_progress to done — close (ungated).
+- backlog/in_progress to cancelled — abandon (ungated).
+
+` + "```yaml" + `
+states:
+  - backlog
+  - {name: in_progress, actor: executor}
+  - done
+  - cancelled
+transitions:
+  - {from: backlog, to: in_progress}
+  - {from: in_progress, to: done}
+  - {from: backlog, to: cancelled}
+  - {from: in_progress, to: cancelled}
+` + "```" + `
+
+## Environment
+
+Drives a story document backlog to in_progress to done via ungated status moves;
+no reviewer skills, no commands bound to states. The goal-keeper Stop hook holds
+the agent to a terminal state.
+
+` + "```yaml" + `
+guardrails:
+  always:
+    - Drive the engaged story to a terminal state (done) — the goal-keeper holds you to it.
+  ask_first: []
+  never:
+    - Move a story across an edge its governing workflow does not declare.
+` + "```" + `
+`
+
+// ensureBaselineWorkflow scaffolds the gateless baseline workflow into
+// .satellites/workflows/, create-if-absent: it writes nothing when a workflow
+// already exists there (so a repo that owns its workflows is never overwritten
+// and no two ["*"] workflows collide as ambiguous-governance). Returns whether
+// it wrote the baseline.
+func ensureBaselineWorkflow(repoRoot string) (bool, error) {
+	wfDir := filepath.Join(repoRoot, ".satellites", "workflows")
+	if entries, err := os.ReadDir(wfDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				return false, nil // a workflow already exists — leave it
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("init: read %s: %w", wfDir, err)
+	}
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		return false, fmt.Errorf("init: create %s: %w", wfDir, err)
+	}
+	path := filepath.Join(wfDir, "satellites-baseline-workflow.md")
+	if err := os.WriteFile(path, []byte(baselineWorkflowDoc), 0o644); err != nil {
+		return false, fmt.Errorf("init: write %s: %w", path, err)
+	}
+	return true, nil
 }
 
 // initLine renders a one-line report: "+ created" or "= present".

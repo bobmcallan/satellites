@@ -104,3 +104,28 @@ func GoverningCheckpoint(storyBody, status, category string, sources []WorkflowS
 	}
 	return to, count == 1
 }
+
+// GoverningUngatedAdvance reports whether the AUTHORITATIVE governing workflow
+// for `category` (falling back to the story's embedded copy when no workflow
+// covers the category) has an UNGATED forward edge from `status` to `target` —
+// an edge carrying no reviewer_skill and no on:pass|fail. This is the
+// gateless-baseline advance path: such a move is enacted directly (a
+// status_transition ledger row), not through a reviewer gate. A gated edge (one
+// that carries a reviewer skill) is NOT advanceable this way — it must go
+// through its gate; an undeclared edge returns false. Pure (no I/O) so the
+// set-status surface stays fixture-testable.
+func GoverningUngatedAdvance(storyBody, status, category, target string, sources []WorkflowSource) bool {
+	var froms []workflow.Transition
+	if auth, _, ok := ResolveGoverningWorkflow(category, sources); ok {
+		froms = auth.TransitionsFrom(strings.TrimSpace(status))
+	} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
+		froms = embedded.TransitionsFrom(strings.TrimSpace(status))
+	}
+	target = strings.TrimSpace(target)
+	for _, t := range froms {
+		if t.To == target && strings.TrimSpace(t.ReviewerSkill) == "" && t.On == "" {
+			return true
+		}
+	}
+	return false
+}
