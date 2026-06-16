@@ -28,12 +28,16 @@ const (
 	hookMatcher = "Edit|Write|MultiEdit|NotebookEdit"
 	hookCommand = "satellites hook gate || exit 2"
 
-	// The commit door (sty_946fc605, epic:enforcement-surface). PreToolUse on
-	// Bash: blocks `git commit`/`git push` without a lease-fresh editable
-	// engagement, closing the leak where edits done via shell + a commit/push
-	// slip past the edit-only START door. Fails closed (`|| exit 2`) like the
-	// START door — a broken/absent client blocks the share rather than allowing
-	// it. The handler itself allows all non-git and read-only git Bash.
+	// The Bash door (sty_946fc605 + sty_448d2024, epic:enforcement-surface).
+	// PreToolUse on Bash, enforcing two things without a lease-fresh editable
+	// engagement: (1) obvious in-repo file-mutating Bash forms — output
+	// redirection (`>`/`>>`), `tee`, `mv`/`cp`/`rm`/`sed -i`/`git mv` — which the
+	// edit-only START door (Edit|Write) does not match; and (2) the share point,
+	// `git push` (or `git commit` under the strict commit_gate knob). Targets
+	// resolve through the same boundary/ungated_dirs/cross-repo rules, so /tmp,
+	// reads, builds and non-governed paths are not gated. Fails closed
+	// (`|| exit 2`) like the START door. Heuristic, not a shell parser — the share
+	// gate is the catch-all backstop.
 	commitGateMatcher = "Bash"
 	commitGateCommand = "satellites hook commitgate || exit 2"
 

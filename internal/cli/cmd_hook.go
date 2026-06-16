@@ -11,6 +11,11 @@
 // binary is caught by the install wiring `... || exit 2`, see `satellites
 // init`.)
 //
+// Cross-repo (sty_448d2024): a target OUTSIDE this repo that lands in ANOTHER
+// satellites-governed repo (one with its own .satellites/) is gated against THAT
+// repo's engagement — not blanket-ungated for being "outside this repo". A target
+// in no governed repo (e.g. ~/.claude) stays ungated for self-maintenance.
+//
 // Output is the Claude Code PreToolUse decision: a `deny` is emitted as JSON
 // on stdout; an `allow` emits nothing (exit 0) so the tool proceeds through
 // normal permissioning — the door only ever BLOCKS, it never auto-approves.
@@ -141,26 +146,73 @@ func gateOutcomeEng(start, session, target string, now time.Time) (allow bool, r
 		return false, "satellites is not configured here (no .satellites/satellites.toml). Run `satellites init` to set up this repo, then `satellites work init <story>` to engage a story.", workstate.Engagement{}
 	}
 	// Boundary rule (sty_11a6077c): the door governs the engaged PROJECT tree,
-	// not Claude's self-maintenance. An edit whose target resolves OUTSIDE the
-	// repo root (e.g. ~/.claude — Claude's own config + agent memory), or into a
-	// configured ungated_dirs path, is allowed regardless of engagement. The
-	// repo's own .claude/ is inside the root, so it stays gated. A target we
-	// cannot determine (empty) falls through to the engagement check (fail safe).
+	// not Claude's self-maintenance. A target we cannot determine (empty) falls
+	// through to THIS repo's engagement check (fail safe).
 	if abs := absTargetPath(start, target); abs != "" {
 		cfg, _, _ := cliconfig.Load(filepath.Join(root, ".satellites", "satellites.toml"))
-		if pathIsUngated(abs, root, cfg.UngatedDirs) {
+		// An explicit ungated_dirs path is exempt regardless of repo (operator opt-in).
+		if pathInUngatedDirs(abs, root, cfg.UngatedDirs) {
 			return true, "", workstate.Engagement{}
 		}
+		if !isInsideRepo(abs, root) {
+			// Outside THIS repo. Cross-repo rule (sty_448d2024): a mutation into
+			// ANOTHER satellites-governed repo (one with its own
+			// .satellites/satellites.toml) is gated against THAT repo's engagement —
+			// keying on "is the target another GOVERNED repo", not merely "outside
+			// this repo". A target in no governed repo (e.g. ~/.claude — Claude's own
+			// config + agent memory) stays ungated (self-maintenance).
+			if other, ok := governingRepoRoot(abs); ok && filepath.Clean(other) != filepath.Clean(root) {
+				return engagementOutcome(other, session, now, crossRepoDeny(abs, other))
+			}
+			return true, "", workstate.Engagement{}
+		}
+		// Inside this repo and not ungated → fall through to the engagement check.
 	}
+	return engagementOutcome(root, session, now, inRepoDeny())
+}
+
+// engDeny carries the four deny messages the engagement check emits, so the
+// in-repo and cross-repo callers can phrase the same outcomes for their context.
+type engDeny struct{ unavailable, unreadable, none, stale, notEditable string }
+
+// inRepoDeny is the START door's own deny vocabulary (editing the engaged repo).
+func inRepoDeny() engDeny {
+	return engDeny{
+		unavailable: "satellites engagement store unavailable — cannot verify an active engagement (fail closed). Run `satellites work init <story>` (and `satellites update` if the client is stale).",
+		unreadable:  "satellites engagement store unreadable — blocking. Run `satellites work init <story>`.",
+		none:        "No active engagement for this session. Run `satellites work init <story>` to engage a story's workflow before editing code.",
+		stale:       "Your engagement's lease has expired (stale). Re-engage with `satellites work init <story>` before editing.",
+		notEditable: "The engaged story is not in an editable phase (e.g. backlog/done). Transition it to an editable status, or `satellites work init` the story you are actually working.",
+	}
+}
+
+// crossRepoDeny is the deny vocabulary for a mutation into ANOTHER governed repo:
+// the way out is to engage a story IN that repo, not this one.
+func crossRepoDeny(abs, other string) engDeny {
+	pre := fmt.Sprintf("satellites: `%s` is in another satellites-governed repo (%s). ", abs, other)
+	return engDeny{
+		unavailable: pre + "Its engagement store is unavailable — cannot verify an engagement there (fail closed).",
+		unreadable:  pre + "Its engagement store is unreadable — blocking.",
+		none:        pre + "This session holds no engagement there. Run `satellites work init <story>` INSIDE that repo before editing it.",
+		stale:       pre + "Your engagement there has expired (stale). Re-engage with `satellites work init <story>` INSIDE that repo.",
+		notEditable: pre + "The engaged story there is not in an editable phase. Advance it (or engage the story you are actually working) INSIDE that repo.",
+	}
+}
+
+// engagementOutcome is the store-backed lease/editable decision for one repo
+// root: an edit is allowed only under a LEASE-FRESH, EDITABLE engagement for this
+// session in that repo's store. Fails closed (store unavailable/unreadable deny).
+// Shared by the in-repo START door and the cross-repo rule (sty_448d2024).
+func engagementOutcome(root, session string, now time.Time, deny engDeny) (bool, string, workstate.Engagement) {
 	store, err := workstate.Open(stateDBForRoot(root))
 	if err != nil {
-		return false, "satellites engagement store unavailable — cannot verify an active engagement (fail closed). Run `satellites work init <story>` (and `satellites update` if the client is stale).", workstate.Engagement{}
+		return false, deny.unavailable, workstate.Engagement{}
 	}
 	defer store.Close()
 
 	engs, err := store.LiveEngagement(session)
 	if err != nil {
-		return false, "satellites engagement store unreadable — blocking. Run `satellites work init <story>`.", workstate.Engagement{}
+		return false, deny.unreadable, workstate.Engagement{}
 	}
 
 	var sawEngagement, sawFresh bool
@@ -179,12 +231,23 @@ func gateOutcomeEng(start, session, target string, now time.Time) (allow bool, r
 	}
 	switch {
 	case !sawEngagement:
-		return false, "No active engagement for this session. Run `satellites work init <story>` to engage a story's workflow before editing code.", workstate.Engagement{}
+		return false, deny.none, workstate.Engagement{}
 	case !sawFresh:
-		return false, "Your engagement's lease has expired (stale). Re-engage with `satellites work init <story>` before editing.", workstate.Engagement{}
+		return false, deny.stale, workstate.Engagement{}
 	default:
-		return false, "The engaged story is not in an editable phase (e.g. backlog/done). Transition it to an editable status, or `satellites work init` the story you are actually working.", workstate.Engagement{}
+		return false, deny.notEditable, workstate.Engagement{}
 	}
+}
+
+// governingRepoRoot reports the satellites-governed repo root that CONTAINS abs
+// (the directory holding .satellites/satellites.toml at or above abs), if any. A
+// file (or not-yet-existing) target is resolved from its parent directory.
+func governingRepoRoot(abs string) (string, bool) {
+	dir := abs
+	if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
+		dir = filepath.Dir(abs)
+	}
+	return findSatellitesRepoRoot(dir)
 }
 
 // gateWorkDir resolves the engagement directory through the shared cliconfig
@@ -268,17 +331,21 @@ func absTargetPath(cwd, target string) string {
 	return filepath.Clean(target)
 }
 
-// pathIsUngated reports whether an absolute target path is exempt from the
-// START-door. The default boundary: a path NOT under the repo root is ungated
-// (Claude self-maintenance — ~/.claude, agent memory). Beyond that, an explicit
-// ungated_dirs entry (filepath glob, leading ~ → $HOME) ungates a path even
-// inside the repo. Pure over its inputs.
-func pathIsUngated(abs, root string, ungatedDirs []string) bool {
+// isInsideRepo reports whether an absolute target path is within the repo tree
+// rooted at root (root itself counts). Pure over its inputs.
+func isInsideRepo(abs, root string) bool {
 	root = filepath.Clean(root)
 	rel, err := filepath.Rel(root, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return true // outside the repo tree — not the door's business
+	if err != nil {
+		return false
 	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pathInUngatedDirs reports whether abs matches an explicit ungated_dirs entry
+// (filepath glob; a relative entry is repo-relative; a leading ~ → $HOME). This
+// is the operator's opt-in exemption, separate from the repo-boundary rule.
+func pathInUngatedDirs(abs, root string, ungatedDirs []string) bool {
 	home, _ := os.UserHomeDir()
 	for _, d := range ungatedDirs {
 		d = strings.TrimSpace(d)
@@ -290,7 +357,7 @@ func pathIsUngated(abs, root string, ungatedDirs []string) bool {
 		}
 		// A relative entry is repo-relative (e.g. "docs/scratch" → <root>/docs/scratch).
 		if !filepath.IsAbs(d) {
-			d = filepath.Join(root, d)
+			d = filepath.Join(filepath.Clean(root), d)
 		}
 		d = filepath.Clean(d)
 		// Under an exempt dir, equal to it, or a glob match.
@@ -302,6 +369,16 @@ func pathIsUngated(abs, root string, ungatedDirs []string) bool {
 		}
 	}
 	return false
+}
+
+// pathIsUngated reports whether an absolute target path is exempt from the
+// START-door's per-repo engagement check: a path NOT under the repo root (the
+// default boundary — Claude self-maintenance), OR an explicit ungated_dirs
+// entry. NOTE: the cross-repo rule (sty_448d2024) layers ON TOP of this in
+// gateOutcomeEng — an "outside this repo" path that lands in ANOTHER governed
+// repo is still gated against that repo. Pure over its inputs.
+func pathIsUngated(abs, root string, ungatedDirs []string) bool {
+	return !isInsideRepo(abs, root) || pathInUngatedDirs(abs, root, ungatedDirs)
 }
 
 // emitGateDeny writes the PreToolUse block decision as JSON on stdout.

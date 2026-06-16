@@ -1,12 +1,13 @@
-// `satellites hook commitgate` — the PreToolUse COMMIT door (epic:enforcement-
-// surface, sty_946fc605). The START door (`satellites hook gate`) gates file
-// edits, but it is matched to Edit/Write/NotebookEdit only — `git commit` /
-// `git push` run through Bash and slip past it, so ungated work can reach `main`
-// with the engaged story still at backlog. This handler closes that leak at the
-// honest choke point: it reads the Bash `command`, and when a segment runs
-// `git push` (or `git commit` under the strict knob) it requires the SAME
-// authority the START door requires — a lease-fresh engagement in an editable
-// phase for this session — denying otherwise.
+// `satellites hook commitgate` — the PreToolUse Bash door (epic:enforcement-
+// surface, sty_946fc605 + sty_448d2024). The START door (`satellites hook gate`)
+// gates file edits, but it is matched to Edit/Write/NotebookEdit only — file
+// mutations done through Bash (`> f`, `>> f`, `tee`, `mv`/`cp`/`rm`/`sed -i`/
+// `git mv`) and the `git commit`/`git push` share point run through Bash and slip
+// past it. This handler closes both at the honest choke point: it reads the Bash
+// `command` and requires the SAME authority the START door requires — a
+// lease-fresh engagement in an editable phase for this session — for (1) an
+// obvious in-repo file mutation and (2) `git push` (or `git commit` under the
+// strict knob), denying otherwise.
 //
 // It reuses gateOutcomeEng, so the commit door and the edit door share one
 // definition of "actively working a started story" (editable, not a hard-coded
@@ -27,6 +28,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -48,13 +50,20 @@ const (
 func newCommitGateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "commitgate",
-		Short: "PreToolUse Bash COMMIT door — block git commit/push without an editable engagement",
-		Long: `commitgate is the PreToolUse handler matched to Bash. It reads the Bash
-command and, when it runs ` + "`git push`" + ` (or ` + "`git commit`" + ` when the
-commit_gate toml knob is "commit"), requires a lease-fresh engagement in an
-editable phase for this session — the same authority the START door requires for
-edits. Read-only git and non-git Bash pass. It fails closed on an unconfigured
-repo, consistent with the START door.`,
+		Short: "PreToolUse Bash door — block git commit/push AND obvious file-mutating Bash without an editable engagement",
+		Long: `commitgate is the PreToolUse handler matched to Bash. It enforces two things,
+both requiring a lease-fresh engagement in an editable phase for this session —
+the same authority the START door requires for edits:
+
+  1. file mutations — obvious in-repo file-mutating forms the Edit/Write START
+     door does not see: output redirection (` + "`>`/`>>`" + `), ` + "`tee`" + `, ` + "`mv`/`cp`/`rm`/`sed -i`/`git mv`" + `.
+     Targets resolve through the same boundary/ungated_dirs/cross-repo rules, so
+     /tmp, reads, builds and non-governed paths are not gated.
+  2. the share point — ` + "`git push`" + ` (or ` + "`git commit`" + ` when the commit_gate toml
+     knob is "commit"), the catch-all backstop.
+
+Read-only git and non-mutating non-git Bash pass. Heuristic, not a shell parser.
+It fails closed on an unconfigured repo, consistent with the START door.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHookCommitGate(cmd.InOrStdin(), cmd.OutOrStdout())
@@ -83,10 +92,31 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 		}
 	}
 
-	// Resolve the strict-reach knob from the LOCAL toml — no server round-trip on
-	// a per-Bash hook. An unconfigured repo resolves to the default ("push").
+	session := sessionKey(ev.SessionID, ev.ParentSessionID)
+	now := time.Now().UTC()
+	root, configured := findSatellitesRepoRoot(start)
+
+	// 1. Bash file-mutation gating (sty_448d2024): the START door matches only
+	// Edit/Write tools, so obvious in-repo file-mutating Bash forms (redirection,
+	// mv/cp/rm/sed -i/tee/git mv) bypass the per-edit gate. Gate each detected
+	// target through gateOutcomeEng — which applies the boundary, ungated_dirs,
+	// AND cross-repo rules uniformly, so /tmp, reads, builds and non-governed
+	// paths are not gated. Only meaningful in a configured repo. Heuristic, not a
+	// shell parser; the git share-point gate below is the catch-all backstop.
+	if configured {
+		for _, t := range bashMutationTargets(command) {
+			if allow, reason, _ := gateOutcomeEng(start, session, t, now); !allow {
+				return emitGateDeny(out, "satellites: this Bash command mutates a governed file without an engagement. "+reason)
+			}
+		}
+	}
+
+	// 2. git share-point gating: `git push` (or `git commit` under the strict
+	// knob) requires the same authority. Resolve the strict-reach knob from the
+	// LOCAL toml — no server round-trip on a per-Bash hook. An unconfigured repo
+	// resolves to the default ("push").
 	gateCommit := false
-	if root, ok := findSatellitesRepoRoot(start); ok {
+	if configured {
 		cfg, _, _ := cliconfig.Load(filepath.Join(root, ".satellites", "satellites.toml"))
 		gateCommit = cfg.ResolveCommitGate() == cliconfig.CommitGateCommit
 	}
@@ -96,12 +126,144 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 		return nil // read-only git / non-git Bash / ungated commit → allow
 	}
 
-	session := sessionKey(ev.SessionID, ev.ParentSessionID)
-	allow, _, _ := gateOutcomeEng(start, session, "", time.Now().UTC())
+	allow, _, _ := gateOutcomeEng(start, session, "", now)
 	if allow {
 		return nil
 	}
 	return emitGateDeny(out, commitGateReason(action))
+}
+
+// redirectRe matches an output redirection target: `>` or `>>` (stdout/append),
+// NOT preceded by a digit/`&`/`>` (so fd redirects `2>`, dup `>&`, `&>` are
+// skipped), followed by the target path (quoted or a bare token). The leading
+// class also rules out the second `>` of `>>` starting a fresh match.
+var redirectRe = regexp.MustCompile(`(?:^|[^0-9&>])>>?[ \t]*("[^"]*"|'[^']*'|[^ \t;|&<>]+)`)
+
+// bashMutationTargets extracts the obvious in-repo file-mutation targets a Bash
+// command writes (sty_448d2024): output redirection (`>`/`>>`), `tee`, `mv`,
+// `cp` (dest), `rm`, `sed -i`, `git mv`. Heuristic, not a shell parser — it
+// gates the overwhelmingly common direct forms; the commit-gate at the share
+// point is the catch-all backstop. Each returned path is resolved + gated by the
+// caller through gateOutcomeEng (boundary, ungated_dirs, and cross-repo rules).
+func bashMutationTargets(command string) []string {
+	var out []string
+	for _, seg := range splitShellSegments(command) {
+		out = append(out, redirectTargets(seg)...)
+		out = append(out, commandMutationTargets(seg)...)
+	}
+	return out
+}
+
+// redirectTargets returns the files a segment writes via `>`/`>>` (excluding
+// /dev/* and fd-dup forms).
+func redirectTargets(seg string) []string {
+	var out []string
+	for _, m := range redirectRe.FindAllStringSubmatch(seg, -1) {
+		p := unquoteArg(m[1])
+		if p == "" || strings.HasPrefix(p, "&") || strings.HasPrefix(p, "/dev/") {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// commandMutationTargets returns the files a segment's leading command mutates,
+// dispatched per command so reads (e.g. cp sources) are not flagged.
+func commandMutationTargets(seg string) []string {
+	fields := strings.Fields(seg)
+	i := 0
+	// Skip env-assignment and common wrapper prefixes (FOO=bar sudo nice … cmd).
+	for i < len(fields) {
+		f := fields[i]
+		if !strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "/") && strings.Contains(f, "=") {
+			i++
+			continue
+		}
+		switch baseName(f) {
+		case "sudo", "env", "command", "nice", "time", "nohup":
+			i++
+			continue
+		}
+		break
+	}
+	if i >= len(fields) {
+		return nil
+	}
+	cmd := baseName(fields[i])
+	args := fields[i+1:]
+	switch cmd {
+	case "mv", "rm":
+		return nonFlagArgs(args) // sources removed + dest written / all removed
+	case "cp":
+		na := nonFlagArgs(args)
+		if len(na) > 0 {
+			return na[len(na)-1:] // only the destination is written
+		}
+	case "tee":
+		return nonFlagArgs(args) // each file arg is written (skip -a)
+	case "sed":
+		if hasInPlaceFlag(args) {
+			if na := nonFlagArgs(args); len(na) > 0 {
+				return na[len(na)-1:] // the in-place file is the last non-flag arg
+			}
+		}
+	case "git":
+		if gitSubcommand(seg) == "mv" {
+			return gitMvArgs(args)
+		}
+	}
+	return nil
+}
+
+// nonFlagArgs returns the non-option args (unquoted), in order.
+func nonFlagArgs(args []string) []string {
+	var out []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		out = append(out, unquoteArg(a))
+	}
+	return out
+}
+
+// hasInPlaceFlag reports whether a sed arg list carries -i / -i<suffix> / --in-place.
+func hasInPlaceFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-i" || strings.HasPrefix(a, "-i") || strings.HasPrefix(a, "--in-place") {
+			return true
+		}
+	}
+	return false
+}
+
+// gitMvArgs returns the non-flag args after the `mv` subcommand token.
+func gitMvArgs(args []string) []string {
+	for i, a := range args {
+		if a == "mv" {
+			return nonFlagArgs(args[i+1:])
+		}
+	}
+	return nil
+}
+
+// baseName strips any directory prefix from a command token (/usr/bin/git → git).
+func baseName(s string) string {
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// unquoteArg strips a single layer of matching surrounding quotes.
+func unquoteArg(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 // classifyGitCommand reports whether a Bash command runs a gated git command.
