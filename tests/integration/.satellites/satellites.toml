@@ -1,0 +1,19 @@
+# satellites.toml — repo config (non-secret). Run `satellites auth` to add credentials.
+# server_url = "https://your-satellites-server"
+# project_id = "proj_..."
+# data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
+# work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
+
+# library_pins — governance + skills this repo CONSUMES from the shared library,
+# each "<publisher>/<name>" (publisher = the publishing project id). The system
+# baseline is inherited with no setup; pin a workflow + its gates to be governed,
+# then run `satellites skill sync` to materialise them into .claude/skills/.
+# A repo authors no governance locally — a process change happens at the
+# registry/team level, not in this repo.
+# library_pins = ["<publisher>/<workflow>", "<publisher>/<gate>"]
+
+# ungated_dirs — paths the START-door (satellites hook gate) will NOT gate.
+# By default the door only gates edits INSIDE this repo; anything outside the
+# repo root (e.g. ~/.claude — Claude's own config + memory) is already ungated.
+# List extra dirs here to also ungate them (globs; a leading ~ expands to $HOME):
+# ungated_dirs = ["~/.claude", "docs/scratch"]

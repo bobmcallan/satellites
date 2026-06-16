@@ -107,13 +107,17 @@ func init() {
 
   - the .satellites/ directory,
   - a satellites.toml (created if missing, left intact if present),
+  - the documented library_pins consumption block in the toml,
   - the PreToolUse START-door + advisory hooks in .claude/settings.json,
   - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
     code symbol index is refreshed deterministically each session.
 
-Author NEW skills as files under .satellites/skills/ and push them with
-` + "`satellites skill upload`" + ` (review-gated). The .claude/skills/ tree is
-sync-owned (` + "`satellites skill sync`" + ` pulls into it) — never hand-write there.
+init configures CONSUMPTION, not authoring: it writes NO local governance
+(workflow/gates/principles) into .satellites/. The system baseline (the
+authoring/review capabilities + principles shipped with satellites) is inherited
+automatically; CONSUME a workflow + its gates by adding their ` + "`<publisher>/<name>`" + `
+to library_pins, then ` + "`satellites skill sync`" + ` to materialise them into
+.claude/skills/ (sync-owned — never hand-write there).
 
 Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
@@ -175,14 +179,19 @@ func runInit(out io.Writer, repoRoot string) error {
 		return fmt.Errorf("init: stat %s: %w", tomlPath, statErr)
 	}
 
-	// 2b. Trunk workflow scaffold (epic:enforcement-surface, order:2): when the
-	//     repo has no kind:workflow source, write a minimal trunk workflow + its
-	//     gate skills into .satellites/skills/ so the START door enforces a real,
-	//     advanceable process instead of engage-only theatre. Operator-owned
-	//     source the operator edits + uploads — not a runtime default.
-	if err := scaffoldWorkflowIfAbsent(out, satDir); err != nil {
-		return err
+	// 2b. Consumption config (epic:skills-registry order-7): a repo onboards by
+	//     CONSUMPTION, not authoring. The system baseline (the format/structure
+	//     capabilities + principles shipped with satellites) is inherited
+	//     automatically; a workflow + its gates are CONSUMED by pinning them in
+	//     library_pins, then `skill sync`. init seeds the documented (commented)
+	//     library_pins block — it writes NO local governance files. This retires
+	//     the epic:enforcement-surface trunk-workflow scaffold.
+	if appended, perr := ensureLibraryPinsBlock(tomlPath); perr != nil {
+		return perr
+	} else if appended {
+		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added library_pins consumption note)"))
 	}
+	fmt.Fprintln(out, "  → governance: the system baseline (authoring/review capabilities + principles) is inherited automatically. CONSUME a workflow + its gates by adding their `<publisher>/<name>` to library_pins, then `satellites skill sync`. Author no governance locally.")
 
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
@@ -202,7 +211,54 @@ const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`
 # project_id = "proj_..."
 # data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
 # work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
-` + ungatedDirsBlock
+` + libraryPinsBlock + ungatedDirsBlock
+
+// libraryPinsBlock documents the consumption knob (epic:skills-registry
+// order-7). A repo authors no governance locally — the system baseline (the
+// format/structure capabilities + principles shipped with satellites) is
+// inherited automatically, and a workflow + its gates are CONSUMED by pinning
+// them here, then materialised by ` + "`satellites skill sync`" + ` into
+// .claude/skills/. Commented + repo-agnostic by default: the operator pins the
+// governance their team publishes to the library.
+const libraryPinsBlock = `
+# library_pins — governance + skills this repo CONSUMES from the shared library,
+# each "<publisher>/<name>" (publisher = the publishing project id). The system
+# baseline is inherited with no setup; pin a workflow + its gates to be governed,
+# then run ` + "`satellites skill sync`" + ` to materialise them into .claude/skills/.
+# A repo authors no governance locally — a process change happens at the
+# registry/team level, not in this repo.
+# library_pins = ["<publisher>/<workflow>", "<publisher>/<gate>"]
+`
+
+// libraryPinsKey is the toml key init looks for before appending the block to an
+// existing config (idempotency).
+const libraryPinsKey = "library_pins"
+
+// ensureLibraryPinsBlock appends the documented library_pins consumption block
+// to an existing toml when the key is not already present (commented or active).
+// Idempotent: a second run is a no-op. Returns whether it appended. A freshly
+// written toml (scaffoldToml) already carries the block, so this is the
+// maintenance path for a pre-order-7 repo.
+func ensureLibraryPinsBlock(tomlPath string) (bool, error) {
+	raw, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return false, err
+	}
+	for _, ln := range strings.Split(string(raw), "\n") {
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ln), "#"))
+		if strings.HasPrefix(t, libraryPinsKey) {
+			return false, nil // already present (commented or active)
+		}
+	}
+	body := string(raw)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(tomlPath, []byte(body+libraryPinsBlock), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // ungatedDirsBlock documents + seeds the START-door exemption knob. The door
 // gates only edits INSIDE this repo by default — anything outside the repo root

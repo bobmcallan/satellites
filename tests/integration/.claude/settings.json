@@ -1,0 +1,89 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "satellites hook gate || exit 2",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook commitgate || exit 2",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook access",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__satellites__document_get"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook codenudge",
+            "type": "command"
+          }
+        ],
+        "matcher": "Read"
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook context",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__satellites__document_get"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "satellites code index",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "satellites hook context",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "satellites hook stopcheck",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "satellites hook prompt",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

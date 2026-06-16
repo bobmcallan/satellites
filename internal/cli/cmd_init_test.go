@@ -96,7 +96,7 @@ func TestMergeHookIntoSettings_PreservesExisting(t *testing.T) {
 // TestRunInit_ScaffoldsAndIsIdempotent exercises the full init over a temp repo:
 // first run creates .satellites/, satellites.toml, and the settings hook;
 // re-run preserves the toml verbatim and does not duplicate the hook.
-func TestRunInit_ScaffoldsAndIsIdempotent(t *testing.T) {
+func TestRunInit_ConsumptionConfigAndIdempotent(t *testing.T) {
 	repo := t.TempDir()
 
 	var out bytes.Buffer
@@ -111,6 +111,16 @@ func TestRunInit_ScaffoldsAndIsIdempotent(t *testing.T) {
 	tomlBefore, err := os.ReadFile(tomlPath)
 	if err != nil {
 		t.Fatalf("satellites.toml not created: %v", err)
+	}
+	// Order-7: init configures CONSUMPTION, not authoring — it writes NO local
+	// governance files, and the toml carries the documented library_pins block.
+	for _, sub := range []string{"skills", "principles", "documents"} {
+		if _, err := os.Stat(filepath.Join(repo, ".satellites", sub)); !os.IsNotExist(err) {
+			t.Errorf("init must NOT scaffold .satellites/%s (got err=%v)", sub, err)
+		}
+	}
+	if !strings.Contains(string(tomlBefore), "library_pins") {
+		t.Errorf("fresh toml should carry the library_pins consumption block, got:\n%s", tomlBefore)
 	}
 	settingsPath := filepath.Join(repo, ".claude", "settings.json")
 	s1, err := os.ReadFile(settingsPath)
