@@ -178,7 +178,32 @@ func changedSkillNames(ref, configArg string) ([]string, error) {
 	return names, nil
 }
 
-// publishSkill resolves, reviews, stamps, and dispatches one library publish.
+// resolvePublishScope maps an artifact's DECLARED level (preferred) or explicit
+// scope to the storage scope `skill publish` routes to (epic:client-dir-separation
+// order-4): global→library (the shared surface), project→project, system→REFUSED
+// (built-in, never user-published). An empty declaration defaults to library for
+// back-compat (the pre-order-4 behaviour). Pure; unit-tested (AC2).
+func resolvePublishScope(level, scope string) (string, error) {
+	pick := strings.ToLower(strings.TrimSpace(level))
+	if pick == "" {
+		pick = strings.ToLower(strings.TrimSpace(scope))
+	}
+	switch pick {
+	case "", "global", "library":
+		return "library", nil
+	case "project":
+		return "project", nil
+	case "system":
+		return "", fmt.Errorf("system is built-in and is never user-published — declare level global (shared) or project (project-scoped)")
+	default:
+		return "", fmt.Errorf("unknown level/scope %q — use system, project, or global", pick)
+	}
+}
+
+// publishSkill resolves, reviews, stamps, and dispatches one publish, ROUTED by
+// the artifact's declared level (order-4): a global artifact lands on the shared
+// library surface (publisher-stamped), a project artifact stays project-scoped,
+// system is refused.
 func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg string, dryRun, skipReview bool) error {
 	publisher, err := projectIDFromConfig(configArg)
 	if err != nil {
@@ -216,6 +241,14 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 		}
 	}
 
+	pubScope, err := resolvePublishScope(t.Level, t.Scope)
+	if err != nil {
+		return fmt.Errorf("publish %s: %w", path, err)
+	}
+	if pubScope == "project" {
+		return publishProjectScoped(ctx, out, t.Body, name, publisher, configArg, userArg, dryRun)
+	}
+	// pubScope == "library" → the shared/global surface (provenance-stamped).
 	prov := libraryProvenance{
 		Publisher: publisher,
 		Repo:      gitOutput("remote", "get-url", "origin"),
@@ -259,6 +292,62 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	}
 	fmt.Fprintf(out, "%s → library/%s/%s (%s)\n", path, publisher, name, summariseUploadResp(resp))
 	return nil
+}
+
+// publishProjectScoped upserts a project-level skill to its project scope (no
+// library provenance stamp — it is not shared). Project scope requires both
+// workspace_id and project_id, so it resolves the publisher project's workspace
+// via project_get (order-4 AC2). Used when an artifact declares level: project.
+func publishProjectScoped(ctx context.Context, out io.Writer, body, name, projectID, configArg, userArg string, dryRun bool) error {
+	wsID, err := workspaceForProject(ctx, projectID, configArg, userArg)
+	if err != nil {
+		return fmt.Errorf("publish project skill %q: resolve workspace: %w", name, err)
+	}
+	if dryRun {
+		fmt.Fprintf(out, "[dryrun] would publish project/%s/%s (workspace %s)\n", projectID, name, wsID)
+		return nil
+	}
+	req, err := json.Marshal(map[string]any{
+		"type": "skill", "scope": "project", "project_id": projectID, "workspace_id": wsID, "name": name, "body": body,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
+	if err != nil {
+		return fmt.Errorf("publish project skill %q: %w", name, err)
+	}
+	fmt.Fprintf(out, "project/%s/%s (%s)\n", projectID, name, summariseUploadResp(resp))
+	return nil
+}
+
+// workspaceForProject resolves a project's workspace_id via project_get — needed
+// to write a project-scoped row (which requires both ids).
+func workspaceForProject(ctx context.Context, projectID, configArg, userArg string) (string, error) {
+	req, err := json.Marshal(map[string]any{"id": projectID})
+	if err != nil {
+		return "", err
+	}
+	raw, err := dispatchVerb(ctx, "project_get", req, configArg, userArg)
+	if err != nil {
+		return "", err
+	}
+	var got struct {
+		Project struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"project"`
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return "", err
+	}
+	if got.Project.WorkspaceID != "" {
+		return got.Project.WorkspaceID, nil
+	}
+	if got.WorkspaceID != "" {
+		return got.WorkspaceID, nil
+	}
+	return "", fmt.Errorf("project_get returned no workspace_id for %s", projectID)
 }
 
 // nextLibraryVersion reads the library row's current latest_version and

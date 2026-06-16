@@ -65,11 +65,21 @@ type Config struct {
 	//   skills = "."        # author skills under the top-level skills/ folder
 	SubstrateRoots map[string]string `toml:"substrate_roots"`
 
-	// LibraryPins names the shared-library skills this repo consumes as-is,
-	// each "<publisher>/<name>" (publisher = the publishing project id).
-	// `skill sync` materialises pinned skills at lowest precedence — a
-	// same-named project/local skill wins — and removing a pin removes the
-	// materialised copy on the next sync (epic:skill-library, sty_56855694).
+	// GlobalPublishers names the publishers (project ids) whose `global`
+	// (library-scope) artifacts this repo OPTS IN to consume
+	// (epic:client-dir-separation order-4). `skill sync` materialises every
+	// global artifact of each opted-in publisher at lowest precedence — a
+	// same-named project/local skill wins. This RETIRES the per-skill
+	// LibraryPins: opt into a publisher, not a hand-maintained skill list.
+	//
+	//   global_publishers = ["proj_682cfeed"]
+	GlobalPublishers []string `toml:"global_publishers"`
+
+	// LibraryPins is the RETIRED per-skill opt-in (epic:skill-library), each
+	// "<publisher>/<name>". Superseded by GlobalPublishers (order-4). Kept as a
+	// deprecated back-compat fallback: when GlobalPublishers is empty, sync
+	// derives the publisher set from these pins so old configs keep working.
+	// Migrate by replacing the pin list with `global_publishers = [<publisher>]`.
 	LibraryPins []string `toml:"library_pins"`
 
 	// WorkDir overrides where per-worktree engagement state lives (the

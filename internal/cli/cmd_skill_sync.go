@@ -581,7 +581,7 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 			return err
 		}
 	}
-	libSet, err := listPinnedLibrarySkills(ctx, dispatch, configArg)
+	libSet, err := listGlobalSkills(ctx, out, dispatch, configArg)
 	if err != nil {
 		return err
 	}
@@ -824,12 +824,23 @@ func firstNonEmpty(a, b string) string {
 // (sty_cbeeb452) — the dynamic skill index passes true so a user's overridden
 // workflow/gate skill wins; sync passes false so it reconciles the shared rows
 // against the operator's stamped local tree, not per-caller overrides.
-// listPinnedLibrarySkills pulls the repo's library_pins
-// (.satellites/satellites.toml) from the shared library, each
-// "<publisher>/<name>" via a scope=library document_get. A pin that does not
-// parse or resolve fails the sync loudly — a typo'd or withdrawn pin must
-// not silently no-op. No config, or no pins, yields an empty set.
-func listPinnedLibrarySkills(ctx context.Context, dispatch verbDispatch, configArg string) ([]substrateSkill, error) {
+// isWorkflowBody reports whether a SKILL.md body declares kind:workflow — used
+// to keep workflows out of global consumption (they are client-dir config).
+func isWorkflowBody(body string) bool {
+	fm, _, err := frontmatter.Parse(frontmatter.StripSyncStamp([]byte(body)))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(fm.Kind), "workflow")
+}
+
+// listGlobalSkills materialises every `global` (library-scope) artifact of each
+// opted-in publisher (config.GlobalPublishers), stamped with its publisher
+// (epic:client-dir-separation order-4 — replaces the per-skill library_pins).
+// Back-compat: when GlobalPublishers is empty but the deprecated library_pins is
+// set, the publisher set is DERIVED from the pins (so old configs keep working)
+// and a one-line deprecation note is printed. Lowest precedence at the merge.
+func listGlobalSkills(ctx context.Context, out io.Writer, dispatch verbDispatch, configArg string) ([]substrateSkill, error) {
 	cfg, _, err := cliconfig.Load(configArg)
 	if err != nil {
 		if errors.Is(err, cliconfig.ErrNotFound) {
@@ -837,43 +848,44 @@ func listPinnedLibrarySkills(ctx context.Context, dispatch verbDispatch, configA
 		}
 		return nil, err
 	}
-	out := make([]substrateSkill, 0, len(cfg.LibraryPins))
-	for _, pin := range cfg.LibraryPins {
-		publisher, name, ok := strings.Cut(strings.TrimSpace(pin), "/")
-		if !ok || publisher == "" || name == "" {
-			return nil, fmt.Errorf("skill sync: library pin %q must be <publisher>/<name>", pin)
+	publishers := append([]string(nil), cfg.GlobalPublishers...)
+	if len(publishers) == 0 && len(cfg.LibraryPins) > 0 {
+		seen := map[string]bool{}
+		for _, pin := range cfg.LibraryPins {
+			pub, _, ok := strings.Cut(strings.TrimSpace(pin), "/")
+			if ok && pub != "" && !seen[pub] {
+				seen[pub] = true
+				publishers = append(publishers, pub)
+			}
 		}
-		getReq, mErr := json.Marshal(struct {
-			Name      string `json:"name"`
-			Scope     string `json:"scope"`
-			ProjectID string `json:"project_id"`
-		}{Name: name, Scope: "library", ProjectID: publisher})
-		if mErr != nil {
-			return nil, mErr
+		if out != nil && len(publishers) > 0 {
+			fmt.Fprintf(out, "note: library_pins is deprecated — deriving global_publishers=%v from it. Migrate by replacing the pin list with `global_publishers`.\n", publishers)
 		}
-		raw, dErr := dispatch(ctx, "document_get", getReq)
-		if dErr != nil {
-			return nil, fmt.Errorf("skill sync: pinned library skill %q: %w", pin, dErr)
-		}
-		var got struct {
-			RawBody  string `json:"raw_body"`
-			Document struct {
-				ID            string `json:"id"`
-				LatestVersion int    `json:"latest_version"`
-			} `json:"document"`
-		}
-		if uErr := json.Unmarshal(raw, &got); uErr != nil {
-			return nil, fmt.Errorf("skill sync: decode pinned %q: %w", pin, uErr)
-		}
-		out = append(out, substrateSkill{
-			Name:       name,
-			DocumentID: got.Document.ID,
-			Version:    got.Document.LatestVersion,
-			Body:       got.RawBody,
-			Publisher:  publisher,
-		})
 	}
-	return out, nil
+	var out2 []substrateSkill
+	for _, pub := range publishers {
+		pub = strings.TrimSpace(pub)
+		if pub == "" {
+			continue
+		}
+		skills, err := listSubstrateSkills(ctx, dispatch, "library", "", pub, false)
+		if err != nil {
+			return nil, fmt.Errorf("skill sync: global publisher %q: %w", pub, err)
+		}
+		for i := range skills {
+			// A workflow is repo-owned client-dir config (order-2,
+			// .satellites/workflows), NEVER a consumed global skill — even if a
+			// publisher still hosts kind:workflow rows in the library, a consumer
+			// resolves its workflow locally. Skip them so global consumption can't
+			// re-materialise a workflow the repo customises.
+			if isWorkflowBody(skills[i].Body) {
+				continue
+			}
+			skills[i].Publisher = pub
+			out2 = append(out2, skills[i])
+		}
+	}
+	return out2, nil
 }
 
 func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string, effective bool) ([]substrateSkill, error) {

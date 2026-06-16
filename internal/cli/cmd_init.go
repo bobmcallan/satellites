@@ -111,7 +111,7 @@ func init() {
 
   - the .satellites/ directory,
   - a satellites.toml (created if missing, left intact if present),
-  - the documented library_pins consumption block in the toml,
+  - the documented global_publishers consumption block in the toml,
   - the PreToolUse START-door + advisory hooks in .claude/settings.json,
   - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
     code symbol index is refreshed deterministically each session.
@@ -119,9 +119,9 @@ func init() {
 init configures CONSUMPTION, not authoring: it writes NO local governance
 (workflow/gates/principles) into .satellites/. The system baseline (the
 authoring/review capabilities + principles shipped with satellites) is inherited
-automatically; CONSUME a workflow + its gates by adding their ` + "`<publisher>/<name>`" + `
-to library_pins, then ` + "`satellites skill sync`" + ` to materialise them into
-.claude/skills/ (sync-owned — never hand-write there).
+automatically; CONSUME a publisher's global workflow + gates by adding its
+` + "`<publisher>`" + ` to global_publishers, then ` + "`satellites skill sync`" + ` to
+materialise them into .claude/skills/ (sync-owned — never hand-write there).
 
 Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
@@ -183,19 +183,19 @@ func runInit(out io.Writer, repoRoot string) error {
 		return fmt.Errorf("init: stat %s: %w", tomlPath, statErr)
 	}
 
-	// 2b. Consumption config (epic:skills-registry order-7): a repo onboards by
-	//     CONSUMPTION, not authoring. The system baseline (the format/structure
-	//     capabilities + principles shipped with satellites) is inherited
-	//     automatically; a workflow + its gates are CONSUMED by pinning them in
-	//     library_pins, then `skill sync`. init seeds the documented (commented)
-	//     library_pins block — it writes NO local governance files. This retires
-	//     the epic:enforcement-surface trunk-workflow scaffold.
-	if appended, perr := ensureLibraryPinsBlock(tomlPath); perr != nil {
+	// 2b. Consumption config (epic:client-dir-separation order-4): a repo onboards
+	//     by CONSUMPTION, not authoring. The system baseline is inherited
+	//     automatically; a publisher's global governance (a workflow + its gates)
+	//     is CONSUMED by opting into the PUBLISHER in global_publishers, then
+	//     `skill sync`. init seeds the documented (commented) global_publishers
+	//     block — it writes NO local governance files. This retires the per-skill
+	//     library_pins.
+	if appended, perr := ensureGlobalPublishersBlock(tomlPath); perr != nil {
 		return perr
 	} else if appended {
-		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added library_pins consumption note)"))
+		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added global_publishers consumption note)"))
 	}
-	fmt.Fprintln(out, "  → governance: the system baseline (authoring/review capabilities + principles) is inherited automatically. CONSUME a workflow + its gates by adding their `<publisher>/<name>` to library_pins, then `satellites skill sync`. Author no governance locally.")
+	fmt.Fprintln(out, "  → governance: the system baseline (authoring/review capabilities + principles) is inherited automatically. CONSUME a publisher's global workflow + gates by adding its `<publisher>` to global_publishers, then `satellites skill sync`. Author no governance locally.")
 
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
@@ -221,50 +221,49 @@ const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`
 # repo root (top-level documents/ principles/ skills/):
 # [substrate_roots]
 # skills = "."
-` + libraryPinsBlock + ungatedDirsBlock
+` + globalPublishersBlock + ungatedDirsBlock
 
-// libraryPinsBlock documents the consumption knob (epic:skills-registry
-// order-7). A repo authors no governance locally — the system baseline (the
-// format/structure capabilities + principles shipped with satellites) is
-// inherited automatically, and a workflow + its gates are CONSUMED by pinning
-// them here, then materialised by ` + "`satellites skill sync`" + ` into
-// .claude/skills/. Commented + repo-agnostic by default: the operator pins the
-// governance their team publishes to the library.
-const libraryPinsBlock = `
-# library_pins — governance + skills this repo CONSUMES from the shared library,
-# each "<publisher>/<name>" (publisher = the publishing project id). The system
-# baseline is inherited with no setup; pin a workflow + its gates to be governed,
-# then run ` + "`satellites skill sync`" + ` to materialise them into .claude/skills/.
-# A repo authors no governance locally — a process change happens at the
-# registry/team level, not in this repo.
-# library_pins = ["<publisher>/<workflow>", "<publisher>/<gate>"]
+// globalPublishersBlock documents the consumption knob (epic:client-dir-separation
+// order-4, retiring the per-skill library_pins). A repo authors no governance
+// locally — the system baseline is inherited automatically, and a publisher's
+// global artifacts (a workflow + its gates) are CONSUMED by opting into the
+// PUBLISHER here, then materialised by ` + "`satellites skill sync`" + ` into
+// .claude/skills/. Commented + repo-agnostic by default.
+const globalPublishersBlock = `
+# global_publishers — the publishers (project ids) whose GLOBAL artifacts this
+# repo CONSUMES from the shared library. Opt into a publisher (not a hand-listed
+# per-skill set) and run ` + "`satellites skill sync`" + ` to materialise its global
+# governance (a workflow + its gates) into .claude/skills/. The system baseline
+# is inherited with no setup; a repo authors no governance locally. This retires
+# the per-skill library_pins (a remaining library_pins is still honoured as a
+# deprecated fallback — its publishers are derived).
+# global_publishers = ["<publisher>"]
 `
 
-// libraryPinsKey is the toml key init looks for before appending the block to an
-// existing config (idempotency).
-const libraryPinsKey = "library_pins"
+// globalPublishersKey is the toml key init looks for before appending the block
+// to an existing config (idempotency).
+const globalPublishersKey = "global_publishers"
 
-// ensureLibraryPinsBlock appends the documented library_pins consumption block
-// to an existing toml when the key is not already present (commented or active).
-// Idempotent: a second run is a no-op. Returns whether it appended. A freshly
-// written toml (scaffoldToml) already carries the block, so this is the
-// maintenance path for a pre-order-7 repo.
-func ensureLibraryPinsBlock(tomlPath string) (bool, error) {
+// ensureGlobalPublishersBlock appends the documented global_publishers consumption
+// block to an existing toml when neither it nor the deprecated library_pins is
+// already present. Idempotent: a second run is a no-op. Returns whether it
+// appended. A freshly written toml (scaffoldToml) already carries the block.
+func ensureGlobalPublishersBlock(tomlPath string) (bool, error) {
 	raw, err := os.ReadFile(tomlPath)
 	if err != nil {
 		return false, err
 	}
 	for _, ln := range strings.Split(string(raw), "\n") {
 		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ln), "#"))
-		if strings.HasPrefix(t, libraryPinsKey) {
-			return false, nil // already present (commented or active)
+		if strings.HasPrefix(t, globalPublishersKey) || strings.HasPrefix(t, "library_pins") {
+			return false, nil // already present (commented or active), or a legacy pinned repo
 		}
 	}
 	body := string(raw)
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
-	if err := os.WriteFile(tomlPath, []byte(body+libraryPinsBlock), 0o644); err != nil {
+	if err := os.WriteFile(tomlPath, []byte(body+globalPublishersBlock), 0o644); err != nil {
 		return false, err
 	}
 	return true, nil

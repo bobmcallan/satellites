@@ -142,6 +142,8 @@ type documentTarget struct {
 	Type      string   // "document" | "skill" — frontmatter value, defaulted per-kind
 	Tags      []string // optional, from frontmatter
 	Headline  string   // optional caveman one-liner, from frontmatter
+	Level     string   // optional declared visibility (system|project|global), from frontmatter
+	Scope     string   // optional explicit scope, from frontmatter (level fallback)
 	Body      string
 }
 
@@ -576,6 +578,8 @@ func classifyDocumentFile(filePath, kind, projectID string) documentTarget {
 		Type:      docType,
 		Tags:      fm.Tags,
 		Headline:  strings.TrimSpace(fm.Headline),
+		Level:     strings.TrimSpace(fm.Level),
+		Scope:     strings.TrimSpace(fm.Scope),
 		Body:      storedBody,
 	}
 }

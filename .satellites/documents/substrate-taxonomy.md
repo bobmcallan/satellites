@@ -33,6 +33,31 @@ is never a per-session judgement. This is the *placement test*;
 Ride-along is a **tag** (`principles:*`), not a kind: a document may carry it to
 ride along, but a document's default is consult-on-demand.
 
+## Visibility: levels + consumption (order-4)
+
+Every artifact DECLARES a **level** — one vocabulary across all kinds — that
+resolves to a storage scope:
+
+| Level | Scope | Meaning |
+|---|---|---|
+| `system` | system | built-in baseline; always present; never user-published |
+| `project` | project | this project's own, by membership |
+| `global` | library | shared, published for cross-repo consumption |
+
+**Publish routes by level** (`skill publish`): a `global` artifact lands on the
+shared library surface (publisher-stamped), a `project` artifact stays
+project-scoped, `system` is refused. **Sync pulls by entitlement**: system
+always; project/workspace by membership; **global only when the repo OPTS IN via
+`global_publishers`** (the publishers whose global artifacts it consumes). This
+RETIRES the per-skill `library_pins` (a remaining `library_pins` is honoured as a
+deprecated fallback — its publishers are derived).
+
+A **workflow is the local/project customization unit**: it lives in
+`.satellites/workflows/` (client-dir config, order-2), is resolved locally, and
+is NEVER consumed as a global skill — global consumption skips `kind:workflow`
+even if a publisher hosts one. A repo composes externally-developed **gates**
+(consumed `global`) under its own **workflow** (local).
+
 ## Intent is a Document
 
 Repo/project **intent** — why the project exists, what "good" means here — is a

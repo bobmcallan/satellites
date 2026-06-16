@@ -46,6 +46,12 @@ type Frontmatter struct {
 	AppliesTo []string `yaml:"applies_to"`
 	When      string   `yaml:"when"`
 
+	// Level is the visibility an artifact DECLARES (epic:client-dir-separation
+	// order-4): system / project / global — one vocabulary across all kinds.
+	// It RESOLVES to a storage scope (global→library, project→project,
+	// system→system); publish routes by it. Empty falls back to Scope.
+	Level string `yaml:"level"`
+
 	// Tools is the agent capability allowlist a kind:task skill declares
 	// (epic:workspace-agents): the policy of which tools the server agent may
 	// call lives in configuration here, not in the binary. Names are resolved
