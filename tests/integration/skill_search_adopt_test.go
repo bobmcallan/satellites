@@ -142,7 +142,7 @@ func TestSkillSearchAdopt(t *testing.T) {
 		return buf.String(), err
 	}
 
-	adoptedPath := filepath.Join(repo, "skills", "sec-scan.md")
+	adoptedPath := filepath.Join(repo, ".satellites", "skills", "sec-scan.md")
 
 	t.Run("search matches description across publishers as distinct rows", func(t *testing.T) {
 		out, err := runCLI("skill", "search", "vulnerability", "--config", tomlPath)

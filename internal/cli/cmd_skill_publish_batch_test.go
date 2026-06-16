@@ -12,7 +12,7 @@ import (
 // writeSkill creates a minimal valid skill file under .satellites/skills/.
 func writeSkill(t *testing.T, name string) {
 	t.Helper()
-	dir := filepath.Join(substrateRoot, "skills")
+	dir := filepath.Join(".satellites", "skills")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -27,10 +27,10 @@ func TestAllSkillNames(t *testing.T) {
 	writeSkill(t, "beta")
 	writeSkill(t, "alpha")
 	// A non-skill file is ignored.
-	if err := os.WriteFile(filepath.Join(substrateRoot, "skills", "notes.txt"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(".satellites", "skills", "notes.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := allSkillNames()
+	got, err := allSkillNames("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,17 +64,17 @@ func TestChangedSkillNames(t *testing.T) {
 	// Add one, modify one, delete one — then commit (the CI flow: the changed
 	// files are committed on the branch before publish runs).
 	writeSkill(t, "fresh") // new
-	if err := os.Remove(filepath.Join(substrateRoot, "skills", "todelete.md")); err != nil {
+	if err := os.Remove(filepath.Join(".satellites", "skills", "todelete.md")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(substrateRoot, "skills", "stable.md"),
+	if err := os.WriteFile(filepath.Join(".satellites", "skills", "stable.md"),
 		[]byte("---\nname: stable\ndescription: changed\n---\n\n# stable changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mustGit("add", "-A")
 	mustGit("commit", "-q", "-m", "change")
 
-	got, err := changedSkillNames(base)
+	got, err := changedSkillNames(base, "")
 	if err != nil {
 		t.Fatalf("changedSkillNames: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestChangedSkillNames(t *testing.T) {
 	}
 
 	// An unknown ref is an error, not an empty no-op.
-	if _, err := changedSkillNames("no-such-ref-xyz"); err == nil {
+	if _, err := changedSkillNames("no-such-ref-xyz", ""); err == nil {
 		t.Fatal("expected an error for an unknown git ref")
 	}
 }

@@ -51,6 +51,20 @@ type Config struct {
 	// verbatim.
 	SkillsRoot string `toml:"skills_root"`
 
+	// SubstrateRoots configures, PER KIND, the parent directory holding a kind's
+	// authoring SOURCE folder (documents/, principles/, skills/) — keyed by kind
+	// ("documents" / "principles" / "skills"). The authored source for kind K
+	// lives at <SubstrateRoots[K]>/<K>/. UNSET for a kind → the default
+	// ".satellites" (so .satellites/<K>/), the original convention. A repo
+	// relocates a kind to the repo root with `<K> = "."` (→ top-level <K>/), or
+	// elsewhere; a relative value resolves against the repo root (the dir holding
+	// .satellites/), absolute is used verbatim. Configuration over code: the
+	// location is data, the default encodes the convention (sty_f2aa0ab5).
+	//
+	//   [substrate_roots]
+	//   skills = "."        # author skills under the top-level skills/ folder
+	SubstrateRoots map[string]string `toml:"substrate_roots"`
+
 	// LibraryPins names the shared-library skills this repo consumes as-is,
 	// each "<publisher>/<name>" (publisher = the publishing project id).
 	// `skill sync` materialises pinned skills at lowest precedence — a

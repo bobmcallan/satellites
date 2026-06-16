@@ -59,33 +59,53 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// substrateRoot is the repo-local substrate source tree, relative to CWD —
-// the REPO ROOT (sty_a75dd8c5). Authoring sources live in TOP-LEVEL folders
-// (documents/, principles/, skills/), first-class repo content. `.satellites/`
-// is the client's config/state home only (satellites.toml, logs, state.db,
-// work, worktree, index.db) — it no longer holds authoring sources. The walker
-// only ever descends into the per-kind subdirectories named in kindDirs, so the
-// repo's other top-level dirs (internal/, cmd/, config/, …) are never touched.
-const substrateRoot = "."
+// substrateRootDefault is the DEFAULT parent directory holding a kind's
+// authoring source folder (documents/, principles/, skills/) — the original
+// convention (.satellites/<kind>/). It is only the default: the location is
+// CONFIGURED per-kind via the toml's [substrate_roots] and resolved by
+// resolveSubstrateRoot. Configuration over code — no baked path (sty_f2aa0ab5).
+const substrateRootDefault = ".satellites"
 
-// legacySubstrateRoot is the retired authoring location. A command that finds a
-// stale `.satellites/<kind>/` with sources nudges the operator to move it to the
-// top-level folder — the client no longer reads it (no silent dual-read).
-const legacySubstrateRoot = ".satellites"
+// resolveSubstrateRoot returns the parent directory holding `kind`'s authoring
+// source folder, from the toml's [substrate_roots] (per-kind), defaulting to
+// `.satellites`. A relative value resolves against the repo root (the dir
+// holding .satellites/, NOT the process CWD); absolute is used verbatim — so a
+// repo authoring under the top-level skills/ sets `skills = "."`. Mirrors
+// resolveSkillsRoot (sty_f2aa0ab5).
+func resolveSubstrateRoot(kind, configArg string) string {
+	root := substrateRootDefault
+	cfg, path, err := cliconfig.Load(configArg)
+	if err == nil {
+		if r := strings.TrimSpace(cfg.SubstrateRoots[kind]); r != "" {
+			root = r
+		}
+	}
+	if filepath.IsAbs(root) {
+		return root
+	}
+	return filepath.Join(cliconfig.RepoRootFromConfigPath(path), root)
+}
 
-// nudgeStaleSubstrateDir warns (one line, non-fatal) when the retired
-// `.satellites/<kind>/` still holds .md sources — the client no longer reads
-// it (sty_a75dd8c5). Surfacing it stops a silent "nothing uploaded" when the
-// operator has not yet moved the sources to the top-level folder.
-func nudgeStaleSubstrateDir(out io.Writer, kind string) {
-	legacy := filepath.Join(legacySubstrateRoot, kind)
+// nudgeStaleSubstrateDir warns (one line, non-fatal) when a `.satellites/<kind>/`
+// still holds .md sources while the kind's RESOLVED authoring root is elsewhere
+// (e.g. configured to the repo root) — those files are no longer read. Surfacing
+// it stops a silent "nothing uploaded". When the kind resolves to .satellites
+// (the default), .satellites/<kind>/ IS the source, so it stays silent.
+func nudgeStaleSubstrateDir(out io.Writer, kind, resolvedRoot string) {
+	legacy := filepath.Join(substrateRootDefault, kind)
+	// If the resolved source folder IS .satellites/<kind>, nothing is stale.
+	if abs, lerr := filepath.Abs(filepath.Join(resolvedRoot, kind)); lerr == nil {
+		if labs, lerr2 := filepath.Abs(legacy); lerr2 == nil && abs == labs {
+			return
+		}
+	}
 	entries, err := os.ReadDir(legacy)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
-			fmt.Fprintf(out, "note: %s/ is no longer read — authoring sources moved to the top-level %s/ folder. Move them: `git mv %s/* %s/`\n", legacy, kind, legacy, kind)
+			fmt.Fprintf(out, "note: %s/ holds sources but the %s authoring root is configured elsewhere (%s/%s) — those files are not read. Move or re-point them.\n", legacy, kind, resolvedRoot, kind)
 			return
 		}
 	}
@@ -199,7 +219,9 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 			// before any dispatch. Every noun's upload runs this — a mis-typed
 			// file anywhere refuses the push, naming file + rule. Pure read,
 			// so it also runs under --dry-run (sty_50ecb56f).
-			violations, err := validateUpload(substrateRoot, filepath.Join(".claude", "skills"), projectID)
+			violations, err := validateUpload(
+				func(k string) string { return resolveSubstrateRoot(k, *cfg.ConfigArg) },
+				filepath.Join(".claude", "skills"), projectID)
 			if err != nil {
 				return err
 			}
@@ -240,13 +262,14 @@ func projectIDFromConfig(configArg string) (string, error) {
 // plan+dispatch loop shared by the per-noun `upload` commands. `satellites
 // deploy` is pull-only and no longer calls this (sty_2fa6f087 follow-up).
 func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, projectID string, dryRun, skipReview bool) error {
-	targets, err := planUpload(substrateRoot, kind, projectID)
+	root := resolveSubstrateRoot(kind, configArg)
+	targets, err := planUpload(root, kind, projectID)
 	if err != nil {
 		return err
 	}
 	if len(targets) == 0 {
-		fmt.Fprintf(out, "no %s found under %s/ — nothing to upload\n", kind, kind)
-		nudgeStaleSubstrateDir(out, kind)
+		fmt.Fprintf(out, "no %s found under %s/ — nothing to upload\n", kind, filepath.Join(root, kind))
+		nudgeStaleSubstrateDir(out, kind, root)
 		return nil
 	}
 	reviewSkill := reviewSkillForKind(kind)
@@ -374,12 +397,12 @@ func (v violation) String() string {
 //     stamped skills are owned by another scope (sync materialises them here
 //     with no project source) and are exempt; unstamped local skills are
 //     operator-owned and ignored.
-func validateUpload(rootDir, skillsRoot, projectID string) ([]violation, error) {
+func validateUpload(rootForKind func(kind string) string, skillsRoot, projectID string) ([]violation, error) {
 	var vs []violation
 	configSkillNames := map[string]bool{}
 
 	for kindDir, defaultType := range kindDirs {
-		kindRoot := filepath.Join(rootDir, kindDir)
+		kindRoot := filepath.Join(rootForKind(kindDir), kindDir)
 		info, err := os.Stat(kindRoot)
 		if err != nil {
 			if os.IsNotExist(err) {

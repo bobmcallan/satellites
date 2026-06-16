@@ -104,7 +104,7 @@ func TestSkillPublishBatch(t *testing.T) {
 	mustGit("config", "user.email", "ci@example.com")
 	mustGit("config", "user.name", "ci")
 	mustGit("remote", "add", "origin", "https://github.com/example/skills.git")
-	skillsDir := filepath.Join(repo, "skills")
+	skillsDir := filepath.Join(repo, ".satellites", "skills")
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

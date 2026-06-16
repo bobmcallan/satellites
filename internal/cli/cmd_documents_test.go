@@ -14,27 +14,42 @@ import (
 // validateUpload in place of the retired path-encoded identity.
 const testProjectID = "proj_test"
 
-// TestSubstrateRoot_IsRepoRoot pins the order-1 contract (sty_a75dd8c5): the
-// authoring source root is the repo root, so planUpload resolves the TOP-LEVEL
-// kind folders (skills/, principles/, documents/), not .satellites/<kind>/.
-func TestSubstrateRoot_IsRepoRoot(t *testing.T) {
-	if substrateRoot != "." {
-		t.Fatalf("substrateRoot = %q, want \".\" (authoring sources are top-level repo folders)", substrateRoot)
+// constRoot adapts a single root to the per-kind resolver validateUpload now
+// takes — every kind resolves to the same fixture root.
+func constRoot(root string) func(string) string { return func(string) string { return root } }
+
+// TestSubstrateRootDefault pins the order-1b contract (sty_f2aa0ab5): the
+// authoring-source root is CONFIGURED in the toml, defaulting to .satellites —
+// never a hardcoded location (configuration over code).
+func TestSubstrateRootDefault(t *testing.T) {
+	if substrateRootDefault != ".satellites" {
+		t.Fatalf("substrateRootDefault = %q, want \".satellites\" (the convention is the default, not a baked path)", substrateRootDefault)
 	}
-	// A skill authored at the top-level skills/ folder is found.
-	root := t.TempDir()
-	writeSource(t, root, "skills/g.md", "---\nname: g\nkind: gate\n---\n# G\n")
-	targets, err := planUpload(filepath.Join(root, substrateRoot), "skills", testProjectID)
-	if err != nil {
-		t.Fatalf("planUpload: %v", err)
+	// With no config, a kind resolves to <repo>/.satellites (default).
+	prev, _ := os.Getwd()
+	repo := t.TempDir()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
 	}
-	if len(targets) != 1 {
-		t.Fatalf("expected 1 target under top-level skills/, got %d", len(targets))
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	got := resolveSubstrateRoot("skills", "")
+	if filepath.Base(got) != ".satellites" {
+		t.Fatalf("default skills root = %q, want a .satellites dir", got)
+	}
+	// A [substrate_roots] override relocates the kind to the repo root.
+	writeSource(t, repo, ".satellites/satellites.toml", "[substrate_roots]\nskills = \".\"\n")
+	if r := resolveSubstrateRoot("skills", ""); filepath.Base(r) == ".satellites" {
+		t.Fatalf("configured skills='.' should resolve the repo root, got %q", r)
+	}
+	// An unconfigured kind still defaults to .satellites.
+	if r := resolveSubstrateRoot("documents", ""); filepath.Base(r) != ".satellites" {
+		t.Fatalf("unconfigured documents should default to .satellites, got %q", r)
 	}
 }
 
-// TestNudgeStaleSubstrateDir pins AC3: a stale `.satellites/<kind>/` with .md
-// sources surfaces a one-line move nudge; an absent/empty legacy dir is silent.
+// TestNudgeStaleSubstrateDir: a `.satellites/<kind>/` with sources nudges when
+// the kind's RESOLVED root is elsewhere (e.g. the repo root); when the kind
+// resolves to .satellites/<kind> (the default) it stays silent.
 func TestNudgeStaleSubstrateDir(t *testing.T) {
 	prev, _ := os.Getwd()
 	repo := t.TempDir()
@@ -43,17 +58,20 @@ func TestNudgeStaleSubstrateDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(prev) })
 
+	writeSource(t, repo, ".satellites/skills/old.md", "---\nname: old\nkind: gate\n---\n# Old\n")
+
+	// Default root (.satellites): .satellites/skills/ IS the source — silent.
 	var quiet strings.Builder
-	nudgeStaleSubstrateDir(&quiet, "skills")
+	nudgeStaleSubstrateDir(&quiet, "skills", ".satellites")
 	if quiet.Len() != 0 {
-		t.Fatalf("no legacy dir should be silent, got: %s", quiet.String())
+		t.Fatalf("default .satellites root should be silent, got: %s", quiet.String())
 	}
 
-	writeSource(t, repo, ".satellites/skills/old.md", "---\nname: old\nkind: gate\n---\n# Old\n")
+	// Root configured to the repo root: .satellites/skills/ is stale — nudge.
 	var loud strings.Builder
-	nudgeStaleSubstrateDir(&loud, "skills")
-	if !strings.Contains(loud.String(), "no longer read") || !strings.Contains(loud.String(), "skills/") {
-		t.Fatalf("stale .satellites/skills/ should nudge, got: %s", loud.String())
+	nudgeStaleSubstrateDir(&loud, "skills", ".")
+	if !strings.Contains(loud.String(), "not read") {
+		t.Fatalf("stale .satellites/skills/ should nudge when the root is elsewhere, got: %s", loud.String())
 	}
 }
 
@@ -334,7 +352,7 @@ func TestValidateUpload_CleanTreePasses(t *testing.T) {
 	writeSource(t, root, "principles/agent-goals.md",
 		"---\ntags: [principles:project]\n---\n# goals\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "no-claude-skills"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "no-claude-skills"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -351,7 +369,7 @@ func TestValidateUpload_WorkflowLifecycleDrift(t *testing.T) {
 	writeSource(t, root, "skills/broken-workflow.md",
 		"---\nname: broken-workflow\ndescription: a cyclic workflow with no terminal\nkind: workflow\napplies_to: [broken]\n---\n# broken\n\n```yaml\nstates:\n  - a\n  - b\ntransitions:\n  - {from: a, to: b}\n  - {from: b, to: a}\n```\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -367,7 +385,7 @@ func TestValidateUpload_WorkflowLifecycleValidPasses(t *testing.T) {
 	writeSource(t, root, "skills/ok-workflow.md",
 		"---\nname: ok-workflow\ndescription: a sound lifecycle\nkind: workflow\napplies_to: [ok]\n---\n# ok\n\n```yaml\nstates:\n  - backlog\n  - in_progress\n  - done\ntransitions:\n  - {from: backlog, to: in_progress, reviewer_skill: plan}\n  - {from: in_progress, to: done, reviewer_skill: done}\n```\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -386,7 +404,7 @@ func TestValidateUpload_TypeMismatches(t *testing.T) {
 	writeSource(t, root, "documents/pretender.md",
 		"---\nname: pretender\ntype: skill\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -404,7 +422,7 @@ func TestValidateUpload_SkillMissingFrontmatter(t *testing.T) {
 	root := t.TempDir()
 	writeSource(t, root, "skills/bare.md", "---\n---\n# body only\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -428,7 +446,7 @@ func TestValidateUpload_SkillDispatch(t *testing.T) {
 	writeSource(t, root, "skills/ok-gate.md",
 		"---\nname: ok-gate\ndescription: d\nkind: gate\nwhen: status==in_progress\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -459,7 +477,7 @@ func TestValidateUpload_UnsupportedIdentity(t *testing.T) {
 	writeSource(t, root, "documents/wrong-proj.md",
 		"---\nname: wrong-proj\nproject_id: proj_OTHER\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -480,7 +498,7 @@ func TestValidateUpload_NestedLayoutRejected(t *testing.T) {
 	root := t.TempDir()
 	writeSource(t, root, "documents/wksp_one/proj_one/nested.md", "---\n---\n# x\n")
 
-	vs, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	vs, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -510,7 +528,7 @@ func TestValidateUpload_OrphanStampedSkill(t *testing.T) {
 		t.Fatalf("install orphan: %v", err)
 	}
 
-	vs, err := validateUpload(root, skillsRoot, testProjectID)
+	vs, err := validateUpload(constRoot(root), skillsRoot, testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -543,7 +561,7 @@ func TestValidateUpload_OrphanCheckScopeAware(t *testing.T) {
 		t.Fatalf("install proj: %v", err)
 	}
 
-	vs, err := validateUpload(root, skillsRoot, testProjectID)
+	vs, err := validateUpload(constRoot(root), skillsRoot, testProjectID)
 	if err != nil {
 		t.Fatalf("validateUpload: %v", err)
 	}
@@ -561,11 +579,11 @@ func TestValidateUpload_Idempotent(t *testing.T) {
 	root := t.TempDir()
 	writeSource(t, root, "skills/bad.md", "---\n---\n# x\n")
 
-	a, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	a, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	b, err := validateUpload(root, filepath.Join(root, "none"), testProjectID)
+	b, err := validateUpload(constRoot(root), filepath.Join(root, "none"), testProjectID)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}

@@ -239,7 +239,7 @@ func adoptSkill(ctx context.Context, out io.Writer, ref, configArg, userArg stri
 		return fmt.Errorf("adopt: decode get: %w", err)
 	}
 
-	dest := filepath.Join(substrateRoot, "skills", name+".md")
+	dest := filepath.Join(resolveSubstrateRoot("skills", configArg), "skills", name+".md")
 	if _, statErr := os.Stat(dest); statErr == nil && !force {
 		return fmt.Errorf("adopt: %s already exists — silent overwrite refused; re-run with --force to confirm", dest)
 	}

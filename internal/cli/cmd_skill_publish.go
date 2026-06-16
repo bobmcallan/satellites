@@ -93,9 +93,9 @@ no-op (exit 0). --dryrun and --skip-review apply across the batch.`,
 				err   error
 			)
 			if all {
-				names, err = allSkillNames()
+				names, err = allSkillNames(*configArg)
 			} else {
-				names, err = changedSkillNames(changedSince)
+				names, err = changedSkillNames(changedSince, *configArg)
 			}
 			if err != nil {
 				return err
@@ -133,9 +133,10 @@ func publishBatch(ctx context.Context, out io.Writer, names []string, configArg,
 	return nil
 }
 
-// allSkillNames returns every skill base name under .satellites/skills/, sorted.
-func allSkillNames() ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(substrateRoot, "skills", "*.md"))
+// allSkillNames returns every skill base name under the configured skills
+// authoring root (default .satellites/skills/), sorted.
+func allSkillNames(configArg string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(resolveSubstrateRoot("skills", configArg), "skills", "*.md"))
 	if err != nil {
 		return nil, fmt.Errorf("publish: scan skills: %w", err)
 	}
@@ -150,8 +151,8 @@ func allSkillNames() ([]string, error) {
 // changedSkillNames returns the base names of skill files that differ from ref,
 // keeping only files that still exist (a deletion cannot be published). A git
 // failure (e.g. an unknown ref) is an error, distinct from an empty diff.
-func changedSkillNames(ref string) ([]string, error) {
-	skillsDir := filepath.Join(substrateRoot, "skills")
+func changedSkillNames(ref, configArg string) ([]string, error) {
+	skillsDir := filepath.Join(resolveSubstrateRoot("skills", configArg), "skills")
 	outBytes, err := exec.Command("git", "diff", "--name-only", ref, "--", skillsDir).Output()
 	if err != nil {
 		return nil, fmt.Errorf("publish: git diff against %q: %w", ref, err)
@@ -183,10 +184,11 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(substrateRoot, "skills", name+".md")
+	root := resolveSubstrateRoot("skills", configArg)
+	path := filepath.Join(root, "skills", name+".md")
 	if _, err := os.Stat(path); err != nil {
-		nudgeStaleSubstrateDir(out, "skills")
-		return fmt.Errorf("publish: no skill at %s — author it under the top-level skills/ folder first", path)
+		nudgeStaleSubstrateDir(out, "skills", root)
+		return fmt.Errorf("publish: no skill at %s — author it under the configured skills/ folder first", path)
 	}
 	t := classifyDocumentFile(path, "skills", publisher)
 	if strings.TrimSpace(t.Body) == "" {

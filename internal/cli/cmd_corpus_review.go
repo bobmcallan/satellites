@@ -120,7 +120,7 @@ func runCorpusReview(ctx context.Context, opts corpusReviewOpts) error {
 	if err != nil {
 		return err
 	}
-	allTargets, err := planUpload(substrateRoot, opts.Kind, projectID)
+	allTargets, err := planUpload(resolveSubstrateRoot(opts.Kind, opts.ConfigArg), opts.Kind, projectID)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func selectReviewTargets(targets []documentTarget, name string, all bool) ([]doc
 				return []documentTarget{t}, nil
 			}
 		}
-		return nil, fmt.Errorf("no source artifact named %q under %s", name, substrateRoot)
+		return nil, fmt.Errorf("no source artifact named %q in the authoring source folder", name)
 	}
 }
 

@@ -211,6 +211,12 @@ const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`
 # project_id = "proj_..."
 # data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
 # work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
+#
+# substrate_roots — per-kind authoring-source parent dir (default ".satellites",
+# i.e. .satellites/<kind>). Override a kind to author it elsewhere, e.g. at the
+# repo root (top-level documents/ principles/ skills/):
+# [substrate_roots]
+# skills = "."
 ` + libraryPinsBlock + ungatedDirsBlock
 
 // libraryPinsBlock documents the consumption knob (epic:skills-registry
