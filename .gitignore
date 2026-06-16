@@ -36,10 +36,14 @@ go.work.sum
 /bin/
 /dist/
 
-# Satellites — .satellites/ is the client's config/state home (ignored).
-# Authoring sources (documents/, principles/, skills/) are TOP-LEVEL repo
-# folders (sty_a75dd8c5), tracked by default — not under .satellites/.
+# Satellites — .satellites/ is the client's config/state home (ignored). The
+# DEFAULT authoring locations .satellites/{documents,principles,skills}/ are the
+# tracked exceptions; a repo that RELOCATES a kind via [substrate_roots] (e.g. a
+# skills repo with skills = ".") tracks it at the configured path instead.
 .satellites/*
+!.satellites/documents/
+!.satellites/principles/
+!.satellites/skills/
 !.satellites/seeds/
 
 /scripts/satellites-server.toml
