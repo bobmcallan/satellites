@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
 )
@@ -181,7 +182,10 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []d
 		}
 	}
 	for g := range named {
-		if _, ok := byName[g]; !ok {
+		// An internal embedded gate (satellites' own governance, injected from
+		// the binary) is AVAILABLE even though it is never materialised to
+		// .claude/skills — naming it is not a missing gate (2.4.1).
+		if _, ok := byName[g]; !ok && !verb.IsInternalGate(g) {
 			out = append(out, driftFinding{"block", "missing-gate", g,
 				"a workflow names this reviewer skill but it is not materialised in .claude/skills — its transition fails closed"})
 		}
@@ -304,7 +308,9 @@ func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string
 		wf, err := workflow.ParseBody([]byte(st.Body))
 		if err == nil && wf != nil {
 			for _, tr := range wf.Transitions {
-				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] {
+				// An internal embedded gate is resolvable from the binary even
+				// when not materialised — not an unresolvable reviewer (2.4.1).
+				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] && !verb.IsInternalGate(g) {
 					out = append(out, driftFinding{"block", "unresolvable-gate", st.ID,
 						fmt.Sprintf("embedded workflow names reviewer %q which is not materialised — the story cannot move", g)})
 				}

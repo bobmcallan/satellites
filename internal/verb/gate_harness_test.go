@@ -128,3 +128,14 @@ func TestInternalGateRaw_Registry(t *testing.T) {
 		t.Fatal("unknown name must not resolve as an internal gate")
 	}
 }
+
+// TestIsInternalGate pins the public predicate the drift checks use to treat an
+// embedded internal gate as available (epic:satellites-backbone 2.4.1).
+func TestIsInternalGate(t *testing.T) {
+	if !IsInternalGate("satellites-internal-selfcheck") {
+		t.Fatal("embedded internal gate must report IsInternalGate true")
+	}
+	if IsInternalGate("satellites-story-plan-review") {
+		t.Fatal("a non-embedded (materialised) gate must report IsInternalGate false")
+	}
+}

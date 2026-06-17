@@ -32,3 +32,13 @@ func internalGateRaw(name string) ([]byte, bool) {
 	}
 	return raw, true
 }
+
+// IsInternalGate reports whether name resolves to a satellites-internal embedded
+// gate. A workflow may NAME such a gate even though it is never materialised to
+// .claude/skills, so the process-drift checks (workflow check, story governance)
+// must treat it as AVAILABLE rather than missing/unresolvable
+// (epic:satellites-backbone 2.4.1).
+func IsInternalGate(name string) bool {
+	_, ok := internalGateRaw(name)
+	return ok
+}

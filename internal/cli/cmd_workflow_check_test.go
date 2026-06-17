@@ -3,7 +3,56 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/verb"
 )
+
+// TestWorkflowCheck_InternalGateRecognised: a workflow may NAME a satellites-
+// internal embedded gate (never materialised to .claude/skills); the drift
+// checks must treat it as AVAILABLE — no missing-gate, no unresolvable-gate, and
+// no first-gate-shallow when it is the entry reviewer (epic:satellites-backbone
+// 2.4.1).
+func TestWorkflowCheck_InternalGateRecognised(t *testing.T) {
+	const internalGate = "satellites-internal-selfcheck" // embedded in internal/verb
+	if !verb.IsInternalGate(internalGate) {
+		t.Fatalf("precondition: %q must be an embedded internal gate", internalGate)
+	}
+
+	// A workflow whose ENTRY reviewer and a CHECKPOINT gate are both the internal
+	// gate; neither is materialised, yet the corpus must be clean.
+	wfBody := "# wf\n\n## Checkpoint gates\n\n- [[" + internalGate + "]] — always.\n\n```yaml\nstates:\n  - backlog\n  - {name: doing, actor: executor}\n  - done\ntransitions:\n  - {from: backlog, to: doing, reviewer_skill: \"" + internalGate + "\"}\n  - {from: doing, to: done, reviewer_skill: \"exit-review\"}\n```\n"
+	raw := "---\nname: internal-wf\nkind: workflow\napplies_to: [\"any\"]\ndescription: names an internal gate\n---\n" + wfBody
+	skills := []matSkill{
+		{name: "internal-wf", kind: "workflow", description: "names an internal gate", body: wfBody, raw: raw},
+		{name: "exit-review", kind: "gate", description: "exit gate", body: "verify the acceptance criteria\n",
+			raw: "---\nname: exit-review\nkind: gate\ndescription: exit gate\n---\nverify the acceptance criteria\n"},
+	}
+	story := []storyLite{{ID: "sty_x", Category: "any", Status: "backlog",
+		Body: "# s\n\n## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"" + internalGate + "\"}\n```\n"}}
+
+	for _, f := range runWorkflowChecks(skills, nil, story) {
+		if f.Severity != "block" {
+			continue
+		}
+		if f.Code == "missing-gate" || f.Code == "unresolvable-gate" || f.Code == "first-gate-shallow" {
+			t.Errorf("internal gate must be recognised, got %s on %q: %s", f.Code, f.Artifact, f.Message)
+		}
+	}
+
+	// Control: a non-internal gate named the same way IS still missing.
+	ctrlBody := "# wf\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"not-an-internal-gate\"}\n```\n"
+	ctrl := []matSkill{{name: "ctrl-wf", kind: "workflow", description: "d", body: ctrlBody,
+		raw: "---\nname: ctrl-wf\nkind: workflow\napplies_to: [\"any\"]\ndescription: d\n---\n" + ctrlBody}}
+	hitMissing := false
+	for _, f := range runWorkflowChecks(ctrl, nil, nil) {
+		if f.Code == "missing-gate" && f.Artifact == "not-an-internal-gate" {
+			hitMissing = true
+		}
+	}
+	if !hitMissing {
+		t.Error("control: a non-internal named gate must still report missing-gate")
+	}
+}
 
 // Fixture corpus helpers — a minimal healthy process: one workflow naming
 // one entry gate (comprehensive) + one checkpoint gate, both materialised.
