@@ -18,7 +18,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/blob"
-	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/config"
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
@@ -94,10 +93,6 @@ func main() {
 	blobStore := blob.New(sqlDB) // binary ingestion (sty_59652a7d)
 	ledgerStore := ledger.New(sqlDB)
 	verb.SetLedgerStore(ledgerStore)
-
-	clStore := changelog.New(sqlDB)
-	verb.SetChangelogStore(clStore)
-	server.SetChangelogStore(clStore)
 
 	// The server-side story_request_review driver was retired (sty_6e1c3641):
 	// the reviewer gate runs client-side (satellites story review), spawning

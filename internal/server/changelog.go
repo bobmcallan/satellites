@@ -2,48 +2,36 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"html/template"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/parser"
 
-	"github.com/bobmcallan/satellites/internal/arbor"
-	"github.com/bobmcallan/satellites/internal/changelog"
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
-var changelogPaginatorKeys = paginatorKeys{
-	Page: "changelog_page", Cursor: "changelog_cursor", Back: "changelog_back",
-}
+// changelogDocType is the documents.type discriminator for changelog rows. The
+// server reaches the substrate through verb dispatch, not the document domain
+// package (the layering guard), so the type rides as a literal here.
+const changelogDocType = "changelog"
 
-const (
-	changelogPageSizeFallback = 20
-	changelogPageSizeMax      = 200
-)
+// changelogListCap bounds the single-page /changelog listing. Changelog entries
+// are manual release notes (low volume); the cursor pagination the dedicated
+// table once carried is dropped with the table — one capped page is enough
+// (epic:satellites-backbone, Workstream C). Raise this if a corpus ever exceeds
+// it (the page would silently truncate, never error).
+const changelogListCap = 200
 
-// changelogStore is wired by the server boot path. Unwired callers
-// (some unit tests) get a "not configured" 500 from the handler.
-var changelogStore *changelog.Store
-
-// SetChangelogStore is called from main once the DB is open. Keeping
-// the wire-up here rather than threading the store through Config
-// matches the verb-package pattern (SetAuthStore, SetProjectStore).
-func SetChangelogStore(s *changelog.Store) { changelogStore = s }
-
-// markdownRenderer is the per-process goldmark instance used for
-// rendering changelog entry content. WithUnsafe is intentionally
-// absent — goldmark refuses to emit raw HTML by default, so any
-// <script> the operator inserts in a content body lands as escaped
-// text. No WithHardWraps: bodies are authored with ~80-column source
-// wrapping, and hard wraps would pin the rendered prose to that width
-// instead of letting paragraphs reflow to the container (sty_2021031d).
-// The renderer is safe to use concurrently.
+// markdownRenderer is the per-process goldmark instance used for rendering
+// changelog entry content (and, via renderStoryMarkdown, story/project bodies).
+// WithUnsafe is intentionally absent — goldmark refuses to emit raw HTML by
+// default, so any <script> in a body lands as escaped text. Safe to use
+// concurrently.
 var markdownRenderer = goldmark.New(
 	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 )
@@ -51,24 +39,34 @@ var markdownRenderer = goldmark.New(
 var changelogTmpl = template.Must(template.ParseFS(assets,
 	"templates/changelog.html", "templates/_user_menu.html"))
 
-// changelogGroup buckets changelog.Entry rows by service. Internal to
-// the grouping step — the template renders the view variant below.
-type changelogGroup struct {
-	Service string
-	Entries []changelog.Entry
+// clEntry is the changelog row as reconstructed from a type:changelog document —
+// the typed fields (service / version_from / version_to / effective_date) ride
+// as tags, the content is the document's latest body. It replaces the retired
+// changelog.Entry now that changelog lives in the documents store.
+type clEntry struct {
+	ID            string
+	Service       string
+	VersionFrom   string
+	VersionTo     string
+	Content       string
+	CreatedAt     time.Time
+	EffectiveDate *time.Time
 }
 
-// changelogGroupView is the render-time shape: rows already pass
-// through markdown rendering, dates formatted as YYYY-MM-DD.
+// changelogGroup buckets clEntry rows by service.
+type changelogGroup struct {
+	Service string
+	Entries []clEntry
+}
+
+// changelogGroupView is the render-time shape: rows already pass through
+// markdown rendering, dates formatted as YYYY-MM-DD.
 type changelogGroupView struct {
 	Service string
 	Entries []changelogEntryView
 }
 
-// changelogEntryView wraps a changelog.Entry with the rendered HTML
-// body. Content is rendered through goldmark; the result is wrapped
-// in template.HTML so the template emits it without a second escape
-// pass.
+// changelogEntryView wraps a clEntry with the rendered HTML body.
 type changelogEntryView struct {
 	ID            string
 	VersionFrom   string
@@ -91,88 +89,62 @@ type changelogPageData struct {
 	Version     string
 }
 
-// readChangelogPageSize mirrors readStoryPageSize: pulls the
-// operator-tuned page size from the system KV via variable_get. Falls
-// back to the const on miss / decode failure / non-numeric value with
-// a WARN log so the misconfiguration is visible.
-func readChangelogPageSize(ctx context.Context) int {
-	body, _ := json.Marshal(verb.VariableGetRequest{
-		Name:  "changelog.page_size",
-		Scope: "system",
-	})
-	raw, err := verb.Dispatch(ctx, "variable_get", body)
-	if err != nil {
-		arbor.WarnCtx(ctx, "changelog page_size: variable_get failed, using fallback",
-			"fallback", changelogPageSizeFallback, "err", err)
-		return changelogPageSizeFallback
-	}
-	var resp verb.VariableGetResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		arbor.WarnCtx(ctx, "changelog page_size: decode failed, using fallback", "err", err)
-		return changelogPageSizeFallback
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(resp.Value))
-	if err != nil || n < 1 {
-		arbor.WarnCtx(ctx, "changelog page_size: non-numeric KV value, using fallback",
-			"value", resp.Value, "fallback", changelogPageSizeFallback)
-		return changelogPageSizeFallback
-	}
-	if n > changelogPageSizeMax {
-		return changelogPageSizeMax
-	}
-	return n
-}
-
-// changelogHandler serves GET /changelog. Public — no auth required;
-// the user menu degrades to a sign-in chip when no session cookie is
-// present. Listing fetches the first page (200 max) and groups by
-// service before rendering.
+// changelogHandler serves GET /changelog. Public — no auth required. It reads
+// type:changelog documents from the generic substrate (document_list +
+// document_get for bodies — the /library pattern), maps each back to a clEntry,
+// and groups by service before rendering. The dedicated changelog table + verbs
+// are retired (epic:satellites-backbone, Workstream C).
 func changelogHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/changelog" {
 			http.NotFound(w, r)
 			return
 		}
-		if changelogStore == nil {
-			http.Error(w, "changelog store not configured", http.StatusInternalServerError)
-			return
-		}
-
 		ctx := r.Context()
-		q := r.URL.Query()
-		pageSize := readChangelogPageSize(ctx)
-		cursor := q.Get(changelogPaginatorKeys.Cursor)
-		page := 1
-		if p := strings.TrimSpace(q.Get(changelogPaginatorKeys.Page)); p != "" {
-			if n, err := strconv.Atoi(p); err == nil && n > 0 {
-				page = n
-			}
-		}
-		backStack := readBackStack(q, changelogPaginatorKeys)
 
-		res, err := changelogStore.List(ctx, changelog.ListOptions{
-			Cursor: cursor,
-			Limit:  pageSize,
+		listBody, _ := json.Marshal(verb.DocumentListRequest{
+			Type:  changelogDocType,
+			Scope: "system",
+			Limit: changelogListCap,
 		})
+		raw, err := verb.Dispatch(ctx, "document_list", listBody)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		paginator := paginatorData{
-			Page:     page,
-			HasPrev:  len(backStack) > 0,
-			HasNext:  res.NextCursor != "",
-			PageSize: pageSize,
-		}
-		if paginator.HasPrev {
-			paginator.PrevURL = prevPageURL("/changelog", page, backStack, changelogPaginatorKeys)
-		}
-		if paginator.HasNext {
-			paginator.NextURL = nextPageURL("/changelog", page, cursor, res.NextCursor, backStack, changelogPaginatorKeys)
+		var lr verb.DocumentListResponse
+		if err := json.Unmarshal(raw, &lr); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
-		groups := groupByService(res.Items)
+		entries := make([]clEntry, 0, len(lr.Items))
+		for _, it := range lr.Items {
+			e := clEntry{
+				ID:          it.ID,
+				Service:     tagValue(it.Tags, "service:"),
+				VersionFrom: tagValue(it.Tags, "version_from:"),
+				VersionTo:   tagValue(it.Tags, "version_to:"),
+				CreatedAt:   it.CreatedAt,
+			}
+			if d := tagValue(it.Tags, "effective_date:"); d != "" {
+				if t, perr := time.Parse("2006-01-02", d); perr == nil {
+					e.EffectiveDate = &t
+				}
+			}
+			// Body via document_get by id (the list view carries no body; id
+			// always resolves, unlike a type-scoped name lookup).
+			getBody, _ := json.Marshal(verb.DocumentGetRequest{ID: it.ID})
+			if graw, gerr := verb.Dispatch(ctx, "document_get", getBody); gerr == nil {
+				var gr verb.DocumentGetResponse
+				if json.Unmarshal(graw, &gr) == nil {
+					e.Content = gr.RawBody
+				}
+			}
+			entries = append(entries, e)
+		}
+
+		groups := groupByService(entries)
 		views := make([]changelogGroupView, 0, len(groups))
 		for _, g := range groups {
 			ev := make([]changelogEntryView, 0, len(g.Entries))
@@ -195,14 +167,11 @@ func changelogHandler(cfg Config) http.HandlerFunc {
 		data := changelogPageData{
 			Title:       "changelog · satellites",
 			Groups:      views,
-			Paginator:   paginator,
 			ActiveNav:   "changelog",
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
 			Version:     versionString(),
 		}
-		// Best-effort user resolution for the nav avatar — same pattern
-		// as indexHandler.
 		if cfg.Sessions != nil {
 			if userID, err := cfg.Sessions.UserID(r); err == nil && cfg.Store != nil && cfg.Store.DB != nil {
 				if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -220,11 +189,20 @@ func changelogHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// groupByService partitions entries into service buckets. Service
-// order follows first-appearance in the input slice (which the store
-// already orders by effective_date / created_at), so the busiest
-// service surfaces first on the page.
-func groupByService(entries []changelog.Entry) []changelogGroup {
+// tagValue returns the suffix of the first tag with the given "key:" prefix, or
+// "" when none is present.
+func tagValue(tags []string, prefix string) string {
+	for _, t := range tags {
+		if strings.HasPrefix(t, prefix) {
+			return strings.TrimPrefix(t, prefix)
+		}
+	}
+	return ""
+}
+
+// groupByService partitions entries into service buckets, first-appearance
+// order, with effective_date DESC within a group (NULLs last).
+func groupByService(entries []clEntry) []changelogGroup {
 	byService := map[string]*changelogGroup{}
 	order := []string{}
 	for _, e := range entries {
@@ -239,8 +217,6 @@ func groupByService(entries []changelog.Entry) []changelogGroup {
 	out := make([]changelogGroup, 0, len(order))
 	for _, name := range order {
 		g := byService[name]
-		// Stable secondary sort within a group — preserves store order
-		// for ties but keeps NULL-effective_date rows last.
 		sort.SliceStable(g.Entries, func(i, j int) bool {
 			return effectiveDateAfter(g.Entries[i], g.Entries[j])
 		})
@@ -249,7 +225,7 @@ func groupByService(entries []changelog.Entry) []changelogGroup {
 	return out
 }
 
-func effectiveDateAfter(a, b changelog.Entry) bool {
+func effectiveDateAfter(a, b clEntry) bool {
 	switch {
 	case a.EffectiveDate != nil && b.EffectiveDate != nil:
 		return a.EffectiveDate.After(*b.EffectiveDate)
@@ -262,10 +238,10 @@ func effectiveDateAfter(a, b changelog.Entry) bool {
 	}
 }
 
-// renderMarkdown converts the supplied markdown to safe HTML. goldmark
-// is configured without WithUnsafe, so raw HTML and dangerous URL
-// schemes are escaped at the renderer layer. Errors fall back to an
-// empty body so a malformed entry doesn't break the page.
+// renderMarkdown converts markdown to safe HTML (goldmark without WithUnsafe, so
+// raw HTML and dangerous URL schemes are escaped). Errors fall back to an empty
+// body so a malformed entry can't break the page. Shared by the story/project
+// detail renderers via renderStoryMarkdown.
 func renderMarkdown(md string) template.HTML {
 	var buf bytes.Buffer
 	if err := markdownRenderer.Convert([]byte(md), &buf); err != nil {
@@ -275,11 +251,7 @@ func renderMarkdown(md string) template.HTML {
 }
 
 // unescapeLiteralNewlines repairs a body whose newlines/tabs were stored as
-// literal backslash escape sequences (e.g. a caller that JSON-escaped the body,
-// so it reaches the store as the two characters backslash-n rather than a
-// newline — sty_0633bcf5). Without this, markdown headings/lists never form and
-// the body renders as one run-on line. No-op when no escape sequence is present,
-// so a clean body is untouched.
+// literal backslash escape sequences (sty_0633bcf5). No-op when none present.
 func unescapeLiteralNewlines(s string) string {
 	if !strings.Contains(s, `\n`) && !strings.Contains(s, `\t`) {
 		return s
@@ -291,8 +263,7 @@ func unescapeLiteralNewlines(s string) string {
 }
 
 // renderStoryMarkdown renders a story body/ACs to safe HTML, first repairing
-// literal-escape-sequence newlines (sty_0633bcf5) so escaped bodies read the
-// same as clean ones.
+// literal-escape-sequence newlines so escaped bodies read the same as clean ones.
 func renderStoryMarkdown(md string) template.HTML {
 	return renderMarkdown(unescapeLiteralNewlines(md))
 }

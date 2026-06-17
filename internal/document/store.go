@@ -77,8 +77,8 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	if docType == "" {
 		docType = TypeDocument
 	}
-	if docType != TypeDocument && docType != TypeSkill {
-		return Document{}, Version{}, fmt.Errorf("document: upsert: unsupported type %q (allowed: document, skill)", docType)
+	if docType != TypeDocument && docType != TypeSkill && docType != TypeChangelog {
+		return Document{}, Version{}, fmt.Errorf("document: upsert: unsupported type %q (allowed: document, skill, changelog)", docType)
 	}
 	now = now.UTC()
 
@@ -418,7 +418,7 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 // free-form rows with a tags column; 'story' and 'task' route tag
 // changes through their own update paths and must not be written here.
 func tagsSettableForType(t string) bool {
-	return t == TypeDocument || t == TypeSkill
+	return t == TypeDocument || t == TypeSkill || t == TypeChangelog
 }
 
 // SetDocumentHeadline writes the caveman one-line headline on a documents

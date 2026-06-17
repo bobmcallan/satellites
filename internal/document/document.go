@@ -108,10 +108,11 @@ type Document struct {
 
 // Type values for the documents.type discriminator.
 const (
-	TypeDocument = "document"
-	TypeStory    = "story"
-	TypeTask     = "task"
-	TypeSkill    = "skill"
+	TypeDocument  = "document"
+	TypeStory     = "story"
+	TypeTask      = "task"
+	TypeSkill     = "skill"
+	TypeChangelog = "changelog"
 )
 
 // Version is an immutable row from document_versions.

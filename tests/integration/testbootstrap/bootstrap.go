@@ -148,7 +148,7 @@ func SetUp(t *testing.T) *Env {
 func resetAll(t *testing.T, env *Env) {
 	t.Helper()
 	if _, err := env.DB.Exec(`
-        TRUNCATE api_keys, blobs, changelog,
+        TRUNCATE api_keys, blobs,
                  documents, document_versions, evidence,
                  invitations, oauth_clients, oauth_codes,
                  oauth_refresh_tokens, oauth_sessions, oauth_states,
