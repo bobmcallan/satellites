@@ -157,31 +157,26 @@ func buildAlwaysContent(ctx context.Context, configPath, userID string) (string,
 	// the config the same way `satellites document index` does, else the server
 	// refuses the list with "project scope requires project_id".
 	wsID, pjID := resolveSkillScopeBinding(ctx, configPath, userID, "", "")
-	listReq, err := json.Marshal(docListRequest{
-		Type:        "document",
-		Scope:       "project",
-		WorkspaceID: wsID,
-		ProjectID:   pjID,
-		Tags:        []string{alwaysTag},
-		Limit:       50,
-		Effective:   true,
-	})
+	// The resident set is the UNION of the SYSTEM baseline principles:always
+	// (agent-goals, broken-windows, story-execution-process — and the
+	// constitution once it is baselined) and THIS project's always-principles,
+	// project winning on a name clash (a repo override of a baseline). Querying
+	// project scope alone silently dropped every system baseline principle
+	// (sty_957a041b). The project list is required (its failure fails the
+	// inject); a system-list failure is non-fatal so a repo still gets its own
+	// resident set.
+	projItems, err := listAlwaysItems(ctx, "project", wsID, pjID, configPath, userID)
 	if err != nil {
 		return "", false, err
 	}
-	raw, err := dispatchVerb(ctx, "document_list", listReq, configPath, userID)
-	if err != nil {
-		return "", false, err
+	sysItems, sysErr := listAlwaysItems(ctx, "system", "", "", configPath, userID)
+	if sysErr != nil {
+		sysItems = nil
 	}
-	var listed struct {
-		Items []alwaysListItem `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &listed); err != nil {
-		return "", false, err
-	}
+	items := mergeAlwaysItems(sysItems, projItems)
 
-	parts := make([]string, 0, len(listed.Items))
-	for _, it := range listed.Items {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
 		body, gerr := fetchDocumentBody(ctx, it.Name, it.Scope, wsID, pjID, configPath, userID)
 		if gerr != nil || strings.TrimSpace(body) == "" {
 			continue // skip an unreadable member rather than abort the whole inject
@@ -198,6 +193,62 @@ func buildAlwaysContent(ctx context.Context, configPath, userID string) (string,
 	}
 	b.WriteString(alwaysIndexInstruction)
 	return b.String(), truncated, nil
+}
+
+// listAlwaysItems lists the principles:always documents at one scope. System
+// scope is global (no project binding); project scope needs the workspace +
+// project binding the caller resolved. Effective overlays the user's own
+// overrides onto the listed set.
+func listAlwaysItems(ctx context.Context, scope, wsID, pjID, configPath, userID string) ([]alwaysListItem, error) {
+	req := docListRequest{
+		Type:      "document",
+		Scope:     scope,
+		Tags:      []string{alwaysTag},
+		Limit:     50,
+		Effective: true,
+	}
+	if scope == "project" {
+		req.WorkspaceID = wsID
+		req.ProjectID = pjID
+	}
+	listReq, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := dispatchVerb(ctx, "document_list", listReq, configPath, userID)
+	if err != nil {
+		return nil, err
+	}
+	var listed struct {
+		Items []alwaysListItem `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return nil, err
+	}
+	return listed.Items, nil
+}
+
+// mergeAlwaysItems unions the system-scope and project-scope always sets,
+// project winning on a name clash (a repo override of a baseline principle).
+// Order is stable: system baseline first, then project-only additions — a
+// clashing project item replaces the system one in place. Both scopes inject;
+// the resident set is the union, never project-only (sty_957a041b).
+func mergeAlwaysItems(system, project []alwaysListItem) []alwaysListItem {
+	out := make([]alwaysListItem, 0, len(system)+len(project))
+	idx := map[string]int{}
+	add := func(items []alwaysListItem) {
+		for _, it := range items {
+			if i, ok := idx[it.Name]; ok {
+				out[i] = it // later scope (project) wins on a name clash
+				continue
+			}
+			idx[it.Name] = len(out)
+			out = append(out, it)
+		}
+	}
+	add(system)
+	add(project)
+	return out
 }
 
 // fetchDocumentBody pulls one document's rendered body via document_get. A

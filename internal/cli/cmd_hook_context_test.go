@@ -167,3 +167,38 @@ func TestRunHookContext_SessionStartFailsOpen(t *testing.T) {
 		t.Errorf("unconfigured SessionStart should inject nothing, got: %s", out.String())
 	}
 }
+
+// TestMergeAlwaysItems pins the resident-set union (sty_957a041b): system
+// baseline principles:always and project principles:always both inject, project
+// winning on a name clash, system order preserved with project-only additions
+// appended.
+func TestMergeAlwaysItems(t *testing.T) {
+	sys := []alwaysListItem{{Name: "agent-goals", Scope: "system"}, {Name: "broken-windows", Scope: "system"}}
+	proj := []alwaysListItem{{Name: "satellites-constitution", Scope: "project"}}
+	got := mergeAlwaysItems(sys, proj)
+	if len(got) != 3 {
+		t.Fatalf("union should hold all 3, got %d: %+v", len(got), got)
+	}
+	names := []string{got[0].Name, got[1].Name, got[2].Name}
+	want := []string{"agent-goals", "broken-windows", "satellites-constitution"}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("order = %v, want %v", names, want)
+		}
+	}
+
+	// Name clash: the project item wins in place (its scope is used to fetch).
+	clash := mergeAlwaysItems(
+		[]alwaysListItem{{Name: "broken-windows", Scope: "system"}},
+		[]alwaysListItem{{Name: "broken-windows", Scope: "project"}},
+	)
+	if len(clash) != 1 || clash[0].Scope != "project" {
+		t.Fatalf("project must win on a name clash, got %+v", clash)
+	}
+
+	// Empty system → project-only still injects (system-list failure is non-fatal).
+	onlyProj := mergeAlwaysItems(nil, proj)
+	if len(onlyProj) != 1 || onlyProj[0].Name != "satellites-constitution" {
+		t.Fatalf("empty system → project set, got %+v", onlyProj)
+	}
+}
