@@ -401,7 +401,10 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stdout, "status: %s → %s\n", story.Status, observed)
 	} else {
 		fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
-		if gateOut.Decision == verb.GateDecisionAccept {
+		// An out-of-band gate at a v2 state (enactV2 false) is EXPECTED not to
+		// transition — it only records its verdict — so an accept that leaves the
+		// status put is correct, not a missed enactment (sty_26c94ca5).
+		if gateOut.Decision == verb.GateDecisionAccept && !(edges.IsV2 && !enactV2) {
 			// The gate accepted but the status did not advance — the skill
 			// did not enact. Surface it; do not silently paper over it by
 			// patching from the client (that is exactly what this story
