@@ -37,6 +37,13 @@ type Config struct {
 	LogPath        string `toml:"log_path"`
 	BranchTemplate string `toml:"branch_template"`
 
+	// CodeNudgeOff turns OFF the code-search PreToolUse advisory
+	// (`satellites hook codenudge`) for this repo — the nudge that steers a
+	// large-source Read, a symbol-shaped Grep, or a symbol-shaped grep/rg via
+	// Bash toward `code search`/`code symbol`. Default false (the nudge is on);
+	// set `code_nudge_off = true` to silence it (sty_097bf1a3).
+	CodeNudgeOff bool `toml:"code_nudge_off"`
+
 	// ReviewerModel, when set, is passed as `--model <value>` to every
 	// reviewer `claude -p` run — the gate dispatcher and the step summariser
 	// (sty_c7a5d741). NOT required in the toml — empty means no flag, so the

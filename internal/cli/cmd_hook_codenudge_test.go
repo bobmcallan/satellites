@@ -81,6 +81,108 @@ func TestAssessCodeNudge_SilentOutsideRepo(t *testing.T) {
 	}
 }
 
+func TestIsSymbolShaped(t *testing.T) {
+	symbols := []string{"resolveGateSkillBody", "MyType", "foo_bar", "_internal", "Abc"}
+	for _, s := range symbols {
+		if !isSymbolShaped(s) {
+			t.Errorf("%q should be symbol-shaped", s)
+		}
+	}
+	nonSymbols := []string{"", "ab", "foo bar", "func (", "a.b", "src/main.go", "TODO:", "x|y", `"quoted"`, "with-dash", "1abc"}
+	for _, s := range nonSymbols {
+		if isSymbolShaped(s) {
+			t.Errorf("%q should NOT be symbol-shaped", s)
+		}
+	}
+}
+
+func TestBashGrepPattern(t *testing.T) {
+	cases := []struct{ cmd, want string }{
+		{"grep MyType", "MyType"},
+		{"grep -rn resolveGateSkillBody internal/", "resolveGateSkillBody"},
+		{"rg -i MyType", "MyType"},
+		{"ls | grep findSatellitesRepoRoot", "findSatellitesRepoRoot"},
+		{`grep -rn "func foo"`, "func foo"}, // quoted phrase → one token, rejected downstream
+		{`grep "MyType" .`, "MyType"},       // quoted single identifier reads through
+		{"go test ./...", ""},               // not a grep command
+		{"cat file.go", ""},
+		{"grep", ""}, // no pattern
+	}
+	for _, c := range cases {
+		if got := bashGrepPattern(c.cmd); got != c.want {
+			t.Errorf("bashGrepPattern(%q) = %q, want %q", c.cmd, got, c.want)
+		}
+	}
+}
+
+func TestAssessSymbolSearchNudge_FiresOnSymbol(t *testing.T) {
+	root := codeNudgeRepo(t, true, "", 0)
+	nudge, msg := assessSymbolSearchNudge(root, "resolveGateSkillBody")
+	if !nudge {
+		t.Fatal("symbol-shaped pattern in an indexed repo should nudge")
+	}
+	if !strings.Contains(msg, "code search resolveGateSkillBody") {
+		t.Errorf("message should name the symbol: %q", msg)
+	}
+}
+
+func TestAssessSymbolSearchNudge_SilentOnNonSymbol(t *testing.T) {
+	root := codeNudgeRepo(t, true, "", 0)
+	for _, p := range []string{"foo bar", "func (", "TODO", "a.b.c", ""} {
+		if p == "TODO" {
+			continue // TODO is a bare identifier; the heuristic accepts it (documented limit)
+		}
+		if nudge, _ := assessSymbolSearchNudge(root, p); nudge {
+			t.Errorf("non-symbol pattern %q must stay silent", p)
+		}
+	}
+}
+
+func TestAssessSymbolSearchNudge_SilentWithoutIndex(t *testing.T) {
+	root := codeNudgeRepo(t, false, "", 0)
+	if nudge, _ := assessSymbolSearchNudge(root, "MyType"); nudge {
+		t.Error("no index → symbol search nudge must stay silent")
+	}
+}
+
+func TestCodeNudge_OffSwitchSilencesAll(t *testing.T) {
+	root := codeNudgeRepo(t, true, "big.go", codeNudgeMinBytes*2)
+	// Flip the off switch in the toml.
+	toml := filepath.Join(root, ".satellites", "satellites.toml")
+	if err := os.WriteFile(toml, []byte("server_url = \"\"\ncode_nudge_off = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if nudge, _ := assessCodeNudge(root, filepath.Join(root, "big.go")); nudge {
+		t.Error("code_nudge_off=true must silence the Read nudge")
+	}
+	if nudge, _ := assessSymbolSearchNudge(root, "MyType"); nudge {
+		t.Error("code_nudge_off=true must silence the symbol-search nudge")
+	}
+}
+
+func TestRunHookCodeNudge_GrepAndBashDispatch(t *testing.T) {
+	root := codeNudgeRepo(t, true, "", 0)
+	for _, ev := range []string{
+		`{"cwd":"` + root + `","tool_name":"Grep","tool_input":{"pattern":"resolveGateSkillBody"}}`,
+		`{"cwd":"` + root + `","tool_name":"Bash","tool_input":{"command":"grep -rn resolveGateSkillBody internal/"}}`,
+	} {
+		var out bytes.Buffer
+		if err := runHookCodeNudge(strings.NewReader(ev), &out); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if !strings.Contains(out.String(), "code search") {
+			t.Errorf("expected a symbol-search advisory, got: %q", out.String())
+		}
+	}
+	// A non-symbol Bash grep stays silent.
+	var out bytes.Buffer
+	ev := `{"cwd":"` + root + `","tool_name":"Bash","tool_input":{"command":"grep -rn \"error: %w\" ."}}`
+	_ = runHookCodeNudge(strings.NewReader(ev), &out)
+	if out.Len() != 0 {
+		t.Errorf("non-symbol grep must stay silent, got: %q", out.String())
+	}
+}
+
 func TestRunHookCodeNudge_EmptyEventSilent(t *testing.T) {
 	var out bytes.Buffer
 	if err := runHookCodeNudge(strings.NewReader(""), &out); err != nil {

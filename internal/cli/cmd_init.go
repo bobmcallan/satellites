@@ -49,10 +49,13 @@ const (
 	accessCommand = "satellites hook access"
 	promptCommand = "satellites hook prompt"
 
-	// The code-search adoption nudge (sty_f52f4b9d, epic:code-index). PreToolUse
-	// on Read: ADVISORY (no `|| exit 2`) — it suggests `satellites code
-	// symbol`/`search` for large indexed source files and must never block a Read.
-	codeNudgeMatcher = "Read"
+	// The code-search adoption nudge (sty_f52f4b9d / sty_097bf1a3, epic:code-
+	// index-replacement). PreToolUse on Read|Grep|Bash: ADVISORY (no `|| exit 2`)
+	// — it steers a large-source Read, a symbol-shaped Grep, or a symbol-shaped
+	// grep/rg via Bash toward `satellites code symbol`/`search`, and must never
+	// block. One alternation matcher (not three entries) because the merge keys
+	// idempotency by command; the handler dispatches on tool_name.
+	codeNudgeMatcher = "Read|Grep|Bash"
 	codeNudgeCommand = "satellites hook codenudge"
 
 	// The deterministic code-index refresh (sty_a89da7e4, epic:code-index).

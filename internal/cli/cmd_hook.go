@@ -80,6 +80,7 @@ type toolInputPath struct {
 	FilePath     string `json:"file_path"`
 	NotebookPath string `json:"notebook_path"`
 	Command      string `json:"command"`
+	Pattern      string `json:"pattern"` // Grep tool's search pattern (codenudge reads it)
 }
 
 // path returns the edited target path (file_path or notebook_path), or "".
