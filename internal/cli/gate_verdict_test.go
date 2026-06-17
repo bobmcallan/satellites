@@ -88,16 +88,3 @@ func TestRecordGateVerdictTo_AppendFailureWarnsOnly(t *testing.T) {
 		t.Fatalf("append failure must warn without failing: %q", out.String())
 	}
 }
-
-// TestTechdebtOnVerdictSeam pins that the techdebt opts seam is nil-safe and
-// fires with the verdict + count it was handed.
-func TestTechdebtOnVerdictSeam(t *testing.T) {
-	techdebtOpts{}.emitVerdict(gateVerdictClean, 0) // nil-safe
-	var gotVerdict string
-	var gotCount int
-	o := techdebtOpts{OnVerdict: func(v string, n int) { gotVerdict, gotCount = v, n }}
-	o.emitVerdict(gateVerdictBlocked, 2)
-	if gotVerdict != gateVerdictBlocked || gotCount != 2 {
-		t.Fatalf("seam fired wrong: %q %d", gotVerdict, gotCount)
-	}
-}

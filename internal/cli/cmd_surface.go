@@ -230,3 +230,27 @@ func loadSurfaceDoc(ctx context.Context, opts surfaceOpts) (string, error) {
 	}
 	return body, nil
 }
+
+// resolveWorkspaceID maps a project to its workspace via project_get. Shared
+// mechanism used by the surface and semantic-search commands; relocated here
+// when the techdebt gate-command was retired to config (sty_16f85607).
+func resolveWorkspaceID(ctx context.Context, projectID, configPath, userArg string) (string, error) {
+	req, err := json.Marshal(verb.ProjectGetRequest{ID: projectID})
+	if err != nil {
+		return "", err
+	}
+	raw, err := dispatchVerb(ctx, "project_get", req, configPath, userArg)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resp.WorkspaceID) == "" {
+		return "", fmt.Errorf("project %s returned no workspace_id", projectID)
+	}
+	return resp.WorkspaceID, nil
+}

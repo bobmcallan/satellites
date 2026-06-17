@@ -28,13 +28,14 @@ status itself answers "whose turn is it, and was the gate run?".
    plan against the [[satellites-constitution]] — rejecting a story that
    proposes baking a gate/process/opinion into the binary instead of the
    substrate — then start-review (ready → in_progress).
-4. Do the work. At every natural checkpoint request the traverse FIRST:
+4. Do the work. At every natural checkpoint, request the checkpoint traverse:
    `satellites story status_transition <story-id> --skill
-   satellites-technical-debt-review` — the client enacts the checkpoint edge
-   into `techdebt-review` and runs that state's command itself against the
-   LOCAL working tree (exit code = pass/fail; no judgment anywhere): a fail
-   returns the story to `in_progress` with nothing shipped (the 3rd fail
-   escalates to `blocked` by the client's own enactment); a pass lands
+   satellites-technical-debt-review` — the client enacts the checkpoint edge into
+   `techdebt-review` (a reviewer state) and stops ("reviewer's turn"). Request the
+   same gate AGAIN from `techdebt-review`: it runs its functional check (build +
+   unit + the integration tier) against the LOCAL working tree and reconciles the
+   failures against the register. A fail returns the story to `in_progress` with
+   nothing shipped (the 3rd fail escalates to `blocked`); a pass lands
    `integration-review` and releases the ship.
 5. On pass, run the **checkpoint capability** (below) — commit, push, watch
    CI, record evidence — so the verified tree becomes the pushed commit the
@@ -69,7 +70,7 @@ binary, so an unshipped change is not seen.
 
 - `plan-reviewed` (reviewer) — the comprehensive plan-review has passed; `satellites-intent-plan-review` judges the plan against the constitution before the story is `ready`.
 - `in_progress` (executor) — the work happens here, and every fail edge lands back here.
-- `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
+- `techdebt-review` (reviewer) — `satellites-technical-debt-review` judges: its functional check runs build + unit + the integration tier, then it reconciles the failures against the quarantine register (a registered + owned failure is tolerated); the client enacts its pass/fail edge.
 - `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
 - `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
 - `blocked` (operator) — fail-loop exhaustion lands here; the operator moves a story out, or the agent requests `satellites-loop-recovery-review` (blocked → in_progress) when the exhaustion was a recoverable, fixed flake — a genuine failure stays the operator's.
@@ -81,10 +82,11 @@ nothing gate-like runs outside it. The checkpoint order at every natural
 checkpoint (end of phase, meaningful change, before requesting review) is
 **verdict, then ship**:
 
-- [[satellites-technical-debt-review]] — the `techdebt-review` STATE's command,
-  run via the status_transition traverse in step 4 against the local working
-  tree BEFORE anything ships. Its verdict lands as a ledger row on the story,
-  and a fail leaves the remote untouched. The gate skill owns the decision rule.
+- [[satellites-technical-debt-review]] — the `techdebt-review` STATE's reviewer
+  gate (step 4): its functional `check:` runs build / unit / the integration tier
+  against the local tree and it reconciles the failures against the register
+  BEFORE anything ships. Its verdict lands as a ledger row; a fail leaves the
+  remote untouched. The gate owns the decision rule — config, not a binary command.
 
 A traverse pass releases the [[satellites-commit-push]] capability (step 5),
 which executes the remaining atomic gates pre-commit and honours their verdicts
@@ -102,7 +104,7 @@ states:
   - {name: plan-reviewed,      actor: reviewer}
   - ready
   - {name: in_progress,        actor: executor}
-  - {name: techdebt-review,    actor: satellites, command: "satellites techdebt review"}
+  - {name: techdebt-review,    actor: reviewer}
   - {name: integration-review, actor: reviewer}
   - {name: done-review,        actor: reviewer}
   - {name: blocked,            actor: operator}
@@ -113,8 +115,8 @@ transitions:
   - {from: plan-reviewed,      to: ready,           reviewer_skill: "satellites-intent-plan-review"}
   - {from: ready,              to: in_progress,     reviewer_skill: "satellites-story-start-review"}
   - {from: in_progress,        to: techdebt-review, trigger: checkpoint}
-  - {from: techdebt-review,    on: pass, to: integration-review}
-  - {from: techdebt-review,    on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked}
+  - {from: techdebt-review,    on: pass, to: integration-review, reviewer_skill: "satellites-technical-debt-review"}
+  - {from: techdebt-review,    on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-technical-debt-review"}
   - {from: integration-review, on: pass, to: done-review, reviewer_skill: "satellites-integration-test-review"}
   - {from: integration-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-integration-test-review"}
   - {from: done-review,        on: pass, to: done, reviewer_skill: "satellites-story-done-review"}

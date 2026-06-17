@@ -7,7 +7,6 @@ check: "go build ./... 2>&1; echo '===UNIT==='; go test ./... 2>&1; echo '===INT
 tags: [kind:gate, content-review:allow-refs]
 description: The technical-debt gate (broken-windows). The techdebt-review checkpoint state — its functional check runs build + unit + the integration tier; the gate reconciles the failing checks against the technical-debt-register and fails closed on any unregistered red. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_87d669a2","version":5,"hash":"d36342cd02fc5b8445d971db6fb6fe16b4aa7b949c28aeecb300c34399ca99aa"} satellites-sync:end -->
 
 Decide whether the local tree is shippable under broken-windows: it is **clean OR every failing check is owned debt named in the register**. You are the `techdebt-review` checkpoint, judged before anything ships. The decision rule below is configuration — the harness runs the build/test mechanism and you judge its result against the register.
 
