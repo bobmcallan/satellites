@@ -19,4 +19,5 @@ story-backed capture of a failure that cannot be fixed in the moment.
 
 | check_id | story_id | reason |
 | --- | --- | --- |
-| TestStoryPanel_FilterBugs | sty_b8aac474 | Residual chromedp websocket/render timing flake under full-tier CPU contention — passes deterministically in isolation and in small batches; not a product defect. The systemic tier instability (per-test container churn saturating the Docker daemon) was fixed in sty_0c98760e via a shared container; this lone chromedp flake is the known class scoped out of that story (AC4). Quarantined until sty_b8aac474 hardens the test's readiness wait, then this row is removed. |
+
+_The register is currently empty — no quarantined checks. `TestStoryPanel_FilterBugs` was hardened (deterministic readiness polls replacing fixed settle sleeps) and its row removed by sty_b8aac474._

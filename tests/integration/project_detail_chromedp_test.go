@@ -479,15 +479,22 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	if err := chromedp.Run(bctx,
 		chromedp.WaitVisible(`[data-field="panel-stories-chip-tags-epic:changelog"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-field="panel-stories-chip-tags-epic:site-content-refresh"]`, chromedp.ByQuery),
-		chromedp.Sleep(150*time.Millisecond),
 	); err != nil {
 		t.Fatalf("wait both tag chips: %v", err)
 	}
-	titles, err := visibleRowTitles(bctx)
+	wantUnion := []string{"alpha changelog", "beta changelog", "gamma site-content", "delta site-content"}
+	titles, err := waitRowTitles(bctx, func(m map[string]bool) bool {
+		for _, w := range wantUnion {
+			if !m[w] {
+				return false
+			}
+		}
+		return true
+	})
 	if err != nil {
 		t.Fatalf("read titles after tag union: %v", err)
 	}
-	for _, want := range []string{"alpha changelog", "beta changelog", "gamma site-content", "delta site-content"} {
+	for _, want := range wantUnion {
 		if !titles[want] {
 			t.Errorf("tag OR: %q missing from union; visible=%v", want, titles)
 		}
@@ -509,10 +516,13 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	if err := waitChipAbsent(bctx, `[data-field="panel-stories-chip-tags-epic:changelog"]`); err != nil {
 		t.Fatalf("changelog chip never cleared: %v", err)
 	}
-	if err := chromedp.Run(bctx, chromedp.Sleep(150*time.Millisecond)); err != nil {
-		t.Fatalf("settle: %v", err)
-	}
-	titles, err = visibleRowTitles(bctx)
+	// Poll for the settled row set rather than a fixed sleep: removing the chip
+	// commits a tag filter over the websocket, and the re-render can lag under
+	// tier CPU contention (sty_b8aac474).
+	titles, err = waitRowTitles(bctx, func(m map[string]bool) bool {
+		return m["gamma site-content"] && m["delta site-content"] &&
+			!m["alpha changelog"] && !m["beta changelog"]
+	})
 	if err != nil {
 		t.Fatalf("read titles after chip-x: %v", err)
 	}
@@ -532,15 +542,14 @@ func TestStoryPanel_FilterBugs(t *testing.T) {
 	if err := chromedp.Run(bctx,
 		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID+"?stories_q=order%3Atitle"),
 		chromedp.WaitVisible(`[data-field="panel-stories-chip-order-title"]`, chromedp.ByQuery),
-		chromedp.Sleep(150*time.Millisecond),
 	); err != nil {
 		t.Fatalf("order:title via navigation: %v", err)
 	}
-	titlesOrdered, err := orderedVisibleTitles(bctx)
+	wantSorted := []string{"alpha changelog", "beta changelog", "delta site-content", "gamma site-content"}
+	titlesOrdered, err := waitOrderedRowTitles(bctx, wantSorted)
 	if err != nil {
 		t.Fatalf("read ordered titles: %v", err)
 	}
-	wantSorted := []string{"alpha changelog", "beta changelog", "delta site-content", "gamma site-content"}
 	if !equalSlices(titlesOrdered, wantSorted) {
 		t.Errorf("order:title: got %v want %v", titlesOrdered, wantSorted)
 	}
@@ -836,4 +845,40 @@ func waitChipAbsent(ctx context.Context, sel string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return context.DeadlineExceeded
+}
+
+// waitRowTitles polls the visible story-row set until pred holds, then returns
+// the last-seen titles. It replaces a fixed settle Sleep so an assertion reads
+// a SETTLED DOM, not a mid-render one: the websocket re-render that follows a
+// filter change can lag a fixed wait under full-tier CPU contention, the
+// residual chromedp flake this story removes (sty_b8aac474). On timeout it
+// returns the last-seen set so the caller's own assertions report the mismatch.
+func waitRowTitles(ctx context.Context, pred func(map[string]bool) bool) (map[string]bool, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		titles, err := visibleRowTitles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if pred(titles) || !time.Now().Before(deadline) {
+			return titles, nil
+		}
+		time.Sleep(75 * time.Millisecond)
+	}
+}
+
+// waitOrderedRowTitles is the ordered counterpart of waitRowTitles: it polls
+// until the visible titles equal want (order-sensitive), then returns them.
+func waitOrderedRowTitles(ctx context.Context, want []string) ([]string, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		titles, err := orderedVisibleTitles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if equalSlices(titles, want) || !time.Now().Before(deadline) {
+			return titles, nil
+		}
+		time.Sleep(75 * time.Millisecond)
+	}
 }
