@@ -31,3 +31,33 @@ func TestFormatStoryGet(t *testing.T) {
 		t.Errorf("missing workflow must render actor as dash:\n%s", out)
 	}
 }
+
+// TestRenderStoryGet_Body pins sty_16b43fe0: --body appends the full story body
+// after the metadata, and the default (no flag) output is byte-identical to the
+// metadata block alone — so exposing the body cannot silently change existing
+// callers' output.
+func TestRenderStoryGet_Body(t *testing.T) {
+	body := "# the plan\n\n## Workflow\n\n```yaml\nstates: [backlog, done]\n```\n"
+	resp := verb.DocumentGetResponse{Document: document.Document{
+		ID: "sty_t1", Name: "the-story", Status: "backlog", Category: "feature",
+	}}
+
+	// Default: byte-identical to formatStoryGet, no body.
+	if got, want := renderStoryGet(resp, body, false), formatStoryGet(resp, body); got != want {
+		t.Errorf("default output drifted from metadata block:\n got: %q\nwant: %q", got, want)
+	}
+	if strings.Contains(renderStoryGet(resp, body, false), "the plan") {
+		t.Error("default output must not include the body")
+	}
+
+	// --body: metadata block is still a prefix, and the full body follows.
+	withBody := renderStoryGet(resp, body, true)
+	if !strings.HasPrefix(withBody, formatStoryGet(resp, body)) {
+		t.Errorf("--body output must start with the metadata block:\n%s", withBody)
+	}
+	for _, want := range []string{"--- body ---", "# the plan", "## Workflow", "states: [backlog, done]"} {
+		if !strings.Contains(withBody, want) {
+			t.Errorf("--body output missing %q:\n%s", want, withBody)
+		}
+	}
+}

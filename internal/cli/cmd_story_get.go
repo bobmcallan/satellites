@@ -19,17 +19,20 @@ import (
 )
 
 func newStoryGetCmd(configArg, userArg *string) *cobra.Command {
-	return &cobra.Command{
+	var withBody bool
+	cmd := &cobra.Command{
 		Use:   "get <story-id>",
 		Short: "Read a story's server-side state: status, state actor, category, priority, tags, parent, headline",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStoryGet(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, args[0])
+			return runStoryGet(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, args[0], withBody)
 		},
 	}
+	cmd.Flags().BoolVar(&withBody, "body", false, "Also print the full story body (plan + ## Workflow) after the metadata")
+	return cmd
 }
 
-func runStoryGet(ctx context.Context, out io.Writer, configPath, userArg, storyID string) error {
+func runStoryGet(ctx context.Context, out io.Writer, configPath, userArg, storyID string, withBody bool) error {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: storyID})
 	if err != nil {
 		return err
@@ -49,8 +52,28 @@ func runStoryGet(ctx context.Context, out io.Writer, configPath, userArg, storyI
 	if body == "" && len(resp.Versions) > 0 {
 		body = resp.Versions[len(resp.Versions)-1].Body
 	}
-	fmt.Fprint(out, formatStoryGet(resp, body))
+	fmt.Fprint(out, renderStoryGet(resp, body, withBody))
 	return nil
+}
+
+// renderStoryGet renders the story view — pure for tests. The body is always
+// fetched (the state actor is parsed from it); --body just appends it, so
+// reading a story's plan + ## Workflow is one command instead of a
+// document_get id=<sty_id> round-trip (sty_16b43fe0). Without the flag the
+// output is exactly formatStoryGet's metadata block.
+func renderStoryGet(resp verb.DocumentGetResponse, body string, withBody bool) string {
+	meta := formatStoryGet(resp, body)
+	if !withBody {
+		return meta
+	}
+	var b strings.Builder
+	b.WriteString(meta)
+	b.WriteString("\n--- body ---\n")
+	b.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // formatStoryGet renders the story view — pure for tests. The state actor
