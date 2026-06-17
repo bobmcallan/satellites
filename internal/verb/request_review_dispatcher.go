@@ -129,9 +129,17 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		return GateOutput{}, fmt.Errorf("gate dispatch: marshal payload: %w", err)
 	}
 
-	systemPrompt, err := resolveGateSkillBody(in.WorktreeRoot, in.SkillName)
+	fm, systemPrompt, err := resolveGateSkill(in.WorktreeRoot, in.SkillName)
 	if err != nil {
 		return GateOutput{}, err
+	}
+	// Functional half (epic:satellites-backbone 2.2): if the gate carries a
+	// `check:`, the harness runs it and folds its deterministic result into the
+	// gate's context. The harness only RUNS it — the gate's body owns how the
+	// result combines with the LLM judgment.
+	if check := strings.TrimSpace(fm.Check); check != "" {
+		code, out := runGateCheck(ctx, in.WorktreeRoot, check)
+		systemPrompt = appendFunctionalCheck(systemPrompt, check, code, out)
 	}
 
 	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
@@ -192,12 +200,22 @@ func gateClaudeArgs(systemPrompt, model string) []string {
 	return args
 }
 
-// resolveGateSkillBody reads the gate skill's SKILL.md from the worktree
-// (.claude/skills/<name>/SKILL.md) and returns its body with frontmatter
-// stripped — the rubric the gate runs under, delivered as the system
-// prompt. A missing skill is a dispatch error: the gate cannot run a
-// skill that is not materialised in the tree under review.
-func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
+// resolveGateSkill returns a gate's parsed frontmatter and its body (with
+// frontmatter stripped) — the rubric delivered as the system prompt. A
+// satellites-INTERNAL gate (embedded in the binary) is resolved FIRST and wins
+// over any worktree copy: its governance ships protected and a user editing
+// `.claude/skills/<name>` cannot alter it (epic:satellites-backbone 2.2).
+// Otherwise the gate is read from the worktree
+// (.claude/skills/<name>/SKILL.md); a missing skill is a dispatch error — the
+// gate cannot run a skill that is neither internal nor materialised.
+func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
+	if raw, ok := internalGateRaw(skillName); ok {
+		fm, body, err := frontmatter.Parse(raw)
+		if err != nil {
+			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse internal gate %q: %w", skillName, err)
+		}
+		return fm, string(body), nil
+	}
 	root := worktreeRoot
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -205,13 +223,62 @@ func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
 	path := filepath.Join(root, ".claude", "skills", skillName, "SKILL.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
+		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
 	}
-	_, body, err := frontmatter.Parse(raw)
+	fm, body, err := frontmatter.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("gate dispatch: parse gate skill %q: %w", skillName, err)
+		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse gate skill %q: %w", skillName, err)
 	}
-	return string(body), nil
+	return fm, string(body), nil
+}
+
+// resolveGateSkillBody is the body-only convenience kept for callers/tests that
+// do not need the frontmatter.
+func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
+	_, body, err := resolveGateSkill(worktreeRoot, skillName)
+	return body, err
+}
+
+// runGateCheck runs a gate's functional `check:` (a `sh -c` command) in the
+// worktree and returns its exit code and trimmed combined output. The harness
+// only RUNS the deterministic half; the gate's body owns how the result folds
+// into the verdict. A command that cannot start (or is killed) reports a
+// non-zero code so the gate never reads a failed check as a pass.
+func runGateCheck(ctx context.Context, worktreeRoot, check string) (int, string) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", check)
+	if strings.TrimSpace(worktreeRoot) != "" {
+		cmd.Dir = worktreeRoot
+	}
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if err != nil {
+		code = 1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if c := exitErr.ExitCode(); c >= 0 {
+				code = c
+			}
+		}
+	}
+	return code, strings.TrimSpace(string(out))
+}
+
+// appendFunctionalCheck folds a functional check's deterministic result into a
+// gate's system prompt as a labelled section. Pure string assembly so the
+// injection is unit-testable without a subprocess; the gate's decision rule
+// reads this section to combine the functional half with its judgment.
+func appendFunctionalCheck(systemPrompt, check string, exitCode int, output string) string {
+	var b strings.Builder
+	b.WriteString(systemPrompt)
+	b.WriteString("\n\n## Functional check (deterministic)\n\n")
+	b.WriteString(fmt.Sprintf("The harness ran this gate's functional check; fold its result into your verdict per your decision rule:\n\n`%s`\n\nexit code: %d\n", check, exitCode))
+	if strings.TrimSpace(output) != "" {
+		b.WriteString("\noutput:\n```\n")
+		b.WriteString(output)
+		b.WriteString("\n```\n")
+	}
+	return b.String()
 }
 
 // ParseGateOutput is lenient on whitespace + surrounding prose but strict

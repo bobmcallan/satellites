@@ -57,6 +57,14 @@ type Frontmatter struct {
 	// call lives in configuration here, not in the binary. Names are resolved
 	// against the harness's tool catalogue at run time.
 	Tools []string `yaml:"tools"`
+
+	// Check is a kind:gate's optional FUNCTIONAL half (epic:satellites-backbone
+	// 2.2): a deterministic `sh -c` command the harness runs in the worktree at
+	// gate time. Its exit code + output are folded into the gate's claude -p
+	// context as config the gate CARRIES — so go build/test, the version-bump
+	// check, the surface check become a gate's functional check rather than a Go
+	// branch. The gate's body owns how the result combines with the LLM verdict.
+	Check string `yaml:"check"`
 }
 
 // frontmatterDelim is the literal `---` line that opens and closes a
