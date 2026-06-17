@@ -131,6 +131,41 @@ func TestDocumentUpsert_MCPRefusesContentWrites(t *testing.T) {
 	}
 }
 
+// TestSystemChangelogWriteAllowed pins the changelog write-path policy
+// (sty_1777fbeb): a system-scope type:changelog write is authorized ONLY for a
+// global admin off the MCP surface. A non-admin, the MCP transport, a
+// non-changelog type, and a non-system scope are each refused — so the
+// allowance can't widen into a general system-write hole.
+func TestSystemChangelogWriteAllowed(t *testing.T) {
+	admin := &auth.User{ID: "u_admin", Role: auth.RoleAdmin}
+	member := &auth.User{ID: "u_member"} // no admin role
+	cliAdmin := auth.WithUser(context.Background(), admin)
+	mcpAdmin := auth.WithUser(auth.WithTransport(context.Background(), auth.TransportMCP), admin)
+	cliMember := auth.WithUser(context.Background(), member)
+
+	cases := []struct {
+		name  string
+		ctx   context.Context
+		scope document.Scope
+		typ   string
+		want  bool
+	}{
+		{"admin off MCP, system changelog → allowed", cliAdmin, document.ScopeSystem, document.TypeChangelog, true},
+		{"admin over MCP → refused", mcpAdmin, document.ScopeSystem, document.TypeChangelog, false},
+		{"non-admin off MCP → refused", cliMember, document.ScopeSystem, document.TypeChangelog, false},
+		{"admin off MCP, system document → refused", cliAdmin, document.ScopeSystem, document.TypeDocument, false},
+		{"admin off MCP, project changelog → refused (not system)", cliAdmin, document.ScopeProject, document.TypeChangelog, false},
+		{"no user → refused", context.Background(), document.ScopeSystem, document.TypeChangelog, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := systemChangelogWriteAllowed(c.ctx, c.scope, c.typ); got != c.want {
+				t.Errorf("systemChangelogWriteAllowed() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // TestMCPForbidsType pins the guard predicate (sty_f302bd8b AC3/AC6): over the
 // MCP transport, document/skill/principle content writes are refused while
 // story and task writes pass; no MCP transport always passes (CLI exec /

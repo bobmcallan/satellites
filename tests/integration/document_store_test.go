@@ -57,10 +57,10 @@ func TestDocumentStore(t *testing.T) {
 	t.Run("system scope accepts writes via internal seed", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 		doc, v, err := store.Upsert(ctx, document.UpsertInput{
-			Key:             document.Key{Scope: document.ScopeSystem, Name: "satellites_client_install"},
-			Body:            "seeded body",
-			ViaInternalSeed: true,
-			CreatedBy:       "system:seed",
+			Key:                document.Key{Scope: document.ScopeSystem, Name: "satellites_client_install"},
+			Body:               "seeded body",
+			SystemWriteAllowed: true,
+			CreatedBy:          "system:seed",
 		}, time.Now())
 		if err != nil {
 			t.Fatalf("seed upsert: %v", err)
@@ -191,9 +191,9 @@ func TestDocumentStore(t *testing.T) {
 		testbootstrap.Reset(t, env)
 		// Seed a system doc via the internal-seed path so the row exists.
 		if _, _, err := store.Upsert(ctx, document.UpsertInput{
-			Key:             document.Key{Scope: document.ScopeSystem, Name: "system_doc"},
-			Body:            "x",
-			ViaInternalSeed: true,
+			Key:                document.Key{Scope: document.ScopeSystem, Name: "system_doc"},
+			Body:               "x",
+			SystemWriteAllowed: true,
 		}, time.Now()); err != nil {
 			t.Fatalf("seed: %v", err)
 		}

@@ -514,7 +514,7 @@ func TestDocumentList_ScopeAll(t *testing.T) {
 
 	seed := func(key document.Key, when time.Time) document.Document {
 		d, _, err := docStore.Upsert(ctx, document.UpsertInput{
-			Key: key, Type: "document", Body: "b", CreatedBy: "test", ViaInternalSeed: true,
+			Key: key, Type: "document", Body: "b", CreatedBy: "test", SystemWriteAllowed: true,
 		}, when)
 		if err != nil {
 			t.Fatalf("seed %s: %v", key.Name, err)

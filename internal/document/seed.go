@@ -35,11 +35,11 @@ func SeedSystemTyped(ctx context.Context, s *Store, docType, name, body, created
 		return err
 	}
 	_, _, err = s.Upsert(ctx, UpsertInput{
-		Key:             key,
-		Type:            docType,
-		Body:            body,
-		CreatedBy:       createdBy,
-		ViaInternalSeed: true,
+		Key:                key,
+		Type:               docType,
+		Body:               body,
+		CreatedBy:          createdBy,
+		SystemWriteAllowed: true,
 	}, now)
 	return err
 }

@@ -20,9 +20,12 @@ type Store struct {
 // New returns a Store bound to the given database/sql handle.
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
-// UpsertInput is the write payload for Upsert. ViaInternalSeed=true is
+// UpsertInput is the write payload for Upsert. SystemWriteAllowed=true is
 // the only path that may write at scope=system; everything else gets
-// ErrScopeReadonly. Verbs always pass false.
+// ErrScopeReadonly. The caller asserts the write is authorized — the boot
+// seed reconciler sets it, and the verb layer sets it once it has authorized
+// a system write its policy permits (a global-admin changelog write off the
+// MCP surface). Ordinary verb writes pass false.
 //
 // Type names the documents.type discriminator the row should carry on
 // first insert. Empty defaults to TypeDocument. Documents and skills
@@ -30,11 +33,11 @@ func New(db *sql.DB) *Store { return &Store{DB: db} }
 // row whose stored type disagrees with this value returns
 // ErrTypeMismatch.
 type UpsertInput struct {
-	Key             Key
-	Type            string
-	Body            string
-	CreatedBy       string
-	ViaInternalSeed bool
+	Key                Key
+	Type               string
+	Body               string
+	CreatedBy          string
+	SystemWriteAllowed bool
 }
 
 // GetOptions controls what Get returns. Version semantics:
@@ -70,7 +73,7 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	if err := in.Key.Validate(); err != nil {
 		return Document{}, Version{}, err
 	}
-	if in.Key.Scope == ScopeSystem && !in.ViaInternalSeed {
+	if in.Key.Scope == ScopeSystem && !in.SystemWriteAllowed {
 		return Document{}, Version{}, ErrScopeReadonly
 	}
 	docType := in.Type
@@ -1072,7 +1075,7 @@ func lockDocumentByKey(ctx context.Context, tx *sql.Tx, key Key) (Document, erro
           AND project_id   IS NOT DISTINCT FROM $3
           AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
-          AND type IN ('document','skill')
+          AND type IN ('document','skill','changelog')
         FOR UPDATE
     `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
@@ -1095,7 +1098,7 @@ func (s *Store) lookupDocument(ctx context.Context, key Key) (Document, error) {
           AND project_id   IS NOT DISTINCT FROM $3
           AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
-          AND type IN ('document','skill')
+          AND type IN ('document','skill','changelog')
     `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
 }

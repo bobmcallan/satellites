@@ -104,7 +104,7 @@ func TestDocumentGet(t *testing.T) {
 		key := document.Key{Scope: document.ScopeSystem, Name: "versioned"}
 		for _, b := range []string{"v1", "v2", "v3"} {
 			if _, _, err := docStore.Upsert(context.Background(), document.UpsertInput{
-				Key: key, Body: b, ViaInternalSeed: true,
+				Key: key, Body: b, SystemWriteAllowed: true,
 			}, time.Now()); err != nil {
 				t.Fatalf("upsert %s: %v", b, err)
 			}

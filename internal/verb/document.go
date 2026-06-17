@@ -755,6 +755,21 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID, pjID st
 // local agent's review skill can't be bypassed. Story and task writes, and any
 // non-MCP transport, pass. An id-addressed patch is handled by the caller
 // (req.ID != "") before this is consulted.
+// systemChangelogWriteAllowed reports whether this is the single system-scope
+// write the verb layer authorizes: a type:changelog (release-notes) write by a
+// global admin arriving OFF the MCP tool surface. The changelog collapsed out
+// of its dedicated verbs into a generic system-scope document (sty_d2b25c4b),
+// and authorizeWrite refuses every system write — so without this the
+// /changelog page would have no runtime write path. The transport boundary is
+// the same one mcpForbidsType draws: the HTTP exec / in-process CLI passes, an
+// agent's MCP tool call does not. Every other system write stays read-only.
+func systemChangelogWriteAllowed(ctx context.Context, scope document.Scope, reqType string) bool {
+	return scope == document.ScopeSystem &&
+		reqType == document.TypeChangelog &&
+		auth.TransportFromContext(ctx) != auth.TransportMCP &&
+		callerIsGlobalAdmin(ctx)
+}
+
 func mcpForbidsType(t auth.Transport, reqType string) bool {
 	if t != auth.TransportMCP {
 		return false
@@ -905,14 +920,23 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		}
 		key.WorkspaceID = p.WorkspaceID
 	}
-	if err := authorizeWrite(ctx, key); err != nil {
-		return nil, err
+	// A changelog (release notes) is a system-scope type:changelog document.
+	// authorizeWrite refuses every system write via verbs, so the changelog —
+	// collapsed out of its dedicated verbs into a generic document — would have
+	// no runtime write path. Permit just this one, on the trusted operator
+	// surface only. Every other system write stays read-only.
+	sysChangelog := systemChangelogWriteAllowed(ctx, key.Scope, req.Type)
+	if !sysChangelog {
+		if err := authorizeWrite(ctx, key); err != nil {
+			return nil, err
+		}
 	}
 	doc, v, err := documentStore.Upsert(ctx, document.UpsertInput{
-		Key:       key,
-		Type:      req.Type,
-		Body:      req.Body,
-		CreatedBy: callerUserID(ctx),
+		Key:                key,
+		Type:               req.Type,
+		Body:               req.Body,
+		CreatedBy:          callerUserID(ctx),
+		SystemWriteAllowed: sysChangelog,
 	}, time.Now().UTC())
 	if err != nil {
 		return nil, mapStoreError(err, "document_upsert")
