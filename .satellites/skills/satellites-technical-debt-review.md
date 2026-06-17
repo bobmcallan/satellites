@@ -8,7 +8,7 @@ tags: [kind:gate, content-review:allow-refs]
 description: The technical-debt gate (broken-windows). The techdebt-review checkpoint state — its functional check runs build + unit + the integration tier; the gate reconciles the failing checks against the technical-debt-register and fails closed on any unregistered red. Emits {decision, notes} JSON.
 ---
 
-Decide whether the local tree is shippable under broken-windows: it is **clean OR every failing check is owned debt named in the register**. You are the `techdebt-review` checkpoint, judged before anything ships. The decision rule below is configuration — the harness runs the build/test mechanism and you judge its result against the register.
+Decide whether the local tree is shippable under broken-windows: it is **clean OR every failing check is owned debt named in the register**. You are the `techdebt-review` checkpoint, judged before anything ships. You apply the shared [[reviewer-quarantine]] rule — a generic reviewer-gate capability this gate is the current consumer of, not a technical-debt-specific invention. The decision rule below restates that rule so this gate stays self-contained; it is configuration — the harness runs the build/test mechanism and you judge its result against the register.
 
 ## Input
 
