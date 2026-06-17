@@ -677,6 +677,52 @@ func (s *Store) HardDelete(ctx context.Context, id string) error {
 	return nil
 }
 
+// TombstoneByID soft-deletes the document addressed by its primary-key id: it
+// appends a StatusDeleted version and marks the row deleted, WITHOUT
+// reconstructing or validating a scope Key. Addressing by id has already
+// uniquely identified the row, so scope coherence is irrelevant here — and the
+// reconstructed key cannot satisfy it anyway: mig-0041 keys project substrate
+// by (project_id, name) with workspace_id NULL, yet Key.Validate requires
+// workspace_id for ScopeProject, so Delete(reconstructed-key) rejects every
+// project document. This is the id-addressed twin of Delete (which validates a
+// (scope,name) key) and keeps the soft-tombstone semantics documents use,
+// unlike HardDelete (stories, hard removal). System rows stay read-only.
+// ErrNotFound when no row carries the id.
+func (s *Store) TombstoneByID(ctx context.Context, id, deletedBy string, now time.Time) (Document, Version, error) {
+	now = now.UTC()
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Document{}, Version{}, fmt.Errorf("document: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	row := tx.QueryRowContext(ctx, selectDocumentColumns+` FROM documents WHERE id = $1 FOR UPDATE`, id)
+	doc, err := scanDocumentFull(row)
+	if err != nil {
+		return Document{}, Version{}, err
+	}
+	if doc.Scope == ScopeSystem {
+		return Document{}, Version{}, ErrScopeReadonly
+	}
+
+	doc, v, err := appendVersion(ctx, tx, doc, "", deletedBy, now, StatusDeleted)
+	if err != nil {
+		return Document{}, Version{}, err
+	}
+	// Mark the row-level status too (not just the version), matching Delete —
+	// list/count filter on documents.status, so without this the tombstone shows
+	// only on the version-aware get while list still returns the row as active.
+	if _, err := tx.ExecContext(ctx, `UPDATE documents SET status = $1 WHERE id = $2`, string(StatusDeleted), doc.ID); err != nil {
+		return Document{}, Version{}, fmt.Errorf("document: mark deleted: %w", err)
+	}
+	doc.Status = string(StatusDeleted)
+
+	if err := tx.Commit(); err != nil {
+		return Document{}, Version{}, fmt.Errorf("document: commit: %w", err)
+	}
+	return doc, v, nil
+}
+
 // ListFilter is the input shape for List. Every field is optional;
 // Status/Type="all" or "" disables that predicate.
 type ListFilter struct {

@@ -1280,13 +1280,19 @@ func invokeDocumentDelete(ctx context.Context, raw json.RawMessage) (json.RawMes
 				Version:  document.Version{DocumentID: d.ID, Version: d.LatestVersion, Body: body, Status: document.StatusDeleted, CreatedBy: callerUserID(ctx)},
 			})
 		}
-		// Document soft-delete by id. Reconstruct the key from the row
-		// so we reuse the existing tombstone-append path.
+		// Document soft-delete by id. Authorize with a key reconstructed from
+		// the row (membership is by project_id/workspace_id, which tolerates the
+		// NULL workspace_id project rows carry), then tombstone BY ID. We do NOT
+		// route through Delete(key): mig-0041 keys project substrate by
+		// (project_id, name) with workspace_id NULL, but Key.Validate still
+		// requires workspace_id for ScopeProject, so Delete(reconstructed-key)
+		// would reject every project document with a scope-coherence error. The
+		// id already identifies the exact row — TombstoneByID removes it (sty_52f62518).
 		key := document.Key{Scope: d.Scope, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID, UserID: d.UserID, Name: d.Name}
 		if err := authorizeWrite(ctx, key); err != nil {
 			return nil, err
 		}
-		doc2, v, err := documentStore.Delete(ctx, key, callerUserID(ctx), false, time.Now().UTC())
+		doc2, v, err := documentStore.TombstoneByID(ctx, req.ID, callerUserID(ctx), time.Now().UTC())
 		if err != nil {
 			return nil, mapStoreError(err, "document_delete")
 		}
