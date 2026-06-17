@@ -29,4 +29,4 @@ it to the substrate.
 - **Gates read this constitution,** so enforcement tracks evolving intent
   without a recompile.
 
-See [[principle-configuration-over-code]], [[process-as-configuration]], [[agent-goals]].
+See [[process-as-configuration]], [[agent-goals]].
