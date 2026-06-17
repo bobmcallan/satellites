@@ -187,6 +187,20 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	}
 	_ = governing
 
+	// v2 enactment authorisation (sty_26c94ca5): a v2 state's pass/fail edge is
+	// enacted ONLY by the gate the workflow declares for it (edges.ReviewerSkill),
+	// or by the state's own command (an actor:satellites state names no reviewer →
+	// GateMatches is true). Any other gate run at a v2 state runs OUT OF BAND — it
+	// judges and records a verdict + QA evidence, but enacts no lifecycle edge —
+	// so a laxer/commit gate cannot stand in for the workflow's required gate and
+	// silently advance the story. enactV2 guards every v2-enactment branch below.
+	enactV2 := edges.IsV2 && edges.GateMatches(gateSkill)
+	if edges.IsV2 && !enactV2 {
+		fmt.Fprintf(opts.Stdout,
+			"out-of-band: %q is not the lifecycle gate for state %q (its gate is %q) — verdict recorded, no transition\n",
+			gateSkill, story.Status, edges.ReviewerSkill)
+	}
+
 	// Actor handoff stop: an operator state takes no review dispatch at all —
 	// it is a human decision point, and the executor's move is to stop. THE
 	// EXCEPTION (sty_0c98760e): when the story's workflow authorizes the gate
@@ -255,7 +269,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// yaml `max_iterations` for this state's fail loop when set — applied once
 	// here so BOTH the pre-dispatch guard below and verb.PlanV2Enactment honour
 	// it. Unset (or unparseable) → the yaml value stands.
-	if edges.IsV2 && edges.MaxIterations > 0 {
+	if enactV2 && edges.MaxIterations > 0 {
 		if kv := resolveWorkflowMaxIterations(ctx, opts, story); kv > 0 {
 			edges.MaxIterations = kv
 		}
@@ -266,7 +280,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// not re-dispatched — the bound is spent. (Normally exhaustion was already
 	// enacted at the Nth reject; this refusal covers the re-request race.)
 	var priorRejects int
-	if edges.IsV2 && edges.MaxIterations > 0 {
+	if enactV2 && edges.MaxIterations > 0 {
 		priorRejects = verb.CountEdgeRejects(fullLedgerViews(ctx, opts, story.ID), story.Status)
 		if priorRejects >= edges.MaxIterations {
 			return fmt.Errorf("status_transition: review for state %q refused — its fail loop is exhausted (%d/%d rejects); the story escalates to %q and it is not the executor's to re-request",
@@ -355,8 +369,10 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// not the skill — enacts the decision's edge: review_* row + the
 	// status_transition row for the pass/fail target, or the exhaustion
 	// transition when this reject spends the bound. Deterministic code; the
-	// executor decides none of it.
-	if edges.IsV2 {
+	// executor decides none of it. Only the gate the workflow declares for this
+	// state (or its command, on an actor:satellites state) enacts — a non-matching
+	// gate ran out of band (enactV2 false) and records only its verdict below.
+	if enactV2 {
 		plan, perr := verb.PlanV2Enactment(gateOut.Decision, gateSkill, story.Status, gateOut.Notes, edges, priorRejects)
 		if perr != nil {
 			return fmt.Errorf("v2 enactment: %w", perr)

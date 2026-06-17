@@ -36,6 +36,25 @@ type V2Edges struct {
 	// fail edge, which validation only permits outside cycles).
 	MaxIterations int
 	OnExhausted   string
+	// ReviewerSkill is the gate the workflow declares for this v2 state's
+	// pass/fail edges — the ONLY gate authorised to enact them. Empty for an
+	// actor:satellites command-driven state (no named reviewer). The dispatcher
+	// enacts a v2 edge only when the invoked gate matches it (GateMatches), so a
+	// laxer gate cannot stand in for the workflow's required one (sty_26c94ca5).
+	ReviewerSkill string
+}
+
+// GateMatches reports whether `skill` is the gate authorised to enact this v2
+// state's edges: true when the state names no reviewer (an actor:satellites
+// command-driven state, decided by its command not a gate) OR `skill` equals
+// the declared `reviewer_skill` (case-insensitive). A non-matching gate run at a
+// v2 state must NOT enact its edge — it runs out-of-band (records a verdict, no
+// transition), mirroring a commit gate run from a non-review state.
+func (e V2Edges) GateMatches(skill string) bool {
+	if strings.TrimSpace(e.ReviewerSkill) == "" {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(skill), strings.TrimSpace(e.ReviewerSkill))
 }
 
 // ResolveV2Edges parses the story body's embedded workflow and projects the
@@ -65,11 +84,17 @@ func edgesFromWorkflow(wf *workflow.Workflow, status string) V2Edges {
 		case "pass":
 			out.IsV2 = true
 			out.PassTo = t.To
+			if out.ReviewerSkill == "" {
+				out.ReviewerSkill = strings.TrimSpace(t.ReviewerSkill)
+			}
 		case "fail":
 			out.IsV2 = true
 			out.FailTo = t.To
 			out.MaxIterations = t.MaxIterations
 			out.OnExhausted = t.OnExhausted
+			if out.ReviewerSkill == "" {
+				out.ReviewerSkill = strings.TrimSpace(t.ReviewerSkill)
+			}
 		}
 	}
 	return out

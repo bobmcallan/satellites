@@ -48,6 +48,51 @@ func TestResolveV2Edges(t *testing.T) {
 	}
 }
 
+// gatedV2Body is a story whose v2 review state names a reviewer_skill on both
+// its pass and fail edges — the well-formed review-state shape.
+const gatedV2Body = "# fixture\n\n## Workflow\n\n```yaml\n" +
+	"states:\n" +
+	"  - {name: in_progress, actor: executor}\n" +
+	"  - {name: gate-review, actor: reviewer}\n" +
+	"  - {name: cmd-state,   actor: satellites, command: \"true\"}\n" +
+	"  - done\n" +
+	"transitions:\n" +
+	"  - {from: in_progress, to: gate-review, trigger: checkpoint}\n" +
+	"  - {from: gate-review, on: pass, to: done,        reviewer_skill: \"the-gate\"}\n" +
+	"  - {from: gate-review, on: fail, to: in_progress, max_iterations: 3, on_exhausted: done, reviewer_skill: \"the-gate\"}\n" +
+	"  - {from: cmd-state,   on: pass, to: done}\n" +
+	"  - {from: cmd-state,   on: fail, to: in_progress, max_iterations: 3, on_exhausted: done}\n" +
+	"```\n"
+
+// TestEdgesCaptureReviewerSkill_AndGateMatches pins sty_26c94ca5: the v2 edge
+// projection carries the declared reviewer_skill, and GateMatches authorises
+// only that gate to enact — except a command-driven (no-reviewer) state, which
+// any caller drives.
+func TestEdgesCaptureReviewerSkill_AndGateMatches(t *testing.T) {
+	e, _ := ResolveV2Edges(gatedV2Body, "gate-review")
+	if !e.IsV2 || e.ReviewerSkill != "the-gate" {
+		t.Fatalf("gate-review edges = %+v, want IsV2 with ReviewerSkill=the-gate", e)
+	}
+	// Only the declared gate enacts; a laxer/other gate does not (AC1).
+	if !e.GateMatches("the-gate") {
+		t.Fatal("the declared reviewer_skill must match")
+	}
+	if !e.GateMatches("THE-GATE") {
+		t.Fatal("the match must be case-insensitive")
+	}
+	if e.GateMatches("satellites-intent-code-review") {
+		t.Fatal("a non-matching gate must NOT be authorised to enact a v2 edge")
+	}
+	if e.GateMatches("") {
+		t.Fatal("an empty gate must not match a named reviewer_skill")
+	}
+	// A command-driven satellites state names no reviewer → any caller drives it.
+	cmd, _ := ResolveV2Edges(gatedV2Body, "cmd-state")
+	if cmd.ReviewerSkill != "" || !cmd.GateMatches("anything") {
+		t.Fatalf("command-driven state edges = %+v, want empty ReviewerSkill matching any caller", cmd)
+	}
+}
+
 // TestRecoveryEdgeFrom pins the operator-stop exception (sty_0c98760e): an
 // unconditional reviewer_skill edge out of an operator state (blocked) is the
 // sanctioned recovery path, but ONLY for the gate the edge names. v2StoryBody's
