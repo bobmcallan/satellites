@@ -6,8 +6,8 @@ when: status==ready
 tags: [kind:gate]
 description: Gate skill for the start-work transition (ready → in_progress). Decides whether a story is genuinely ready for an executor to begin — plan accepted, no open blockers. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_612e4ff5","version":3,"hash":"630ff65eb6059f018a3a9f6f4ea69a02178e4e853d584e941c4c8b5ac177ac68","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_612e4ff5","version":5,"hash":"8b78d25216810f7b05556c1cf345ab1cf31266b336a877f0577f54b486a556b2","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 Decide whether the conditions to START work are met. This is a lightweight readiness gate, not a re-review of the plan (plan-review already accepted it to reach `ready`). Do not run the build or tests, and do not re-litigate plan quality.
 

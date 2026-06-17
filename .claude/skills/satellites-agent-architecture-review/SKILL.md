@@ -6,8 +6,8 @@ when: pre-commit
 tags: [kind:gate]
 description: "Pre-commit gate for agent/executor changes — critiques the plan and code for configuration over code. Agent BEHAVIOUR (which tools, the operating prompt, the process/policy) must live in the substrate (skill frontmatter, system documents, principles), not baked into the binary; MECHANISM (the loop, the tool catalogue, security guardrails) is accepted. Emits a {decision, notes} JSON verdict."
 ---
-<!-- satellites-sync:begin {"document_id":"doc_c19bf434","version":3,"hash":"0f4af1fac8ab872064a84c85a3b5fa3a88d441a9f983451be2b44c39dfe8a1cf","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_c19bf434","version":5,"hash":"b3e1fd56d715c1149911ae9b49fa10a11acf0850ac0e8a1ee3d2eb3fb7a61d06","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 Decide whether an agent/executor change keeps BEHAVIOUR in configuration and only MECHANISM in code — the project's primary objective. Run when a change touches the agent surface (internal/agent, the agent executor in internal/verb, or agent operating documents).
 

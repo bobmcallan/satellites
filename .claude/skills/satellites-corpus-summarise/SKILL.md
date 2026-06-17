@@ -6,8 +6,8 @@ tags: [kind:task]
 description: Summarise every document in the workspace corpus into one document, aligned to the workspace objective.
 tools: [document_list, document_get, semantic_search]
 ---
-<!-- satellites-sync:begin {"document_id":"doc_0e6956a9","version":9,"hash":"debd4d5c5acfb4c0f5902dd67f804e9bf6f0199288aba03f2fbf0ffda7478a12","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_0e6956a9","version":15,"hash":"69a749c6f7f6add622f5eb978148cf26c8ae55c467e01773a4f0f556be7238e1","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 # Corpus summarise
 

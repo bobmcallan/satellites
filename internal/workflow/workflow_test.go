@@ -21,14 +21,16 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		transitions int
 	}{
 		// The single repo workflow, stateful v3 (epic:graduated-workflow):
-		// 2 gated entry edges + 1 checkpoint edge + 4 on-edges + 3
-		// cancellation edges + 1 blocked→in_progress recovery edge
-		// (sty_0c98760e). Ungated edges are the deterministic client-enacted
-		// ones (trigger/on) — every other edge is gated.
+		// 3 gated entry edges (plan-review → plan-reviewed, the
+		// satellites-intent-plan-review intent gate → ready, start-review →
+		// in_progress; epic:satellites-backbone 2.1) + 1 checkpoint edge + 6
+		// on-edges + 4 cancellation edges (incl. plan-reviewed → cancelled) + 1
+		// blocked→in_progress recovery edge (sty_0c98760e). Ungated edges are the
+		// deterministic client-enacted ones (trigger/on) — every other edge is gated.
 		// The product workflows are now repo-owned client-dir config under
 		// .satellites/workflows/ (epic:client-dir-separation order-2), no longer
 		// materialised kind:workflow skills — Parse reads the same shape.
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 13},
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 15},
 		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {

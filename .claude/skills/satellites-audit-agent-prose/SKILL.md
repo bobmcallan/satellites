@@ -5,8 +5,8 @@ kind: capability
 tags: [kind:capability, content-review:allow-refs]
 description: Audit a prose artifact intended for an agent or operator (MCP load instructions, tool descriptions, CLI help, seed/principle markdown, system prompts) for repo-agnostic, short, prescriptive language. Use when the user invokes "/satellites-audit-agent-prose <path>...", says "audit this instruction", "review this prompt", or asks to critique any file that ships text to a downstream reader. Push back hard on narrative, host-repo coupling, and rotting identifiers.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_745199cd","version":3,"hash":"573e0f4de624ae82e579ff45ed635d6baf34ccc571424bcae39d6e624d5207a6","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_745199cd","version":5,"hash":"a236134dc54366ef094d48c04a49f70b07ddc1912dc2972ff1fe7951a5feb1ef","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 # satellites-audit-agent-prose
 

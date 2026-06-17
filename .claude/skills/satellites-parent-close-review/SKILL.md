@@ -6,8 +6,8 @@ when: status==backlog
 tags: [kind:gate]
 description: Gate skill for closing a parent (epic/anchor) story — backlog → done. Accepts only when the anchor has at least one child AND every child is in a terminal status; rejects a childless or still-open anchor. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_2257041a","version":3,"hash":"11b51eafb9e1297fcfbe3e4e038a4cb4dd5ca7d602ca61d7c051e981f505ba95","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_2257041a","version":5,"hash":"68a7f4eff8898b1c4d7b50a1cde19ec87c6d32197d32e10520c0ff2bdf68f4f5","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 Decide whether a parent (epic/anchor) story has earned closure: it is a genuine anchor (not empty or relabelled) AND every child it groups has reached a terminal status.
 

@@ -22,8 +22,12 @@ status itself answers "whose turn is it, and was the gate run?".
      ```yaml block into the story, and prints the workflow + the next gate. Do
      NOT hand-copy the yaml. Later gates parse the embedded copy.
    - **The plan** — `document_upsert` Purpose / Approach / numbered Acceptance criteria.
-3. Request the entry gates: `satellites story status_transition <story-id> --skill <gate>`
-   for plan-review (backlog → ready) and start-review (ready → in_progress).
+3. Request the entry gates in order: `satellites story status_transition
+   <story-id> --skill <gate>` for the comprehensive plan-review (backlog →
+   plan-reviewed), then the intent gate (plan-reviewed → ready) which judges the
+   plan against the [[satellites-constitution]] — rejecting a story that
+   proposes baking a gate/process/opinion into the binary instead of the
+   substrate — then start-review (ready → in_progress).
 4. Do the work. At every natural checkpoint request the traverse FIRST:
    `satellites story status_transition <story-id> --skill
    satellites-technical-debt-review` — the client enacts the checkpoint edge
@@ -63,6 +67,7 @@ binary, so an unshipped change is not seen.
 
 ## States and actors
 
+- `plan-reviewed` (reviewer) — the comprehensive plan-review has passed; `satellites-intent-plan-review` judges the plan against the constitution before the story is `ready`.
 - `in_progress` (executor) — the work happens here, and every fail edge lands back here.
 - `techdebt-review` (satellites) — advanced by the client running `satellites techdebt review`; exit code decides, no agent discretion.
 - `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
@@ -89,10 +94,12 @@ which executes the remaining atomic gates pre-commit and honours their verdicts
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
 - [[satellites-agent-architecture-review]] — when the change touches the agent/executor surface (internal/agent, the agent executor in internal/verb, agent operating documents); a judgment gate critiquing the change for configuration-over-code.
+- [[satellites-intent-code-review]] — the general config-over-code gate, judged on the diff against the satellites-constitution: rejects a gate, workflow, check, process step, or opinion baked into the binary where the substrate already holds its kind. The agent-architecture-review is its narrow agent-surface case.
 
 ```yaml
 states:
   - backlog
+  - {name: plan-reviewed,      actor: reviewer}
   - ready
   - {name: in_progress,        actor: executor}
   - {name: techdebt-review,    actor: satellites, command: "satellites techdebt review"}
@@ -102,7 +109,8 @@ states:
   - done
   - cancelled
 transitions:
-  - {from: backlog,            to: ready,           reviewer_skill: "satellites-story-plan-review"}
+  - {from: backlog,            to: plan-reviewed,   reviewer_skill: "satellites-story-plan-review"}
+  - {from: plan-reviewed,      to: ready,           reviewer_skill: "satellites-intent-plan-review"}
   - {from: ready,              to: in_progress,     reviewer_skill: "satellites-story-start-review"}
   - {from: in_progress,        to: techdebt-review, trigger: checkpoint}
   - {from: techdebt-review,    on: pass, to: integration-review}
@@ -113,6 +121,7 @@ transitions:
   - {from: done-review,        on: fail, to: in_progress, max_iterations: 3, on_exhausted: blocked, reviewer_skill: "satellites-story-done-review"}
   - {from: blocked,            to: in_progress,     reviewer_skill: "satellites-loop-recovery-review"}
   - {from: backlog,            to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: plan-reviewed,      to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: ready,              to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: in_progress,        to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
 ```

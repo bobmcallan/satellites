@@ -6,8 +6,8 @@ when: status==backlog
 tags: [kind:gate]
 description: The comprehensive story review — the workflow's FIRST gate. Decides in one verdict whether a story is a sound contract before an executor picks it up - story shape, plan, acceptance criteria, embedded workflow, and code grounding. A story is created freely (it is user intent, no review on upsert); THIS gate is where it is judged. Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_046586b7","version":3,"hash":"c6f6f94bbee83f107a189ebe0aaf3f625903921a6738e60973879ad36185505b","publisher":"proj_682cfeed"} satellites-sync:end -->
-<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"https://github.com/bobmcallan/satellites-skills","commit":"7caa10cbeb50ac1856b1576e7ffbdafc7ca746eb"} satellites-library:end -->
+<!-- satellites-sync:begin {"document_id":"doc_046586b7","version":5,"hash":"efdfd5092641bc6d800b798ea0794317ba303678dc2c9f32bfd20235db274b4a","publisher":"proj_682cfeed"} satellites-sync:end -->
+<!-- satellites-library:begin {"publisher":"proj_682cfeed","repo":"git@github.com:bobmcallan/satellites-skills.git","commit":"02290b00e3a68ffca0360fb69f90f61e83fee8bb"} satellites-library:end -->
 
 Decide whether the story is a sound contract — its shape conforms, its workflow is correctly embedded, its plan is ready to execute, and that plan is grounded in the code it claims to change. A story is created with no review (intent is free to land); this gate is the single point where everything is judged. Gate the contract, not the work: do not run the build or tests, and do not penalise the absence of code.
 
