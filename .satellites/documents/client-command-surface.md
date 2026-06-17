@@ -104,6 +104,15 @@ so the `satellites surface check` gate stays green ([[broken-windows]]):
 | `satellites semantic-search <query>` | Search a workspace's document corpus by semantic similarity (epic:workspace-engagement). Server-side verb (`semantic_search`, also an MCP tool): embeds the query with the corpus embedder, cosine-ranks the workspace's chunks, returns top-k results with document provenance + score. `--workspace` (defaults to the configured project's workspace), `--limit`. Requires server-side embeddings (`GEMINI_API_KEY`); degrades to an empty noted result otherwise. | DONE. |
 | `satellites code <index\|search\|symbol>` | The in-client code symbol index (epic:code-index). `index` builds a per-repo `.satellites/index.db` (pure-Go SQLite + FTS5) of symbols from the repo; `search <query>` lists matching symbols (name, kind, file:line) via FTS5 prefix + substring fallback; `symbol <name>` prints the exact source slice by stored byte offsets. CLI-only, no MCP — the agent searches symbols instead of reading whole files. Extraction is per-file: Go via `go/ast`, every other language via a CGo-free WASM tree-sitter runtime (`gotreesitter`, ~100+ grammars) — so coverage is broad, not Go-only. The store/schema/search are language-neutral. A PreToolUse nudge (`satellites hook codenudge`, matcher `Read\|Grep\|Bash`) steers a large-source Read or a symbol-shaped Grep/`grep`/`rg` toward `code search`/`code symbol`; disable with `code_nudge_off = true`. | DONE (tree-sitter + go/ast). |
 
+**`code` — accepted capability loss (jcodemunch retirement, epic:code-index-replacement).**
+The in-client index deliberately covers symbol NAVIGATION only — find a symbol,
+read its declaration. It does NOT replace the retired second indexer's query-DEPTH
+analysis (find-references, call/class hierarchy, blast radius, dead-code) or
+semantic code search; those are a conscious, accepted loss, not a regression to
+fix. Language BREADTH is retained — the tree-sitter runtime above covers the same
+~100+ grammars. Depth analysis, if ever needed, is a deterministic command a
+future verb adds, never a dependency on a second indexer.
+
 When `update` adds, renames, or removes a command, reconcile this section in the
 same change — `satellites surface check` blocks the commit until it matches.
 
