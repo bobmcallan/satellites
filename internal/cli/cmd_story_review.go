@@ -166,7 +166,24 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	wfSources := governingWorkflowSources(opts.ConfigPath)
 	edges, governing, drift := verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
 	if drift != "" {
-		fmt.Fprintf(opts.Stderr, "workflow drift: %s\n", drift)
+		// The embedded `## Workflow` diverged from the authoritative governing
+		// workflow — a governing-config edit staled this in-flight story's copy.
+		// Self-heal: re-stamp the embed from the governing definition so every
+		// embed reader (the entry gates' to_status resolution, the recovery edge,
+		// the portal) reads the authoritative shape — there is one authoritative
+		// source and no false "diverges … not honoured" warning. Fail-soft: a
+		// restamp failure falls back to surfacing the drift and never fails the
+		// transition.
+		if synced, changed, gov, ok, rErr := reembedGoverningWorkflow(ctx, story, body, opts.ConfigPath, opts.UserArg, wfSources); ok && rErr == nil && changed {
+			body = synced
+			edges, governing, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+			fmt.Fprintf(opts.Stdout, "re-synced embedded ## Workflow from governing workflow %q\n", gov)
+		} else {
+			fmt.Fprintf(opts.Stderr, "workflow drift: %s\n", drift)
+			if rErr != nil {
+				fmt.Fprintf(opts.Stderr, "warn: re-sync embedded ## Workflow failed: %v\n", rErr)
+			}
+		}
 	}
 	_ = governing
 

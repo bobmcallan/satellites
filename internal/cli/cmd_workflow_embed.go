@@ -67,31 +67,20 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 		return fmt.Errorf("workflow embed: no workflow covers category %q — author one under .satellites/workflows (frontmatter applies_to) before embedding (fail closed)", story.Category)
 	}
 
-	// Extract the source's yaml block verbatim so the embedded copy round-trips
-	// exactly with the governing definition (drift-free).
+	// Stamp the embedded `## Workflow` from the governing definition. Shared with
+	// the review path's self-heal (reembedGoverningWorkflow) so there is one
+	// stamping implementation; idempotent (writes only when absent/drifted).
+	_, changed, _, _, err := reembedGoverningWorkflow(ctx, story, body, configPath, userArg, sources)
+	if err != nil {
+		return fmt.Errorf("workflow embed: %w", err)
+	}
+
+	// srcBody for the printed table (state machine + checkpoint gates).
 	var srcBody string
 	for _, s := range sources {
 		if s.Name == name {
 			srcBody = s.Body
 			break
-		}
-	}
-	yamlBlock, err := workflow.ExtractYAMLBlock([]byte(srcBody))
-	if err != nil {
-		return fmt.Errorf("workflow embed: governing workflow %q carries no ```yaml block: %w", name, err)
-	}
-	section := "## Workflow\n\n```yaml\n" + strings.TrimRight(string(yamlBlock), "\n") + "\n```\n"
-
-	// Idempotent: only write when the embedded copy is absent or has drifted
-	// from the governing definition — avoids a needless new story version.
-	changed := true
-	if embedded, perr := workflow.ParseBody([]byte(body)); perr == nil && embedded != nil && wf.Equivalent(embedded) {
-		changed = false
-	}
-	if changed {
-		newBody := replaceSection(body, "## Workflow", section)
-		if err := applyStoryBody(ctx, story, newBody, configPath, userArg); err != nil {
-			return fmt.Errorf("workflow embed: write ## Workflow into story: %w", err)
 		}
 	}
 
@@ -138,4 +127,57 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 		fmt.Fprintf(out, "\nno forward transition from status %q.\n", story.Status)
 	}
 	return nil
+}
+
+// reembedGoverningWorkflow re-stamps the story's embedded `## Workflow` from the
+// AUTHORITATIVE governing workflow when the embedded copy is absent or has
+// drifted from it. The embed is a derived cache that the entry gates (their
+// to_status resolution), the recovery edge, and the portal read; keeping it in
+// sync with the authoritative .satellites/workflows config is mechanism, not a
+// workflow opinion. Idempotent: it writes a new story version only when the
+// embed actually differs from the governing definition. Returns the (possibly
+// rewritten) body, whether it changed, the resolved governing workflow name, and
+// ok=false when no governing workflow covers the story's category — the
+// ungoverned path keeps the embed as its own source (nothing authoritative to
+// restamp from). Shared by `workflow embed` and the review path's self-heal so
+// the stamping has one implementation.
+func reembedGoverningWorkflow(ctx context.Context, story reviewStory, body, configPath, userArg string, sources []verb.WorkflowSource) (newBody string, changed bool, governing string, ok bool, err error) {
+	newBody, changed, governing, ok, err = syncEmbeddedWorkflowBody(body, story.Category, sources)
+	if err != nil || !ok || !changed {
+		return newBody, changed, governing, ok, err
+	}
+	if aErr := applyStoryBody(ctx, story, newBody, configPath, userArg); aErr != nil {
+		return body, false, governing, true, fmt.Errorf("write ## Workflow into story: %w", aErr)
+	}
+	return newBody, true, governing, true, nil
+}
+
+// syncEmbeddedWorkflowBody is the pure half of reembedGoverningWorkflow: it
+// resolves the governing workflow by the story's category over the sources and
+// returns body with its `## Workflow` re-stamped verbatim from the governing
+// definition. changed is false when the embed already matches the governing
+// definition (no rewrite needed); ok is false when no governing workflow covers
+// the category (ungoverned — nothing authoritative to restamp from). No I/O, so
+// the restamp transformation is fixture-testable.
+func syncEmbeddedWorkflowBody(body, category string, sources []verb.WorkflowSource) (newBody string, changed bool, governing string, ok bool, err error) {
+	wf, name, found := verb.ResolveGoverningWorkflow(category, sources)
+	if !found {
+		return body, false, "", false, nil
+	}
+	var srcBody string
+	for _, s := range sources {
+		if s.Name == name {
+			srcBody = s.Body
+			break
+		}
+	}
+	yamlBlock, yErr := workflow.ExtractYAMLBlock([]byte(srcBody))
+	if yErr != nil {
+		return body, false, name, true, fmt.Errorf("governing workflow %q carries no ```yaml block: %w", name, yErr)
+	}
+	if embedded, perr := workflow.ParseBody([]byte(body)); perr == nil && embedded != nil && wf.Equivalent(embedded) {
+		return body, false, name, true, nil // already in sync — no needless story version
+	}
+	section := "## Workflow\n\n```yaml\n" + strings.TrimRight(string(yamlBlock), "\n") + "\n```\n"
+	return replaceSection(body, "## Workflow", section), true, name, true, nil
 }
