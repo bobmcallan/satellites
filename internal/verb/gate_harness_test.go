@@ -132,8 +132,12 @@ func TestInternalGateRaw_Registry(t *testing.T) {
 // TestIsInternalGate pins the public predicate the drift checks use to treat an
 // embedded internal gate as available (epic:satellites-backbone 2.4.1).
 func TestIsInternalGate(t *testing.T) {
-	if !IsInternalGate("satellites-internal-selfcheck") {
-		t.Fatal("embedded internal gate must report IsInternalGate true")
+	// satellites' own intent-gates ship embedded so they govern any repo
+	// (epic:satellites-backbone 2.4.2).
+	for _, internal := range []string{"satellites-internal-selfcheck", "satellites-intent-plan-review", "satellites-intent-code-review"} {
+		if !IsInternalGate(internal) {
+			t.Fatalf("embedded internal gate %q must report IsInternalGate true", internal)
+		}
 	}
 	if IsInternalGate("satellites-story-plan-review") {
 		t.Fatal("a non-embedded (materialised) gate must report IsInternalGate false")

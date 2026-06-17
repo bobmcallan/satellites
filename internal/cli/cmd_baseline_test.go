@@ -11,8 +11,10 @@ import (
 )
 
 // TestBaselineWorkflowDoc: the scaffolded baseline parses as a valid
-// kind:workflow, passes ValidateLifecycle, is applies_to ["*"], names NO gate
-// (every edge ungated), and carries the backlog→in_progress→done lifecycle.
+// kind:workflow, passes ValidateLifecycle, is applies_to ["*"], carries the
+// backlog→in_progress→done lifecycle, and wires the INTENT SPINE — the entry
+// (backlog→in_progress) is gated by the embedded internal intent-gate while the
+// exit stays ungated (epic:satellites-backbone 2.4.2).
 func TestBaselineWorkflowDoc(t *testing.T) {
 	wf, err := workflow.Parse([]byte(baselineWorkflowDoc))
 	if err != nil || wf == nil {
@@ -30,10 +32,25 @@ func TestBaselineWorkflowDoc(t *testing.T) {
 	if !wild {
 		t.Errorf("baseline must be applies_to [\"*\"], got %v", wf.AppliesTo)
 	}
+	entryGated, exitUngated := false, false
 	for _, tr := range wf.Transitions {
-		if strings.TrimSpace(tr.ReviewerSkill) != "" {
-			t.Errorf("baseline must name no gate, but %s->%s has reviewer_skill %q", tr.From, tr.To, tr.ReviewerSkill)
+		switch {
+		case tr.From == "backlog" && tr.To == "in_progress":
+			entryGated = strings.TrimSpace(tr.ReviewerSkill) == "satellites-intent-plan-review"
+		case tr.From == "in_progress" && tr.To == "done":
+			exitUngated = strings.TrimSpace(tr.ReviewerSkill) == ""
 		}
+	}
+	if !entryGated {
+		t.Errorf("baseline entry backlog→in_progress must be gated by satellites-intent-plan-review")
+	}
+	if !exitUngated {
+		t.Errorf("baseline exit in_progress→done must stay ungated")
+	}
+	// The intent-gate must be an embedded internal gate — a clean repo with no
+	// materialised skills must still be able to run it.
+	if !verb.IsInternalGate("satellites-intent-plan-review") {
+		t.Errorf("the baseline's entry gate must be an embedded internal gate")
 	}
 	if !baselineHasEdge(wf, "backlog", "in_progress") || !baselineHasEdge(wf, "in_progress", "done") {
 		t.Errorf("baseline missing the backlog→in_progress→done lifecycle edges")
@@ -82,6 +99,56 @@ func TestEnsureBaselineWorkflow(t *testing.T) {
 	}
 }
 
+// TestEnsureStarterConstitution: scaffolds the starter constitution into an
+// empty repo; create-if-absent (a repo that already owns any principle is
+// untouched, so no second resident constitution) (epic:satellites-backbone 2.4).
+func TestEnsureStarterConstitution(t *testing.T) {
+	repo := t.TempDir()
+	added, err := ensureStarterConstitution(repo)
+	if err != nil || !added {
+		t.Fatalf("fresh ensureStarterConstitution: added=%v err=%v", added, err)
+	}
+	b, err := os.ReadFile(filepath.Join(repo, ".satellites", "principles", "constitution.md"))
+	if err != nil {
+		t.Fatalf("constitution not written: %v", err)
+	}
+	if !strings.Contains(string(b), "principles:always") || !strings.Contains(string(b), "configuration, not code") {
+		t.Errorf("starter constitution missing the resident tag / config-over-code rule")
+	}
+	if added, _ := ensureStarterConstitution(repo); added {
+		t.Errorf("re-run scaffolded again — must be create-if-absent")
+	}
+
+	// A repo that already owns a (differently-named) principle is left untouched.
+	repo2 := t.TempDir()
+	dir := filepath.Join(repo2, ".satellites", "principles")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "my-constitution.md"), []byte("# mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if added, _ := ensureStarterConstitution(repo2); added {
+		t.Errorf("scaffolded over a repo that already owns a principle")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "constitution.md")); !os.IsNotExist(err) {
+		t.Errorf("constitution written despite an existing principle")
+	}
+}
+
+// TestBaselineWorkflowDoc_WorkflowCheckClean: the baseline names the internal
+// intent-gates (never materialised), yet the drift checks raise no blocking
+// finding — proving 2.4.1 recognition covers the order-zero baseline (2.4.2).
+func TestBaselineWorkflowDoc_WorkflowCheckClean(t *testing.T) {
+	wf := matSkill{name: "satellites-baseline-workflow", kind: "workflow", description: "the order-zero baseline",
+		body: baselineWorkflowDoc, raw: baselineWorkflowDoc}
+	for _, f := range runWorkflowChecks([]matSkill{wf}, nil, nil) {
+		if f.Severity == "block" {
+			t.Errorf("baseline naming internal intent-gates must be workflow-check CLEAN, got: %+v", f)
+		}
+	}
+}
+
 // gatedTestWorkflow is a minimal GATED workflow fixture: its forward edges carry
 // reviewer skills, so set-status must refuse them.
 const gatedTestWorkflow = `---
@@ -110,8 +177,8 @@ func TestSetStatusAllowed(t *testing.T) {
 	if !setStatusAllowed("parent", "done", "backlog", "", nil) {
 		t.Errorf("parent reopen must be allowed")
 	}
-	if !setStatusAllowed("fix", "backlog", "in_progress", "", baseline) {
-		t.Errorf("ungated backlog→in_progress must be allowed under the baseline")
+	if setStatusAllowed("fix", "backlog", "in_progress", "", baseline) {
+		t.Errorf("the baseline entry is now gated by the intent-gate — set-status must refuse it")
 	}
 	if !setStatusAllowed("fix", "in_progress", "done", "", baseline) {
 		t.Errorf("ungated in_progress→done must be allowed under the baseline")

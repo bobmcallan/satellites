@@ -112,12 +112,17 @@ func TestRunInit_ConsumptionConfigAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("satellites.toml not created: %v", err)
 	}
-	// Order-7: init configures CONSUMPTION, not authoring — it writes NO local
-	// governance files, and the toml carries the documented library_pins block.
-	for _, sub := range []string{"skills", "principles", "documents"} {
+	// init configures CONSUMPTION for skills/documents (no local authoring), and
+	// the toml carries the documented library_pins block. But the ORDER-ZERO
+	// substrate IS scaffolded (epic:satellites-backbone 2.4): the baseline
+	// workflow and a starter constitution under .satellites/principles.
+	for _, sub := range []string{"skills", "documents"} {
 		if _, err := os.Stat(filepath.Join(repo, ".satellites", sub)); !os.IsNotExist(err) {
 			t.Errorf("init must NOT scaffold .satellites/%s (got err=%v)", sub, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".satellites", "principles", "constitution.md")); err != nil {
+		t.Errorf("init must scaffold the starter constitution .satellites/principles/constitution.md: %v", err)
 	}
 	if !strings.Contains(string(tomlBefore), "library_pins") {
 		t.Errorf("fresh toml should carry the library_pins consumption block, got:\n%s", tomlBefore)

@@ -12,11 +12,12 @@ import (
 	"github.com/bobmcallan/satellites/internal/cli"
 )
 
-// TestInitConfiguresConsumption pins the order-7 contract (sty_985b05ec):
-// `satellites init` onboards a repo by CONSUMPTION — it writes NO local
-// governance (no .satellites/{skills,principles,documents}) and seeds the
-// documented library_pins consumption block in the toml. The prior
-// enforcement-surface trunk-workflow scaffold is retired.
+// TestInitConfiguresConsumption pins the consumption contract (sty_985b05ec):
+// `satellites init` onboards a repo by CONSUMPTION for skills/documents — it
+// writes NO local .satellites/{skills,documents} and seeds the documented
+// library_pins block in the toml. It DOES scaffold the order-zero substrate
+// (the baseline workflow + a starter constitution under .satellites/principles;
+// epic:satellites-backbone 2.4).
 func TestInitConfiguresConsumption(t *testing.T) {
 	repo := t.TempDir()
 	tomlPath := filepath.Join(repo, ".satellites", "satellites.toml")
@@ -47,11 +48,16 @@ func TestInitConfiguresConsumption(t *testing.T) {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
 
-	// No local governance scaffolded.
-	for _, sub := range []string{"skills", "principles", "documents"} {
+	// No local skills/documents scaffolded (those are CONSUMED), but the
+	// ORDER-ZERO substrate IS scaffolded: the baseline workflow + a starter
+	// constitution under .satellites/principles (epic:satellites-backbone 2.4).
+	for _, sub := range []string{"skills", "documents"} {
 		if _, statErr := os.Stat(filepath.Join(repo, ".satellites", sub)); !os.IsNotExist(statErr) {
 			t.Errorf("init must not scaffold .satellites/%s (statErr=%v)", sub, statErr)
 		}
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, ".satellites", "principles", "constitution.md")); statErr != nil {
+		t.Errorf("init must scaffold the starter constitution: %v", statErr)
 	}
 
 	// The toml carries the consumption knob.

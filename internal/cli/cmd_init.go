@@ -199,7 +199,7 @@ func runInit(out io.Writer, repoRoot string) error {
 	} else if appended {
 		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added global_publishers consumption note)"))
 	}
-	fmt.Fprintln(out, "  → governance: the gateless baseline workflow is scaffolded below; gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`. Gates are an opt-in palette; the baseline names none.")
+	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the internal intent-gate (config-over-code, injected from the binary). Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
 
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
@@ -229,7 +229,16 @@ func runInit(out io.Writer, repoRoot string) error {
 	if added, berr := ensureBaselineWorkflow(repoRoot); berr != nil {
 		return berr
 	} else {
-		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (gateless baseline)"))
+		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (intent-gated baseline)"))
+	}
+
+	// 6. Starter constitution — scaffold a repo-owned principles:always
+	//    constitution the intent-gates enforce, create-if-absent so a repo that
+	//    owns its principles is untouched (epic:satellites-backbone 2.4).
+	if added, cerr := ensureStarterConstitution(repoRoot); cerr != nil {
+		return cerr
+	} else {
+		fmt.Fprintln(out, initLine(added, ".satellites/principles/constitution.md (starter, principles:always)"))
 	}
 	return nil
 }
@@ -406,25 +415,28 @@ name: satellites-baseline-workflow
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
-description: The gateless baseline lifecycle — backlog to in_progress to done, no gates. Open a story, do the work, close it to done; the only enforcement is the goal-keeper holding the agent to a terminal state. Gates are an opt-in palette a richer repo-owned workflow composes; this baseline names none.
+description: The order-zero baseline lifecycle — backlog to in_progress to done. The entry is gated by the intent-gate (satellites-intent-plan-review, injected from the binary) so a story is judged against the repo's config-over-code intent before any code exists; the exit is ungated. Other gates stay an opt-in palette a richer repo-owned workflow composes.
 ---
 
-# Baseline workflow (gateless)
+# Baseline workflow (order-zero)
 
-The simplest governing workflow: a story moves backlog to in_progress to done
-with NO gates. Open the story, do the work, close it to done. The only thing
-holding you to it is the goal-keeper — an engaged, non-terminal story blocks the
-stop. Gates (plan / start / techdebt / done review, and so on) remain available
-as an opt-in palette; compose them into a richer repo-owned workflow when you
-want them. This baseline names none.
+The minimal governing workflow: a story moves backlog to in_progress to done.
+The ONLY gate is the intent spine every repo gets — the entry transition
+(backlog to in_progress) is judged by satellites-intent-plan-review, which
+rejects a plan that proposes baking a process, a gate, or an opinion into the
+binary instead of the substrate (the config-over-code rule), honouring the
+repo's resident constitution. The intent-gates are satellites-INTERNAL: injected
+from the binary, never materialised to .claude/skills, so they cannot be edited.
 
-Advance along an edge with: satellites story set-status <story-id> <status>. A
-non-parent move is permitted only along an UNGATED edge of the governing
-workflow — here, every forward edge is ungated.
+The exit (in_progress to done) and the cancel edges are ungated — advance them
+with: satellites story set-status <story-id> <status>. The goal-keeper Stop hook
+holds the agent to a terminal state. Other gates (start / techdebt / done review,
+and so on) remain an opt-in palette a richer repo-owned workflow composes; this
+baseline names only the intent spine.
 
 ## Workflow
 
-- backlog to in_progress — open (ungated).
+- backlog to in_progress — open, gated by satellites-intent-plan-review (intent).
 - in_progress to done — close (ungated).
 - backlog/in_progress to cancelled — abandon (ungated).
 
@@ -435,24 +447,33 @@ states:
   - done
   - cancelled
 transitions:
-  - {from: backlog, to: in_progress}
+  - {from: backlog, to: in_progress, reviewer_skill: "satellites-intent-plan-review"}
   - {from: in_progress, to: done}
   - {from: backlog, to: cancelled}
   - {from: in_progress, to: cancelled}
 ` + "```" + `
 
+## Checkpoint gates
+
+- [[satellites-intent-code-review]] — the config-over-code gate judged on the
+  diff: rejects code that hardcodes a gate, process step, or opinion that belongs
+  in the substrate. Injected from the binary (internal); run at the commit
+  checkpoint by the repo's commit routine.
+
 ## Environment
 
-Drives a story document backlog to in_progress to done via ungated status moves;
-no reviewer skills, no commands bound to states. The goal-keeper Stop hook holds
-the agent to a terminal state.
+Drives a story document backlog to in_progress to done. The entry is gated by the
+internal intent-gate; the exit and cancels are ungated status moves. The
+goal-keeper Stop hook holds the agent to a terminal state.
 
 ` + "```yaml" + `
 guardrails:
   always:
     - Drive the engaged story to a terminal state (done) — the goal-keeper holds you to it.
+    - Request the entry intent-gate (satellites-intent-plan-review) to open a story; it rejects a hardcoding plan.
   ask_first: []
   never:
+    - Move a story across a gated edge with set-status — route it through the named gate.
     - Move a story across an edge its governing workflow does not declare.
 ` + "```" + `
 `
@@ -478,6 +499,56 @@ func ensureBaselineWorkflow(repoRoot string) (bool, error) {
 	}
 	path := filepath.Join(wfDir, "satellites-baseline-workflow.md")
 	if err := os.WriteFile(path, []byte(baselineWorkflowDoc), 0o644); err != nil {
+		return false, fmt.Errorf("init: write %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// starterConstitutionDoc is the repo-AGNOSTIC starter constitution init/rebase
+// scaffold into .satellites/principles/, create-if-absent. It is
+// principles:always (resident every session) and a STARTER the repo adapts to
+// its own intent; the config-over-code rule is the universal spine the intent-
+// gates enforce (epic:satellites-backbone 2.4).
+const starterConstitutionDoc = `---
+name: constitution
+tags: [principles:always]
+---
+# Constitution
+
+This repo's process is configuration, not code. Workflows, gates, reviews, and
+opinions live in the substrate — documents, principles, skills, and workflow
+config the team authors and edits without a binary release — never as branches
+baked into a binary. A check that is deterministic is still configuration: a
+command a gate carries, not a hardcoded decision.
+
+When a change proposes baking a process, a gate, or an opinion into the binary
+instead of the substrate, that is the violation — move it to configuration.
+
+Adapt the rest of this document to your repo's own intent and definition of
+"good"; the rule above is the spine the intent-gates enforce.
+`
+
+// ensureStarterConstitution scaffolds the starter constitution into
+// .satellites/principles/, create-if-absent: it writes nothing when that
+// directory already holds any .md (a repo that owns its principles — including
+// satellites itself, with satellites-constitution.md — is never overwritten and
+// never gets a second resident constitution). Returns whether it wrote one.
+func ensureStarterConstitution(repoRoot string) (bool, error) {
+	dir := filepath.Join(repoRoot, ".satellites", "principles")
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				return false, nil // the repo already owns principles — leave them
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("init: read %s: %w", dir, err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, fmt.Errorf("init: create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, "constitution.md")
+	if err := os.WriteFile(path, []byte(starterConstitutionDoc), 0o644); err != nil {
 		return false, fmt.Errorf("init: write %s: %w", path, err)
 	}
 	return true, nil

@@ -66,7 +66,12 @@ func runRebase(out io.Writer, repoRoot string, doWF, doHook bool) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (gateless baseline)"))
+		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (intent-gated baseline)"))
+		conAdded, cerr := ensureStarterConstitution(repoRoot)
+		if cerr != nil {
+			return cerr
+		}
+		fmt.Fprintln(out, initLine(conAdded, ".satellites/principles/constitution.md (starter, principles:always)"))
 	}
 	if doHook {
 		settingsPath := filepath.Join(repoRoot, ".claude", "settings.json")
