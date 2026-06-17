@@ -155,11 +155,21 @@ func bashMutationTargets(command string) []string {
 }
 
 // redirectTargets returns the files a segment writes via `>`/`>>` (excluding
-// /dev/* and fd-dup forms).
+// /dev/* and fd-dup forms). A `>` inside a quoted span is data, not an operator
+// (sty_54c65577) — e.g. the literal `'<root>'` in an interpreter `-c` body — so
+// such matches are skipped. A real redirect's TARGET may still be quoted
+// (`> "out file"`); that quote follows the operator and is captured as before.
 func redirectTargets(seg string) []string {
+	mask := quoteMask(seg)
 	var out []string
-	for _, m := range redirectRe.FindAllStringSubmatch(seg, -1) {
-		p := unquoteArg(m[1])
+	for _, m := range redirectRe.FindAllStringSubmatchIndex(seg, -1) {
+		// m[0:2] is the whole match, m[2:4] is group 1 (the target). The operator
+		// is the first `>` in the match; skip the match when that `>` is quoted.
+		gt := strings.IndexByte(seg[m[0]:m[1]], '>')
+		if gt < 0 || mask[m[0]+gt] {
+			continue
+		}
+		p := unquoteArg(seg[m[2]:m[3]])
 		if p == "" || strings.HasPrefix(p, "&") || strings.HasPrefix(p, "/dev/") {
 			continue
 		}
@@ -294,11 +304,60 @@ func classifyGitCommand(command string, gateCommit bool) gitGateAction {
 
 // splitShellSegments breaks a command line on the shell separators that start a
 // new simple command (&&, ||, ;, |, newline), so each segment can be inspected
-// for its own leading command. `||` is listed before `|` so the two-char form
-// wins at a position.
+// for its own leading command. Separators inside a quoted span are ignored
+// (sty_54c65577): a `;`/`|` inside an interpreter `-c` body or any quoted
+// argument is data, not a separator, so it must not spawn a bogus segment whose
+// leading token looks like a mutation command.
 func splitShellSegments(s string) []string {
-	repl := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n")
-	return strings.Split(repl.Replace(s), "\n")
+	mask := quoteMask(s)
+	var segs []string
+	start := 0
+	for i := 0; i < len(s); {
+		if mask[i] {
+			i++
+			continue
+		}
+		if i+1 < len(s) && !mask[i+1] && (s[i:i+2] == "&&" || s[i:i+2] == "||") {
+			segs = append(segs, s[start:i])
+			i += 2
+			start = i
+			continue
+		}
+		if c := s[i]; c == ';' || c == '|' || c == '\n' {
+			segs = append(segs, s[start:i])
+			i++
+			start = i
+			continue
+		}
+		i++
+	}
+	return append(segs, s[start:])
+}
+
+// quoteMask reports, per byte of s, whether that byte lies inside a single- or
+// double-quoted span (the surrounding quote bytes are marked inside too). It is
+// a heuristic in keeping with the rest of this file — it models neither
+// backslash escapes nor `$'...'`; a quote opens a span until the next matching
+// quote (or end of string). It exists so shell-operator scanning (`>`, `|`,
+// `;`, `&&`) does not fire on an operator that sits inside a quoted argument,
+// e.g. the `>` in an interpreter body like `python3 -c "print('<root>')"`.
+func quoteMask(s string) []bool {
+	mask := make([]bool, len(s))
+	var q byte // 0 = outside quotes, else the open-quote char
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case q == 0 && (c == '\'' || c == '"'):
+			q = c
+			mask[i] = true
+		case q != 0 && c == q:
+			mask[i] = true
+			q = 0
+		case q != 0:
+			mask[i] = true
+		}
+	}
+	return mask
 }
 
 // gitSubcommand returns the git subcommand a single segment runs (lowercased),

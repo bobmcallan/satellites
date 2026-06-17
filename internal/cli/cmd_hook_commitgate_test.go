@@ -97,6 +97,110 @@ func TestRunHookCommitGate_NonGitAllows(t *testing.T) {
 	}
 }
 
+// bashCommitGateEvent marshals a PreToolUse Bash event, avoiding hand-escaping a
+// command that itself contains quotes/newlines.
+func bashCommitGateEvent(t *testing.T, repo, session, command string) *bytes.Buffer {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"cwd":        repo,
+		"session_id": session,
+		"tool_input": map[string]any{"command": command},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.NewBuffer(b)
+}
+
+// TestRunHookCommitGate_QuotedOperatorsAllow pins sty_54c65577: a read-only Bash
+// command whose only shell-operator characters (`>`, `|`, `;`) sit inside a
+// quoted span must NOT be gated, even with no engagement. The regression case is
+// the exact shape that falsely denied in session 7ba2a9aa — a `python3 -c` JSON
+// reader containing the literal `'<root>'`.
+func TestRunHookCommitGate_QuotedOperatorsAllow(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"python -c json reader with '<root>' literal", "python3 -c \"\nimport json\nd=json.load(open('/etc/hostname'))\ndef walk(o,path=''):\n    if isinstance(o,dict):\n        print('container:', path or '<root>')\nwalk(d)\n\""},
+		{"reported first-attempt form with 2>&1 | grep", "python3 -c \"print('<root>')\" 2>&1 | grep -i x | head"},
+		{"redirect operator only inside echo string", "echo '> not a redirect; rm -rf /'"},
+		{"separators only inside an interpreter body", "python3 -c \"print('a|b;c'); mv=1\""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := bashCommitGateEvent(t, repo, "sess1", c.command)
+			var out bytes.Buffer
+			if err := runHookCommitGate(in, &out); err != nil {
+				t.Fatalf("runHookCommitGate: %v", err)
+			}
+			if strings.TrimSpace(out.String()) != "" {
+				t.Errorf("quoted operators must not be gated, got deny: %q", out.String())
+			}
+		})
+	}
+}
+
+// TestRunHookCommitGate_RealRedirectStillDenies pins the no-regression half of
+// sty_54c65577: a genuine in-repo output redirection / mutation with no
+// engagement is still denied — including a quoted TARGET (the quote follows the
+// operator, so it is a real redirect).
+func TestRunHookCommitGate_RealRedirectStillDenies(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"truncate redirect", "echo hi > note.txt"},
+		{"append redirect", "echo hi >> note.txt"},
+		{"quoted target redirect", `echo hi > "out file.txt"`},
+		{"sed in place", "sed -i s/a/b/ src.go"},
+		{"mv into repo", "mv a.txt b.txt"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := bashCommitGateEvent(t, repo, "sess1", c.command)
+			var out bytes.Buffer
+			if err := runHookCommitGate(in, &out); err != nil {
+				t.Fatalf("runHookCommitGate: %v", err)
+			}
+			var dec gateDecisionJSON
+			if err := json.Unmarshal(out.Bytes(), &dec); err != nil {
+				t.Fatalf("real mutation should deny with decision JSON: %v\n%s", err, out.String())
+			}
+			if dec.HookSpecificOutput.PermissionDecision != "deny" {
+				t.Errorf("real mutation %q should deny, got %+v", c.command, dec.HookSpecificOutput)
+			}
+		})
+	}
+}
+
+// TestBashMutationTargets_QuoteAware unit-pins target extraction: operators
+// inside quotes yield no target; real redirects/mutations still do.
+func TestBashMutationTargets_QuoteAware(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    []string
+	}{
+		{"quoted gt literal", "python3 -c \"print('<root>')\"", nil},
+		{"separators in quotes", "python3 -c \"x='a|b;c'; print(x)\"", nil},
+		{"real redirect", "echo hi > note.txt", []string{"note.txt"}},
+		{"quoted real target", `echo hi > "out file.txt"`, []string{"out file.txt"}},
+		{"fd dup not a target", "go test ./... 2>&1", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := bashMutationTargets(c.command)
+			if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+				t.Errorf("bashMutationTargets(%q) = %v, want %v", c.command, got, c.want)
+			}
+		})
+	}
+}
+
 // TestRunHookCommitGate_StrictKnobGatesCommit pins AC3: with commit_gate="commit"
 // in the local toml, a bare `git commit` (no engagement) is denied; with the
 // default it would pass.
