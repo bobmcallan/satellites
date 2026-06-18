@@ -456,13 +456,6 @@ transitions:
   - {from: in_progress, to: cancelled}
 ` + "```" + `
 
-## Checkpoint gates
-
-- [[satellites-intent-code-review]] — the config-over-code gate judged on the
-  diff: rejects code that hardcodes a gate, process step, or opinion that belongs
-  in the substrate. Injected from the binary (internal); run at the commit
-  checkpoint by the repo's commit routine.
-
 ## Environment
 
 Drives a story document backlog to in_progress to done. The entry is gated by the
