@@ -84,6 +84,13 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 	if command == "" {
 		return nil // not a readable Bash command → nothing to gate
 	}
+	// Strip heredoc bodies + here-string operands before scanning (sty_8f68efc8):
+	// their lines are DATA passed to a verb (e.g. a document_upsert body), not
+	// shell file operations, so a governed path or redirect-like text inside them
+	// must not be read as a mutation. The command BEFORE a `<<` operator survives,
+	// so a genuine mutation on the same line is still gated. Both scans below
+	// (mutation targets AND the git share point) read the stripped form.
+	scan := stripHeredocs(command)
 
 	start := strings.TrimSpace(ev.Cwd)
 	if start == "" {
@@ -104,7 +111,7 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 	// paths are not gated. Only meaningful in a configured repo. Heuristic, not a
 	// shell parser; the git share-point gate below is the catch-all backstop.
 	if configured {
-		for _, t := range bashMutationTargets(command) {
+		for _, t := range bashMutationTargets(scan) {
 			if allow, reason, _ := gateOutcomeEng(start, session, t, now); !allow {
 				return emitGateDeny(out, "satellites: this Bash command mutates a governed file without an engagement. "+reason)
 			}
@@ -121,7 +128,7 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 		gateCommit = cfg.ResolveCommitGate() == cliconfig.CommitGateCommit
 	}
 
-	action := classifyGitCommand(command, gateCommit)
+	action := classifyGitCommand(scan, gateCommit)
 	if action == gitGateNone {
 		return nil // read-only git / non-git Bash / ungated commit → allow
 	}
@@ -138,6 +145,80 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 // skipped), followed by the target path (quoted or a bare token). The leading
 // class also rules out the second `>` of `>>` starting a fresh match.
 var redirectRe = regexp.MustCompile(`(?:^|[^0-9&>])>>?[ \t]*("[^"]*"|'[^']*'|[^ \t;|&<>]+)`)
+
+// heredocOpRe matches a heredoc redirection operator: `<<` or `<<-`, optional
+// spaces, then the delimiter — quoted (`<<'EOF'` / `<<"EOF"`) or a bare
+// identifier (`<<EOF`). It deliberately does NOT match a here-string `<<<` (the
+// trailing `<` fails every delimiter alternative); here-strings are stripped
+// separately. Heuristic, in keeping with the rest of this file.
+var heredocOpRe = regexp.MustCompile(`<<-?[ \t]*(?:"([^"\n]+)"|'([^'\n]+)'|([A-Za-z_][A-Za-z0-9_]*))`)
+
+// hereStringRe matches a here-string `<<<` and its single operand (quoted or a
+// bare token). The operand is DATA fed on stdin, never a shell file operation.
+var hereStringRe = regexp.MustCompile(`<<<[ \t]*("[^"]*"|'[^']*'|[^ \t;|&<>]+)`)
+
+// stripHeredocs removes heredoc BODIES, their closing delimiter lines, and
+// here-string operands from a Bash command before mutation/git scanning
+// (sty_8f68efc8). A heredoc body — the natural way to pass a multi-line document
+// to a verb, e.g. `satellites exec document_upsert <<'EOF' … EOF` — is DATA: its
+// lines are not shell commands, so a body line that happens to read like a
+// redirect (`> path`) or a mutation command (`rm`/`cp`/`mv`/`tee`/`sed -i` of a
+// governed path) must not be scanned as one. The command text BEFORE the `<<`
+// operator (the real command, e.g. `tee f <<EOF`) is preserved so genuine
+// mutations on that line are still gated. Heuristic, not a shell parser: it
+// handles the first heredoc per line and degrades to over-stripping (dropping
+// data, never inventing a target) on exotic multi-heredoc lines.
+func stripHeredocs(command string) string {
+	lines := strings.Split(command, "\n")
+	var out []string
+	for i := 0; i < len(lines); {
+		// A here-string is single-line data — drop its operand wherever it appears.
+		line := hereStringRe.ReplaceAllString(lines[i], "")
+
+		loc := heredocOpRe.FindStringSubmatchIndex(line)
+		if loc == nil {
+			out = append(out, line)
+			i++
+			continue
+		}
+		// Remove only the `<<DELIM` operator token; keep the rest of the line on
+		// BOTH sides, so a real op on the operator line — before it (`tee f <<EOF`)
+		// or after it (`cat <<EOF > governed`) — is still scanned. Only the BODY
+		// (subsequent lines) is data.
+		out = append(out, line[:loc[0]]+line[loc[1]:])
+		op := line[loc[0]:loc[1]]
+		delim := firstNonEmptySubmatch(line, loc, 1, 2, 3)
+		stripTabs := strings.HasPrefix(op, "<<-")
+		i++
+		// Drop body lines up to and including the closing delimiter. Bash ends the
+		// heredoc at a line equal to the delimiter (leading tabs stripped for `<<-`).
+		for i < len(lines) {
+			body := lines[i]
+			cmp := body
+			if stripTabs {
+				cmp = strings.TrimLeft(body, "\t")
+			}
+			i++
+			if cmp == delim {
+				break // closing delimiter consumed
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// firstNonEmptySubmatch returns the first non-empty capture group among the
+// given group indices, using the submatch index slice loc over s.
+func firstNonEmptySubmatch(s string, loc []int, groups ...int) string {
+	for _, g := range groups {
+		if 2*g+1 < len(loc) && loc[2*g] >= 0 {
+			if v := s[loc[2*g]:loc[2*g+1]]; v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
 
 // bashMutationTargets extracts the obvious in-repo file-mutation targets a Bash
 // command writes (sty_448d2024): output redirection (`>`/`>>`), `tee`, `mv`,

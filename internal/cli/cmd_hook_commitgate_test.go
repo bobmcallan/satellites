@@ -237,3 +237,129 @@ func TestRunHookCommitGate_StrictKnobGatesCommit(t *testing.T) {
 		t.Errorf("default knob must not gate git commit, got %q", out2.String())
 	}
 }
+
+// TestStripHeredocs pins sty_8f68efc8: heredoc bodies, their closing delimiter
+// lines, and here-string operands are removed (they are DATA), while the command
+// text BEFORE a `<<` operator (a real command on that line) survives.
+func TestStripHeredocs(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		// substrings that MUST be gone (heredoc/here-string data) ...
+		absent []string
+		// ... and substrings that MUST remain (real command before the operator).
+		present []string
+	}{
+		{
+			name:    "quoted-delimiter heredoc body dropped",
+			command: "satellites exec document_upsert --json \"$(cat <<'EOF'\nbody text > .satellites/x and rm .claude/skills/y\nEOF\n)\"",
+			absent:  []string{"> .satellites/x", "rm .claude/skills/y", "EOF"},
+			present: []string{"document_upsert"},
+		},
+		{
+			name:    "bare-delimiter heredoc body dropped",
+			command: "read -r -d '' BODY <<EOF\n> .satellites/a\nsed -i s/a/b/ .claude/skills/z\nEOF",
+			absent:  []string{".satellites/a", "sed -i", ".claude/skills/z"},
+			present: []string{"read -r -d"},
+		},
+		{
+			name:    "tab-indented <<- closing delimiter recognised",
+			command: "cmd <<-END\n\tdata rm .satellites/q\n\tEND\nafter",
+			absent:  []string{"rm .satellites/q"},
+			present: []string{"cmd ", "after"},
+		},
+		{
+			name:    "here-string operand dropped, command kept",
+			command: "satellites exec foo <<< \"governed > .claude/skills/h\"",
+			absent:  []string{".claude/skills/h"},
+			present: []string{"satellites exec foo"},
+		},
+		{
+			name:    "real mutation BEFORE the operator survives",
+			command: "tee .satellites/real.txt <<EOF\njust data\nEOF",
+			absent:  []string{"just data"},
+			present: []string{"tee .satellites/real.txt"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := stripHeredocs(c.command)
+			for _, a := range c.absent {
+				if strings.Contains(got, a) {
+					t.Errorf("stripHeredocs kept data %q:\nin:  %q\nout: %q", a, c.command, got)
+				}
+			}
+			for _, p := range c.present {
+				if !strings.Contains(got, p) {
+					t.Errorf("stripHeredocs dropped real command %q:\nin:  %q\nout: %q", p, c.command, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRunHookCommitGate_HeredocDataAllows pins sty_8f68efc8 AC1/AC2: a Bash
+// command that carries governed-path + redirect/mutation text only as DATA (a
+// heredoc body or here-string fed to a verb) is NOT denied, even with no
+// engagement — the body is data, not a file operation. This is the false-deny
+// that blocked creating/patching stories through the CLI.
+func TestRunHookCommitGate_HeredocDataAllows(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "document_upsert heredoc body referencing governed paths",
+			command: "satellites exec document_upsert --json \"$(cat <<'EOF'\nApproach: a real rm .claude/skills/x and > .satellites/y are described as data here\nEOF\n)\"",
+		},
+		{
+			name:    "read into var via bare heredoc",
+			command: "read -r -d '' BODY <<EOF\nsed -i s/a/b/ .claude/skills/gate.md\ntee .satellites/foo\nEOF\nsatellites exec document_upsert --json \"$BODY\"",
+		},
+		{
+			name:    "here-string data with governed path",
+			command: "satellites exec document_upsert --json <<< '{\"body\":\"rm .claude/skills/z and > .satellites/w\"}'",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := bashCommitGateEvent(t, repo, "sess1", c.command)
+			var out bytes.Buffer
+			if err := runHookCommitGate(in, &out); err != nil {
+				t.Fatalf("runHookCommitGate: %v", err)
+			}
+			if strings.TrimSpace(out.String()) != "" {
+				t.Errorf("governed-path text passed only as heredoc/here-string DATA must not be gated, got deny: %q", out.String())
+			}
+		})
+	}
+}
+
+// TestRunHookCommitGate_RealMutationBeforeHeredocStillDenies pins the
+// no-regression half of sty_8f68efc8: a genuine mutation written BEFORE a `<<`
+// operator (its target is real, only the body is data) is still denied without
+// an engagement — stripping the body must not blind the gate to the real op.
+func TestRunHookCommitGate_RealMutationBeforeHeredocStillDenies(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	cases := []string{
+		"tee .satellites/real.txt <<EOF\njust data\nEOF",
+		"cat <<EOF > .satellites/written\nbody\nEOF",
+	}
+	for _, command := range cases {
+		t.Run(command[:10], func(t *testing.T) {
+			in := bashCommitGateEvent(t, repo, "sess1", command)
+			var out bytes.Buffer
+			if err := runHookCommitGate(in, &out); err != nil {
+				t.Fatalf("runHookCommitGate: %v", err)
+			}
+			var dec gateDecisionJSON
+			if err := json.Unmarshal(out.Bytes(), &dec); err != nil {
+				t.Fatalf("real mutation before heredoc should deny with decision JSON: %v\n%s", err, out.String())
+			}
+			if dec.HookSpecificOutput.PermissionDecision != "deny" {
+				t.Errorf("real mutation %q should deny, got %+v", command, dec.HookSpecificOutput)
+			}
+		})
+	}
+}
