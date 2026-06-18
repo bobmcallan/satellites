@@ -4,7 +4,7 @@ type: skill
 kind: capability
 scope: system
 when: planning
-tags: [kind:capability]
+tags: [kind:capability, sync:true]
 description: Design a story's ## Workflow from its requirement in isolated context — propose candidate state machines (states + gated transitions) using only the available gate skills, each justified, fail-closed. Invoked by `satellites workflow design`; the agent authors the workflow, the operator chooses.
 ---
 

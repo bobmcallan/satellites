@@ -4,7 +4,7 @@ type: skill
 kind: capability
 description: Review a document file before `satellites document upload` — strict reference/link checks plus a maintainability critique. Invoke when authoring or revising a substrate document, before uploading it.
 scope: system
-tags: [kind:capability, area:substrate]
+tags: [kind:capability, area:substrate, sync:true]
 ---
 # satellites-document-review
 

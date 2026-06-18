@@ -4,7 +4,7 @@ type: skill
 kind: capability
 description: Define or revise a project's reviewer-gated workflow from the admin's requirements and the repo's reality. Invoke when a project has no workflow skill or wants to change how stories move; bakes in no other project's conventions.
 scope: system
-tags: [kind:capability, area:process]
+tags: [kind:capability, area:process, sync:true]
 ---
 # satellites-project-setup
 

@@ -4,7 +4,7 @@ type: skill
 kind: capability
 description: Review a skill file before `satellites skill upload` — strict drift/link checks the CLI hard-blocks, plus a kind-aware maintainability critique (Spec/Verifier/Environment). Invoke after authoring or revising a skill, before uploading it.
 scope: system
-tags: [kind:capability, area:substrate]
+tags: [kind:capability, area:substrate, sync:true]
 ---
 # satellites-skill-review
 

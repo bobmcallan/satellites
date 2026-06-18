@@ -4,7 +4,7 @@ type: skill
 kind: capability
 description: Review a principle file before `satellites principle upload` — strict reference checks plus a durability critique. Invoke after authoring or revising a principle, before uploading it.
 scope: system
-tags: [kind:capability, area:substrate]
+tags: [kind:capability, area:substrate, sync:true]
 ---
 # satellites-principle-review
 
