@@ -17,6 +17,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -29,8 +30,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// surfaceDocName is the project document of record for the client's
-// command surface — the doc the gate reconciles the live commands against.
+// surfaceDocName is the DEFAULT name of the command-surface reference
+// document — a mechanism parameter, not a hard dependency. It is overridable
+// per invocation via --doc, and the gate functions even when no such document
+// exists: an absent/unreadable doc degrades to "every live command
+// undocumented" (actionable drift), never a crash. The gate derives the live
+// surface from the binary's own command tree, so its behaviour does not depend
+// on any repo-specific document existing (sty_1bdebdd9).
 const surfaceDocName = "client-command-surface"
 
 func init() {
@@ -112,22 +118,31 @@ func runSurfaceCheck(ctx context.Context, opts surfaceOpts) error {
 	}
 	live := liveCommandNames(NewRootCmd())
 
-	body, err := loadSurfaceDoc(ctx, opts)
+	body, present, err := loadSurfaceDoc(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("surface gate: read command-surface doc %q: %w", opts.DocName, err)
 	}
+	return evaluateSurface(opts.Stdout, live, body, present, opts.DocName, opts.OnVerdict)
+}
 
+// evaluateSurface compares the live command surface against the doc body and
+// renders the verdict. It is the pure, network-free core of the gate: an
+// ABSENT doc (present=false, empty body) degrades to "every live command
+// undocumented" — actionable drift, never a crash — so the gate stays atomic
+// and self-contained. The referenced doc may enrich the verdict (mark commands
+// documented); it can never disable the gate (sty_1bdebdd9).
+func evaluateSurface(w io.Writer, live []string, body string, present bool, docName string, onVerdict func(verdict string, blockingFindings int)) error {
 	missing := surfaceDrift(live, body)
-	printSurfaceReport(opts.Stdout, live, missing, opts.DocName)
-	if opts.OnVerdict != nil {
+	printSurfaceReport(w, live, missing, docName, present)
+	if onVerdict != nil {
 		if len(missing) > 0 {
-			opts.OnVerdict(gateVerdictBlocked, len(missing))
+			onVerdict(gateVerdictBlocked, len(missing))
 		} else {
-			opts.OnVerdict(gateVerdictClean, 0)
+			onVerdict(gateVerdictClean, 0)
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("surface gate: %d command(s) undocumented in %q — reconcile the doc to match the CLI", len(missing), opts.DocName)
+		return fmt.Errorf("surface gate: %d command(s) undocumented in %q — reconcile the doc to match the CLI", len(missing), docName)
 	}
 	return nil
 }
@@ -167,9 +182,12 @@ func surfaceDrift(live []string, body string) []string {
 	return missing
 }
 
-func printSurfaceReport(w io.Writer, live, missing []string, docName string) {
+func printSurfaceReport(w io.Writer, live, missing []string, docName string, docPresent bool) {
 	fmt.Fprintln(w, "\n── command-surface review ──")
 	fmt.Fprintf(w, "live commands (%d): %s\n", len(live), strings.Join(live, ", "))
+	if !docPresent {
+		fmt.Fprintf(w, "NOTE: command-surface doc %q is absent or empty — every live command is reported as undocumented; create the doc to track the surface.\n", docName)
+	}
 	if len(missing) > 0 {
 		fmt.Fprintf(w, "UNDOCUMENTED (%d) — add to %s:\n", len(missing), docName)
 		for _, c := range missing {
@@ -184,21 +202,27 @@ func printSurfaceReport(w io.Writer, live, missing []string, docName string) {
 // loadSurfaceDoc fetches the command-surface document body, resolving
 // workspace_id from the project when not supplied — the techdebt-gate
 // register-load pattern.
-func loadSurfaceDoc(ctx context.Context, opts surfaceOpts) (string, error) {
+//
+// It returns present=false (with no error) when the document is ABSENT or
+// empty: a missing command-surface doc is not a gate failure, it means the
+// surface is undocumented, which evaluateSurface renders as drift. A genuine
+// pre-flight failure (no project_id, workspace resolution, transport) is still
+// returned as an error — only the no-doc CRASH path is removed (sty_1bdebdd9).
+func loadSurfaceDoc(ctx context.Context, opts surfaceOpts) (body string, present bool, err error) {
 	projectID := opts.ProjectID
 	if projectID == "" {
-		if cfg, _, err := cliconfig.Load(opts.ConfigPath); err == nil {
+		if cfg, _, cerr := cliconfig.Load(opts.ConfigPath); cerr == nil {
 			projectID = strings.TrimSpace(cfg.ProjectID)
 		}
 	}
 	if projectID == "" {
-		return "", fmt.Errorf("no project_id (set --project or configure satellites.toml)")
+		return "", false, fmt.Errorf("no project_id (set --project or configure satellites.toml)")
 	}
 	workspaceID := opts.WorkspaceID
 	if workspaceID == "" {
-		ws, err := resolveWorkspaceID(ctx, projectID, opts.ConfigPath, opts.UserArg)
-		if err != nil {
-			return "", fmt.Errorf("resolve workspace_id: %w", err)
+		ws, werr := resolveWorkspaceID(ctx, projectID, opts.ConfigPath, opts.UserArg)
+		if werr != nil {
+			return "", false, fmt.Errorf("resolve workspace_id: %w", werr)
 		}
 		workspaceID = ws
 	}
@@ -211,24 +235,36 @@ func loadSurfaceDoc(ctx context.Context, opts surfaceOpts) (string, error) {
 		Inherit:     true,
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	raw, err := dispatchVerb(ctx, "document_get", req, opts.ConfigPath, opts.UserArg)
 	if err != nil {
-		return "", err
+		if isDocNotFound(err) {
+			return "", false, nil // doc absent — degrade to drift, do not crash the gate
+		}
+		return "", false, err
 	}
 	var resp verb.DocumentGetResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", err
+		return "", false, err
 	}
-	body := resp.RawBody
+	body = resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
 		body = resp.Versions[0].Body
 	}
 	if strings.TrimSpace(body) == "" {
-		return "", fmt.Errorf("document %q has an empty body", opts.DocName)
+		return "", false, nil // empty doc — same as absent: nothing documented
 	}
-	return body, nil
+	return body, true, nil
+}
+
+// isDocNotFound reports whether err is a document-not-found from document_get,
+// across both the in-process path (verb.ErrNotFound) and the HTTP path (the
+// server's "not found" error string, which errors.Is cannot see through the
+// transport boundary).
+func isDocNotFound(err error) bool {
+	return errors.Is(err, verb.ErrNotFound) ||
+		strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 // resolveWorkspaceID maps a project to its workspace via project_get. Shared

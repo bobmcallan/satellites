@@ -1,7 +1,12 @@
 package cli
 
 import (
+	"bytes"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/verb"
 )
 
 // sty_d7698c22: the live command surface is enumerated without cobra's
@@ -57,5 +62,73 @@ func TestSurfaceDrift_WholeWordOnly(t *testing.T) {
 	missing := surfaceDrift([]string{"doc"}, doc)
 	if len(missing) != 1 {
 		t.Fatalf("substring should not count as documented, got %v", missing)
+	}
+}
+
+// sty_1bdebdd9 / AC2+AC4: an ABSENT command-surface doc (present=false, empty
+// body) must NOT crash the gate. evaluateSurface degrades to "every live
+// command undocumented" — actionable drift — and returns a drift error with a
+// BLOCKED verdict, never a read/crash error. No claude, no network.
+func TestEvaluateSurface_MissingDocReportsDriftNoCrash(t *testing.T) {
+	live := []string{"surface", "update", "version"}
+	var buf bytes.Buffer
+	var gotVerdict string
+	var gotBlocking int
+	err := evaluateSurface(&buf, live, "", false, "client-command-surface", func(v string, n int) {
+		gotVerdict, gotBlocking = v, n
+	})
+	if err == nil {
+		t.Fatal("missing doc should yield a drift error, got nil")
+	}
+	if gotVerdict != gateVerdictBlocked {
+		t.Errorf("expected BLOCKED verdict, got %q", gotVerdict)
+	}
+	if gotBlocking != len(live) {
+		t.Errorf("expected all %d live commands undocumented, got %d", len(live), gotBlocking)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "absent or empty") {
+		t.Errorf("report should name the absent doc, got:\n%s", out)
+	}
+	for _, c := range live {
+		if !strings.Contains(out, c) {
+			t.Errorf("report should list undocumented command %q, got:\n%s", c, out)
+		}
+	}
+}
+
+// A present, fully-documenting doc accepts cleanly: present=true, no drift,
+// CLEAN verdict, nil error — the absent-doc degradation does not leak into the
+// happy path.
+func TestEvaluateSurface_PresentDocCleanAccepts(t *testing.T) {
+	live := []string{"surface", "version"}
+	var buf bytes.Buffer
+	var gotVerdict string
+	err := evaluateSurface(&buf, live, "commands: surface, version", true, "client-command-surface", func(v string, n int) {
+		gotVerdict = v
+	})
+	if err != nil {
+		t.Fatalf("fully documented surface should accept, got %v", err)
+	}
+	if gotVerdict != gateVerdictClean {
+		t.Errorf("expected CLEAN verdict, got %q", gotVerdict)
+	}
+	if strings.Contains(buf.String(), "absent or empty") {
+		t.Errorf("present doc should not print the absent-doc notice, got:\n%s", buf.String())
+	}
+}
+
+// isDocNotFound classifies a document_get not-found (in-process sentinel and the
+// HTTP error string) as absent, while a genuine transport error is NOT absent —
+// so only the no-doc path degrades; real failures still surface.
+func TestIsDocNotFound(t *testing.T) {
+	if !isDocNotFound(fmt.Errorf("document_get: %w", verb.ErrNotFound)) {
+		t.Error("in-process verb.ErrNotFound should be classified as not-found")
+	}
+	if !isDocNotFound(fmt.Errorf("cli: document_get: document_get: verb: not found: project/client-command-surface")) {
+		t.Error("HTTP not-found error string should be classified as not-found")
+	}
+	if isDocNotFound(fmt.Errorf("cli: dispatch document_get: connection refused")) {
+		t.Error("a transport error must NOT be classified as not-found")
 	}
 }

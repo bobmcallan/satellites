@@ -22,6 +22,8 @@ Read the quarantine register — the `technical-debt-register` document:
 
 Each row is `| check_id | story_id | reason |`. A failing check is tolerated ONLY when the register names it AND that row carries a non-empty story_id.
 
+The register only ever WEAKENS a reject (it can excuse an owned red); it can never cause one. So an **absent, empty, or unreadable register is an EMPTY register — nothing is quarantined** (the strictest stance): no check is owned, so every failing check is unregistered. Judge the injected check result against that empty register; never reject merely because the register could not be read. This keeps the gate atomic — the document may enrich the verdict but never disables it.
+
 ## Decision rule
 
 From the injected functional-check output:
@@ -33,7 +35,7 @@ From the injected functional-check output:
 - **A registered check that PASSED this run** (named in the register but absent from the failures) → it is stale; **accept**, and NAME it in your notes so the owner removes the row (the register only shrinks).
 - Otherwise (no new red, no unowned row) → **accept**.
 
-Fail closed: if the injected check result or the register cannot be read, **reject** with the reason named.
+Fail closed binds to the CHECK RESULT, never to the register: if the injected functional-check result cannot be read, **reject** with the reason named — you cannot pass a tree you cannot see. An absent, empty, or unreadable register is NOT a reject cause: treat it as an empty register (nothing quarantined) and judge the check result against it — a clean tree still **accepts**, any red is unregistered and **rejects**.
 
 ## Environment
 
@@ -44,7 +46,7 @@ guardrails:
   always:
     - Judge ONLY the injected functional-check result against the register — the harness owns running build/test.
     - Tolerate a failing check only when the register names it AND the row owns a story.
-    - Fail closed when the check result or the register cannot be read.
+    - Fail closed on an unreadable CHECK RESULT only; an absent/unreadable register means nothing quarantined (judge against an empty register), never a reject.
     - Distinguish an integration INFRA outage (skip, not block) from a test FAILURE (block unless registered).
   ask_first: []
   never:
