@@ -171,12 +171,12 @@ func reviewContextConflicts(storyBody string, skillExists func(string) bool) []c
 		if skill == "" || seen[skill] {
 			continue // an unguarded edge is allowed; report each missing skill once
 		}
-		if !skillExists(skill) {
+		if !skillExists(skill) && !verb.IsInternalGate(skill) {
 			seen[skill] = true
 			out = append(out, conflictFinding{
 				Severity: "error",
 				Code:     "missing-gate-skill",
-				Message:  fmt.Sprintf("transition %s→%s names reviewer_skill %q but no such skill is materialised in .claude/skills", t.From, t.To, skill),
+				Message:  fmt.Sprintf("transition %s→%s names reviewer_skill %q but no such skill is materialised in .claude/skills (and it is not an embedded internal gate)", t.From, t.To, skill),
 			})
 		}
 	}
