@@ -94,7 +94,26 @@ type ClaudeCLIGateDispatcher struct {
 	// zero. Zero here disables the cap entirely — used by tests that
 	// want fine-grained control.
 	DefaultTimeout time.Duration
+
+	// Fetch is the server-fetch resolution source (sty_b8de4776): when a
+	// non-embedded gate is absent from the worktree materialised dir, its body
+	// is fetched from the server by name instead. This makes a substrate
+	// reviewer injectable without a local install — the materialised dir is an
+	// OPTIONAL offline cache, not a hard requirement. Nil disables the server
+	// step (resolution stays embed → local only), which keeps test fakes that
+	// do not need a server simple. The CLI wires the prod fetcher.
+	Fetch GateBodyFetcher
 }
+
+// GateBodyFetcher fetches a gate skill's raw SKILL.md (frontmatter + body) from
+// the server by name, honouring scope precedence (the same precedence
+// `skill sync` materialises by — project > workspace > system > global library
+// — so a server hit is the same body the local cache would have held). ok=false
+// means the server holds no such skill in ANY scope; that is not an error — the
+// dispatcher then fails closed naming all three sources. A transport failure is
+// returned as err. The CLI owns the implementation (it has the server/config
+// access the verb layer does not); the verb only holds the seam.
+type GateBodyFetcher func(ctx context.Context, skillName string) (raw []byte, ok bool, err error)
 
 // Dispatch satisfies GateDispatcher with a `claude -p` subprocess. Story
 // 11 (`audit-prose + size-budget`) layers an additional gate runner on
@@ -129,7 +148,7 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		return GateOutput{}, fmt.Errorf("gate dispatch: marshal payload: %w", err)
 	}
 
-	fm, systemPrompt, err := resolveGateSkill(in.WorktreeRoot, in.SkillName)
+	fm, systemPrompt, err := c.resolveGate(ctx, in.WorktreeRoot, in.SkillName)
 	if err != nil {
 		return GateOutput{}, err
 	}
@@ -200,14 +219,56 @@ func gateClaudeArgs(systemPrompt, model string) []string {
 	return args
 }
 
+// errGateSkillAbsent marks the one resolution outcome the server step may
+// recover from: a non-embedded gate simply not present in the worktree
+// materialised dir (the blank-repo / no-local-install case). A read error that
+// is NOT a plain not-exist (a permission fault), or a parse error on a present
+// body, is fatal and never masked by the server — a corrupt local cache is a
+// clear failure, not a cache miss.
+var errGateSkillAbsent = errors.New("gate skill absent from worktree .claude/skills")
+
+// resolveGate resolves a gate's frontmatter + body through the full source
+// chain (sty_b8de4776): embed → local materialised (offline cache) → server.
+// The local dir stays the FIRST non-embedded source so a present cache costs no
+// network; the server is the fallback that lets a substrate reviewer dispatch
+// with no local install. A gate that resolves from NO source is a clear
+// fail-closed dispatch error naming all three. An embedded gate never reaches
+// the server, so the home-of-gate invariant (a gate lives in one home) holds.
+func (c ClaudeCLIGateDispatcher) resolveGate(ctx context.Context, worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
+	fm, body, err := resolveGateSkill(worktreeRoot, skillName)
+	if err == nil {
+		return fm, body, nil // embed or local hit
+	}
+	// Only a plain local-miss falls through to the server; any other local
+	// error (corrupt body, permission fault) is fatal and surfaced as-is.
+	if !errors.Is(err, errGateSkillAbsent) || c.Fetch == nil {
+		return frontmatter.Frontmatter{}, "", err
+	}
+	raw, ok, ferr := c.Fetch(ctx, skillName)
+	if ferr != nil {
+		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: fetch gate skill %q from server: %w", skillName, ferr)
+	}
+	if !ok {
+		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: gate skill %q resolves from no source (not embedded, not in .claude/skills, not on the server)", skillName)
+	}
+	pfm, pbody, perr := frontmatter.Parse(raw)
+	if perr != nil {
+		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse server gate skill %q: %w", skillName, perr)
+	}
+	return pfm, string(pbody), nil
+}
+
 // resolveGateSkill returns a gate's parsed frontmatter and its body (with
 // frontmatter stripped) — the rubric delivered as the system prompt. A
 // satellites-INTERNAL gate (embedded in the binary) is resolved FIRST and wins
 // over any worktree copy: its governance ships protected and a user editing
 // `.claude/skills/<name>` cannot alter it (epic:satellites-backbone 2.2).
 // Otherwise the gate is read from the worktree
-// (.claude/skills/<name>/SKILL.md); a missing skill is a dispatch error — the
-// gate cannot run a skill that is neither internal nor materialised.
+// (.claude/skills/<name>/SKILL.md); an absent skill returns errGateSkillAbsent
+// so the dispatcher's resolveGate can fall through to the server fetch
+// (sty_b8de4776). This function itself stops at embed → local; it is the
+// embed+cache half the server step builds on (and the form callers/tests that
+// need no server still use).
 func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
 	if raw, ok := internalGateRaw(skillName); ok {
 		fm, body, err := frontmatter.Parse(raw)
@@ -223,6 +284,9 @@ func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, 
 	path := filepath.Join(root, ".claude", "skills", skillName, "SKILL.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, errGateSkillAbsent)
+		}
 		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
 	}
 	fm, body, err := frontmatter.Parse(raw)

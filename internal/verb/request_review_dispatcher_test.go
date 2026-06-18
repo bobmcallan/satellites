@@ -1,6 +1,8 @@
 package verb
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +87,161 @@ func TestResolveGateSkillBody_Missing(t *testing.T) {
 	_, err := resolveGateSkillBody(t.TempDir(), "nonexistent-gate")
 	if err == nil || !strings.Contains(err.Error(), "read gate skill") {
 		t.Fatalf("expected read-gate-skill error, got %v", err)
+	}
+}
+
+// substrateGateBody is a minimal materialised gate SKILL.md (frontmatter +
+// body) the resolution tests stand in for either a worktree copy or a server
+// fetch. No `check:` so Dispatch runs no functional half.
+func substrateGateBody(name, marker string) string {
+	return "---\nname: " + name + "\ntype: skill\nkind: gate\ntags: [kind:gate]\n---\n" + marker + "\n"
+}
+
+// writeLocalGate materialises a gate SKILL.md under root/.claude/skills/<name>.
+func writeLocalGate(t *testing.T, root, name, marker string) {
+	t.Helper()
+	dir := filepath.Join(root, ".claude", "skills", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(substrateGateBody(name, marker)), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+// TestResolveGate_EmbedWins pins the home-of-gate invariant in the resolution
+// chain (sty_b8de4776 AC5): a satellites-INTERNAL gate resolves from the binary
+// FIRST and never consults the worktree or the server, even when a same-named
+// local copy exists and a fetcher is wired. The fetcher fails the test if called.
+func TestResolveGate_EmbedWins(t *testing.T) {
+	root := t.TempDir()
+	writeLocalGate(t, root, "satellites-intent-plan-review", "LOCAL IMPOSTOR BODY")
+	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, name string) ([]byte, bool, error) {
+		t.Fatalf("server fetch must not be consulted for embedded gate %q", name)
+		return nil, false, nil
+	}}
+	_, body, err := disp.resolveGate(context.Background(), root, "satellites-intent-plan-review")
+	if err != nil {
+		t.Fatalf("resolveGate: %v", err)
+	}
+	if strings.Contains(body, "IMPOSTOR") {
+		t.Fatalf("embedded gate must win over local copy; got worktree body: %q", body)
+	}
+	if !strings.Contains(body, "satellites-formatted") {
+		t.Fatalf("expected embedded intent-plan-review rubric, got: %q", body)
+	}
+}
+
+// TestResolveGate_LocalHit: a non-embedded gate present in the worktree resolves
+// from the local materialised dir — the FIRST non-embedded source (offline
+// cache) — and the server fetcher is NOT consulted (no extra network when cached).
+func TestResolveGate_LocalHit(t *testing.T) {
+	root := t.TempDir()
+	writeLocalGate(t, root, "custom-review", "LOCAL CACHE BODY")
+	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, name string) ([]byte, bool, error) {
+		t.Fatalf("server fetch must not be consulted when local copy present (gate %q)", name)
+		return nil, false, nil
+	}}
+	_, body, err := disp.resolveGate(context.Background(), root, "custom-review")
+	if err != nil {
+		t.Fatalf("resolveGate: %v", err)
+	}
+	if !strings.Contains(body, "LOCAL CACHE BODY") {
+		t.Fatalf("expected local cache body, got: %q", body)
+	}
+}
+
+// TestResolveGate_ServerFallback: a non-embedded gate ABSENT from the worktree
+// is fetched from the server and injected — the core sty_b8de4776 property (no
+// local install required). The worktree has no .claude/skills entry for it.
+func TestResolveGate_ServerFallback(t *testing.T) {
+	root := t.TempDir()
+	var asked string
+	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, name string) ([]byte, bool, error) {
+		asked = name
+		return []byte(substrateGateBody(name, "SERVER FETCHED BODY")), true, nil
+	}}
+	_, body, err := disp.resolveGate(context.Background(), root, "custom-review")
+	if err != nil {
+		t.Fatalf("resolveGate: %v", err)
+	}
+	if asked != "custom-review" {
+		t.Fatalf("server fetch asked for %q, want custom-review", asked)
+	}
+	if !strings.Contains(body, "SERVER FETCHED BODY") {
+		t.Fatalf("expected server-fetched body, got: %q", body)
+	}
+}
+
+// TestResolveGate_Nowhere: a gate that resolves from NO source — not embedded,
+// not local, server returns ok=false — is a clear fail-closed dispatch error
+// naming all three sources (sty_b8de4776 AC2).
+func TestResolveGate_Nowhere(t *testing.T) {
+	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, _ string) ([]byte, bool, error) {
+		return nil, false, nil // server has no such skill in any scope
+	}}
+	_, _, err := disp.resolveGate(context.Background(), t.TempDir(), "ghost-review")
+	if err == nil {
+		t.Fatalf("expected fail-closed error when gate resolves nowhere")
+	}
+	for _, want := range []string{"embedded", ".claude/skills", "server"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("nowhere error must name source %q; got %v", want, err)
+		}
+	}
+}
+
+// TestResolveGate_FetchErrorNotMasked: a server transport failure is returned as
+// an error, never silently read as a cache miss / accept.
+func TestResolveGate_FetchErrorNotMasked(t *testing.T) {
+	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, _ string) ([]byte, bool, error) {
+		return nil, false, errors.New("substrate unreachable")
+	}}
+	_, _, err := disp.resolveGate(context.Background(), t.TempDir(), "custom-review")
+	if err == nil || !strings.Contains(err.Error(), "substrate unreachable") {
+		t.Fatalf("transport failure must surface, got %v", err)
+	}
+}
+
+// TestResolveGate_NoFetcherKeepsLocalError: with no fetcher wired, an absent
+// non-embedded gate still fails closed with the local read error (the server
+// step is simply disabled — embed → local only).
+func TestResolveGate_NoFetcherKeepsLocalError(t *testing.T) {
+	disp := ClaudeCLIGateDispatcher{} // Fetch nil
+	_, _, err := disp.resolveGate(context.Background(), t.TempDir(), "custom-review")
+	if err == nil || !strings.Contains(err.Error(), "read gate skill") {
+		t.Fatalf("expected local read-gate-skill error with no fetcher, got %v", err)
+	}
+}
+
+// TestDispatch_SucceedsViaServerFetch proves the end-to-end property (AC4): a
+// reviewer ABSENT from the worktree dispatches successfully because its body is
+// fetched from the server and injected into the claude run. A shim binary stands
+// in for `claude -p`, printing the decision JSON a real gate would emit.
+func TestDispatch_SucceedsViaServerFetch(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "claude-shim.sh")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nprintf '%s' '{\"decision\":\"accept\",\"notes\":\"resolved via server\"}'\n"), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+	worktree := t.TempDir() // no .claude/skills — the reviewer is absent locally
+	disp := ClaudeCLIGateDispatcher{
+		BinaryPath: shim,
+		Fetch: func(_ context.Context, name string) ([]byte, bool, error) {
+			return []byte(substrateGateBody(name, "You are the custom-review gate.")), true, nil
+		},
+	}
+	out, err := disp.Dispatch(context.Background(), GateInput{
+		SkillName:    "custom-review",
+		StoryID:      "sty_test",
+		StoryStatus:  "in_progress",
+		WorktreeRoot: worktree,
+	})
+	if err != nil {
+		t.Fatalf("dispatch via server fetch failed: %v", err)
+	}
+	if out.Decision != GateDecisionAccept {
+		t.Fatalf("decision = %q, want accept", out.Decision)
 	}
 }
 

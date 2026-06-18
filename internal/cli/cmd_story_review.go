@@ -345,6 +345,11 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
 			Model:          reviewerModel(opts.ConfigPath),
 			DefaultTimeout: gateDispatchTimeout,
+			// Server-fetch fallback (sty_b8de4776): a non-embedded reviewer absent
+			// from .claude/skills is fetched from the server and injected, so a
+			// substrate reviewer needs no local install. The local dir stays the
+			// first non-embedded source (offline cache); this is the fallback.
+			Fetch: serverGateFetcher(opts.ConfigPath, opts.UserArg),
 		}
 		gateOut, err = disp.Dispatch(ctx, verb.GateInput{
 			SkillName:    gateSkill,
