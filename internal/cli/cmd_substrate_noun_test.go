@@ -2,10 +2,98 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestCallerScopedListVia_ConfinesToCallerProject pins the project-scoped
+// discovery fix (sty_4add3b87): the default (unflagged) listing — including the
+// tag-filtered principle noun — must return only the caller's project rows plus
+// the system union, never another project's project-scope rows.
+//
+// The fake dispatch models the verb's scope confinement: a project-scope
+// document_list returns only the rows of the project_id it names (exactly as
+// requireScopeKey + addScopePredicate bound it server-side); an empty-scope
+// request — the pre-fix leak path — would return every project's rows. Because
+// callerScopedListVia names the caller's project_id on its project sub-list, the
+// foreign project-B row never appears. No second live project is needed — the
+// store is seeded in-test.
+func TestCallerScopedListVia_ConfinesToCallerProject(t *testing.T) {
+	systemRows := []nounListItem{
+		{Name: "agent-goals", Scope: "system", Tags: []string{"principles:global", "principles:always"}},
+	}
+	storeByProject := map[string][]nounListItem{
+		"proj_A": {{Name: "constitution", Scope: "project", Tags: []string{"principles:always"}}},
+		"proj_B": {{Name: "foreign-constitution", Scope: "project", Tags: []string{"principles:always"}}},
+	}
+
+	var projReqProjectID string
+	projRequests := 0
+	dispatch := func(_ context.Context, name string, raw json.RawMessage) (json.RawMessage, error) {
+		if name != "document_list" {
+			return nil, fmt.Errorf("unexpected verb %q", name)
+		}
+		var req docListRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		var items []nounListItem
+		switch req.Scope {
+		case "system":
+			items = systemRows
+		case "project":
+			projRequests++
+			projReqProjectID = req.ProjectID
+			if req.ProjectID == "" {
+				// Pre-fix leak: no project predicate → every project's rows.
+				for _, rows := range storeByProject {
+					items = append(items, rows...)
+				}
+			} else {
+				items = storeByProject[req.ProjectID]
+			}
+		default:
+			// Empty/unscoped — the global leak the fix removes.
+			items = append(items, systemRows...)
+			for _, rows := range storeByProject {
+				items = append(items, rows...)
+			}
+		}
+		return json.Marshal(docListView{Items: items})
+	}
+
+	got, err := callerScopedListVia(context.Background(), dispatch, "", "proj_A", "wksp_X", "", nil)
+	if err != nil {
+		t.Fatalf("callerScopedListVia: %v", err)
+	}
+
+	// The project sub-list must name the caller's project — that is what bounds
+	// the verb. A request without it would leak (and is the bug under test).
+	if projRequests != 1 {
+		t.Fatalf("want exactly one project sub-list, got %d", projRequests)
+	}
+	if projReqProjectID != "proj_A" {
+		t.Fatalf("project sub-list project_id = %q, want proj_A (unscoped request leaks foreign rows)", projReqProjectID)
+	}
+
+	names := make([]string, len(got))
+	for i, it := range got {
+		names[i] = it.Name
+	}
+	if !contains(names, "agent-goals") {
+		t.Errorf("system union dropped: %v", names)
+	}
+	if !contains(names, "constitution") {
+		t.Errorf("caller-project row dropped: %v", names)
+	}
+	if contains(names, "foreign-constitution") {
+		t.Errorf("foreign project row leaked into the listing: %v", names)
+	}
+}
 
 func TestFilterByTagPrefix(t *testing.T) {
 	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)

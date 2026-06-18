@@ -211,25 +211,44 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 
 // callerScopedList lists a noun's EFFECTIVE set for a configured caller —
 // system-scope rows plus the configured project's rows — so a default
-// (unflagged) list never surfaces another project's rows (sty_de7e2008). It
-// engages only for the type-filtered nouns (skill / document), not the
-// tag-filtered principle noun, and only when a project is configured. Returns
-// ok=false to signal the caller to fall back to the plain unscoped list rather
-// than fail (an unconfigured or unresolvable caller still gets a listing).
+// (unflagged) list never surfaces another project's rows (sty_de7e2008,
+// sty_4add3b87). It engages for every noun — the type-filtered nouns (skill /
+// document) AND the tag-filtered principle noun — and only when a project is
+// configured. The tag-prefix narrowing is applied by the caller's
+// filterByTagPrefix over the union returned here, so a principle listing is
+// confined to caller-project + system rows the same way (an empty-scope request
+// would otherwise add no project predicate and surface every project's rows).
+// Returns ok=false to signal the caller to fall back to the plain unscoped list
+// rather than fail (an unconfigured or unresolvable caller still gets a
+// listing).
 func callerScopedList(ctx context.Context, cfg substrateNounConfig, nameContains string, tags []string) ([]nounListItem, bool, error) {
-	if cfg.FilterTagPrefix != "" {
-		return nil, false, nil // principle listing keeps its tag-scoped behaviour
-	}
 	projectID, wsID, ok := resolveCallerScopeKeys(ctx, cfg)
 	if !ok {
 		return nil, false, nil // unconfigured / unresolvable — fall back to the unscoped list
 	}
+	dispatch := func(c context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		return dispatchVerb(c, name, req, *cfg.ConfigArg, *cfg.UserArg)
+	}
+	items, err := callerScopedListVia(ctx, dispatch, cfg.FilterType, projectID, wsID, nameContains, tags)
+	if err != nil {
+		return nil, false, err
+	}
+	return items, true, nil
+}
+
+// callerScopedListVia issues the two scoped sub-lists — system ∪ caller-project
+// — through the injected dispatch and returns their union. Each sub-list names
+// its scope key (the project sub-list carries the caller's project_id) so the
+// verb's scope confinement bounds the rows; a foreign project's rows never
+// enter. Split from callerScopedList around the verbDispatch seam so the
+// confinement is unit-testable without a live substrate (sty_4add3b87).
+func callerScopedListVia(ctx context.Context, dispatch verbDispatch, filterType, projectID, wsID, nameContains string, tags []string) ([]nounListItem, error) {
 	list := func(req docListRequest) ([]nounListItem, error) {
 		raw, mErr := json.Marshal(req)
 		if mErr != nil {
 			return nil, mErr
 		}
-		resp, dErr := dispatchVerb(ctx, "document_list", raw, *cfg.ConfigArg, *cfg.UserArg)
+		resp, dErr := dispatch(ctx, "document_list", raw)
 		if dErr != nil {
 			return nil, dErr
 		}
@@ -239,15 +258,15 @@ func callerScopedList(ctx context.Context, cfg substrateNounConfig, nameContains
 		}
 		return parsed.Items, nil
 	}
-	sys, err := list(docListRequest{Type: cfg.FilterType, Scope: "system", Tags: tags, NameContains: nameContains, Limit: 200})
+	sys, err := list(docListRequest{Type: filterType, Scope: "system", Tags: tags, NameContains: nameContains, Limit: 200})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	proj, err := list(docListRequest{Type: cfg.FilterType, Scope: "project", WorkspaceID: wsID, ProjectID: projectID, Tags: tags, NameContains: nameContains, Limit: 200})
+	proj, err := list(docListRequest{Type: filterType, Scope: "project", WorkspaceID: wsID, ProjectID: projectID, Tags: tags, NameContains: nameContains, Limit: 200})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return append(sys, proj...), true, nil
+	return append(sys, proj...), nil
 }
 
 // resolveCallerScopeKeys returns the configured project_id and its workspace_id
