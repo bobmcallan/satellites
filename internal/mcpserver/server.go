@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/bobmcallan/satellites/config/documents"
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -156,7 +156,7 @@ func stripNullable(node any) {
 // `config/documents/satellites_mcp_load_context.md` —
 // configuration-over-code: agent-facing prose lives in markdown, this
 // file just loads it.
-var orientationInstructions = string(documents.MCPLoadContextMarkdown())
+var orientationInstructions = string(substrate.MCPLoadContextMarkdown())
 
 // exposedVerbs are the verbs the MCP HTTP transport advertises and
 // dispatches. The surface is intentionally narrow:

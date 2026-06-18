@@ -1,14 +1,16 @@
-// Package documents embeds the canonical substrate markdown artifacts
-// in this directory into the satellites-server binary. It is the
-// SINGLE source of those bytes — no duplicate copy lives under
-// internal/.
+// Package config embeds the canonical global-default substrate markdown
+// artifacts into the satellites binaries. It is the SINGLE source of
+// those bytes — no duplicate copy lives under internal/.
 //
-// Layout is flat: every artifact is a sibling .md in this directory
-// and declares its identity in YAML frontmatter (`scope`, `name`,
-// optional `workspace_id` / `project_id`, optional `tags`). The
-// reconciler reads scope from frontmatter rather than from the
-// directory layout — a new system-scope artifact is one new file in
-// this directory, with `scope: system` declared in its frontmatter.
+// Layout mirrors .satellites/: artifacts are filed by type into
+// sibling subdirectories — documents/ (infra schemas, references,
+// contracts), principles/ (the principles:* layer), and skills/
+// (type:skill capability + reviewer bodies). Type is also declared in
+// each artifact's YAML frontmatter (`scope`, `name`, `type`, optional
+// `tags`); the reconciler reads identity from the frontmatter, NOT from
+// the subdirectory — the subdir is for legibility. A new system-scope
+// artifact is one new file in the matching subdir, with `scope: system`
+// declared in its frontmatter.
 //
 // Configuration over code: agent-facing prose, install schemas,
 // reviewer rubrics, and skill bodies all live as markdown under this
@@ -20,14 +22,14 @@
 //     scope.
 //   - internal/mcpserver — returns the MCP load-context artifact as
 //     the `initialize` instructions for every connecting client.
-package documents
+package substrate
 
 import (
 	"embed"
 	"io/fs"
 )
 
-//go:embed *.md
+//go:embed documents/*.md principles/*.md skills/*.md
 var FS embed.FS
 
 // MCPLoadContextMarkdown returns the raw MCP load-context artifact
@@ -36,20 +38,20 @@ var FS embed.FS
 // variable; reference material lives in the separate
 // satellites_mcp_reference_* artifacts which agents fetch on demand.
 func MCPLoadContextMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "satellites_mcp_load_context.md")
+	b, err := fs.ReadFile(FS, "documents/satellites_mcp_load_context.md")
 	if err != nil {
 		// The file is embedded at compile time — a missing read is a
 		// build-time integrity break, not a runtime fallback.
-		panic("documents: satellites_mcp_load_context.md missing from embed.FS: " + err.Error())
+		panic("substrate: documents/satellites_mcp_load_context.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }
 
 // ClientInstallMarkdown returns the raw install-schema artifact bytes.
 func ClientInstallMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "satellites_client_install.md")
+	b, err := fs.ReadFile(FS, "documents/satellites_client_install.md")
 	if err != nil {
-		panic("documents: satellites_client_install.md missing from embed.FS: " + err.Error())
+		panic("substrate: documents/satellites_client_install.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }
@@ -58,9 +60,9 @@ func ClientInstallMarkdown() []byte {
 // artifact bytes — the operator-facing contract enumerating every
 // computed system variable a document template can reference.
 func SystemVariablesMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "system_variables.md")
+	b, err := fs.ReadFile(FS, "documents/system_variables.md")
 	if err != nil {
-		panic("documents: system_variables.md missing from embed.FS: " + err.Error())
+		panic("substrate: documents/system_variables.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }

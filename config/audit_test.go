@@ -1,6 +1,7 @@
-package documents
+package substrate
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,19 +9,35 @@ import (
 	"testing"
 )
 
+// mdArtifacts returns every embedded .md artifact path under config/,
+// recursing the by-type subdirectories (documents/ principles/ skills/).
+// The directory-walking audits below run over this set so a violation in
+// any subdir surfaces at PR time.
+func mdArtifacts(t *testing.T) []string {
+	t.Helper()
+	var paths []string
+	if err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
+	}); err != nil {
+		t.Fatalf("walk config artifacts: %v", err)
+	}
+	return paths
+}
+
 // TestSeedArtifactsAuditClean enforces the block-level static rules from
 // the satellites-audit-agent-prose skill against every markdown
-// artifact in this directory. CI runs this via `go test ./...` so
+// artifact in this directory tree. CI runs this via `go test ./...` so
 // verbose drift in agent-facing prose surfaces at PR time rather
 // than after the binary ships. The reviewer-gated equivalent is the
 // substrate-primitive defense; this test is the belt-and-braces line.
 func TestSeedArtifactsAuditClean(t *testing.T) {
-	const artifactsDir = "."
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", artifactsDir, err)
-	}
-
 	type rule struct {
 		name    string
 		pattern *regexp.Regexp
@@ -43,11 +60,7 @@ func TestSeedArtifactsAuditClean(t *testing.T) {
 		},
 	}
 
-	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(artifactsDir, ent.Name())
+	for _, path := range mdArtifacts(t) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -57,7 +70,7 @@ func TestSeedArtifactsAuditClean(t *testing.T) {
 			if locs := r.pattern.FindAllStringIndex(body, -1); len(locs) > 0 {
 				for _, loc := range locs {
 					t.Errorf("%s · rule %q · match %q at byte %d — fix prose or move to a code fence",
-						ent.Name(), r.name, body[loc[0]:loc[1]], loc[0])
+						path, r.name, body[loc[0]:loc[1]], loc[0])
 				}
 			}
 		}
@@ -72,19 +85,10 @@ func TestSeedArtifactsAuditClean(t *testing.T) {
 // the same regression at the artifact source.
 func TestMCPStartupArtifactsUnderLineBudget(t *testing.T) {
 	const (
-		artifactsDir = "."
-		startupTag   = "kind:mcp-startup"
-		lineBudget   = 150
+		startupTag = "kind:mcp-startup"
+		lineBudget = 150
 	)
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", artifactsDir, err)
-	}
-	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(artifactsDir, ent.Name())
+	for _, path := range mdArtifacts(t) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -95,13 +99,13 @@ func TestMCPStartupArtifactsUnderLineBudget(t *testing.T) {
 		lines := strings.Count(string(raw), "\n") + 1
 		if lines > lineBudget {
 			t.Errorf("%s · %d lines exceeds %s budget of %d — split reference material into a separate document fetched on demand",
-				ent.Name(), lines, startupTag, lineBudget)
+				path, lines, startupTag, lineBudget)
 		}
 	}
 }
 
 // TestSkillSeedsCarrySatellitesPrefix enforces the satellites-skill-naming
-// principle at the source: every embedded skill seed (type:skill) must declare
+// convention at the source: every embedded skill seed (type:skill) must declare
 // a frontmatter name AND a filename stem that begin with `satellites-`. The
 // review-family seeds (skill-review/principle-review/document-review) and
 // project-setup historically lacked it, masked at materialise time by
@@ -110,36 +114,28 @@ func TestMCPStartupArtifactsUnderLineBudget(t *testing.T) {
 // silently return. Non-skill artifacts (documents, reference prose) are exempt —
 // the prefix marks substrate-owned SKILLS.
 func TestSkillSeedsCarrySatellitesPrefix(t *testing.T) {
-	const artifactsDir = "."
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", artifactsDir, err)
-	}
 	typeRe := regexp.MustCompile(`(?m)^type:\s*(\S+)`)
 	nameRe := regexp.MustCompile(`(?m)^name:\s*(\S+)`)
-	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(artifactsDir, ent.Name())
+	for _, path := range mdArtifacts(t) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
 		tm := typeRe.FindStringSubmatch(string(raw))
 		if tm == nil || tm[1] != "skill" {
-			continue // only type:skill seeds are governed by the naming principle
+			continue // only type:skill seeds are governed by the naming convention
 		}
-		if !strings.HasPrefix(ent.Name(), "satellites-") {
-			t.Errorf("%s · skill seed filename must start with `satellites-` (satellites-skill-naming)", ent.Name())
+		base := filepath.Base(path)
+		if !strings.HasPrefix(base, "satellites-") {
+			t.Errorf("%s · skill seed filename must start with `satellites-` (satellites-skill-naming)", path)
 		}
 		nm := nameRe.FindStringSubmatch(string(raw))
 		if nm == nil {
-			t.Errorf("%s · skill seed missing frontmatter `name:`", ent.Name())
+			t.Errorf("%s · skill seed missing frontmatter `name:`", path)
 			continue
 		}
 		if !strings.HasPrefix(nm[1], "satellites-") {
-			t.Errorf("%s · skill seed frontmatter name %q must start with `satellites-` (satellites-skill-naming)", ent.Name(), nm[1])
+			t.Errorf("%s · skill seed frontmatter name %q must start with `satellites-` (satellites-skill-naming)", path, nm[1])
 		}
 	}
 }

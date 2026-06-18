@@ -1,4 +1,4 @@
-package documents
+package substrate
 
 import (
 	"regexp"
@@ -12,7 +12,7 @@ import (
 // fenced yaml snippet in the doc must parse as a valid workflow, so the doc
 // cannot drift from what the parser accepts.
 func TestWorkflowPatternsSnippetsParse(t *testing.T) {
-	raw, err := FS.ReadFile("workflow-patterns.md")
+	raw, err := FS.ReadFile("documents/workflow-patterns.md")
 	if err != nil {
 		t.Fatalf("read workflow-patterns.md: %v", err)
 	}

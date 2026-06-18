@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bobmcallan/satellites/config/documents"
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/mcpserver"
@@ -42,7 +42,7 @@ func TestMCPCutover(t *testing.T) {
 		verb.SetSystemVariableResolver(nil, nil)
 	})
 
-	if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(documents.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
+	if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(substrate.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestMCPCutover(t *testing.T) {
 	})
 
 	t.Run("orientation instructions reference the bootstrap verbs", func(t *testing.T) {
-		body := string(documents.MCPLoadContextMarkdown())
+		body := string(substrate.MCPLoadContextMarkdown())
 		for _, want := range []string{"document_get", "project_match"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("load context missing %q", want)
@@ -140,7 +140,7 @@ func TestMCPCutover(t *testing.T) {
 	// back to host-repo grep. Mirror that strip here and assert the
 	// schema is still recoverable from the body alone.
 	t.Run("schema survives the production frontmatter-strip path", func(t *testing.T) {
-		raw := documents.ClientInstallMarkdown()
+		raw := substrate.ClientInstallMarkdown()
 		fm, body, err := frontmatter.Parse(raw)
 		if err != nil {
 			t.Fatalf("frontmatter parse: %v", err)

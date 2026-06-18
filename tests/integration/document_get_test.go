@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bobmcallan/satellites/config/documents"
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -58,7 +58,7 @@ func TestDocumentGet(t *testing.T) {
 
 	t.Run("seeded install schema is byte-equivalent to embedded source", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
-		body := string(documents.ClientInstallMarkdown())
+		body := string(substrate.ClientInstallMarkdown())
 		if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", body, "system:seed", time.Now()); err != nil {
 			t.Fatalf("seed: %v", err)
 		}

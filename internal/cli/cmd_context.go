@@ -31,7 +31,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/bobmcallan/satellites/config/documents"
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
@@ -143,7 +143,7 @@ func assembleDeliveredContext(ctx context.Context, storyID, configPath, userArg 
 	}
 
 	// 1. Load-context (MCP instructions) — served verbatim from the embed.
-	lc := documents.MCPLoadContextMarkdown()
+	lc := substrate.MCPLoadContextMarkdown()
 	add("load-context (MCP instructions)",
 		"config/documents/satellites_mcp_load_context.md (MCP initialize, served verbatim)",
 		partAlwaysOn, len(lc))

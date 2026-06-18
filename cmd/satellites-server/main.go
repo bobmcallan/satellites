@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bobmcallan/satellites/config/documents"
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/agent"
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/auth"
@@ -99,7 +99,8 @@ func main() {
 	// its own claude -p, so the server no longer wires a gate dispatcher.
 
 	// Document substrate + system-seed registry: wire stores then
-	// reconcile every artifact embedded under config/documents/. Each
+	// reconcile every artifact embedded under config/ (documents/,
+	// principles/, skills/ subdirs). Each
 	// file declares its identity (`scope`, `name`, optional tags) in
 	// frontmatter; the reconciler dispatches by scope rather than by
 	// directory layout. ReconcileSystemSeed is idempotent — a no-op
@@ -112,16 +113,21 @@ func main() {
 	sysSeedStore := document.NewSystemSeedStore(sqlDB)
 	verb.SetSystemSeedStore(sysSeedStore)
 
-	docEntries, err := fs.ReadDir(documents.FS, ".")
-	if err != nil {
-		arbor.Fatal("read config/documents", "err", err)
-	}
-	docFilenames := make([]string, 0, len(docEntries))
-	for _, e := range docEntries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	// Walk the embed FS recursively: artifacts are filed by type into
+	// config/{documents,principles,skills}/ subdirs, so the reconcile must
+	// descend into them rather than read a flat top-level directory.
+	var docFilenames []string
+	if err := fs.WalkDir(substrate.FS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		docFilenames = append(docFilenames, e.Name())
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		docFilenames = append(docFilenames, path)
+		return nil
+	}); err != nil {
+		arbor.Fatal("walk config embed FS", "err", err)
 	}
 	sort.Strings(docFilenames)
 	// keep collects every embedded artifact's resolved name so the prune
@@ -129,7 +135,7 @@ func main() {
 	// was retired — making removal symmetrical with addition (sty_a1a74121).
 	keep := make(map[string]bool, len(docFilenames))
 	for _, filename := range docFilenames {
-		raw, err := fs.ReadFile(documents.FS, filename)
+		raw, err := fs.ReadFile(substrate.FS, filename)
 		if err != nil {
 			arbor.Fatal("read embedded document", "file", filename, "err", err)
 		}
@@ -146,7 +152,7 @@ func main() {
 			scope = "system"
 		}
 		if scope != "system" {
-			arbor.Fatal("config/documents currently only supports scope=system",
+			arbor.Fatal("config embed currently only supports scope=system",
 				"file", filename, "scope", scope)
 		}
 		docType := fm.Type
@@ -193,7 +199,7 @@ func main() {
 
 	// Reviewer registry — load every type:"skill" row tagged
 	// `kind:reviewer` from the documents store (the reconciler seeded
-	// these from config/documents/ above), then wire either the
+	// these from config/ above), then wire either the
 	// production Anthropic client (when ANTHROPIC_API_KEY is set) or
 	// no client at all. Without a client, dispatch is a no-op so the
 	// substrate boots cleanly in environments without LLM creds.
