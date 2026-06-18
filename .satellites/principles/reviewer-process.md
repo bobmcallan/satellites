@@ -1,7 +1,5 @@
 ---
 name: reviewer-process
-type: document
-scope: system
 tags: [principles:global]
 ---
 

@@ -1,7 +1,5 @@
 ---
 name: no-new-mcp-verbs
-type: document
-scope: system
 tags: [principles:global]
 ---
 # No new MCP verbs

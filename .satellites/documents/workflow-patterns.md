@@ -1,6 +1,6 @@
 ---
 name: workflow-patterns
-scope: system
+type: document
 headline: The answer sheet for authoring complex workflows — sequential pipelines, bounded review loops, parallel via parent/children, graduated actors, escalation states; yaml is the execution format, DOT is export-only
 tags: [area:substrate, kind:reference]
 ---

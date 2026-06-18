@@ -3,7 +3,6 @@ name: satellites-principle-authoring
 type: skill
 kind: capability
 description: Author or revise a satellites principle — a standing belief or constraint, not a procedure. Invoke when capturing a durable rule for the substrate; produce it into .satellites/principles/ and run satellites-principle-review before upload.
-scope: system
 tags: [kind:capability, area:substrate, sync:true]
 ---
 # satellites-principle-authoring

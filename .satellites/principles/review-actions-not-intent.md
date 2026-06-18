@@ -1,6 +1,5 @@
 ---
 name: review-actions-not-intent
-scope: system
 headline: Intent is created freely and never judged at creation; refinement is authored at pickup and judged at the workflow's first gate
 tags: [principles:global]
 ---

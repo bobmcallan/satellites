@@ -1,7 +1,5 @@
 ---
 name: principle-configuration-over-code
-type: document
-scope: system
 tags: [principles:global]
 ---
 # Configuration over code

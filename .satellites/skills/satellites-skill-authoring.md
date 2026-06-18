@@ -3,7 +3,6 @@ name: satellites-skill-authoring
 type: skill
 kind: capability
 description: Author or revise a satellites skill as configuration — defines the target shape (Spec/Verifier/Environment) and the review gate. Invoke when creating or reworking a substrate skill; produce it into .satellites/skills/ and run satellites-skill-review before upload.
-scope: system
 tags: [kind:capability, area:substrate, sync:true]
 ---
 # satellites-skill-authoring

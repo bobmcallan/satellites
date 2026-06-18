@@ -1,7 +1,5 @@
 ---
 name: process-as-configuration
-type: document
-scope: system
 tags: [principles:global]
 ---
 

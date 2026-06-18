@@ -1,7 +1,5 @@
 ---
 name: fail-closed-gate
-type: document
-scope: system
 tags: [principles:global]
 ---
 

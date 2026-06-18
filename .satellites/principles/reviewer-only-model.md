@@ -1,6 +1,5 @@
 ---
 name: reviewer-only-model
-scope: system
 tags: [principles:global]
 ---
 # The reviewer-only execution model

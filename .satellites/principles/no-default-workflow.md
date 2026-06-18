@@ -1,7 +1,5 @@
 ---
 name: no-default-workflow
-type: document
-scope: system
 tags: [principles:global, area:workflow, area:reviewer]
 ---
 
