@@ -26,12 +26,14 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// in_progress; epic:satellites-backbone 2.1) + 1 checkpoint edge + 6
 		// on-edges + 5 cancellation edges (incl. plan-reviewed → cancelled and
 		// blocked → cancelled, the operator's terminal exit for a genuinely-failed
-		// story) + 1 blocked→in_progress recovery edge (sty_0c98760e). Ungated edges
-		// are the deterministic client-enacted ones (trigger/on) — every other edge
-		// is gated. The product workflows are now repo-owned client-dir config under
-		// .satellites/workflows/ (epic:client-dir-separation order-2), no longer
-		// materialised kind:workflow skills — Parse reads the same shape.
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 16},
+		// story) + 1 blocked→in_progress recovery edge (sty_0c98760e) + 1 ungated
+		// shipping → done-review ship-advance edge (the executor set-status moves
+		// after commit-push). Every other edge is gated or deterministically
+		// client-enacted (trigger/on). The product workflows are now repo-owned
+		// client-dir config under .satellites/workflows/
+		// (epic:client-dir-separation order-2), no longer materialised
+		// kind:workflow skills — Parse reads the same shape.
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 17},
 		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {
@@ -58,7 +60,13 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// drive (sty_3934ad71; v2 semantics epic:graduated-workflow).
 		for _, tr := range wf.Transitions {
 			if strings.TrimSpace(tr.ReviewerSkill) == "" && tr.On == "" && tr.Trigger == "" {
-				t.Errorf("%s: undrivable transition %s→%s (needs a gate, an on-edge, or a trigger)", c.path, tr.From, tr.To)
+				// An ungated edge is driven by the executor via `set-status`:
+				// the shipping → done-review ship-advance after commit-push is
+				// the one such edge. Any OTHER ungated edge is an accidentally
+				// undrivable gate.
+				if tr.From != "shipping" || tr.To != "done-review" {
+					t.Errorf("%s: undrivable transition %s→%s (needs a gate, an on-edge, a trigger, or be the shipping→done-review set-status edge)", c.path, tr.From, tr.To)
+				}
 			}
 		}
 	}
