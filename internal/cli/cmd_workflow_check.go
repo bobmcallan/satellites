@@ -424,10 +424,30 @@ func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []
 	out = append(out, checkAmbiguousGovernance(wfs)...)
 	out = append(out, checkGateCoverage(wfBearing, wfs)...)
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
+	out = append(out, checkGateHomeFork(skills)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
 	out = append(out, checkStoryGovernance(stories, wfBearing, wfs)...)
 	out = append(out, checkFirstGateComprehensive(wfBearing, wfs)...)
+	return out
+}
+
+// checkGateHomeFork enforces the home-of-gate invariant (epic:minimal-spine
+// order-8): a gate resolves from EXACTLY one home — the embedded spine OR the
+// materialised .claude/skills, never both. A name that is both embedded
+// (verb.IsInternalGate) and materialised is a divergent shadow: the dispatcher
+// resolves the embedded copy first, so the materialised one is silently dead.
+// This is a structural wiring invariant, like orphan-gate / missing-gate — no
+// allowlist, just one-home-per-gate. Fail closed on any fork so the "fork the
+// source of truth" failure cannot silently return.
+func checkGateHomeFork(skills []matSkill) []driftFinding {
+	var out []driftFinding
+	for _, s := range skills {
+		if verb.IsInternalGate(s.name) {
+			out = append(out, driftFinding{"block", "gate-home-fork", s.name,
+				fmt.Sprintf("gate %q is BOTH embedded in the binary and materialised in .claude/skills — the dispatcher resolves the embedded copy first, so the materialised one is a dead, divergent shadow. Give it ONE home: an embedded spine gate must be removed from .satellites/skills and the server (so it resolves only from the embed); a substrate gate must not be embedded.", s.name)})
+		}
+	}
 	return out
 }
 
