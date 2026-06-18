@@ -3,7 +3,7 @@ name: satellites-workflow
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
-description: The lifecycle EVERY satellites story follows (any category) — backlog → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
+description: The lifecycle EVERY satellites story follows (any category) — backlog → plan-reviewed → ready → in_progress → techdebt-review → integration-review → done-review → done, reviews as visible states with actors, fail loops bounded in code (×3, exhaustion → blocked). Invoke when implementing a story; it IS the executor's process.
 ---
 
 # Satellites workflow
@@ -71,9 +71,9 @@ binary, so an unshipped change is not seen.
 - `plan-reviewed` (reviewer) — the comprehensive plan-review has passed; `satellites-intent-plan-review` judges the plan against the constitution before the story is `ready`.
 - `in_progress` (executor) — the work happens here, and every fail edge lands back here.
 - `techdebt-review` (reviewer) — `satellites-technical-debt-review` judges: its functional check runs build + unit + the integration tier, then it reconciles the failures against the quarantine register (a registered + owned failure is tolerated); the client enacts its pass/fail edge.
-- `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence; trivial accept when no browser surface; the client enacts its decision.
+- `integration-review` (reviewer) — `satellites-integration-test-review` judges the UI/DOGFOOD evidence by reading the integration result the `techdebt-review` traverse already produced; it carries no functional check and never re-runs the tier (the suite executes exactly once per loop, in `techdebt-review`). Trivial accept when no browser surface; the client enacts its decision.
 - `done-review` (reviewer) — `satellites-story-done-review` judges; the client enacts its decision.
-- `blocked` (operator) — fail-loop exhaustion lands here; the operator moves a story out, or the agent requests `satellites-loop-recovery-review` (blocked → in_progress) when the exhaustion was a recoverable, fixed flake — a genuine failure stays the operator's.
+- `blocked` (operator) — fail-loop exhaustion lands here; the operator moves a story out by one of two operator-owned edges: `satellites-loop-recovery-review` (blocked → in_progress) when the exhaustion was a recoverable, fixed flake, or `satellites-story-cancel-review` (blocked → cancelled) to terminally retire a genuinely-failed story. A genuine failure that is not being retired stays the operator's.
 
 ## Checkpoint gates
 
@@ -87,6 +87,13 @@ checkpoint (end of phase, meaningful change, before requesting review) is
   against the local tree and it reconciles the failures against the register
   BEFORE anything ships. Its verdict lands as a ledger row; a fail leaves the
   remote untouched. The gate owns the decision rule — config, not a binary command.
+  This is the SINGLE point the test tiers execute in the local loop — the
+  downstream `integration-review` reads this result and never re-runs (CI re-runs
+  the tiers as the non-skippable backstop, not in-loop duplication). The gate is
+  KEPT as distinct from `integration-review`: it judges broken-windows debt
+  (every failing check is owned in the register), a concern orthogonal to
+  integration-review's UI/DOGFOOD coverage judgement — it is a genuine
+  debt-register review, not a re-skinned test runner.
 
 A traverse pass releases the [[satellites-commit-push]] capability (step 5),
 which executes the remaining atomic gates pre-commit and honours their verdicts
@@ -126,6 +133,7 @@ transitions:
   - {from: plan-reviewed,      to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: ready,              to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
   - {from: in_progress,        to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
+  - {from: blocked,            to: cancelled,       reviewer_skill: "satellites-story-cancel-review"}
 ```
 
 ## Environment
