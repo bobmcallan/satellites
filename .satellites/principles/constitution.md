@@ -1,5 +1,5 @@
 ---
-name: satellites-constitution
+name: constitution
 tags: [principles:always, area:substrate]
 ---
 # satellites constitution

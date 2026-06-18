@@ -25,7 +25,7 @@ status itself answers "whose turn is it, and was the gate run?".
 3. Request the entry gates in order: `satellites story status_transition
    <story-id> --skill <gate>` for the comprehensive plan-review (backlog →
    plan-reviewed), then the intent gate (plan-reviewed → ready) which judges the
-   plan against the [[satellites-constitution]] — rejecting a story that
+   plan against the [[constitution]] — rejecting a story that
    proposes baking a gate/process/opinion into the binary instead of the
    substrate — then start-review (ready → in_progress).
 4. Do the work. At every natural checkpoint, request the checkpoint traverse:
@@ -96,7 +96,7 @@ which executes the remaining atomic gates pre-commit and honours their verdicts
 - [[satellites-global-button-style-review]] — when the change touches the portal UI.
 - [[satellites-workflow-drift-review]] — when the change touches process configuration (skills, principles, workflows).
 - [[satellites-agent-architecture-review]] — when the change touches the agent/executor surface (internal/agent, the agent executor in internal/verb, agent operating documents); a judgment gate critiquing the change for configuration-over-code.
-- [[satellites-intent-code-review]] — the general config-over-code gate, judged on the diff against the satellites-constitution: rejects a gate, workflow, check, process step, or opinion baked into the binary where the substrate already holds its kind. The agent-architecture-review is its narrow agent-surface case.
+- [[satellites-intent-code-review]] — the general config-over-code gate, judged on the diff against the constitution: rejects a gate, workflow, check, process step, or opinion baked into the binary where the substrate already holds its kind. The agent-architecture-review is its narrow agent-surface case.
 
 ```yaml
 states:

@@ -4,9 +4,9 @@ type: skill
 kind: gate
 when: status==plan-reviewed
 tags: [kind:gate]
-description: Intent gate judged on a story's PLAN before any code — reads the satellites-constitution and rejects a story that proposes baking a process, gate, check, or opinion into the binary instead of the substrate. Composes with the comprehensive plan-review (it judges intent, not shape/grounding). Emits {decision, notes} JSON.
+description: Intent gate judged on a story's PLAN before any code — judges against the universal config-over-code rule (honouring the repo's resident constitution, whatever repo it runs in) and rejects a story that proposes baking a process, gate, check, or opinion into the binary instead of the substrate. Composes with the comprehensive plan-review (it judges intent, not shape/grounding). Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_97bd8c36","version":1,"hash":"e1c7897c42001900e67f1ad953f8c797604a4bfa87981797287366463c826a16"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_97bd8c36","version":2,"hash":"7a6b84db3293b7f9035893c1bacdfd84a0f7d95365e62c6166589970c3cbd729"} satellites-sync:end -->
 
 Decide ONE thing: does this story's plan respect the constitution — process, gates, and opinions as configuration, never code? Judge the intent of the change before any code exists, so a hardcoding plan is rejected before an executor writes it. This gate does NOT re-judge story shape, acceptance criteria, or code grounding — the comprehensive `satellites-story-plan-review` owns those; you compose with it.
 
@@ -14,7 +14,7 @@ Decide ONE thing: does this story's plan respect the constitution — process, g
 
 One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `story_status` (current state), and `story_body` (markdown containing a `## Workflow` fenced yaml block). No `next_status` — resolve the target yourself (see *Enact*).
 
-Read the resident `satellites-constitution` (injected as a `principles:always` artifact; `.satellites/satellites exec document_get` it by name if you need the exact text). It is the rule you judge against.
+The config-over-code rule in the *Decision rule* below is the universal standard you judge against; it holds even when the repo has authored no constitution. The repo MAY declare its own intent as resident `principles:always` documents (its constitution): list them with `.satellites/satellites exec document_list --json '{"type":"document","tags":["principles:always"]}'` and `document_get` the relevant one to honour any repo-specific intent on top of the universal rule. Never assume a specific constitution NAME — discover it, so this gate is repo-agnostic.
 
 The gate's `.satellites/satellites exec` calls authenticate as the operator's admin user, authorized to write status_transition / review_* rows.
 

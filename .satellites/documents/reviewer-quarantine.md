@@ -16,7 +16,7 @@ reconciles the same way against the same register.
 The reconciliation is **substrate, not binary**: the harness runs the gate's
 `check:` and injects the result; the reviewer (the gate skill) reads the register
 document and applies the rule below. The binary holds only the run mechanism — no
-reconciliation branch lives in Go ([[satellites-constitution]]).
+reconciliation branch lives in Go ([[constitution]]).
 
 ## The register
 
@@ -45,4 +45,4 @@ From the gate's injected functional-check output, judged against the register:
 
 A reviewer gate that adopts this capability names its own register and runs its
 own `check:`; the rule above is identical. See [[broken-windows]],
-[[satellites-constitution]].
+[[constitution]].

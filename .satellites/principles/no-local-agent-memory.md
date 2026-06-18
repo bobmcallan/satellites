@@ -29,4 +29,4 @@ every agent that follows. The substrate IS the shared memory.
   substrate, then delete the local store — a stale private memory is worse than
   none.
 
-See [[process-as-configuration]], [[satellites-constitution]].
+See [[process-as-configuration]], [[constitution]].

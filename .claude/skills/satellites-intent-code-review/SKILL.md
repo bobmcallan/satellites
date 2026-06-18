@@ -4,16 +4,16 @@ type: skill
 kind: gate
 when: pre-commit
 tags: [kind:gate]
-description: Intent gate judged on the DIFF — reads the satellites-constitution and rejects code that hardcodes a gate, workflow, check, process step, or opinion that belongs in the substrate. The general config-over-code check (satellites-agent-architecture-review is its agent-surface special case). Emits {decision, notes} JSON.
+description: Intent gate judged on the DIFF — judges against the universal config-over-code rule (honouring the repo's resident constitution, whatever repo it runs in) and rejects code that hardcodes a gate, workflow, check, process step, or opinion that belongs in the substrate. The general config-over-code check (satellites-agent-architecture-review is its agent-surface special case). Emits {decision, notes} JSON.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_b48ada2c","version":1,"hash":"8262899e1a135e541b6bd3d1478ceb349f12d4752800fb82ae0e62767722843b"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_b48ada2c","version":2,"hash":"e67c4bddea2815a0b0b9ea7ce5f68b10287fe1d307848636703f87c63453900f"} satellites-sync:end -->
 
-Decide ONE thing: does this change keep process/gates/checks/opinions in the substrate and only MECHANISM in the binary? Judge the diff against the `satellites-constitution`. This is the general config-over-code gate; `satellites-agent-architecture-review` is its narrow agent-surface case.
+Decide ONE thing: does this change keep process/gates/checks/opinions in the substrate and only MECHANISM in the binary? Judge the diff against the universal config-over-code rule below — it holds even when the repo has authored no constitution. This is the general config-over-code gate; `satellites-agent-architecture-review` is its narrow agent-surface case.
 
 ## Input
 
 One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `story_status`, and `story_body` (the plan). You run in the story's worktree with admin-authenticated `.satellites/satellites exec` access. Read, do not trust:
-- The constitution — the resident `satellites-constitution` (`principles:always`); `.satellites/satellites exec document_get` it by name for the exact text.
+- The repo's intent — any resident `principles:always` documents (its constitution): list with `.satellites/satellites exec document_list --json '{"type":"document","tags":["principles:always"]}'`, `document_get` the relevant one; honour repo-specific intent on top of the universal rule. Never assume a specific constitution NAME — discover it, so this gate is repo-agnostic.
 - The code — `git diff` / `git show` the change in the working tree and the latest commit.
 
 ## What "configuration over code" means here
