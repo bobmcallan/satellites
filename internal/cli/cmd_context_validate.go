@@ -47,11 +47,13 @@ type validateFinding struct {
 	Source   string `json:"source"`
 }
 
-// validateStory is one story's id + body — the structural aggregator's input,
-// kept minimal so the pure pass is unit-testable without dispatch.
+// validateStory is one story's id + status + body — the structural
+// aggregator's input, kept minimal so the pure pass is unit-testable without
+// dispatch. Status drives child-2's repair classification (started vs not).
 type validateStory struct {
-	ID   string
-	Body string
+	ID     string
+	Status string
+	Body   string
 }
 
 // validateBudget is the always-on size dimension folded into the report —
@@ -128,18 +130,24 @@ type contextValidateOpts struct {
 	ClaudeBin  string
 }
 
-func runContextValidate(ctx context.Context, opts contextValidateOpts, stdout, stderr io.Writer) error {
+// gatherCorpusFindings runs the corpus-wide aggregation — the SINGLE source of
+// findings shared by `context validate` and `context repair` (no second
+// validator). It resolves the project, enumerates non-terminal stories, folds
+// the structural + budget (+ optional semantic) findings, and returns the
+// report alongside the stories (repair needs their status). Warnings go to
+// stderr; only a hard resolution/listing failure errors.
+func gatherCorpusFindings(ctx context.Context, opts contextValidateOpts, stderr io.Writer) (validateReport, []validateStory, error) {
 	_, pj, err := resolveDeployScope(ctx, opts.ConfigPath, opts.UserArg)
 	if err != nil {
-		return fmt.Errorf("context validate: resolve project: %w", err)
+		return validateReport{}, nil, fmt.Errorf("context validate: resolve project: %w", err)
 	}
 	if strings.TrimSpace(pj) == "" {
-		return fmt.Errorf("context validate: no project configured for this repo (run `satellites project match`?)")
+		return validateReport{}, nil, fmt.Errorf("context validate: no project configured for this repo (run `satellites project match`?)")
 	}
 
 	stories, err := listContextValidateStories(ctx, pj, opts.ConfigPath, opts.UserArg)
 	if err != nil {
-		return err
+		return validateReport{}, nil, err
 	}
 
 	skillExists := func(name string) bool {
@@ -176,6 +184,14 @@ func runContextValidate(ctx context.Context, opts contextValidateOpts, stdout, s
 				Fix: mapFix(f.Code), Source: "context-validate-semantic",
 			})
 		}
+	}
+	return report, stories, nil
+}
+
+func runContextValidate(ctx context.Context, opts contextValidateOpts, stdout, stderr io.Writer) error {
+	report, _, err := gatherCorpusFindings(ctx, opts, stderr)
+	if err != nil {
+		return err
 	}
 
 	if opts.JSON {
@@ -230,7 +246,7 @@ func listContextValidateStories(ctx context.Context, projectID, configPath, user
 		if json.Unmarshal(graw, &got) != nil {
 			continue
 		}
-		out = append(out, validateStory{ID: it.ID, Body: got.RawBody})
+		out = append(out, validateStory{ID: it.ID, Status: it.Status, Body: got.RawBody})
 	}
 	return out, nil
 }
