@@ -3,7 +3,7 @@ name: satellites-commit-push
 type: skill
 kind: capability
 when: status==shipping
-tags: [kind:capability]
+tags: [kind:capability, sync:true]
 description: Ship satellites at the `shipping` state — after techdebt-review and integration-review have passed, before done-review. Runs the remaining pre-commit gates, bumps .version ONCE, makes the final commit + push (folding the incremental local commits made during in_progress), watches the CI chain (test → release → deploy), and records evidence. The process-owned counterpart of the operator's /commit-push shadow.
 ---
 

@@ -88,8 +88,11 @@ func TestSkillSyncGlobalPublishers(t *testing.T) {
 		}
 	}
 
+	// sync:true opts the skill into local materialisation (sty_36894714, default
+	// false). A publisher tags a skill the consumer's agent invokes via the Skill
+	// tool so `skill sync` pulls it to .claude/skills.
 	skillBody := func(name, marker string) string {
-		return fmt.Sprintf("---\nname: %s\ndescription: Pinned smoke skill (%s).\nkind: capability\n---\n\n# %s\n\n%s\n", name, marker, name, marker)
+		return fmt.Sprintf("---\nname: %s\ndescription: Pinned smoke skill (%s).\nkind: capability\ntags: [sync:true]\n---\n\n# %s\n\n%s\n", name, marker, name, marker)
 	}
 	upsert("library", "proj_pinpub", "lib-pin", skillBody("lib-pin", "v1-body"))
 	upsert("library", "proj_pinpub", "shared-tool", skillBody("shared-tool", "library-flavour"))

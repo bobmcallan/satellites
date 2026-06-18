@@ -3,7 +3,7 @@ name: satellites-code-search
 type: skill
 kind: capability
 when: code-discovery
-tags: [kind:capability]
+tags: [kind:capability, sync:true]
 description: Prefer the in-client code index for code discovery — use `satellites code search`/`code symbol` over Read/Grep (and over `grep`/`rg` run via Bash) to find where a symbol is defined, read a declaration's body, or navigate code. Covers delegated/sub-agent search too. Index once per session with `satellites code index`. Invoke whenever a task means locating or reading code by name (where is X / what is X's body / what is this type).
 ---
 

@@ -5,6 +5,13 @@
 // substrate takes effect after a sync with no hand-edit and no binary
 // release.
 //
+// Materialisation is opt-in (sty_36894714): only a substrate skill whose
+// frontmatter carries the `sync:true` tag is pulled to .claude/skills (default
+// false). A skill the agent does NOT invoke via the Skill tool — a gate or the
+// summariser, consumed only by claude -p — needs no local copy: it resolves
+// embed→local→server (sty_b8de4776). A previously-materialised skill that is no
+// longer sync:true reconciles to removal.
+//
 // Ownership is keyed by an injected identity stamp, NOT the skill name
 // prefix (sty_4b517016 built the stamp; operator decision on sty_52e10340).
 // sync updates or removes a local skill it materialised (one carrying the
@@ -586,6 +593,17 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 		return err
 	}
 
+	// Honour the per-skill sync:true opt-in (default false, sty_36894714): only a
+	// skill the interactive agent invokes via the Skill tool materialises locally.
+	// Gates and the summariser (claude -p consumers) resolve embed→local→server
+	// and need no local copy (sty_b8de4776). Filtering here drops a non-sync skill
+	// from BOTH the install set and the cross-scope protected set, so a stamped
+	// local copy of one is no longer guarded and reconciles to removal.
+	sysSet = keepSyncable(sysSet)
+	wsSet = keepSyncable(wsSet)
+	pjSet = keepSyncable(pjSet)
+	libSet = keepSyncable(libSet)
+
 	// The union (precedence project > workspace > system > library pins) is
 	// what every resolvable scope owns — its local names guard removal so no
 	// scope orphans another's stamped skill. The install/update set is the
@@ -832,6 +850,43 @@ func isWorkflowBody(body string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(fm.Kind), "workflow")
+}
+
+// syncEnabled reports whether a substrate skill opts INTO local materialisation
+// via a `sync:true` frontmatter tag. DEFAULT FALSE (epic:minimal-spine,
+// sty_36894714): a skill materialises into .claude/skills only when it declares
+// the tag — so gates and the summariser, consumed only by claude -p (which
+// resolves embed→local→server, sty_b8de4776), never need a local file. The
+// signal is read from frontmatter alone — no hardcoded name/kind list — so the
+// operator states intent ("the agent invokes this directly via the Skill tool")
+// on the skill itself. A malformed or frontmatter-less body fails closed to
+// false (not materialised).
+func syncEnabled(body string) bool {
+	fm, _, err := frontmatter.Parse(frontmatter.StripSyncStamp([]byte(body)))
+	if err != nil {
+		return false
+	}
+	for _, t := range fm.Tags {
+		if strings.EqualFold(strings.TrimSpace(t), "sync:true") {
+			return true
+		}
+	}
+	return false
+}
+
+// keepSyncable returns the subset of subs that opt into materialisation
+// (syncEnabled). A skill filtered out here is never installed/updated; when a
+// stamped local copy of it already exists, the reconcile sees no substrate row
+// for the name and removes it (actionRemove) — so flipping a skill to non-sync,
+// or dropping the tag, reconciles its local copy away on the next sync.
+func keepSyncable(subs []substrateSkill) []substrateSkill {
+	out := make([]substrateSkill, 0, len(subs))
+	for _, s := range subs {
+		if syncEnabled(s.Body) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // listGlobalSkills materialises every `global` (library-scope) artifact of each

@@ -600,3 +600,62 @@ func TestReconcileActionRehomedRow(t *testing.T) {
 		t.Errorf("same row current copy should skip, got %v", got)
 	}
 }
+
+// TestSyncEnabled_FrontmatterOptIn pins AC1/AC5 (sty_36894714): the materialise
+// opt-in is read from the `sync:true` frontmatter tag alone — no hardcoded name
+// or kind list — and DEFAULTS FALSE for a skill with no tag, an explicit
+// non-true value, no frontmatter, or a malformed body (fail closed).
+func TestSyncEnabled_FrontmatterOptIn(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"sync-true-among-tags", "---\nname: a\ntype: skill\ntags: [kind:capability, sync:true]\n---\n# a\n", true},
+		{"sync-true-only-tag", "---\nname: a\ntags: [sync:true]\n---\nbody\n", true},
+		{"no-sync-tag", "---\nname: a\ntags: [kind:capability]\n---\n# a\n", false},
+		{"sync-false-value", "---\nname: a\ntags: [sync:false]\n---\n# a\n", false},
+		{"gate-no-tag", "---\nname: g\ntype: skill\ntags: [kind:gate]\n---\n# g\n", false},
+		{"no-frontmatter", "# just a body, no frontmatter\n", false},
+		{"empty", "", false},
+		{"malformed-frontmatter", "---\nname: a\ntags: [unterminated\n# body without close\n", false},
+	}
+	for _, c := range cases {
+		if got := syncEnabled(c.body); got != c.want {
+			t.Errorf("%s: syncEnabled = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestSkillSync_OnlySyncTrueMaterialises pins AC1+AC2: keepSyncable drops a
+// skill without sync:true from the install set, and a stamped local copy of a
+// now-non-sync skill reconciles to removal (the filtered name carries no
+// substrate row, so reconcileAction(nil, stampedLocal) → actionRemove), while a
+// sync:true skill with no local copy installs.
+func TestSkillSync_OnlySyncTrueMaterialises(t *testing.T) {
+	syncTrue := substrateSkill{Name: "satellites-doc-review", DocumentID: "doc_dr", Version: 1,
+		Body: "---\nname: satellites-doc-review\ntype: skill\ntags: [kind:capability, sync:true]\n---\n# dr\n"}
+	noTag := substrateSkill{Name: "satellites-some-gate", DocumentID: "doc_g", Version: 1,
+		Body: "---\nname: satellites-some-gate\ntype: skill\ntags: [kind:gate]\n---\n# gate\n"}
+
+	kept := keepSyncable([]substrateSkill{syncTrue, noTag})
+	if len(kept) != 1 || kept[0].Name != "satellites-doc-review" {
+		t.Fatalf("keepSyncable kept %d skills (want 1: satellites-doc-review)", len(kept))
+	}
+
+	// Pre-existing stamped local copy of the now-filtered gate (unedited:
+	// BodyHash == Stamp.Hash) — must reconcile to removal.
+	gateLocal := localSkill{Name: "satellites-some-gate", Stamped: true,
+		Stamp: skillStamp{DocumentID: "doc_g", Version: 1, Hash: "h"}, BodyHash: "h"}
+
+	got := map[string]syncAction{}
+	for _, item := range reconcileSkills(kept, []localSkill{gateLocal}, nil) {
+		got[item.Name] = item.Action
+	}
+	if got["satellites-some-gate"] != actionRemove {
+		t.Errorf("non-sync stamped local: action = %v, want remove", got["satellites-some-gate"])
+	}
+	if got["satellites-doc-review"] != actionInstall {
+		t.Errorf("sync:true with no local: action = %v, want install", got["satellites-doc-review"])
+	}
+}
