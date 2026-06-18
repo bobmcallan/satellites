@@ -92,10 +92,15 @@ func runHookStopCheck(in io.Reader, out io.Writer) (block bool) {
 	if err != nil {
 		return false
 	}
-	governed := len(governingWorkflowSources(filepath.Join(root, ".satellites", "satellites.toml"))) > 0
+	cfg := filepath.Join(root, ".satellites", "satellites.toml")
+	governed := len(governingWorkflowSources(cfg)) > 0
 	now := time.Now().UTC()
 	for _, e := range engs {
-		if e.Phase == phaseCandidate || !e.IsLeaseFresh(now) || isTerminalPhase(e.Phase) {
+		// Engine-derived terminal check (no hardcoded names): a KNOWN terminal
+		// phase releases the stop. Unresolvable → term=false → the governed/
+		// deadlock logic below decides (never traps the agent).
+		term, _ := phaseIsTerminal(cfg, e.Phase)
+		if e.Phase == phaseCandidate || !e.IsLeaseFresh(now) || term {
 			continue
 		}
 		b, msg := stopGoalDecision(e.Story, e.Phase, commitsSince(root, e.UpdatedAt), governed)

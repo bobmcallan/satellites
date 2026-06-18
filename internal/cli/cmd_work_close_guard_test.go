@@ -63,6 +63,12 @@ func seedEngagementAt(t *testing.T, repo, session, story, phase string, editable
 // since engagement; --force overrides; a terminal story or no-commits closes.
 func TestWorkCloseGuard(t *testing.T) {
 	repo := gitRepoWithSatellites(t)
+	// The guard derives terminal-ness from the governing workflow (no hardcoded
+	// names), so the test repo must be governed — the baseline declares
+	// in_progress non-terminal and done terminal.
+	if _, err := ensureBaselineWorkflow(repo); err != nil {
+		t.Fatal(err)
+	}
 	workDir := filepath.Join(repo, ".satellites", "work")
 	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Now().UTC()
@@ -97,6 +103,47 @@ func TestWorkCloseGuard(t *testing.T) {
 		seedEngagementAt(t, repo, "sess3", "sty_clean", "in_progress", true, now.Add(time.Hour), now.Add(2*time.Hour))
 		if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_clean", "sess3", false, now); err != nil {
 			t.Fatalf("no-commit story should close: %v", err)
+		}
+	})
+}
+
+// TestWorkCloseGuard_RenamedTerminal pins epic:minimal-spine order-7: terminal-ness
+// is engine-derived, so a repo whose governing workflow RENAMES its terminal state
+// (here `shipped`, not `done`/`cancelled`) is honoured — the hardcoded-name
+// regression is foreclosed. A non-terminal renamed state (`wip`) still blocks.
+func TestWorkCloseGuard_RenamedTerminal(t *testing.T) {
+	repo := gitRepoWithSatellites(t)
+	wfDir := filepath.Join(repo, ".satellites", "workflows")
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	renamed := "---\nname: renamed-wf\nkind: workflow\napplies_to: [\"*\"]\n---\n" +
+		"```yaml\n" +
+		"states:\n  - backlog\n  - {name: wip, actor: executor}\n  - shipped\n" +
+		"transitions:\n  - {from: backlog, to: wip}\n  - {from: wip, to: shipped}\n" +
+		"```\n"
+	if err := os.WriteFile(filepath.Join(wfDir, "renamed.md"), []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(repo, ".satellites", "work")
+	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
+	now := time.Now().UTC()
+	past := now.Add(-time.Hour)
+	lease := now.Add(time.Hour)
+
+	t.Run("renamed terminal closes despite commits", func(t *testing.T) {
+		seedEngagementAt(t, repo, "sessS", "sty_ship", "shipped", false, past, lease)
+		gitExec(t, repo, "commit", "--allow-empty", "-m", "after engage")
+		if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_ship", "sessS", false, now); err != nil {
+			t.Fatalf("a renamed terminal state (shipped) must close: %v", err)
+		}
+	})
+
+	t.Run("renamed non-terminal with commits is refused", func(t *testing.T) {
+		seedEngagementAt(t, repo, "sessW", "sty_wip", "wip", true, past, lease)
+		gitExec(t, repo, "commit", "--allow-empty", "-m", "after engage 2")
+		if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_wip", "sessW", false, now); err == nil {
+			t.Fatal("a renamed non-terminal state (wip) with commits must be refused")
 		}
 	})
 }

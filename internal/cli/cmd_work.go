@@ -347,17 +347,28 @@ func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, ses
 	return nil
 }
 
-// terminalPhases are the canonical end states the enforcement guards treat as
-// "the story finished" — closing or ending a turn on one is not abandonment.
-// Kept here (not derived from a workflow) because the client holds no workflow
-// knowledge; these are the shared terminals the fix/feature/parent/urgent
-// workflows converge on (mirrors the `done` cleanup key in cmd_story_review.go).
-var terminalPhases = map[string]bool{"done": true, "cancelled": true, "canceled": true}
-
-// isTerminalPhase reports whether a phase is a workflow terminal. An empty phase
-// is NOT terminal — an engagement with no recorded status is still in flight.
-func isTerminalPhase(phase string) bool {
-	return terminalPhases[strings.ToLower(strings.TrimSpace(phase))]
+// phaseIsTerminal reports whether `phase` is a terminal (finished) state of the
+// repo's governing workflow(s) — engine-derived via workflow.IsTerminal, so a
+// repo that RENAMES its terminal states is honoured with NO hardcoded names. The
+// client holds no baked terminal-name list; it derives the answer from the
+// substrate. `known` is false when no governing workflow resolves or `phase` is
+// not a declared state, in which case the enforcement guards fail OPEN (never
+// over-block), matching resolveEditable.
+func phaseIsTerminal(configPath, phase string) (terminal bool, known bool) {
+	phase = strings.TrimSpace(phase)
+	if phase == "" {
+		return false, false
+	}
+	for _, s := range governingWorkflowSources(configPath) {
+		wf, err := workflow.Parse([]byte(s.Body))
+		if err != nil || wf == nil {
+			continue
+		}
+		if wf.HasState(phase) {
+			return wf.IsTerminal(phase), true
+		}
+	}
+	return false, false
 }
 
 // phaseOrUnset renders a phase for a message, naming an empty phase explicitly.
@@ -413,11 +424,18 @@ func runWorkClose(out io.Writer, repoRoot, workDir, stateDB, storyID, session st
 	defer store.Close()
 
 	if !force {
-		if eng, ok, cErr := store.Current(session, storyID); cErr == nil && ok && !isTerminalPhase(eng.Phase) {
-			if n := commitsSince(repoRoot, eng.UpdatedAt); n > 0 {
-				return fmt.Errorf("work close: %s is still %q (not terminal) and %d commit(s) were made since it was engaged — "+
-					"closing now abandons shared work that never reached done. Drive it to done through its gates, or pass --force to close anyway",
-					storyID, phaseOrUnset(eng.Phase), n)
+		if eng, ok, cErr := store.Current(session, storyID); cErr == nil && ok {
+			// Engine-derived (no hardcoded terminal names): block only when the
+			// phase is a KNOWN non-terminal state of the governing workflow.
+			// Unresolvable/undeclared → fail open (allow close), never
+			// over-blocking on a renamed terminal or an ungoverned repo.
+			cfg := filepath.Join(repoRoot, ".satellites", "satellites.toml")
+			if term, known := phaseIsTerminal(cfg, eng.Phase); known && !term {
+				if n := commitsSince(repoRoot, eng.UpdatedAt); n > 0 {
+					return fmt.Errorf("work close: %s is still %q (not terminal) and %d commit(s) were made since it was engaged — "+
+						"closing now abandons shared work that never reached done. Drive it to done through its gates, or pass --force to close anyway",
+						storyID, phaseOrUnset(eng.Phase), n)
+				}
 			}
 		}
 	}
