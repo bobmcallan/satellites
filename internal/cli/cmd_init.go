@@ -202,7 +202,7 @@ func runInit(out io.Writer, repoRoot string) error {
 	} else if appended {
 		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added global_publishers consumption note)"))
 	}
-	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the internal intent-gate (config-over-code, injected from the binary). Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
+	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the internal spine gate (story format + a story→done goal, injected from the binary). Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
 
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
@@ -427,10 +427,9 @@ The minimal governing workflow: a story moves backlog to in_progress to done.
 The ONLY gate is the spine every repo gets — the entry transition (backlog to
 in_progress) is judged by satellites-intent-plan-review, which checks the story
 is satellites-formatted (Purpose / Approach / numbered acceptance criteria / an
-embedded ## Workflow) and carries a clear story→done goal. It does NOT judge
-config-over-code — that is satellites-intent-code-review, on the diff, an opt-in
-substrate gate. The spine gates are satellites-INTERNAL: injected from the
-binary, never materialised to .claude/skills, so they cannot be edited.
+embedded ## Workflow) and carries a clear story→done goal. The spine gates are
+satellites-INTERNAL: injected from the binary, never materialised to
+.claude/skills, so they cannot be edited.
 
 The exit (in_progress to done) and the cancel edges are ungated — advance them
 with: satellites story set-status <story-id> <status>. The goal-keeper Stop hook
@@ -504,8 +503,9 @@ func ensureBaselineWorkflow(repoRoot string) (bool, error) {
 // starterConstitutionDoc is the repo-AGNOSTIC starter constitution init/rebase
 // scaffold into .satellites/principles/, create-if-absent. It is
 // principles:always (resident every session) and a STARTER the repo adapts to
-// its own intent; the config-over-code rule is the universal spine the intent-
-// gates enforce (epic:satellites-backbone 2.4).
+// its own intent; the config-over-code rule it encodes is enforced on the DIFF
+// by satellites-intent-code-review (an opt-in substrate gate), not by the
+// format+goal spine plan-gate (epic:satellites-backbone 2.4; epic:minimal-spine).
 const starterConstitutionDoc = `---
 name: constitution
 tags: [principles:always]

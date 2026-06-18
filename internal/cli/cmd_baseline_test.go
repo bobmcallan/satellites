@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,36 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workflow"
 )
+
+// TestInitScaffoldsReducedSpine pins epic:minimal-spine order-6: `satellites
+// init` scaffolds the baseline workflow as the REDUCED spine — the entry is
+// gated by satellites-intent-plan-review (story format + a story→done goal),
+// the doc names no config-over-code judgment, and it does not reference the diff
+// gate (config-over-code moved off the spine, onto satellites-intent-code-review).
+func TestInitScaffoldsReducedSpine(t *testing.T) {
+	repo := t.TempDir()
+	var out bytes.Buffer
+	if err := runInit(&out, repo); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(repo, ".satellites", "workflows", "satellites-baseline-workflow.md"))
+	if err != nil {
+		t.Fatalf("baseline workflow not scaffolded: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `reviewer_skill: "satellites-intent-plan-review"`) {
+		t.Errorf("baseline entry must be gated by satellites-intent-plan-review:\n%s", body)
+	}
+	if !strings.Contains(body, "story→done goal") {
+		t.Errorf("baseline must describe the format + story→done spine gate:\n%s", body)
+	}
+	if strings.Contains(body, "satellites-intent-code-review") {
+		t.Errorf("baseline must NOT name the diff gate — config-over-code is not part of the spine:\n%s", body)
+	}
+	if strings.Contains(strings.ToLower(body), "config-over-code") {
+		t.Errorf("baseline workflow doc must carry no config-over-code language:\n%s", body)
+	}
+}
 
 // TestBaselineWorkflowDoc: the scaffolded baseline parses as a valid
 // kind:workflow, passes ValidateLifecycle, is applies_to ["*"], carries the
