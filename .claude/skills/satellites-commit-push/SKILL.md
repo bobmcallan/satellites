@@ -2,34 +2,40 @@
 name: satellites-commit-push
 type: skill
 kind: capability
-when: checkpoint
+when: status==shipping
 tags: [kind:capability]
-description: Commit and push satellites at a story checkpoint — bump .version, conventional commit (no AI attribution), push, and watch the CI chain (test → release → deploy). Run at every natural checkpoint and before requesting review, so the change is visible to reviewers and the build pipeline. The process-owned counterpart of the operator's /commit-push shadow.
+description: Ship satellites at the `shipping` state — after techdebt-review and integration-review have passed, before done-review. Runs the remaining pre-commit gates, bumps .version ONCE, makes the final commit + push (folding the incremental local commits made during in_progress), watches the CI chain (test → release → deploy), and records evidence. The process-owned counterpart of the operator's /commit-push shadow.
 ---
-<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":5,"hash":"bf91e2de93e1edcd17ba48d19d235a727646d947109be1886c197dc87d61c0b2"} satellites-sync:end -->
+<!-- satellites-sync:begin {"document_id":"doc_2c4432eb","version":6,"hash":"fd45cc26b013b807be07137a4554d658270b5cd002652329fdf27cf6bc8f6a86"} satellites-sync:end -->
 
 # satellites-commit-push
 
-Run at every natural checkpoint and before requesting review — reviewers judge the
-latest pushed commit, not the local tree. A change not committed + pushed +
-(where a binary changed) released is invisible to the gate.
+This capability runs at the workflow's **`shipping`** state (actor: executor):
+after both reviewer gates — [[satellites-technical-debt-review]] (senior-dev
+code-debt scan) and [[satellites-integration-test-review]] (broken-windows:
+build + unit + integration) — have PASSED, and before `done-review`. It is the
+single point the change is pushed; done-review judges the pushed commit.
+
+**Commit cadence.** During `in_progress` you commit INCREMENTALLY and LOCALLY as
+the work progresses — small conventional commits, **no `.version` bump, no
+push**. This step is where the change first leaves the machine: one `.version`
+bump, then push (all the incremental commits go up together).
 
 **No AI attribution** in commit messages (no "Claude", "AI", "automated",
 "assistant", "co-author"). Conventional commit format: `type(scope): description`.
 
 ## Routine
 
-1. **Precondition — the techdebt-review traverse has already PASSED at this
-   checkpoint.** The technical-debt verdict
-   ([[satellites-technical-debt-review]]) is rendered by the workflow's
-   `techdebt-review` state against the local tree BEFORE this capability runs
-   — never ship from a tree whose traverse failed; on a fail, resolve per the
-   gate skill and re-traverse before returning here.
+1. **Precondition — you are in the `shipping` state**, i.e. techdebt-review AND
+   integration-review have already PASSED for this checkpoint (the broken-windows
+   build/unit/integration verdict is integration-review's, rendered against the
+   local tree before you ship). Never ship from a tree whose reviews did not
+   pass; on a fail you are back in `in_progress`, not here.
 
    Then run the remaining pre-commit gates — each is its own atomic skill; this
-   checkpoint only names them and honours their verdicts. A gate's routine,
-   repair semantics, and guardrails live in the gate skill — the single home;
-   do not restate or improvise them here.
+   step only names them and honours their verdicts. A gate's routine, repair
+   semantics, and guardrails live in the gate skill — the single home; do not
+   restate or improvise them here.
 
    - **[[satellites-doc-drift-review]]** — when the change touches the CLI
      (`internal/cli`, `cmd/satellites`): `satellites surface check`. Exit 0 →
@@ -44,10 +50,8 @@ latest pushed commit, not the local tree. A change not committed + pushed +
      agent/executor surface (`internal/agent`, the agent executor in
      `internal/verb`, agent operating documents): a judgment gate (not a CLI
      check) — `satellites story status_transition --skill
-     satellites-agent-architecture-review <story-id>`. It critiques the change
-     for configuration-over-code (agent behaviour in the substrate, only
-     mechanism in code). accept → proceed; reject → **do not commit**, move the
-     flagged behaviour into the substrate, re-run.
+     satellites-agent-architecture-review <story-id>`. accept → proceed; reject →
+     **do not commit**, move the flagged behaviour into the substrate, re-run.
 
 2. **Configure + stage**
 
@@ -58,9 +62,10 @@ latest pushed commit, not the local tree. A change not committed + pushed +
 3. **Analyse + format** — `git branch --show-current`, `git diff --cached --stat`,
    `git log --oneline -5` for style. If `go.mod` exists: `gofmt -s -w . && git add -u`.
 
-4. **Bump `.version` — MANDATORY on every commit.** `.version` is per-binary:
+4. **Bump `.version` ONCE for this ship.** `.version` is per-binary:
    `satellites.version` = the **CLI**, `satellites-server.version` = the
-   **server**. Bump the patch of the binary(ies) the change touches.
+   **server**. Bump the patch of the binary(ies) the change touches. This is the
+   ONLY bump in the loop — the incremental `in_progress` commits did not bump.
 
    The release gate's **CLIENT_PATHS** (`.github/workflows/release.yml`) are the
    authoritative definition of "client-affecting" → bump **`satellites.version`**:
@@ -70,25 +75,20 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    ```
 
    - **CLI / client** (any CLIENT_PATH above) → bump `satellites.version`.
-     `internal/verb` IS a client path (compiled into the CLI) — a verb change needs
-     a `satellites.version` bump, not just a server bump.
+     `internal/verb` IS a client path (compiled into the CLI).
    - **server-only** (`internal/server`, `internal/mcpserver`,
      `internal/document`, `cmd/satellites-server`, other non-client packages) →
      bump `satellites-server.version`.
    - **both** — code compiled into BOTH binaries bumps both versions:
      `config/documents/` embedded seeds, and `internal/verb`. When in doubt, bump both.
+   - **substrate-only** (only `.satellites/` documents/skills/workflows, docs) →
+     no binary path changed, so no bump is required.
 
-   Update the matching `*.build` timestamp. `git add .version`. Never skip — the
-   release tag derives from `satellites.version`, and a CLIENT_PATH change with no
-   bump FAILS the release workflow.
+   Update the matching `*.build` timestamp. `git add .version`. A CLIENT_PATH
+   change pushed with no bump FAILS the release workflow.
 
-5. **Commit, then push.** The release version-bump gate is CONFIGURATION, not a
-   binary command (epic:satellites-backbone 2.3.1): the authoritative gate is the
-   CI release workflow (`.github/workflows/release.yml`), which FAILS when a
-   CLIENT_PATH changed since the `v<satellites.version>` tag without a
-   `satellites.version` bump. Step 4's bump discipline is what keeps that gate
-   green; step 6 watches the release workflow so a missed bump surfaces within a
-   minute of the push, not silently.
+5. **Final commit, then push.** One commit folds the staged work + the `.version`
+   bump on top of the incremental `in_progress` commits; the push sends them all.
 
    ```bash
    git commit -m "type(scope): message"
@@ -97,13 +97,12 @@ latest pushed commit, not the local tree. A change not committed + pushed +
 
 6. **Watch CI** (`.github/workflows/`: test → release → deploy) — three
    **separate** workflows. Check ALL THREE conclusions, especially **release**: it
-   does NOT silently skip — it FAILS when a CLIENT_PATH changed without a
-   `satellites.version` bump, and that red is invisible if you only watch `test` +
-   `deploy`. The **`test`** workflow now runs TWO parallel jobs — `vet-test`
-   (unit) and `integration` (the full `-tags integration` tier, incl. chromedp);
-   either job red fails `test` and blocks release+deploy, so CI is the
-   non-skippable backstop to the local [[satellites-technical-debt-review]] gate.
-   When `test` is red, `gh run view <id> --log-failed` shows which job.
+   FAILS when a CLIENT_PATH changed without a `satellites.version` bump, invisible
+   if you only watch `test` + `deploy`. The **`test`** workflow runs TWO parallel
+   jobs — `vet-test` (unit) and `integration` (the full `-tags integration` tier,
+   incl. chromedp); either red fails `test` and blocks release+deploy, so CI is
+   the non-skippable backstop to the local integration-review gate. When `test` is
+   red, `gh run view <id> --log-failed` shows which job.
 
    ```bash
    HEAD=$(git rev-parse HEAD)
@@ -115,7 +114,7 @@ latest pushed commit, not the local tree. A change not committed + pushed +
    — do not amend or retry unless asked. On success, report the runs + the release tag.
 
 7. **Record the CI outcomes into the QA-evidence trail.** Once the three workflows
-   have concluded, capture each stage:
+   have concluded:
 
    ```bash
    satellites evidence ci --from-head   # story id from HEAD's commit trailer; idempotent
@@ -123,7 +122,8 @@ latest pushed commit, not the local tree. A change not committed + pushed +
 
    It writes a `ci_result` row per concluded stage (test/release/deploy), keyed
    to the story in the commit trailer; a stage with no concluded run is skipped.
-   Confirm with `satellites evidence show <story>`.
+   Confirm with `satellites evidence show <story>`. Then advance `shipping →
+   done-review` and request `satellites-story-done-review`.
 
 ## Environment
 
@@ -136,10 +136,9 @@ deploy workflow, so the bounds below apply to every run.
 ```yaml
 guardrails:
   always:
-    - Run only after the techdebt-review traverse has PASSED at this checkpoint — its verdict precedes any ship action.
+    - Run only from the shipping state — techdebt-review and integration-review must already have PASSED.
     - Pass the (when CLI touched) surface and other named gates BEFORE committing — fail closed.
-    - Bump the correct per-binary .version on every commit and stage it.
-    - Bump satellites.version (step 4) for any CLIENT_PATH change; the CI release workflow (release.yml) is the authoritative release gate and fails a missed bump.
+    - Bump the correct per-binary .version ONCE for the ship when a binary path changed, and stage it; substrate-only ships need no bump.
     - Watch all THREE CI workflows (test, release, deploy) and confirm each conclusion.
     - Use conventional-commit format with NO AI attribution (no Claude/AI/automated/assistant/co-author).
     - Stop on any gate BLOCK or CI failure and report it.
@@ -151,7 +150,8 @@ guardrails:
   never:
     - Force-push or rewrite pushed history without the operator's say-so.
     - Bypass a gate with `--skip-review`, `--no-verify`, or by editing the gate output.
-    - Ship from a tree whose techdebt-review traverse failed, or commit on a BLOCKED surface gate.
+    - Ship from a tree whose techdebt-review or integration-review did not pass.
     - Push a CLIENT_PATH change without a matching `satellites.version` bump.
+    - Bump .version on the incremental in_progress commits — the bump happens once, here.
     - Add AI attribution to a commit message.
 ```
