@@ -114,6 +114,7 @@ baseline. --json emits the structured measure.`,
 	contextCmd.AddCommand(newContextReviewCmd(configArg, userArg))
 	contextCmd.AddCommand(newContextCurateCmd(configArg, userArg))
 	contextCmd.AddCommand(newContextBudgetCmd(configArg, userArg))
+	contextCmd.AddCommand(newContextValidateCmd(configArg, userArg))
 	return contextCmd
 }
 
