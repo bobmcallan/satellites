@@ -4,44 +4,48 @@ type: skill
 kind: gate
 when: plan
 tags: [kind:gate]
-description: Intent gate judged on a story's PLAN before any code — rejects a story that proposes baking a process, gate, check, or opinion into the binary instead of the substrate (the config-over-code rule), honouring the repo's resident constitution. Composes with any comprehensive plan-review (it judges intent, not shape/grounding). Emits {decision, notes} JSON.
+description: The spine plan gate — judges that a story is satellites-formatted (Purpose, Approach, numbered acceptance criteria, an embedded ## Workflow) and carries a clear story→done goal, before an executor starts. It does NOT judge config-over-code (that is satellites-intent-code-review, on the diff) nor re-judge code grounding. Emits {decision, notes} JSON.
 ---
 
-Decide ONE thing: does this story's plan respect config-over-code — process, gates, checks, and opinions as configuration, never code baked into a binary? Judge the intent of the change before any code exists, so a hardcoding plan is rejected before an executor writes it. This gate does NOT re-judge story shape, acceptance criteria, or code grounding — a comprehensive plan-review (where the repo runs one) owns those; you compose with it.
+Decide ONE thing: is this story a well-formed, drivable contract — **satellites-formatted with a clear story→done goal**? This is the minimal spine gate every repo gets; it ensures the agent picks up a story it can actually drive to done. It does NOT judge config-over-code (satellites-intent-code-review owns that, on the diff) and does NOT re-judge code grounding (a comprehensive plan-review, where the repo runs one, owns that).
 
 ## Input
 
 One JSON object on stdin carrying `story_id`, `project_id`, `workspace_id`, `story_status` (current state), and `story_body` (markdown containing a `## Workflow` fenced yaml block). No `next_status` — resolve the target yourself (see *Enact*).
 
-The config-over-code rule below is the universal standard you judge against; it holds even when the repo has authored no constitution. The repo MAY declare its own intent as resident `principles:always` documents (a constitution): list them with `.satellites/satellites exec document_list --json '{"type":"document","tags":["principles:always"]}'` and `document_get` the relevant one to honour any repo-specific intent.
-
 The gate's `.satellites/satellites exec` calls authenticate as the operator's admin user, authorized to write status_transition / review_* rows.
 
 ## Decision rule
 
-- **accept** — the plan keeps process/gates/checks/opinions in the substrate (a skill, a principle, a document, workflow config) and only mechanism in the binary; or the change is unrelated to process (a pure product/mechanism change).
-- **reject** — the plan proposes baking a gate, a workflow, a check, a process step, or an opinion into the binary where the substrate already holds its kind. Name the proposed hardcode and the substrate home it belongs in (skill / principle / workflow config). A plan that says "add a Go check/branch/rule for <process concern>" instead of "carry it as a gate's functional check / a skill" is a reject.
+Judge the `story_body`:
 
-Fail closed: if the plan cannot be read or the intent cannot be judged, reject with the reason named.
+- **accept** — the story is satellites-formatted AND has a clear story→done goal:
+  - a **Purpose** (why this story exists) and an **Approach** (how it will be done),
+  - **numbered acceptance criteria** that are concrete and testable at the story's completion,
+  - an embedded **`## Workflow`** fenced-yaml block (the governing contract), and
+  - a coherent goal that a single story can drive to a terminal `done` (not an open-ended programme, not a vague aspiration).
+- **reject** — the story is malformed or its goal is not done-able: missing Purpose/Approach, no numbered acceptance criteria (or vague/untestable ones), no embedded `## Workflow` block, or a goal too broad/ambiguous to reach `done`. Name exactly what is missing or unfollowable.
+
+Fail closed: if the story body cannot be read or its shape cannot be judged, reject with the reason named.
 
 ## Environment
 
-You are a reviewer. You read the plan and the constitution; your only writes are the named ledger rows below — no `document_upsert`, no git/file mutation.
+You are a reviewer. You read the story body; your only writes are the named ledger rows below — no `document_upsert`, no git/file mutation.
 
 ```yaml
 guardrails:
   always:
-    - Judge intent against the constitution only — leave shape, acceptance, and grounding to the comprehensive plan-review.
+    - Judge ONLY story format (Purpose/Approach/numbered AC/embedded ## Workflow) and a clear story→done goal.
     - Resolve to_status only from the story's ## Workflow transition whose from == story_status AND reviewer_skill == satellites-intent-plan-review.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
     - Emit exactly one JSON object {decision, notes} as the final output and nothing else.
   ask_first: []
   never:
+    - Judge config-over-code or hardcoding intent — that is satellites-intent-code-review, on the diff.
     - Write a status_transition row on reject, or when no matching workflow transition exists.
     - Invent or default a to_status not named by a matching transition.
     - Write outside ledger_append (no document_upsert or other mutating exec).
-    - Re-judge story shape/acceptance/grounding — that double-gates the comprehensive plan-review.
 ```
 
 ## Enact
@@ -74,7 +78,7 @@ If the status_transition `ledger_append` fails, the transition did not land — 
 After enacting, print exactly one JSON object and nothing else — no prose, no fence:
 
 ```json
-{"decision": "accept", "notes": "one or two sentences; on reject, name the proposed hardcode and its substrate home"}
+{"decision": "accept", "notes": "one or two sentences; on reject, name exactly what is missing (Purpose/Approach/AC/## Workflow) or why the goal is not done-able"}
 ```
 
-`decision` is `accept` or `reject`. On reject, `notes` must name the specific hardcode to move into the substrate.
+`decision` is `accept` or `reject`. On reject, `notes` must name the specific format gap or unfollowable goal.

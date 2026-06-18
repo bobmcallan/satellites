@@ -24,10 +24,11 @@ status itself answers "whose turn is it, and was the gate run?".
    - **The plan** — `document_upsert` Purpose / Approach / numbered Acceptance criteria.
 3. Request the entry gates in order: `satellites story status_transition
    <story-id> --skill <gate>` for the comprehensive plan-review (backlog →
-   plan-reviewed), then the intent gate (plan-reviewed → ready) which judges the
-   plan against the [[constitution]] — rejecting a story that
-   proposes baking a gate/process/opinion into the binary instead of the
-   substrate — then start-review (ready → in_progress).
+   plan-reviewed), then the spine plan gate (plan-reviewed → ready) which judges
+   the story is satellites-formatted (Purpose / Approach / numbered acceptance
+   criteria / an embedded ## Workflow) and carries a clear story→done goal — then
+   start-review (ready → in_progress). Config-over-code is judged on the DIFF by
+   [[satellites-intent-code-review]], not at the plan stage.
 4. **Do the work in `in_progress`, committing INCREMENTALLY and LOCALLY** — small
    conventional commits as the work progresses, with **no `.version` bump and no
    push** (the push happens once, at `shipping`). At a natural checkpoint, request
@@ -76,7 +77,7 @@ binary, so an unshipped change is not seen.
 
 ## States and actors
 
-- `plan-reviewed` (reviewer) — the comprehensive plan-review has passed; `satellites-intent-plan-review` judges the plan against the constitution before the story is `ready`.
+- `plan-reviewed` (reviewer) — the comprehensive plan-review has passed; `satellites-intent-plan-review` judges that the story is satellites-formatted and carries a story→done goal before it is `ready` (config-over-code is judged on the diff by `satellites-intent-code-review`, not here).
 - `in_progress` (executor) — the work happens here, with incremental LOCAL commits (no version bump, no push); every fail edge lands back here.
 - `techdebt-review` (reviewer) — `satellites-technical-debt-review` is a senior-developer code-debt scan of the diff (duplicated / redundant / dead functions); it runs NO tests; the client enacts its pass/fail edge.
 - `integration-review` (reviewer) — `satellites-integration-test-review` carries broken-windows: its functional check runs build + unit + the integration tier, reconciles the failures against the quarantine register (a registered + owned failure is tolerated), and judges the UI/DOGFOOD coverage. The suite executes exactly once per loop, here; the client enacts its pass/fail edge.

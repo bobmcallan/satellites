@@ -418,18 +418,19 @@ name: satellites-baseline-workflow
 kind: workflow
 tags: [kind:workflow]
 applies_to: ["*"]
-description: The order-zero baseline lifecycle — backlog to in_progress to done. The entry is gated by the intent-gate (satellites-intent-plan-review, injected from the binary) so a story is judged against the repo's config-over-code intent before any code exists; the exit is ungated. Other gates stay an opt-in palette a richer repo-owned workflow composes.
+description: The order-zero baseline lifecycle — backlog to in_progress to done. The entry is gated by the spine plan-gate (satellites-intent-plan-review, injected from the binary) so a story is judged satellites-formatted with a clear story→done goal before work begins; the exit is ungated. Other gates stay an opt-in palette a richer repo-owned workflow composes.
 ---
 
 # Baseline workflow (order-zero)
 
 The minimal governing workflow: a story moves backlog to in_progress to done.
-The ONLY gate is the intent spine every repo gets — the entry transition
-(backlog to in_progress) is judged by satellites-intent-plan-review, which
-rejects a plan that proposes baking a process, a gate, or an opinion into the
-binary instead of the substrate (the config-over-code rule), honouring the
-repo's resident constitution. The intent-gates are satellites-INTERNAL: injected
-from the binary, never materialised to .claude/skills, so they cannot be edited.
+The ONLY gate is the spine every repo gets — the entry transition (backlog to
+in_progress) is judged by satellites-intent-plan-review, which checks the story
+is satellites-formatted (Purpose / Approach / numbered acceptance criteria / an
+embedded ## Workflow) and carries a clear story→done goal. It does NOT judge
+config-over-code — that is satellites-intent-code-review, on the diff, an opt-in
+substrate gate. The spine gates are satellites-INTERNAL: injected from the
+binary, never materialised to .claude/skills, so they cannot be edited.
 
 The exit (in_progress to done) and the cancel edges are ungated — advance them
 with: satellites story set-status <story-id> <status>. The goal-keeper Stop hook
@@ -439,7 +440,7 @@ baseline names only the intent spine.
 
 ## Workflow
 
-- backlog to in_progress — open, gated by satellites-intent-plan-review (intent).
+- backlog to in_progress — open, gated by satellites-intent-plan-review (format + story→done goal).
 - in_progress to done — close (ungated).
 - backlog/in_progress to cancelled — abandon (ungated).
 
@@ -466,7 +467,7 @@ goal-keeper Stop hook holds the agent to a terminal state.
 guardrails:
   always:
     - Drive the engaged story to a terminal state (done) — the goal-keeper holds you to it.
-    - Request the entry intent-gate (satellites-intent-plan-review) to open a story; it rejects a hardcoding plan.
+    - Request the entry spine gate (satellites-intent-plan-review) to open a story; it checks the story is satellites-formatted with a story→done goal.
   ask_first: []
   never:
     - Move a story across a gated edge with set-status — route it through the named gate.
