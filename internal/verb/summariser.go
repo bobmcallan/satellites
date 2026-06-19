@@ -15,10 +15,7 @@ package verb
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -67,42 +64,18 @@ type ClaudeCLISummariser struct {
 // gate, which needs it to run tests). Space-separated per --allowedTools.
 const summariserAllowedTools = "Read Grep Glob"
 
-// summariserClaudeArgs builds the claude argv for a summariser run. The skill
-// body is the appended system prompt; the transition payload arrives on
-// stdin. Standalone so a test can pin the argv (and catch a future invalid
-// flag or a widened tool grant) without a live run.
-func summariserClaudeArgs(systemPrompt, model string) []string {
-	args := []string{
-		"-p",
-		"--allowedTools", summariserAllowedTools,
-		"--append-system-prompt", systemPrompt,
-	}
-	if m := strings.TrimSpace(model); m != "" {
-		args = append(args, "--model", m)
-	}
-	return args
-}
-
-// Summarise runs the skill and returns its stdout prose, trimmed. Errors are
-// the caller's to treat as non-fatal: a missing summary is observability
-// lost, not a transition undone.
+// Summarise runs the skill and returns its stdout prose, trimmed. It threads
+// through the same single claude -p primitive as the gate (claudeArgs +
+// runClaudeCLI, sty_3436e9f0) — only the tool grant (read-only), the stdin
+// payload, and the output handling (raw trimmed prose, not a parsed decision)
+// differ. Errors are the caller's to treat as non-fatal: a missing summary is
+// observability lost, not a transition undone.
 func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) (string, error) {
 	if strings.TrimSpace(in.SkillName) == "" {
 		return "", fmt.Errorf("summariser: skill_name required")
 	}
-	binary := c.BinaryPath
-	if binary == "" {
-		binary = "claude"
-	}
-	timeout := in.Timeout
-	if timeout == 0 {
-		timeout = c.DefaultTimeout
-	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
+	ctx, cancel := withClaudeTimeout(ctx, in.Timeout, c.DefaultTimeout)
+	defer cancel()
 
 	payload, err := json.Marshal(map[string]any{
 		"story_id":      in.StoryID,
@@ -123,21 +96,11 @@ func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) 
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, binary, summariserClaudeArgs(systemPrompt, c.Model)...)
-	cmd.Stdin = strings.NewReader(string(payload))
-	if in.WorktreeRoot != "" {
-		cmd.Dir = in.WorktreeRoot
-	}
-	cmd.Env = os.Environ()
-
-	out, err := cmd.Output()
+	out, err := runClaudeCLI(ctx, c.BinaryPath,
+		claudeArgs(systemPrompt, summariserAllowedTools, c.Model),
+		string(payload), in.WorktreeRoot, "summariser")
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return "", fmt.Errorf("summariser: subprocess exited: %s: %s",
-				exitErr.String(), strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", fmt.Errorf("summariser: subprocess: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }

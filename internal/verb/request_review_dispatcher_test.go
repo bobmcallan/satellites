@@ -18,7 +18,7 @@ import (
 // missing — catching the class of bug that shipped a gate that could not
 // verify yet accepted anyway.
 func TestGateClaudeArgs(t *testing.T) {
-	args := gateClaudeArgs("GATE BODY", "")
+	args := claudeArgs("GATE BODY", gateAllowedTools, "")
 	want := []string{"-p", "--allowedTools", gateAllowedTools, "--append-system-prompt", "GATE BODY"}
 	if len(args) != len(want) {
 		t.Fatalf("argv length = %d, want %d (%v)", len(args), len(want), args)
@@ -340,8 +340,8 @@ func TestParseGateOutput_NoDecision(t *testing.T) {
 // (sty_c7a5d741): a configured model appends `--model <value>`; unset leaves
 // the argv byte-identical to the default (inherit the harness model).
 func TestGateClaudeArgs_ReviewerModel(t *testing.T) {
-	base := gateClaudeArgs("GATE BODY", "")
-	withModel := gateClaudeArgs("GATE BODY", "claude-sonnet-4-6")
+	base := claudeArgs("GATE BODY", gateAllowedTools, "")
+	withModel := claudeArgs("GATE BODY", gateAllowedTools, "claude-sonnet-4-6")
 	if len(withModel) != len(base)+2 {
 		t.Fatalf("model argv length = %d, want %d+2 (%v)", len(withModel), len(base), withModel)
 	}

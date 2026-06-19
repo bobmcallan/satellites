@@ -122,19 +122,8 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	if strings.TrimSpace(in.SkillName) == "" {
 		return GateOutput{}, fmt.Errorf("gate dispatch: skill_name required")
 	}
-	binary := c.BinaryPath
-	if binary == "" {
-		binary = "claude"
-	}
-	timeout := in.Timeout
-	if timeout == 0 {
-		timeout = c.DefaultTimeout
-	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
+	ctx, cancel := withClaudeTimeout(ctx, in.Timeout, c.DefaultTimeout)
+	defer cancel()
 
 	payload, err := json.Marshal(map[string]any{
 		"story_id":      in.StoryID,
@@ -161,26 +150,11 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 		systemPrompt = appendFunctionalCheck(systemPrompt, check, code, out)
 	}
 
-	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
-	cmd.Stdin = strings.NewReader(string(payload))
-	if in.WorktreeRoot != "" {
-		cmd.Dir = in.WorktreeRoot
-	}
-	// Inherit the caller's environment — claude needs PATH/HOME and the
-	// operator's auth to run at all. The gate skill enacts its transition
-	// under that same inherited operator auth (the server authorizes
-	// status_transition / review_* by the admin user); no separate reviewer
-	// key is layered on.
-	cmd.Env = os.Environ()
-
-	out, err := cmd.Output()
+	out, err := runClaudeCLI(ctx, c.BinaryPath,
+		claudeArgs(systemPrompt, gateAllowedTools, c.Model),
+		string(payload), in.WorktreeRoot, "gate dispatch")
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return GateOutput{}, fmt.Errorf("gate dispatch: subprocess exited: %s: %s",
-				exitErr.String(), strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return GateOutput{}, fmt.Errorf("gate dispatch: subprocess: %w", err)
+		return GateOutput{}, err
 	}
 	return ParseGateOutput(out)
 }
@@ -206,19 +180,8 @@ func (c ClaudeCLIGateDispatcher) ReviewContent(ctx context.Context, in ContentRe
 	if strings.TrimSpace(in.SkillName) == "" {
 		return GateOutput{}, fmt.Errorf("content review: skill_name required")
 	}
-	binary := c.BinaryPath
-	if binary == "" {
-		binary = "claude"
-	}
-	timeout := in.Timeout
-	if timeout == 0 {
-		timeout = c.DefaultTimeout
-	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
+	ctx, cancel := withClaudeTimeout(ctx, in.Timeout, c.DefaultTimeout)
+	defer cancel()
 	_, systemPrompt, err := c.resolveGate(ctx, in.WorktreeRoot, in.SkillName)
 	if err != nil {
 		return GateOutput{}, err
@@ -229,20 +192,11 @@ func (c ClaudeCLIGateDispatcher) ReviewContent(ctx context.Context, in ContentRe
 	// the task?" instead of judging it. The fences make "the thing under review"
 	// unambiguous against everything else in the subprocess's context.
 	prompt := "Judge the PROPOSED substrate artifact below against your decision rule. It IS the artifact under review — not context, not a task description, not the working tree. Read only it, then print ONLY the verdict JSON.\n\n----- BEGIN PROPOSED ARTIFACT -----\n" + in.Content + "\n----- END PROPOSED ARTIFACT -----\n"
-	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
-	cmd.Stdin = strings.NewReader(prompt)
-	if in.WorktreeRoot != "" {
-		cmd.Dir = in.WorktreeRoot
-	}
-	cmd.Env = os.Environ()
-	out, err := cmd.Output()
+	out, err := runClaudeCLI(ctx, c.BinaryPath,
+		claudeArgs(systemPrompt, gateAllowedTools, c.Model),
+		prompt, in.WorktreeRoot, "content review")
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return GateOutput{}, fmt.Errorf("content review: subprocess exited: %s: %s",
-				exitErr.String(), strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return GateOutput{}, fmt.Errorf("content review: subprocess: %w", err)
+		return GateOutput{}, err
 	}
 	return ParseGateOutput(out)
 }
@@ -284,25 +238,71 @@ func (c ClaudeCLIGateDispatcher) IsReviewer(ctx context.Context, worktreeRoot, s
 // (harmless). Space-separated per the claude CLI's --allowedTools format.
 const gateAllowedTools = "Bash Read Grep Glob"
 
-// gateClaudeArgs builds the claude argv for a gate run. The gate skill
-// body is delivered as an appended system prompt (`--append-system-prompt`,
-// a real claude flag); the story payload arrives on stdin as the prompt.
-// `--allowedTools` grants the gate the means to actually run build/tests in
-// the worktree (sty_cba1d47b) — without it the gate cannot verify and
-// false-accepts. The earlier `--skill <name>` form was invalid — the claude
-// CLI has no such flag, so every gate run died at dispatch (sty_1312d692).
-// Kept as a standalone function so a test can pin the argv and catch a
-// future invalid flag — or a dropped tool grant — before a live run.
-func gateClaudeArgs(systemPrompt, model string) []string {
+// claudeArgs builds the ONE `claude -p` argv (sty_3436e9f0): the gate/skill body
+// rides as an appended system prompt (`--append-system-prompt`, a real claude
+// flag); the payload arrives on stdin. `--allowedTools` grants the means to do
+// the lane's work — a gate needs Bash to build/test in the worktree
+// (sty_cba1d47b), a summariser is read-only — so the grant is the caller's knob,
+// but this is the SINGLE place an argv is assembled. The earlier `--skill <name>`
+// form was invalid (no such claude flag) and died at dispatch (sty_1312d692);
+// pinned by a test so a future invalid flag or dropped grant is caught before a
+// live run.
+func claudeArgs(systemPrompt, allowedTools, model string) []string {
 	args := []string{
 		"-p",
-		"--allowedTools", gateAllowedTools,
+		"--allowedTools", allowedTools,
 		"--append-system-prompt", systemPrompt,
 	}
 	if m := strings.TrimSpace(model); m != "" {
 		args = append(args, "--model", m)
 	}
 	return args
+}
+
+// withClaudeTimeout derives the dispatch context (sty_3436e9f0): a per-call
+// timeout overrides the configured default; zero in both leaves ctx uncapped.
+// One place so every claude -p caller — and the skill resolution it wraps —
+// bounds itself identically.
+func withClaudeTimeout(ctx context.Context, timeout, defaultTimeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout == 0 {
+		timeout = defaultTimeout
+	}
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return ctx, func() {}
+}
+
+// runClaudeCLI is the ONE configurable `claude -p` invocation primitive
+// (sty_3436e9f0): binary resolution, the subprocess run with stdin + worktree
+// dir + inherited operator env, and exit-error surfacing. Every reviewer and the
+// summariser thread through it — there is no second binary resolver, argv
+// builder, or subprocess/error path. The caller owns argv (via claudeArgs), the
+// timeout (via withClaudeTimeout on ctx), the stdin payload, the error label,
+// and the output parse. Env is inherited so claude has PATH/HOME and the
+// operator's auth — the gate skill enacts its transition under that same auth
+// (no separate reviewer key).
+func runClaudeCLI(ctx context.Context, binaryPath string, args []string, stdin, dir, label string) ([]byte, error) {
+	binary := binaryPath
+	if binary == "" {
+		binary = "claude"
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("%s: subprocess exited: %s: %s",
+				label, exitErr.String(), strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("%s: subprocess: %w", label, err)
+	}
+	return out, nil
 }
 
 // errGateSkillAbsent marks the one resolution outcome the server step may

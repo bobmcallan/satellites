@@ -12,7 +12,7 @@ import (
 // fails if the system prompt is dropped, the `--skill` non-flag returns, or
 // the grant widens to include a write/exec tool.
 func TestSummariserClaudeArgs(t *testing.T) {
-	args := summariserClaudeArgs("SUMMARY BODY", "")
+	args := claudeArgs("SUMMARY BODY", summariserAllowedTools, "")
 	want := []string{"-p", "--allowedTools", summariserAllowedTools, "--append-system-prompt", "SUMMARY BODY"}
 	if len(args) != len(want) {
 		t.Fatalf("argv length = %d, want %d (%v)", len(args), len(want), args)
@@ -45,8 +45,8 @@ func TestSummarise_RequiresSkillName(t *testing.T) {
 // summariser argv (sty_c7a5d741): set → trailing `--model <value>`; unset →
 // byte-identical to today.
 func TestSummariserClaudeArgs_ReviewerModel(t *testing.T) {
-	base := summariserClaudeArgs("SUMMARY BODY", "")
-	withModel := summariserClaudeArgs("SUMMARY BODY", "claude-haiku-4-5-20251001")
+	base := claudeArgs("SUMMARY BODY", summariserAllowedTools, "")
+	withModel := claudeArgs("SUMMARY BODY", summariserAllowedTools, "claude-haiku-4-5-20251001")
 	if len(withModel) != len(base)+2 {
 		t.Fatalf("model argv length = %d, want %d+2 (%v)", len(withModel), len(base), withModel)
 	}
