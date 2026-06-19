@@ -54,6 +54,20 @@ is deleted. Refresh skills afterwards with ` + "`satellites skill sync`" + `.`,
 // (a rename, not a delete).
 func runRebase(out io.Writer, repoRoot string, doWF, doHook bool) error {
 	fmt.Fprintf(out, "rebase %s\n", repoRoot)
+	// Up-front warning (sty_381050ee): name what rebase will do BEFORE it acts, so
+	// the operator is not surprised by an archived workflow dir or rewritten hooks.
+	// Informational only — rebase stays non-interactive (no prompt); the actions
+	// are reversible (the workflow dir is RENAMED to an archive, nothing deleted;
+	// hooks are merged, not replaced). Scope it with --workflows / --hooks.
+	fmt.Fprintln(out, "  ! rebase will modify this repo's governance (reversible):")
+	if doWF {
+		fmt.Fprintln(out, "      • archive .satellites/workflows/ → .satellites/workflows.archive-N/ (a rename, kept) and scaffold the gateless baseline")
+	}
+	if doHook {
+		fmt.Fprintln(out, "      • reconcile .claude/settings.json hooks to the current init set (merge — adds missing, nothing removed)")
+	}
+	fmt.Fprintln(out, "      • afterwards, refresh skills with `satellites skill sync`")
+	fmt.Fprintln(out, "      narrow with --workflows / --hooks; nothing here is deleted.")
 	if doWF {
 		dest, archived, err := archiveWorkflows(repoRoot)
 		if err != nil {

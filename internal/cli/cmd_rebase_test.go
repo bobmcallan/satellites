@@ -72,6 +72,38 @@ func TestRunRebase_HooksReconcile(t *testing.T) {
 	}
 }
 
+// TestRunRebase_WarnsUpFront (sty_381050ee): rebase prints the up-front,
+// reversible-action warning BEFORE it acts, scoped to the active flags, and
+// stays non-interactive (no prompt — runRebase takes no input).
+func TestRunRebase_WarnsUpFront(t *testing.T) {
+	repo := t.TempDir()
+	var out bytes.Buffer
+	if err := runRebase(&out, repo, true, true); err != nil {
+		t.Fatalf("rebase: %v", err)
+	}
+	s := out.String()
+	for _, want := range []string{
+		"rebase will modify",
+		"reversible",
+		"archive .satellites/workflows/",
+		".claude/settings.json hooks",
+		"satellites skill sync",
+		"--workflows / --hooks",
+	} {
+		if !bytes.Contains([]byte(s), []byte(want)) {
+			t.Errorf("warning missing %q:\n%s", want, s)
+		}
+	}
+	// Scope narrowing: a hooks-only rebase must not warn about archiving workflows.
+	var hooksOnly bytes.Buffer
+	if err := runRebase(&hooksOnly, t.TempDir(), false, true); err != nil {
+		t.Fatalf("rebase --hooks: %v", err)
+	}
+	if bytes.Contains(hooksOnly.Bytes(), []byte("archive .satellites/workflows/")) {
+		t.Errorf("hooks-only rebase must not warn about archiving workflows:\n%s", hooksOnly.String())
+	}
+}
+
 // TestRunRebase_WorkflowsBaseline: rebase --workflows archives the current
 // workflows and scaffolds the gateless baseline.
 func TestRunRebase_WorkflowsBaseline(t *testing.T) {
