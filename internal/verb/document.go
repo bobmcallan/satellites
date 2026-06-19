@@ -420,6 +420,16 @@ func invokeDocumentGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		if mcpReadForbiddenDoc(auth.TransportFromContext(ctx), d.Type, d.Tags) {
 			return nil, fmt.Errorf("document_get: %w: skills/principles are read client-side, not over MCP", ErrForbidden)
 		}
+		// Enforce the same scope read gate as the by-(scope,name) path
+		// (sty_14410cb3): the id-addressed fetch is the PRIMARY story-read path and
+		// must not bypass project scope, or a caller limited to project A (a
+		// non-member, or an agent-role downscope) could read any project-B story by
+		// id. authorizeRead resolves system (ok) / user (owner-only) / library (ok,
+		// audience below) / project (≥read) / workspace (membership) from the
+		// fetched row's own scope keys.
+		if err := authorizeRead(ctx, document.Key{Scope: d.Scope, WorkspaceID: d.WorkspaceID, ProjectID: d.ProjectID, UserID: d.UserID, Name: d.Name}); err != nil {
+			return nil, err
+		}
 		if err := authorizeLibraryAudience(ctx, d); err != nil {
 			return nil, err
 		}

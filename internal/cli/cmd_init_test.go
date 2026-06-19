@@ -251,6 +251,161 @@ func TestEnsureGitignore(t *testing.T) {
 	}
 }
 
+// TestScaffoldToml_BindReady: a fresh toml carries an ACTIVE server_url default
+// (not the commented placeholder), so `satellites auth` no longer fails with
+// `server_url not set` on a fresh install→init (sty_1dc6b146).
+func TestScaffoldToml_BindReady(t *testing.T) {
+	if tomlActiveKey([]byte(scaffoldToml), "server_url") == false {
+		t.Fatalf("scaffoldToml must set an ACTIVE server_url; got:\n%s", scaffoldToml)
+	}
+	if !strings.Contains(scaffoldToml, `server_url = "`+defaultServerURL+`"`) {
+		t.Errorf("scaffoldToml missing active default server_url %q", defaultServerURL)
+	}
+	if strings.Contains(scaffoldToml, `# server_url = "https://your-satellites-server"`) {
+		t.Errorf("scaffoldToml still carries the stale commented server_url placeholder")
+	}
+	// project_id stays a commented placeholder until init resolves it via match.
+	if tomlActiveKey([]byte(scaffoldToml), "project_id") {
+		t.Errorf("scaffoldToml must NOT pre-set an active project_id (it is resolved via match)")
+	}
+}
+
+// TestActivateTomlKey covers the three paths: upgrade a commented placeholder in
+// place, append when no placeholder exists, and no-op when an active key is
+// already present (idempotent re-run).
+func TestActivateTomlKey(t *testing.T) {
+	// 1. Upgrade a commented placeholder in place.
+	repo := t.TempDir()
+	p := filepath.Join(repo, "c.toml")
+	if err := os.WriteFile(p, []byte("# server_url = \"https://your-satellites-server\"\n# other = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := activateTomlKey(p, "server_url", defaultServerURL); err != nil || !added {
+		t.Fatalf("upgrade: added=%v err=%v, want added=true", added, err)
+	}
+	body, _ := os.ReadFile(p)
+	if !strings.Contains(string(body), `server_url = "`+defaultServerURL+`"`) || strings.Contains(string(body), "# server_url") {
+		t.Errorf("placeholder not upgraded in place:\n%s", body)
+	}
+	if !strings.Contains(string(body), "# other = 1") {
+		t.Errorf("unrelated line lost:\n%s", body)
+	}
+	// 2. Idempotent: re-run is a no-op now that the key is active.
+	if added, err := activateTomlKey(p, "server_url", defaultServerURL); err != nil || added {
+		t.Errorf("re-run: added=%v err=%v, want added=false (idempotent)", added, err)
+	}
+
+	// 3. Append when no placeholder exists.
+	p2 := filepath.Join(repo, "empty.toml")
+	if err := os.WriteFile(p2, []byte("name = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := activateTomlKey(p2, "project_id", "proj_abc"); err != nil || !added {
+		t.Fatalf("append: added=%v err=%v, want added=true", added, err)
+	}
+	b2, _ := os.ReadFile(p2)
+	if !tomlActiveKey(b2, "project_id") || !strings.Contains(string(b2), `project_id = "proj_abc"`) {
+		t.Errorf("project_id not appended active:\n%s", b2)
+	}
+}
+
+// TestEnsureProjectID_PresentNoOp: an existing active project_id is reported
+// present and the toml is left untouched (no match call, no rewrite).
+func TestEnsureProjectID_PresentNoOp(t *testing.T) {
+	repo := t.TempDir()
+	p := filepath.Join(repo, "satellites.toml")
+	in := "server_url = \"https://x\"\nproject_id = \"proj_keep\"\n"
+	if err := os.WriteFile(p, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	ensureProjectID(&out, repo, p)
+	after, _ := os.ReadFile(p)
+	if string(after) != in {
+		t.Errorf("toml rewritten despite active project_id:\n%s", after)
+	}
+	if !strings.Contains(out.String(), "already present") {
+		t.Errorf("expected a present report, got: %s", out.String())
+	}
+}
+
+// TestEnsureMCPJSON covers the .mcp.json contract (sty_cd83072f): create when
+// absent, preserve an identical entry (no rewrite), reconcile a divergent url to
+// the toml's server, keep other servers + unknown keys, and never duplicate.
+func TestEnsureMCPJSON(t *testing.T) {
+	const server = "https://satellites-pprod.fly.dev"
+	wantURL := server + "/mcp"
+
+	// 1. Absent → created with the satellites entry.
+	repo := t.TempDir()
+	st, err := ensureMCPJSON(repo, server)
+	if err != nil || st != "added" {
+		t.Fatalf("create: st=%q err=%v, want added", st, err)
+	}
+	p := filepath.Join(repo, ".mcp.json")
+	var doc map[string]any
+	b, _ := os.ReadFile(p)
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf(".mcp.json invalid: %v\n%s", err, b)
+	}
+	sat := doc["mcpServers"].(map[string]any)["satellites"].(map[string]any)
+	if sat["url"] != wantURL || sat["type"] != "http" {
+		t.Errorf("entry = %v, want {type:http, url:%s}", sat, wantURL)
+	}
+
+	// 2. Identical → preserved, no rewrite.
+	before, _ := os.ReadFile(p)
+	st2, err := ensureMCPJSON(repo, server)
+	if err != nil || st2 != "" {
+		t.Errorf("idempotent: st=%q err=%v, want no-op", st2, err)
+	}
+	after, _ := os.ReadFile(p)
+	if string(before) != string(after) {
+		t.Errorf(".mcp.json rewritten on identical re-run")
+	}
+
+	// 3. Divergent url + an unrelated server → reconciled, other server kept.
+	repo2 := t.TempDir()
+	seed := `{"mcpServers":{"satellites":{"type":"http","url":"https://OLD/mcp"},"other":{"type":"http","url":"https://x/mcp"}},"extra":true}`
+	if err := os.WriteFile(filepath.Join(repo2, ".mcp.json"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st3, err := ensureMCPJSON(repo2, server)
+	if err != nil || st3 != "reconciled" {
+		t.Fatalf("reconcile: st=%q err=%v, want reconciled", st3, err)
+	}
+	var doc2 map[string]any
+	b2, _ := os.ReadFile(filepath.Join(repo2, ".mcp.json"))
+	_ = json.Unmarshal(b2, &doc2)
+	servers := doc2["mcpServers"].(map[string]any)
+	if servers["satellites"].(map[string]any)["url"] != wantURL {
+		t.Errorf("divergent url not reconciled to %s: %v", wantURL, servers["satellites"])
+	}
+	if _, ok := servers["other"]; !ok {
+		t.Errorf("unrelated MCP server `other` was dropped")
+	}
+	if doc2["extra"] != true {
+		t.Errorf("unknown top-level key `extra` was dropped")
+	}
+}
+
+// TestRunInit_WritesMCPJSON: a full init in a temp repo registers the satellites
+// MCP server in .mcp.json from the scaffolded server_url default.
+func TestRunInit_WritesMCPJSON(t *testing.T) {
+	repo := t.TempDir()
+	var out bytes.Buffer
+	if err := runInit(&out, repo); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(repo, ".mcp.json"))
+	if err != nil {
+		t.Fatalf(".mcp.json not written: %v", err)
+	}
+	if !strings.Contains(string(b), defaultServerURL+"/mcp") {
+		t.Errorf(".mcp.json missing %s/mcp:\n%s", defaultServerURL, b)
+	}
+}
+
 // commandUnderEvent reports whether a settings doc carries `command` under the
 // named hook event (with the expected matcher, "" = any/none).
 func commandUnderEvent(t *testing.T, raw []byte, event, matcher, command string) bool {
@@ -334,5 +489,21 @@ func TestRunInit_InstallsAccessTriggers(t *testing.T) {
 	}
 	if ss, _ := hooks["SessionStart"].([]any); len(ss) != 2 { // code-index + always-context
 		t.Errorf("SessionStart has %d entries after re-init, want 2 (code-index + always-context, no duplicate)", len(ss))
+	}
+}
+
+// TestGitignoreBlock_LocalOverlayIgnored pins sty_f0c02276 AC3: the managed
+// .gitignore allowlist re-includes the committed satellites.toml but NOT the
+// per-user satellites.local.toml overlay, so the overlay (which may carry an
+// api_key) stays gitignored — the secret-free-committed invariant holds.
+func TestGitignoreBlock_LocalOverlayIgnored(t *testing.T) {
+	if !strings.Contains(gitignoreBlock, ".satellites/*") {
+		t.Fatal("gitignore block must ignore .satellites/* (the allowlist base)")
+	}
+	if !strings.Contains(gitignoreBlock, "!.satellites/satellites.toml") {
+		t.Error("committed satellites.toml must be re-included (shared config is committed)")
+	}
+	if strings.Contains(gitignoreBlock, "satellites.local.toml") {
+		t.Error("satellites.local.toml must NOT be re-included — the per-user overlay stays gitignored")
 	}
 }

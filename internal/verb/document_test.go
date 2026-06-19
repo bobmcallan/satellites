@@ -9,6 +9,8 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/project"
+	"github.com/bobmcallan/satellites/internal/workspace"
 )
 
 // TestEpicReparentRefusal pins sty_409c0af8: epic membership (parent_id) freezes
@@ -424,5 +426,39 @@ func TestParseVersionSelector(t *testing.T) {
 		if opts.AllVersions != tc.wantAll || opts.Version != tc.wantVersion {
 			t.Fatalf("%q: got %+v want all=%v version=%d", tc.in, opts, tc.wantAll, tc.wantVersion)
 		}
+	}
+}
+
+// TestDocumentGetByID_ProjectScopeGate pins sty_14410cb3: the id-addressed
+// document_get path enforces the project-scope read gate via authorizeRead (the
+// helper the by-id branch now calls), closing the gap where a caller limited to
+// project A could read any project-B story by id. A global admin short-circuits
+// the store lookups, so the downscope-cap arithmetic is unit-testable directly.
+func TestDocumentGetByID_ProjectScopeGate(t *testing.T) {
+	prevAuth, prevWS := authStore, workspaceStore
+	authStore, workspaceStore = &auth.Store{}, &workspace.Store{}
+	defer func() { authStore, workspaceStore = prevAuth, prevWS }()
+
+	const projA, projB = "proj_a", "proj_b"
+	admin := auth.WithUser(context.Background(), &auth.User{ID: "u1", Role: auth.RoleAdmin})
+	// Downscoped to read on project A only — the limited-user simulation.
+	capped := auth.WithAgentRole(admin, auth.AgentRoleCap{Role: project.RoleRead, Projects: []string{projA}})
+
+	keyFor := func(pid string) document.Key {
+		return document.Key{Scope: document.ScopeProject, WorkspaceID: "wksp_1", ProjectID: pid, Name: "sty_x"}
+	}
+
+	// Allowed: a story in the granted project.
+	if err := authorizeRead(capped, keyFor(projA)); err != nil {
+		t.Fatalf("project A (granted) must be readable by id, got: %v", err)
+	}
+	// Denied: a story OUTSIDE the granted project — the leak sty_14410cb3 closes.
+	if err := authorizeRead(capped, keyFor(projB)); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("project B (not granted) must be ErrForbidden by id, got: %v", err)
+	}
+	// Sanity: the SAME admin WITHOUT a downscope reads either project (proving the
+	// deny above is the cap, not a misconfigured store).
+	if err := authorizeRead(admin, keyFor(projB)); err != nil {
+		t.Fatalf("uncapped admin must read any project, got: %v", err)
 	}
 }

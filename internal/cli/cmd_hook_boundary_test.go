@@ -56,6 +56,43 @@ func TestGateOutcome_BoundaryAndUngated(t *testing.T) {
 	}
 }
 
+// TestGateOutcome_BootstrapConfigExempt pins sty_4a3fe62d: the bind config
+// (.satellites/satellites.toml + .mcp.json) is ALWAYS writable with no
+// engagement, so the agent can bootstrap a repo; arbitrary in-repo code stays
+// gated (no regression).
+func TestGateOutcome_BootstrapConfigExempt(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	repo := writeRepo(t, true, "") // configured, NO engagement
+
+	// Allowed pre-engagement: the toml and the .mcp.json.
+	for _, p := range []string{
+		filepath.Join(repo, ".satellites", "satellites.toml"),
+		filepath.Join(repo, ".mcp.json"),
+	} {
+		if allow, reason := gateOutcome(repo, "sess1", p, now); !allow {
+			t.Errorf("bootstrap config %s must be ungated with no engagement: reason=%q", p, reason)
+		}
+	}
+
+	// Still gated: arbitrary in-repo code, and a non-bootstrap file under .satellites/.
+	for _, p := range []string{
+		filepath.Join(repo, "internal", "x.go"),
+		filepath.Join(repo, ".satellites", "principles", "constitution.md"),
+	} {
+		if allow, _ := gateOutcome(repo, "sess1", p, now); allow {
+			t.Errorf("non-bootstrap in-repo target %s must stay gated with no engagement", p)
+		}
+	}
+
+	// And the pure predicate agrees.
+	if !isBootstrapConfig(filepath.Join(repo, ".mcp.json"), repo) {
+		t.Errorf("isBootstrapConfig must recognise .mcp.json")
+	}
+	if isBootstrapConfig(filepath.Join(repo, "internal", "x.go"), repo) {
+		t.Errorf("isBootstrapConfig must not match arbitrary code")
+	}
+}
+
 // TestPathIsUngated pins the pure boundary + glob/~-expansion logic.
 func TestPathIsUngated(t *testing.T) {
 	root := filepath.Clean(t.TempDir())

@@ -1,22 +1,24 @@
+# satellites.toml — repo config (non-secret). Run `satellites auth` to add credentials.
+# server_url = "https://your-satellites-server"
 server_url = "https://satellites-pprod.fly.dev"
 project_id = "proj_fc7d72d8"
-repo_path = "."
-worktree_root = "./.satellites/worktree"
-log_path = "./.satellites/logs"
-branch_template = "client-{task_id}-from-{base_sha}"
+# data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
+# work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
+#
+# substrate_roots — per-kind authoring-source parent dir (default ".satellites",
+# i.e. .satellites/<kind>). Override a kind to author it elsewhere, e.g. at the
+# repo root (top-level documents/ principles/ skills/):
+# [substrate_roots]
+# skills = "."
 
 # global_publishers — the publishers (project ids) whose GLOBAL artifacts this
-# repo CONSUMES from the shared library (epic:client-dir-separation order-4,
-# retiring the per-skill library_pins). Opt into a publisher; `skill sync`
-# materialises ALL its global governance (gates + capabilities) at lowest
-# precedence (a same-named project/local skill wins). The product WORKFLOWS are
-# repo-owned client-dir config under .satellites/workflows/ (order-2), NOT
-# consumed from a publisher.
-global_publishers = ["proj_682cfeed"]
-
-# reviewer_model — model for reviewer claude -p runs (gate dispatcher + step
-# summariser). Unset = inherit the harness default (sty_c7a5d741).
-reviewer_model = "claude-opus-4-8"
+# repo CONSUMES from the shared library. Opt into a publisher (not a hand-listed
+# per-skill set) and run `satellites skill sync` to materialise its global
+# governance (a workflow + its gates) into .claude/skills/. The system baseline
+# is inherited with no setup; a repo authors no governance locally. This retires
+# the per-skill library_pins (a remaining library_pins is still honoured as a
+# deprecated fallback — its publishers are derived).
+# global_publishers = ["<publisher>"]
 
 # ungated_dirs — paths the START-door (satellites hook gate) will NOT gate.
 # By default the door only gates edits INSIDE this repo; anything outside the

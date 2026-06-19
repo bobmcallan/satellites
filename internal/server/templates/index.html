@@ -182,7 +182,23 @@
     <h2>install the client</h2>
     <p>The <code>satellites</code> CLI is a per-platform release binary, installed the way <code>claude install</code> works — client only, no server. The one-line bootstrap fetches the installer, sha-verifies the platform binary, and places it at <code>~/.local/bin/satellites</code> (on PATH):</p>
     <pre class="code"><code>curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh</code></pre>
-    <p>Pass <code>--local</code> for the in-repo dev binary, or <code>--version &lt;tag&gt;</code> to pin a release (<code>sh -s -- --local</code>). Once <code>satellites</code> is on PATH, <code>satellites install</code> / <code>satellites update</code> place and refresh the same binary, then <code>satellites auth</code> mints the executor key.</p>
+    <p>Pass <code>--local</code> for the in-repo dev binary, or <code>--version &lt;tag&gt;</code> to pin a release (<code>sh -s -- --local</code>). Once <code>satellites</code> is on PATH, <code>satellites install</code> / <code>satellites update</code> place and refresh the same binary.</p>
+  </section>
+
+  <section class="panel" data-section="getting-started">
+    <h2>out of the box</h2>
+    <p>Install the client, ask the agent to set the repo up, and drive a story to <code>done</code> — with <strong>nothing in <code>.claude/skills</code></strong>:</p>
+    <pre class="code"><code>satellites init     # bind: .satellites/satellites.toml (active server_url + project_id
+                    #   resolved from your git remote) and .mcp.json (mcpServers.satellites
+                    #   → &lt;server_url&gt;/mcp — the SAME server as the toml) + the harness hooks
+satellites auth     # browser login → executor key in the user credential store
+satellites status   # → db UP, MCP connected — no flags, no hand-edits</code></pre>
+    <p><code>init</code> is idempotent — it reports added-vs-present, upgrades an existing toml rather than clobbering it, and derives the MCP endpoint from the toml's <code>server_url</code>, so the CLI and the agent's MCP client can never point at different servers. If the project isn't resolvable yet, <code>init</code> prints the one follow-on command (<code>satellites project match --remote &lt;git-remote&gt;</code>) to bind <code>project_id</code> once authenticated.</p>
+    <p>Then create a story and let the agent drive it through its reviewer-gated workflow:</p>
+    <pre class="code"><code>satellites work init &lt;story-id&gt;                              # engage the workflow
+satellites story status_transition --skill &lt;gate&gt; &lt;story-id&gt; # reviewer-gated transition
+satellites story set-status &lt;story-id&gt; done                  # advance an ungated edge</code></pre>
+    <p><code>.claude/skills</code> holds <strong>no gates</strong>: reviewer skills resolve <em>embed → local → server</em>. The baseline workflow gates only the entry transition with the spine reviewer <code>satellites-intent-plan-review</code> — injected from the binary, never written to <code>.claude/skills</code> — so a fresh repo is governable empty, and the agent's goal is simply to reach <code>done</code> through the transitions its workflow declares.</p>
   </section>
 
   <section class="panel" data-section="server">

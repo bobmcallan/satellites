@@ -8,14 +8,17 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
@@ -113,7 +116,10 @@ func init() {
 		Long: `init makes a repo ready for satellites, idempotently. It ensures:
 
   - the .satellites/ directory,
-  - a satellites.toml (created if missing, left intact if present),
+  - a satellites.toml (created if missing, left intact if present) — bind-ready:
+    an active server_url default + a project_id resolved from the git remote,
+  - a .mcp.json registering the satellites MCP server at <server_url>/mcp, from
+    the SAME server_url as the toml (CLI and MCP never diverge),
   - the documented global_publishers consumption block in the toml,
   - the PreToolUse START-door + advisory hooks in .claude/settings.json,
   - a SessionStart hook that runs ` + "`satellites code index`" + ` so the
@@ -204,6 +210,37 @@ func runInit(out io.Writer, repoRoot string) error {
 	}
 	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the internal spine gate (story format + a story→done goal, injected from the binary). Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
 
+	// 2c. Bind-ready config (sty_1dc6b146, epic:ootb-onboarding): make the repo
+	//     usable with no hand-edit. Activate the server_url default (upgrading a
+	//     legacy commented placeholder on an existing toml), then resolve+write
+	//     project_id from the repo's git remote via `project match` — so after a
+	//     fresh install→init, `satellites auth` + `satellites status` succeed with
+	//     no flags. Both steps are idempotent; project_id resolution is best-effort
+	//     and never fails init (it prints the one follow-on command instead).
+	if added, serr := activateTomlKey(tomlPath, "server_url", defaultServerURL); serr != nil {
+		return serr
+	} else if added {
+		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (activated server_url default)"))
+	}
+	ensureProjectID(out, repoRoot, tomlPath)
+
+	// 2d. MCP wiring (sty_cd83072f, epic:ootb-onboarding): register the satellites
+	//     MCP server in .mcp.json, deriving its url from the SAME server_url as the
+	//     toml (+ /mcp) so the CLI and the agent's MCP client can never point at
+	//     different servers. Idempotent: identical preserved, divergent reconciled.
+	if cfg, _, lerr := cliconfig.Load(tomlPath); lerr == nil {
+		switch st, merr := ensureMCPJSON(repoRoot, cfg.ServerURL); {
+		case merr != nil:
+			return merr
+		case st == "added":
+			fmt.Fprintln(out, initLine(true, ".mcp.json (registered satellites MCP server at server_url/mcp)"))
+		case st == "reconciled":
+			fmt.Fprintln(out, initLine(true, ".mcp.json (reconciled satellites MCP url to server_url)"))
+		default:
+			fmt.Fprintln(out, initLine(false, ".mcp.json (satellites MCP server)"))
+		}
+	}
+
 	// 3. The harness hooks in .claude/settings.json — the START door plus the
 	//    advisory story-access triggers. Each is merged idempotently.
 	settingsPath := filepath.Join(repoRoot, ".claude", "settings.json")
@@ -246,8 +283,22 @@ func runInit(out io.Writer, repoRoot string) error {
 	return nil
 }
 
-const scaffoldToml = `# satellites.toml — repo config (non-secret). Run ` + "`satellites auth`" + ` to add credentials.
-# server_url = "https://your-satellites-server"
+// defaultServerURL is the active server_url a fresh init writes so the repo is
+// bind-ready out of the box: `satellites auth` + `satellites status` work with
+// no flags and no hand-edit (sty_1dc6b146, epic:ootb-onboarding). Hardcoded
+// until a real domain is reserved. The SAME value powers the .mcp.json the
+// client registers (sty_cd83072f), so CLI and MCP can never point at different
+// servers.
+const defaultServerURL = "https://satellites-pprod.fly.dev"
+
+const scaffoldToml = `# satellites.toml — repo config (non-secret, committed). Run ` + "`satellites auth`" + ` to add credentials.
+# Per-user overrides — an api_key to use instead of OAuth, or a server_url/project_id/
+# preference — go in .satellites/satellites.local.toml (gitignored). This committed
+# file stays secret-free; the local overlay wins where set. (api_key precedence:
+# SATELLITES_API_KEY env > satellites.local.toml > OAuth credential store.)
+server_url = "` + defaultServerURL + `"
+# project_id is resolved by ` + "`satellites init`" + ` from your git remote (project match);
+# if init could not resolve it, run ` + "`satellites project match --remote <remote>`" + ` and add it here.
 # project_id = "proj_..."
 # data_dir = ".satellites"        # home for the client data stores: state.db + index.db (default; optional)
 # work_dir = ".satellites/work"   # per-story working area, e.g. evidence review outputs (default; optional)
@@ -303,6 +354,166 @@ func ensureGlobalPublishersBlock(tomlPath string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// tomlActiveKey reports whether the toml bytes set `key` to an ACTIVE
+// (non-commented) value. Scanned line-wise so a substring in some other value
+// or a commented placeholder can't false-match.
+func tomlActiveKey(raw []byte, key string) bool {
+	for _, ln := range strings.Split(string(raw), "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(t, key); ok && strings.HasPrefix(strings.TrimSpace(rest), "=") {
+			return true
+		}
+	}
+	return false
+}
+
+// activateTomlKey ensures `key = "value"` is ACTIVE in the toml at path. When an
+// active assignment is already present it is a no-op (returns false). Otherwise
+// it upgrades the first commented placeholder line for that key (`# key = …`) in
+// place, or — when none exists — appends the active assignment. Idempotent: a
+// second run finds the active key and does nothing. Returns whether it wrote.
+func activateTomlKey(path, key, value string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if tomlActiveKey(raw, key) {
+		return false, nil
+	}
+	active := fmt.Sprintf("%s = %q", key, value)
+	lines := strings.Split(string(raw), "\n")
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(t, "#") {
+			continue
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(t, "#"))
+		if rest, ok := strings.CutPrefix(body, key); ok && strings.HasPrefix(strings.TrimSpace(rest), "=") {
+			lines[i] = active // upgrade the commented placeholder in place
+			return true, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+	}
+	body := string(raw)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return true, os.WriteFile(path, []byte(body+active+"\n"), 0o644)
+}
+
+// gitOriginRemote returns the repo's `origin` remote URL, or "" when repoRoot is
+// not a git repo or has no origin. Used to resolve project_id at init time.
+func gitOriginRemote(repoRoot string) string {
+	out, err := exec.Command("git", "-C", repoRoot, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ensureProjectID resolves the repo's project_id from its git remote via the
+// project_match verb and writes it into the toml (idempotent), so a fresh
+// install→init is bind-ready with NO hand-edit (sty_1dc6b146). Best-effort and
+// non-fatal: when project_id is already set, or the remote / credential /
+// matching project is absent, it reports the state (and prints the one follow-on
+// command) rather than failing init — the cold-start ordering (auth needs a
+// project_id) is closed elsewhere in the epic.
+func ensureProjectID(out io.Writer, repoRoot, tomlPath string) {
+	if raw, err := os.ReadFile(tomlPath); err == nil && tomlActiveKey(raw, "project_id") {
+		fmt.Fprintln(out, initLine(false, ".satellites/satellites.toml (project_id)"))
+		return
+	}
+	remote := gitOriginRemote(repoRoot)
+	if remote == "" {
+		fmt.Fprintln(out, "  → project_id: no git `origin` remote — once authenticated, run `satellites project match --remote <url>` and add project_id, or re-run `satellites init`.")
+		return
+	}
+	req, err := json.Marshal(verb.ProjectMatchRequest{GitURL: remote})
+	if err != nil {
+		return
+	}
+	resp, err := dispatchVerb(context.Background(), "project_match", req, tomlPath, "")
+	if err != nil {
+		fmt.Fprintf(out, "  → project_id: could not resolve from %s yet (%v).\n     Authenticate (`satellites auth`) then re-run `satellites init`.\n", remote, err)
+		return
+	}
+	var m verb.ProjectMatchResponse
+	if jerr := json.Unmarshal(resp, &m); jerr != nil || strings.TrimSpace(m.ProjectID) == "" {
+		fmt.Fprintln(out, "  → project_id: project match returned no id — create the project, then re-run `satellites init`.")
+		return
+	}
+	if added, werr := activateTomlKey(tomlPath, "project_id", m.ProjectID); werr != nil {
+		fmt.Fprintf(out, "  → project_id: resolved %s but could not write it: %v\n", m.ProjectID, werr)
+	} else if added {
+		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (project_id "+m.ProjectID+" via project match)"))
+	}
+}
+
+// mcpServerName is the key under .mcp.json's mcpServers the client registers.
+const mcpServerName = "satellites"
+
+// mcpURLFromServer derives the MCP endpoint from the toml's server_url (+ /mcp),
+// so the agent's MCP client and the CLI always resolve to the SAME satellites
+// server (sty_cd83072f). Empty server_url → "" (nothing to register yet).
+func mcpURLFromServer(serverURL string) string {
+	s := strings.TrimRight(strings.TrimSpace(serverURL), "/")
+	if s == "" {
+		return ""
+	}
+	return s + "/mcp"
+}
+
+// ensureMCPJSON registers the satellites MCP server in the repo's .mcp.json,
+// idempotently and non-destructively (sty_cd83072f). The url is derived from the
+// toml's server_url (+ /mcp) so CLI and MCP can never point at different servers.
+// An identical entry is preserved (no write); a divergent url is RECONCILED to
+// the toml's server and reported; other mcpServers and unknown keys are kept.
+// Returns "" (already present / nothing to do), "added", or "reconciled".
+func ensureMCPJSON(repoRoot, serverURL string) (string, error) {
+	want := mcpURLFromServer(serverURL)
+	if want == "" {
+		return "", nil
+	}
+	path := filepath.Join(repoRoot, ".mcp.json")
+	var raw []byte
+	if b, rerr := os.ReadFile(path); rerr == nil {
+		raw = b
+	} else if !os.IsNotExist(rerr) {
+		return "", fmt.Errorf("init: read %s: %w", path, rerr)
+	}
+
+	doc := map[string]any{}
+	if len(strings.TrimSpace(string(raw))) > 0 {
+		if jerr := json.Unmarshal(raw, &doc); jerr != nil {
+			return "", fmt.Errorf("init: parse %s: %w", path, jerr)
+		}
+	}
+	servers, _ := doc["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	status := "added"
+	if existing, ok := servers[mcpServerName].(map[string]any); ok {
+		if cur, _ := existing["url"].(string); strings.TrimSpace(cur) == want {
+			return "", nil // identical — preserve, never rewrite or duplicate
+		}
+		status = "reconciled"
+	}
+	servers[mcpServerName] = map[string]any{"type": "http", "url": want}
+	doc["mcpServers"] = servers
+
+	out, merr := json.MarshalIndent(doc, "", "    ")
+	if merr != nil {
+		return "", merr
+	}
+	if werr := os.WriteFile(path, append(out, '\n'), 0o644); werr != nil {
+		return "", fmt.Errorf("init: write %s: %w", path, werr)
+	}
+	return status, nil
 }
 
 // ungatedDirsBlock documents + seeds the START-door exemption knob. The door

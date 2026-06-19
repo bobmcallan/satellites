@@ -43,6 +43,9 @@ go.work.sum
 # Workflows are repo-owned config (epic:client-dir-separation order-2), tracked
 # at .satellites/workflows/ — the governing-workflow resolver's client-dir home.
 .satellites/*
+/scripts/satellites-server.toml
+/satellites.toml
+
 !.satellites/documents/
 !.satellites/principles/
 !.satellites/skills/
@@ -53,8 +56,8 @@ go.work.sum
 # library_pins (workflows unpinned per order-2) — is shared, not per-clone.
 !.satellites/satellites.toml
 
-/scripts/satellites-server.toml
-/satellites.toml
+# exclude bakups
+.satellites.bak
 
 # Operator-local backup of .claude/skills (created during a manual move). Never committed.
 .claude_bak/
@@ -65,3 +68,17 @@ go.work.sum
 # Skill-sync conflict backups (`satellites skill sync --on-conflict force`).
 # Local safety copies of an overwritten edit — never committed.
 .claude/skills/**/*.bak
+
+# >>> satellites (managed) >>>
+# .satellites/ is the satellites client's config/state home — ignore it all
+# (state.db*/index.db* + WAL sidecars, logs/, work/ engagement store, worktree/),
+# then re-include the substrate authoring dirs + the non-secret toml so THOSE are
+# committed. Local state is config/state, not substrate.
+.satellites/*
+!.satellites/documents/
+!.satellites/principles/
+!.satellites/skills/
+!.satellites/workflows/
+!.satellites/seeds/
+!.satellites/satellites.toml
+# <<< satellites (managed) <<<

@@ -155,6 +155,14 @@ func gateOutcomeEng(start, session, target string, now time.Time) (allow bool, r
 		if pathInUngatedDirs(abs, root, cfg.UngatedDirs) {
 			return true, "", workstate.Engagement{}
 		}
+		// Built-in bootstrap-config exemption (sty_4a3fe62d, epic:ootb-onboarding):
+		// the bind config (.satellites/satellites.toml + .mcp.json) is ALWAYS
+		// writable, even with no engagement — otherwise the door deadlocks bootstrap
+		// (you cannot engage a story until the repo is bound, but the door blocks
+		// the very edits that bind it). All OTHER in-repo edits stay gated below.
+		if isBootstrapConfig(abs, root) {
+			return true, "", workstate.Engagement{}
+		}
 		if !isInsideRepo(abs, root) {
 			// Outside THIS repo. Cross-repo rule (sty_448d2024): a mutation into
 			// ANOTHER satellites-governed repo (one with its own
@@ -372,14 +380,31 @@ func pathInUngatedDirs(abs, root string, ungatedDirs []string) bool {
 	return false
 }
 
+// isBootstrapConfig reports whether abs is the repo's bootstrap config — the
+// satellites.toml and the .mcp.json `satellites init` writes (sty_4a3fe62d,
+// epic:ootb-onboarding). These are ALWAYS ungated: the agent must be able to
+// write the bind config BEFORE any story is engaged, otherwise the START door
+// deadlocks bootstrap (you cannot engage a story until the repo is bound, but
+// every in-repo edit is blocked until you engage). Configuration, not
+// story-work. Pure over its inputs.
+func isBootstrapConfig(abs, root string) bool {
+	root = filepath.Clean(root)
+	switch filepath.Clean(abs) {
+	case filepath.Join(root, ".satellites", "satellites.toml"), filepath.Join(root, ".mcp.json"):
+		return true
+	}
+	return false
+}
+
 // pathIsUngated reports whether an absolute target path is exempt from the
 // START-door's per-repo engagement check: a path NOT under the repo root (the
-// default boundary — Claude self-maintenance), OR an explicit ungated_dirs
-// entry. NOTE: the cross-repo rule (sty_448d2024) layers ON TOP of this in
+// default boundary — Claude self-maintenance), the built-in bootstrap-config
+// exemption (satellites.toml + .mcp.json), OR an explicit ungated_dirs entry.
+// NOTE: the cross-repo rule (sty_448d2024) layers ON TOP of this in
 // gateOutcomeEng — an "outside this repo" path that lands in ANOTHER governed
 // repo is still gated against that repo. Pure over its inputs.
 func pathIsUngated(abs, root string, ungatedDirs []string) bool {
-	return !isInsideRepo(abs, root) || pathInUngatedDirs(abs, root, ungatedDirs)
+	return !isInsideRepo(abs, root) || isBootstrapConfig(abs, root) || pathInUngatedDirs(abs, root, ungatedDirs)
 }
 
 // emitGateDeny writes the PreToolUse block decision as JSON on stdout.

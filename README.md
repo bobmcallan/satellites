@@ -93,11 +93,11 @@ Three roles act on a story, and the server enforces the boundary at the verb lay
 
 | Role | Can do | Cannot do |
 | --- | --- | --- |
-| **Executor** (the agent) | Create stories, edit story bodies, run `satellites story review` | Change a story's status; write the ledger |
+| **Executor** (the agent) | Create stories, edit story bodies, run `satellites story status_transition` | Change a story's status directly; write the ledger |
 | **Reviewer** | Change status; append the ledger | Run as the executor — its key is minted per review and revoked after |
 | **Operator** (human, CLI or portal) | Full access | — |
 
-The executor holds a body-only api-key. To advance a story it runs `satellites story review`, the client-side gate, which mints a short-lived reviewer key, runs the gate skill, flips the status on accept, and revokes the key. The agent never holds a reviewer key, so it cannot approve its own work. The operator acts through the CLI or the signed-in portal; the role gate applies only to api-key callers, so operator actions pass.
+The executor holds a body-only api-key. To advance a story it runs `satellites story status_transition --skill <gate>`, the client-side gate, which runs the named gate skill against the worktree and writes the `review_accept` + `status_transition` ledger rows on accept (the rejection notes on reject). The agent never holds a reviewer key, so it cannot approve its own work. The operator acts through the CLI or the signed-in portal; the role gate applies only to api-key callers, so operator actions pass.
 
 A reviewer is an interface returning `accept | reject` with notes, against a contract authored by the operator. Reviewer implementations:
 
@@ -175,11 +175,50 @@ binary of a different version without `--force`, a matching version is a no-op, 
 it never touches a repo's `.satellites/` beyond the binary itself — TOML config,
 logs, worktrees, and work state are preserved.
 
-After the binary is in place, authenticate to mint the executor key:
+### Out of the box: install → set up → drive a story to done
+
+A fresh user installs the client, asks the agent to set the repo up, and the
+agent drives a story to `done` — with **nothing in `.claude/skills`**. After the
+binary is in place:
 
 ```sh
-satellites auth               # browser login → executor key in the user-level credential store
+satellites init     # scaffold + bind. Writes .satellites/satellites.toml
+                    #   (active server_url default + project_id resolved from your
+                    #   git remote via `project match`), a .mcp.json registering
+                    #   mcpServers.satellites → <server_url>/mcp (the SAME server as
+                    #   the toml — CLI and MCP can never diverge), the harness hooks,
+                    #   and the order-zero baseline workflow.
+satellites auth     # browser login → executor key in the user-level credential store
+satellites status   # → db UP, MCP connected — no flags, no hand-edits
 ```
+
+`init` is idempotent and reports added-vs-present on every run; an existing toml
+is upgraded (commented defaults activated), never clobbered. If your repo's
+project is not yet resolvable — a brand-new project, or no prior credential to
+authenticate `project match` — `init` leaves `project_id` empty and prints the
+one follow-on command: run `satellites project match --remote <git-remote>` (or
+re-run `init`) once authenticated to bind it.
+
+Then create a story and let the agent drive it to a terminal state:
+
+```sh
+satellites work init <story-id>                                # engage the story's workflow
+satellites story status_transition --skill <gate> <story-id>   # reviewer-gated transition (e.g. open)
+satellites story set-status <story-id> done                    # advance an ungated edge (e.g. close)
+```
+
+### The core premise
+
+`.claude/skills` holds **no gates**. Reviewer gate skills resolve in the order
+**embed → local → server**: the binary embed first, then the repo's
+`.claude/skills`, then the server. The baseline workflow `init` scaffolds gates
+only the entry transition (`backlog → in_progress`) with the spine reviewer
+`satellites-intent-plan-review` — injected from the binary, never materialised to
+`.claude/skills`, so it cannot be edited — and leaves the close edge ungated. A
+fresh repo is therefore governable with an **empty** `.claude/skills`: the agent's
+goal is to move a story's status to `done` through the reviewer-gated transitions
+its workflow declares, and every gate it needs resolves from the binary or the
+server, not from a local skill file.
 
 ---
 

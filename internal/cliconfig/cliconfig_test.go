@@ -254,3 +254,67 @@ func TestIsConfigured(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_LocalOverlay covers sty_f0c02276: a gitignored satellites.local.toml
+// overlays the committed toml (local wins); its api_key overrides the OAuth
+// credstore; SATELLITES_API_KEY env still wins over the overlay; and an api_key
+// placed in the COMMITTED toml is IGNORED (the secret-free invariant, sty_c2ecbb86).
+func TestLoad_LocalOverlay(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+	t.Setenv("SATELLITES_API_KEY", "")
+	path := filepath.Join(dir, "satellites.toml")
+	// Committed toml: shared config + (deliberately) an api_key that MUST be ignored.
+	base := "server_url = \"https://example.com\"\nproject_id = \"proj_shared\"\napi_key = \"committed-key-IGNORED\"\n"
+	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No overlay yet: the committed api_key is ignored, no credential → empty token.
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Token != "" {
+		t.Errorf("committed api_key must be ignored (secret-free invariant), token=%q", cfg.Token)
+	}
+	if cfg.ProjectID != "proj_shared" {
+		t.Errorf("project_id = %q, want proj_shared", cfg.ProjectID)
+	}
+
+	// Add the gitignored overlay: api_key authenticates, project_id overrides shared.
+	local := filepath.Join(dir, "satellites.local.toml")
+	if err := os.WriteFile(local, []byte("api_key = \"local-key-abc\"\nproject_id = \"proj_local\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load with overlay: %v", err)
+	}
+	if cfg.Token != "local-key-abc" {
+		t.Errorf("overlay api_key should be the bearer, got %q", cfg.Token)
+	}
+	if cfg.ProjectID != "proj_local" {
+		t.Errorf("overlay project_id should win (local over shared), got %q", cfg.ProjectID)
+	}
+	if cfg.ServerURL != "https://example.com" {
+		t.Errorf("unset overlay field should keep the committed value, got %q", cfg.ServerURL)
+	}
+	if !cfg.IsConfigured() {
+		t.Error("server_url + overlay api_key should be configured")
+	}
+
+	// A stored OAuth credential is overridden by the overlay api_key.
+	if err := SaveCredential(Credential{ServerURL: "https://example.com", Token: "oauth-stored", Role: "executor"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _, _ = Load(path); cfg.Token != "local-key-abc" {
+		t.Errorf("overlay api_key should override the OAuth credstore, got %q", cfg.Token)
+	}
+
+	// SATELLITES_API_KEY env still wins over the overlay.
+	t.Setenv("SATELLITES_API_KEY", "env-wins")
+	if cfg, _, _ = Load(path); cfg.Token != "env-wins" {
+		t.Errorf("env should win over the overlay, got %q", cfg.Token)
+	}
+}

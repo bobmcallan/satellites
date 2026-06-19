@@ -143,9 +143,18 @@ type Config struct {
 	// It is DEFAULT ON: an absent [measure] section means enabled + record.
 	Measure MeasureConfig `toml:"measure"`
 
+	// APIKey, when set in the gitignored satellites.local.toml overlay, is the
+	// bearer the client presents — overriding the OAuth credstore for this repo
+	// (sty_f0c02276). It is honoured ONLY from satellites.local.toml, never the
+	// committed satellites.toml, so sty_c2ecbb86's "no secret in committed config"
+	// invariant holds. Precedence: SATELLITES_API_KEY env > this > credstore.
+	// Empty = OAuth default.
+	APIKey string `toml:"api_key"`
+
 	// Token is the executor api-key presented on every server call.
-	// Resolved at Load from the credential store (NOT the TOML), so it
-	// is never a repo-committed secret. Empty until `satellites auth`.
+	// Resolved at Load from the credential store (NOT the committed TOML), so it
+	// is never a repo-committed secret. Empty until `satellites auth` (or set via
+	// the satellites.local.toml api_key overlay / SATELLITES_API_KEY).
 	Token string `toml:"-"`
 }
 
@@ -408,19 +417,40 @@ func Load(explicitPath string) (Config, string, error) {
 	if _, err := toml.Decode(string(b), &cfg); err != nil {
 		return Config{}, path, fmt.Errorf("cliconfig: parse %s: %w", path, err)
 	}
+	// The committed satellites.toml never supplies the api-key (sty_c2ecbb86):
+	// drop any api_key it carries so ONLY the gitignored overlay below can set
+	// it. Every other field it set stands as the shared default.
+	cfg.APIKey = ""
+	// Overlay the gitignored per-user file satellites.local.toml beside the
+	// committed toml (sty_f0c02276), mirroring Claude's settings.json +
+	// settings.local.json split. Its SET fields win (local over shared) —
+	// api_key, plus any server_url/project_id/preference a user overrides
+	// locally; decoding over the populated cfg leaves absent fields untouched.
+	// Absent file: no change (the OAuth default is preserved).
+	localPath := filepath.Join(filepath.Dir(path), "satellites.local.toml")
+	if lb, lerr := os.ReadFile(localPath); lerr == nil {
+		if _, derr := toml.Decode(string(lb), &cfg); derr != nil {
+			return Config{}, localPath, fmt.Errorf("cliconfig: parse %s: %w", localPath, derr)
+		}
+	} else if !errors.Is(lerr, os.ErrNotExist) {
+		return Config{}, path, fmt.Errorf("cliconfig: read %s: %w", localPath, lerr)
+	}
 	if !validMeasureMode(cfg.Measure.Mode) {
 		return Config{}, path, fmt.Errorf("cliconfig: %s: invalid measure.mode %q (want off, record, or enforce)", path, cfg.Measure.Mode)
 	}
-	// Resolve the bearer from the user-level credential store keyed by
-	// server_url (provisioned by `satellites auth`). A missing credential
-	// is not an error — Token stays empty and IsConfigured reports false,
-	// so the caller falls back to in-process dispatch.
+	// Bearer resolution, lowest precedence first:
+	//   1. OAuth credstore keyed by server_url (`satellites auth`) — the default.
+	//   2. api_key from the satellites.local.toml overlay — overrides the OAuth
+	//      user for THIS repo (sty_f0c02276).
+	//   3. SATELLITES_API_KEY env — headless/CI, wins over all (sty_1121f1b2).
+	// A missing credential at any layer is not an error: Token stays empty and
+	// IsConfigured reports false, so the caller falls back to in-process dispatch.
 	if cred, err := LoadCredential(cfg.ServerURL); err == nil {
 		cfg.Token = cred.Token
 	}
-	// Headless/CI override (sty_1121f1b2): SATELLITES_API_KEY takes precedence
-	// over the credential store, so non-interactive automation authenticates
-	// with no `satellites auth` credential file present.
+	if k := strings.TrimSpace(cfg.APIKey); k != "" {
+		cfg.Token = k
+	}
 	if v := strings.TrimSpace(os.Getenv("SATELLITES_API_KEY")); v != "" {
 		cfg.Token = v
 	}

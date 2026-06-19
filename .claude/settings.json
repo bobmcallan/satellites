@@ -13,6 +13,15 @@
       {
         "hooks": [
           {
+            "command": "satellites hook commitgate || exit 2",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
             "command": "satellites hook access",
             "type": "command"
           }
@@ -27,15 +36,6 @@
           }
         ],
         "matcher": "Read|Grep|Bash"
-      },
-      {
-        "hooks": [
-          {
-            "command": "satellites hook commitgate || exit 2",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
       },
       {
         "hooks": [

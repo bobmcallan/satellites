@@ -28,6 +28,8 @@ in-band via the `auth_bootstrap.mcp_only` fallback below.
 target_install_path:        ./.satellites/satellites   # in-repo dev / MCP-fallback path
 target_install_path_global: ~/.local/bin/satellites    # shell clients: the shared binary on PATH (default)
 target_config_path:  ./.satellites/satellites.toml
+target_local_config_path: ./.satellites/satellites.local.toml   # gitignored per-user overlay (api_key, overrides) — mirrors .claude/settings.local.json
+target_mcp_config_path: ./.mcp.json   # `satellites init` registers the MCP server here, from the same server_url
 default_config:
   server_url: "{{server_url}}"
   project_id: ""
@@ -60,7 +62,9 @@ install:
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `target_install_path`            | In-repo binary path (`.satellites/satellites`) — the dev / MCP-fallback location; placed by `satellites install --local`. |
 | `target_install_path_global`     | Shared global binary on PATH (`~/.local/bin/satellites`, the `claude` model) — the default for shell-capable clients; placed by `satellites install`. |
-| `target_config_path`             | Where to write `satellites.toml`.                                                                                  |
+| `target_config_path`             | Where to write `satellites.toml` — the SHARED, committed, non-secret config (`server_url`, `project_id`).          |
+| `target_local_config_path`       | Optional gitignored per-user overlay (`satellites.local.toml`), mirroring `.claude/settings.local.json`. Its set fields override `satellites.toml` (local wins). An `api_key` here authenticates the client INSTEAD of OAuth — precedence `SATELLITES_API_KEY` env > `satellites.local.toml` > OAuth credential store. The committed `satellites.toml` never holds the key. |
+| `target_mcp_config_path`         | Where `satellites init` registers the MCP server (`.mcp.json`): `mcpServers.satellites = {type:http, url:<server_url>/mcp}`, derived from the SAME `server_url` as the toml so CLI and MCP can never point at different servers. Idempotent: identical preserved, divergent reconciled. |
 | `default_config.server_url`      | TOML `server_url`. Server-rendered from the `{{server_url}}` system variable.                                      |
 | `default_config.project_id`      | TOML `project_id`. Empty at bootstrap — load-context Step 4 fills it via `project_match`.                          |
 | `default_config.repo_path`       | TOML `repo_path` — the consumer project's repo root.                                                               |
