@@ -8,6 +8,17 @@
 // The work directory is satellites.toml-configurable (work_dir) with a default
 // of .satellites/work — the toml need not carry the key. Reader (hook) and
 // writer (here) resolve it through cliconfig.ResolveWorkDir so they agree.
+//
+// `.satellites/work` is LOAD-BEARING, not vestigial (sty_8c6fb902 traced it):
+//   - engagement.json — written here by `work init`, read by the START-door
+//     hook (cmd_hook.go readEngagement). A tiny JSON precisely so the bash hook
+//     can read the active engagement WITHOUT opening the sqlite state.db; this
+//     is the hook's read-contract (docs/work-engagement.md).
+//   - .satellites/work/<story>/review.md + metrics.json — written by
+//     `satellites evidence review` (cmd_evidence_review.go).
+// The per-story inbox/claim ROWS moved to the event store (state.db /
+// workstate.Store, sty_676e070c / sty_8e8ec0e7); only the two file artifacts
+// above remain on disk. Do not remove the dir or its ResolveWorkDir machinery.
 
 package cli
 
