@@ -242,3 +242,37 @@ func TestCheckpointEdge(t *testing.T) {
 		t.Fatal("a gated legacy edge must not resolve as checkpoint")
 	}
 }
+
+// satellitesWFBody is this repo's reviewers-only lifecycle shape (the workflow
+// the quirk story sty_21d2c535 governs): a reviewer-gated entry edge into the
+// executor's first work state, then an ungated checkpoint to shipping.
+const satellitesWFBody = "# satellites-workflow\n\n## Workflow\n\n```yaml\n" +
+	"states:\n" +
+	"  - backlog\n" +
+	"  - {name: in_progress, actor: executor}\n" +
+	"  - {name: shipping,    actor: executor}\n" +
+	"  - {name: blocked,     actor: operator}\n" +
+	"  - done\n" +
+	"transitions:\n" +
+	"  - {from: backlog,     to: in_progress, reviewer_skill: \"satellites-intent-plan-review\"}\n" +
+	"  - {from: in_progress, to: shipping,    trigger: checkpoint}\n" +
+	"  - {from: shipping,    to: done,        reviewer_skill: \"satellites-commit-push-review\", on: pass}\n" +
+	"  - {from: shipping,    to: in_progress, reviewer_skill: \"satellites-commit-push-review\", on: fail, max_iterations: 3, on_exhausted: blocked}\n" +
+	"```\n"
+
+// TestCheckpointEdge_EntryDoesNotChain pins AC3 of sty_21d2c535 at the decision
+// layer: the reviewer-gated entry edge (backlog → in_progress) is NOT a
+// checkpoint, so an entry-gate transition has nothing to chain into and cannot
+// reach shipping in one move — it lands at the executor's first work state. The
+// checkpoint lives only at in_progress, advancing to shipping deliberately.
+func TestCheckpointEdge_EntryDoesNotChain(t *testing.T) {
+	if _, ok := CheckpointEdge(satellitesWFBody, "backlog"); ok {
+		t.Fatal("the reviewer-gated entry state must not resolve a checkpoint edge — the entry gate must land at in_progress, not chain to shipping")
+	}
+	if to, ok := CheckpointEdge(satellitesWFBody, "in_progress"); !ok || to != "shipping" {
+		t.Fatalf("in_progress checkpoint = %q/%v, want shipping/true", to, ok)
+	}
+	if _, ok := CheckpointEdge(satellitesWFBody, "shipping"); ok {
+		t.Fatal("shipping carries on:pass|fail edges — it must not resolve as an ungated checkpoint")
+	}
+}

@@ -68,6 +68,7 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 		claudeBin    string
 		worktreeRoot string
 		skill        string
+		checkpoint   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "status_transition --skill <gate> <story-id>",
@@ -81,7 +82,12 @@ The client holds no workflow knowledge: the story's ` + "`## Workflow`" + ` sect
 the workflow, and the GATE skill reads it to derive its own target status and
 enact the transition (review_accept + status_transition ledger rows on accept;
 the rejection notes on reject). The gate runs where the worktree and claude
-live — the substrate stays on the server.`,
+live — the substrate stays on the server.
+
+An ungated ` + "`trigger: checkpoint`" + ` edge carries no reviewer gate — it is the
+executor's DELIBERATE move, advanced with --checkpoint (no --skill). The
+checkpoint is never a silent side-effect of a gate request (sty_21d2c535): run
+` + "`status_transition --checkpoint <story-id>`" + ` to enact it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -95,6 +101,7 @@ live — the substrate stays on the server.`,
 				ClaudeBin:    claudeBin,
 				WorktreeRoot: worktreeRoot,
 				Skill:        strings.TrimSpace(skill),
+				Checkpoint:   checkpoint,
 				Stdout:       cmd.OutOrStdout(),
 				Stderr:       cmd.ErrOrStderr(),
 			})
@@ -102,7 +109,8 @@ live — the substrate stays on the server.`,
 	}
 	cmd.Flags().StringVar(&claudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or `claude` on PATH).")
 	cmd.Flags().StringVar(&worktreeRoot, "worktree", "", "Worktree root the gate runs against (default: current directory).")
-	cmd.Flags().StringVar(&skill, "skill", "", "REQUIRED. Name the gate skill to run against the story. The gate reads the story's `## Workflow` to derive its own target status and enact the transition.")
+	cmd.Flags().StringVar(&skill, "skill", "", "Name the gate skill to run against the story (required unless --checkpoint). The gate reads the story's `## Workflow` to derive its own target status and enact the transition.")
+	cmd.Flags().BoolVar(&checkpoint, "checkpoint", false, "Advance the current state's ungated `trigger: checkpoint` edge — a deliberate executor move that runs no gate. Mutually exclusive with --skill.")
 	return cmd
 }
 
@@ -112,13 +120,17 @@ type reviewOpts struct {
 	UserArg      string
 	ClaudeBin    string
 	WorktreeRoot string
-	// Skill is REQUIRED: the name of the gate skill to run against the story.
-	// The client does not resolve a workflow or pick a transition — it
-	// dispatches this gate and reports. The gate reads the story's `## Workflow`
-	// to derive its own target status and enact the transition.
-	Skill  string
-	Stdout io.Writer
-	Stderr io.Writer
+	// Skill names the gate skill to run against the story (required unless
+	// Checkpoint). The client does not resolve a workflow or pick a transition —
+	// it dispatches this gate and reports. The gate reads the story's
+	// `## Workflow` to derive its own target status and enact the transition.
+	Skill string
+	// Checkpoint requests the executor's deliberate advance of the current
+	// state's ungated `trigger: checkpoint` edge — no gate runs. Mutually
+	// exclusive with Skill (sty_21d2c535).
+	Checkpoint bool
+	Stdout     io.Writer
+	Stderr     io.Writer
 }
 
 // reviewStory is the minimal projection the reviewer needs from a
@@ -133,16 +145,47 @@ type reviewStory struct {
 	WorkspaceID string
 }
 
+// checkpointDecision is the single rule behind --checkpoint (sty_21d2c535): the
+// ungated `trigger: checkpoint` edge is the executor's DELIBERATE move, never a
+// silent side-effect of a gate request. Given whether --checkpoint was asked for
+// and whether the current state is a pure ungated-checkpoint state, it decides
+// whether to enact the hop, or returns the error that steers the caller to the
+// right action. Pure (no IO) so the four-quadrant contract is unit-pinnable.
+//
+//   - checkpoint state + --checkpoint → enact the hop.
+//   - checkpoint state + --skill      → error: the state has no gate; use --checkpoint.
+//   - other state     + --checkpoint → error: nothing to checkpoint here.
+//   - other state     + --skill      → no checkpoint; proceed to the gate path.
+func checkpointDecision(wantCheckpoint, isCheckpointState bool, status, cpTo, gateSkill string) (enact bool, err error) {
+	switch {
+	case isCheckpointState && wantCheckpoint:
+		return true, nil
+	case isCheckpointState && !wantCheckpoint:
+		return false, fmt.Errorf("status_transition: state %q has no reviewer gate — its only transition is the ungated checkpoint %q → %q; advance it with --checkpoint (a deliberate executor move), not --skill %q",
+			status, status, cpTo, gateSkill)
+	case !isCheckpointState && wantCheckpoint:
+		return false, fmt.Errorf("status_transition: --checkpoint given but state %q has no single ungated checkpoint edge to advance", status)
+	default:
+		return false, nil
+	}
+}
+
 func runReview(ctx context.Context, opts reviewOpts) error {
 	if opts.StoryID == "" {
 		return fmt.Errorf("story id required")
 	}
 
-	// 0. The gate to run is named explicitly — the client holds no workflow
-	// knowledge and never resolves a gate from status. --skill is required.
+	// 0. The action is named explicitly — the client holds no workflow knowledge
+	// and never resolves a gate from status. --skill names a reviewer gate;
+	// --checkpoint advances an ungated `trigger: checkpoint` edge (the executor's
+	// deliberate move). Exactly one applies (sty_21d2c535): a checkpoint must
+	// never be a silent side-effect of naming a gate.
 	gateSkill := strings.TrimSpace(opts.Skill)
-	if gateSkill == "" {
-		return fmt.Errorf("--skill is required: name the gate skill to run")
+	switch {
+	case opts.Checkpoint && gateSkill != "":
+		return fmt.Errorf("--checkpoint advances the ungated checkpoint edge and runs no gate — pass --checkpoint OR --skill, not both")
+	case !opts.Checkpoint && gateSkill == "":
+		return fmt.Errorf("--skill is required: name the gate skill to run (or pass --checkpoint to advance an ungated checkpoint edge)")
 	}
 
 	// 1. Resolve the story (substrate read — server).
@@ -241,26 +284,39 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// state's own semantics below (a satellites-actor state runs its command
 	// and enacts pass/fail; a reviewer or operator state stops the traverse —
 	// their move is a separate request / a human's turn).
-	if !edges.IsV2 && edges.Actor != "operator" {
-		if to, ok := verb.GoverningCheckpoint(body, story.Status, story.Category, wfSources); ok {
-			reviewAppendLedger(ctx, opts, story, "status_transition",
-				fmt.Sprintf("%s → %s (checkpoint)", story.Status, to),
-				map[string]any{"from_status": story.Status, "to_status": to, "trigger": "checkpoint"})
-			fmt.Fprintf(opts.Stdout, "checkpoint: %s → %s\n", story.Status, to)
-			story.Status = to
-			edges, _, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
-			if edges.Actor != "satellites" {
-				// Landed where someone else acts (reviewer gate = its own
-				// request; operator = a human's turn; terminal = done).
-				whose := edges.Actor
-				if whose == "" {
-					whose = "the next gate"
-				}
-				fmt.Fprintf(opts.Stdout, "status: now %s — %s's turn\n", story.Status, whose)
-				flushLocalInbox(ctx, opts, store, story)
-				return nil
+	//
+	// The checkpoint is a DELIBERATE executor move (--checkpoint), NOT a silent
+	// side-effect of naming a gate (sty_21d2c535): before this fix, ANY
+	// status_transition at a checkpoint state enacted the hop regardless of
+	// --skill, so re-running the entry gate on an in_progress story silently
+	// advanced it to shipping and skipped the executor's work. checkpointDecision
+	// makes the contract explicit — the hop fires only under --checkpoint, and
+	// naming --skill at a pure-checkpoint state errors rather than transitions.
+	cpTo, cpOK := verb.GoverningCheckpoint(body, story.Status, story.Category, wfSources)
+	isCheckpointState := cpOK && !edges.IsV2 && edges.Actor != "operator"
+	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, story.Status, cpTo, gateSkill)
+	if cpErr != nil {
+		return cpErr
+	}
+	if enactCheckpoint {
+		reviewAppendLedger(ctx, opts, story, "status_transition",
+			fmt.Sprintf("%s → %s (checkpoint)", story.Status, cpTo),
+			map[string]any{"from_status": story.Status, "to_status": cpTo, "trigger": "checkpoint"})
+		fmt.Fprintf(opts.Stdout, "checkpoint: %s → %s\n", story.Status, cpTo)
+		story.Status = cpTo
+		edges, _, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+		if edges.Actor != "satellites" {
+			// Landed where someone else acts (reviewer gate = its own
+			// request; operator = a human's turn; terminal = done).
+			whose := edges.Actor
+			if whose == "" {
+				whose = "the next gate"
 			}
+			fmt.Fprintf(opts.Stdout, "status: now %s — %s's turn\n", story.Status, whose)
+			flushLocalInbox(ctx, opts, store, story)
+			return nil
 		}
+		// Landed on a satellites-actor state: fall through to run its command.
 	}
 
 	// KV iteration bound (sty_0c98760e): the operator can tune the fail-loop

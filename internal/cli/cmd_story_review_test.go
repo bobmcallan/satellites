@@ -27,20 +27,65 @@ func TestClaimLeaseTTLOutlivesDispatch(t *testing.T) {
 	}
 }
 
-// TestRunReviewRequiresSkill pins the new model: --skill is required. The
-// client holds no workflow knowledge and never resolves a gate from status —
-// it must be told which gate to run. Without --skill, runReview errors before
-// any substrate read or gate dispatch.
+// TestRunReviewRequiresSkill pins the model: --skill is required unless
+// --checkpoint is given. The client holds no workflow knowledge and never
+// resolves a gate from status — it must be told which gate to run. Without
+// either, runReview errors before any substrate read or gate dispatch.
 func TestRunReviewRequiresSkill(t *testing.T) {
 	err := runReview(t.Context(), reviewOpts{
 		StoryID: "sty_deadbeef",
-		Skill:   "", // missing
+		Skill:   "", // missing, and no --checkpoint
 	})
 	if err == nil {
-		t.Fatal("runReview with no --skill should error")
+		t.Fatal("runReview with no --skill and no --checkpoint should error")
 	}
-	if got := err.Error(); got != "--skill is required: name the gate skill to run" {
+	if got := err.Error(); !strings.Contains(got, "--skill is required") {
 		t.Fatalf("error = %q, want the --skill-required message", got)
+	}
+}
+
+// TestRunReviewSkillAndCheckpointConflict pins that --skill and --checkpoint are
+// mutually exclusive: a checkpoint is the executor's deliberate move, never a
+// side-effect of naming a gate (sty_21d2c535). Errors before any substrate read.
+func TestRunReviewSkillAndCheckpointConflict(t *testing.T) {
+	err := runReview(t.Context(), reviewOpts{
+		StoryID:    "sty_deadbeef",
+		Skill:      "satellites-intent-plan-review",
+		Checkpoint: true,
+	})
+	if err == nil {
+		t.Fatal("runReview with both --skill and --checkpoint should error")
+	}
+	if got := err.Error(); !strings.Contains(got, "not both") {
+		t.Fatalf("error = %q, want the mutual-exclusion message", got)
+	}
+}
+
+// TestCheckpointDecision pins the four-quadrant contract of the --checkpoint
+// rule (sty_21d2c535): the ungated checkpoint hop fires ONLY on an explicit
+// --checkpoint at a pure-checkpoint state; naming --skill at such a state errors
+// (it must not silently transition — the bug this story fixes); --checkpoint at
+// a non-checkpoint state errors; and a gate request elsewhere proceeds normally.
+func TestCheckpointDecision(t *testing.T) {
+	// checkpoint state + --checkpoint → enact.
+	if enact, err := checkpointDecision(true, true, "in_progress", "shipping", ""); err != nil || !enact {
+		t.Fatalf("checkpoint+checkpoint-state: enact=%v err=%v, want enact=true err=nil", enact, err)
+	}
+	// checkpoint state + --skill → error, NO enact (the silent-shadow bug).
+	enact, err := checkpointDecision(false, true, "in_progress", "shipping", "satellites-intent-plan-review")
+	if err == nil || enact {
+		t.Fatalf("skill-at-checkpoint-state: enact=%v err=%v, want enact=false err!=nil", enact, err)
+	}
+	if !strings.Contains(err.Error(), "--checkpoint") {
+		t.Fatalf("skill-at-checkpoint-state error = %q, want it to steer to --checkpoint", err)
+	}
+	// non-checkpoint state + --checkpoint → error.
+	if enact, err := checkpointDecision(true, false, "shipping", "", ""); err == nil || enact {
+		t.Fatalf("checkpoint-at-non-checkpoint: enact=%v err=%v, want enact=false err!=nil", enact, err)
+	}
+	// non-checkpoint state + --skill → no checkpoint, proceed to gate path.
+	if enact, err := checkpointDecision(false, false, "shipping", "", "satellites-commit-push-review"); err != nil || enact {
+		t.Fatalf("gate-elsewhere: enact=%v err=%v, want enact=false err=nil", enact, err)
 	}
 }
 

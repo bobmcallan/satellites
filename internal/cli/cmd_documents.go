@@ -155,7 +155,7 @@ type documentTarget struct {
 	Level     string   // optional declared visibility (system|project|global), from frontmatter
 	Scope     string   // optional explicit scope, from frontmatter (level fallback)
 	Body      string
-	Raw       string   // the full file (frontmatter + body) — what a reviewer judges, since Body strips frontmatter for documents/principles
+	Raw       string // the full file (frontmatter + body) — what a reviewer judges, since Body strips frontmatter for documents/principles
 }
 
 func init() {

@@ -16,7 +16,11 @@ This workflow names only reviewers that exist, so every gated edge resolves.
    (satellites-formatted, a clear story→done goal).
 2. **in_progress** (executor) — do the work however you like, committing
    incrementally and locally (no `.version` bump, no push). At a natural
-   checkpoint, advance the ungated `in_progress → shipping` checkpoint edge.
+   checkpoint, advance the ungated `in_progress → shipping` checkpoint edge with
+   `satellites story status_transition --checkpoint <story-id>` — a deliberate
+   executor move (no gate, no `--skill`). The checkpoint is NEVER a side-effect
+   of naming a gate: running a `--skill` gate at `in_progress` is refused, not
+   silently advanced (sty_21d2c535).
 3. **shipping** (executor) — run the [[satellites-commit-push]] capability
    (final commit folding the incremental ones, `.version` bump when a binary path
    changed, push, watch the test → release → deploy CI chain). Then request the
