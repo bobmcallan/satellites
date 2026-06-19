@@ -9,7 +9,7 @@
      of the shared rule — never a height override. Decorative buttons
      (modal-close, avatar, chip-remove, tag-chip) are chrome, not form
      controls, and keep their bespoke styling. */
-  --control-height: 2.4rem;
+  --control-height: 2.2rem; /* slimmed (sty_f6fdce76): buttons + inputs/selects share this one knob — proportionate to the text, never per-control overridden */
 }
 
 body {
