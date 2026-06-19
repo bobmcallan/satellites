@@ -132,11 +132,15 @@ var validSkillKinds = map[string]bool{
 	"workflow": true,
 	"function": true,
 	// gate is the legacy name for a reviewer (a claude -p judgment that enacts a
-	// transition); reviewer is the reviewers-only name. Both are accepted while
-	// the gate→reviewer rename lands (0c); new reviewers should declare reviewer.
-	"gate":       true,
-	"reviewer":   true,
-	"capability": true,
+	// transition); reviewer is the reviewers-only name. gate stays tolerated for
+	// inherited skills from a not-yet-migrated publisher; new authoring of
+	// kind:gate is rejected by the skill reviewer (0c).
+	"gate":     true,
+	"reviewer": true,
+	// capability is RETIRED (0e): a "capability" was advisory guidance the agent
+	// was never bound to — under the reviewers-only model that belongs in a
+	// document or principle (a non-binding guide), not a skill kind. No
+	// enforcement path depends on it; kind:capability is no longer valid.
 	// task (epic:workspace-agents): a workspace agent's unit of work — a spec a
 	// server-side run executes over the workspace corpus (workspace_task_run).
 	"task": true,
@@ -512,9 +516,9 @@ func validateUpload(rootForKind func(kind string) string, skillsRoot, projectID 
 				// workflow additionally declares the story types it binds.
 				switch k := strings.TrimSpace(fm.Kind); {
 				case k == "":
-					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|reviewer|capability|task)"})
+					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|reviewer|task)"})
 				case !validSkillKinds[k]:
-					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|reviewer|capability|task", k)})
+					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|reviewer|task", k)})
 				case k == "workflow" && len(fm.AppliesTo) == 0:
 					vs = append(vs, violation{p, "skill-dispatch", "workflow skill missing required frontmatter: applies_to"})
 				}

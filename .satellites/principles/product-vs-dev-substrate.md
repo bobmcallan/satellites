@@ -26,4 +26,4 @@ developing satellites itself?** → `.satellites/` (dev, project scope). Putting
 product machinery in `.satellites/` hides it from the repos that need it; putting
 this repo's dev plumbing in `config/` ships it to everyone.
 
-See [[constitution]], [[substrate-taxonomy]], [[reviewer-only-model]].
+See [[constitution]], [[reviewer-only-model]].
