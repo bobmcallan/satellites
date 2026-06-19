@@ -88,6 +88,47 @@
     </table>
   </section>
 
+  <!-- Workspace API keys -->
+  {{if .IsWorkspaceAdmin}}
+  <section class="panel" data-section="ws-keys">
+    <div class="panel-header">
+      <h2>api keys · {{.WorkspaceName}}</h2>
+      <form method="POST" action="/settings/people?workspace_id={{.WorkspaceID}}" class="inline-form" data-form="ws-key-issue">
+        <input type="hidden" name="action" value="issue_ws_key">
+        <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+        <input type="text" name="agent_name" placeholder="agent name (optional)">
+        <button type="submit" class="btn primary" data-action="ws-key-issue">ISSUE KEY</button>
+      </form>
+    </div>
+    {{if and .IssuedKey (eq .IssuedKeyScope "workspace")}}
+    <p class="notice" data-field="ws-key-issued">New key (copy now — shown once): <code data-field="ws-key-issued-value">{{.IssuedKey}}</code></p>
+    {{end}}
+    <table class="panel-table" data-field="ws-keys-table">
+      <thead><tr><th>key id</th><th>agent</th><th>role</th><th>created</th><th></th></tr></thead>
+      <tbody>
+        {{range .WorkspaceKeys}}
+        <tr>
+          <td>{{.KeyID}}</td>
+          <td>{{if .AgentName}}{{.AgentName}}{{else}}—{{end}}</td>
+          <td>{{.Role}}</td>
+          <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+          <td>
+            <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}" class="inline-form" data-form="ws-key-revoke">
+              <input type="hidden" name="action" value="revoke_key">
+              <input type="hidden" name="workspace_id" value="{{$.WorkspaceID}}">
+              <input type="hidden" name="key_id" value="{{.KeyID}}">
+              <button type="submit" class="btn danger" data-action="ws-key-revoke">REVOKE</button>
+            </form>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="empty" data-field="ws-keys-empty">No keys issued for this workspace.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
   <!-- Projects -->
   <section class="panel" data-section="ws-projects">
     <div class="panel-header">
@@ -248,6 +289,48 @@
         {{end}}
       </tbody>
     </table>
+    {{end}}
+
+    {{if .IsProjectAdmin}}
+    <div class="panel-subsection" data-section="pj-keys">
+      <div class="panel-header">
+        <h2>api keys · {{.SelectedProjectName}}</h2>
+        <form method="POST" action="/settings/people?workspace_id={{.WorkspaceID}}&project_id={{.SelectedProjectID}}" class="inline-form" data-form="pj-key-issue">
+          <input type="hidden" name="action" value="issue_pj_key">
+          <input type="hidden" name="workspace_id" value="{{.WorkspaceID}}">
+          <input type="hidden" name="project_id" value="{{.SelectedProjectID}}">
+          <input type="text" name="agent_name" placeholder="agent name (optional)">
+          <button type="submit" class="btn primary" data-action="pj-key-issue">ISSUE KEY</button>
+        </form>
+      </div>
+      {{if and .IssuedKey (eq .IssuedKeyScope "project")}}
+      <p class="notice" data-field="pj-key-issued">New key (copy now — shown once): <code data-field="pj-key-issued-value">{{.IssuedKey}}</code></p>
+      {{end}}
+      <table class="panel-table" data-field="pj-keys-table">
+        <thead><tr><th>key id</th><th>agent</th><th>role</th><th>created</th><th></th></tr></thead>
+        <tbody>
+          {{range .ProjectKeys}}
+          <tr>
+            <td>{{.KeyID}}</td>
+            <td>{{if .AgentName}}{{.AgentName}}{{else}}—{{end}}</td>
+            <td>{{.Role}}</td>
+            <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+            <td>
+              <form method="POST" action="/settings/people?workspace_id={{$.WorkspaceID}}&project_id={{$.SelectedProjectID}}" class="inline-form" data-form="pj-key-revoke">
+                <input type="hidden" name="action" value="revoke_key">
+                <input type="hidden" name="workspace_id" value="{{$.WorkspaceID}}">
+                <input type="hidden" name="project_id" value="{{$.SelectedProjectID}}">
+                <input type="hidden" name="key_id" value="{{.KeyID}}">
+                <button type="submit" class="btn danger" data-action="pj-key-revoke">REVOKE</button>
+              </form>
+            </td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="empty" data-field="pj-keys-empty">No keys issued for this project.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
     {{end}}
 
     <p><a href="/settings/people?workspace_id={{.WorkspaceID}}" class="btn secondary" data-action="people-back">← BACK TO WORKSPACE</a></p>

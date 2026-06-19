@@ -57,6 +57,14 @@ type adminPeopleData struct {
 
 	WorkspaceRoles []string
 	ProjectRoles   []string
+
+	// API-key management (sty_f972d934): the non-revoked keys scoped to the
+	// workspace / selected project (admins only), plus the raw key shown ONCE
+	// right after issue (IssuedKeyScope = "workspace" | "project").
+	WorkspaceKeys  []verb.APIKeyRow
+	ProjectKeys    []verb.APIKeyRow
+	IssuedKey      string
+	IssuedKeyScope string
 }
 
 type peopleMemberRow struct {
@@ -173,6 +181,30 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 		})
 	case "invite_revoke":
 		err = dispatch("invitation_revoke", verb.InvitationRevokeRequest{ID: r.FormValue("id")})
+	case "issue_ws_key", "issue_pj_key":
+		// Mint a key scoped to the workspace or the project. apikey_create mints
+		// the executor role only (sty_f972d934 keeps the safe default; elevating
+		// is a server authz change deferred to its own story); the raw key is
+		// shown ONCE — render directly so it is not lost to a redirect.
+		req := verb.APIKeyCreateRequest{AgentName: r.FormValue("agent_name")}
+		scope := "workspace"
+		if action == "issue_ws_key" {
+			req.WorkspaceID = wsID
+		} else {
+			req.ProjectID = projectID
+			scope = "project"
+		}
+		raw, e := verb.Dispatch(ctx, "apikey_create", mustJSON(req))
+		if e != nil {
+			err = e
+			break
+		}
+		var resp verb.APIKeyCreateResponse
+		_ = json.Unmarshal(raw, &resp)
+		renderAdminPeopleWithKey(w, ctx, cfg, userID, wsID, projectID, "", "", resp.APIKey, scope)
+		return
+	case "revoke_key":
+		err = dispatch("apikey_revoke", verb.APIKeyRevokeRequest{KeyID: r.FormValue("key_id")})
 	default:
 		renderAdminPeople(w, ctx, cfg, userID, wsID, projectID, "unknown action", "")
 		return
@@ -197,6 +229,21 @@ func handleAdminPeoplePost(w http.ResponseWriter, r *http.Request, cfg Config, u
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
+// listKeys returns the non-revoked API keys matching the filter (apikey_list is
+// redacted — never the raw secret). A dispatch error yields an empty list; the
+// page still renders (sty_f972d934).
+func listKeys(ctx context.Context, req verb.APIKeyListRequest) []verb.APIKeyRow {
+	raw, err := verb.Dispatch(ctx, "apikey_list", mustJSON(req))
+	if err != nil {
+		return nil
+	}
+	var resp verb.APIKeyListResponse
+	if json.Unmarshal(raw, &resp) != nil {
+		return nil
+	}
+	return resp.Keys
+}
+
 // absoluteURL builds a fully-qualified URL for path from the request, honouring
 // a proxy's X-Forwarded-Proto. Used to render a copy-paste invite link.
 func absoluteURL(r *http.Request, path string) string {
@@ -210,6 +257,13 @@ func absoluteURL(r *http.Request, path string) string {
 }
 
 func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, userID, requestedWS, projectID, flashErr, flashLink string) {
+	renderAdminPeopleWithKey(w, ctx, cfg, userID, requestedWS, projectID, flashErr, flashLink, "", "")
+}
+
+// renderAdminPeopleWithKey is renderAdminPeople plus the one-time issued API key
+// (sty_f972d934): the key secret is shown ONCE after issue and never re-fetched
+// (apikey_list is redacted). issuedScope is "workspace" | "project" | "".
+func renderAdminPeopleWithKey(w http.ResponseWriter, ctx context.Context, cfg Config, userID, requestedWS, projectID, flashErr, flashLink, issuedKey, issuedScope string) {
 	data := adminPeopleData{
 		Title:          "people · satellites",
 		ActiveNav:      "people",
@@ -219,6 +273,8 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 		Version:        versionString(),
 		FlashError:     flashErr,
 		FlashLink:      flashLink,
+		IssuedKey:      issuedKey,
+		IssuedKeyScope: issuedScope,
 		WorkspaceRoles: []string{"admin", "member"},
 		ProjectRoles:   []string{"read", "write", "admin"},
 	}
@@ -308,6 +364,10 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 		}
 		// Pending workspace invitations.
 		data.Invitations = listInvites(ctx, verb.InvitationListRequest{WorkspaceID: data.WorkspaceID, Status: "pending"})
+		// Workspace-scoped API keys (admins only — issuing/revoking is an admin act).
+		if data.IsWorkspaceAdmin {
+			data.WorkspaceKeys = listKeys(ctx, verb.APIKeyListRequest{WorkspaceID: data.WorkspaceID})
+		}
 	}
 
 	// Selected project pane.
@@ -338,6 +398,10 @@ func renderAdminPeople(w http.ResponseWriter, ctx context.Context, cfg Config, u
 			}
 		}
 		data.ProjectInvitations = listInvites(ctx, verb.InvitationListRequest{ProjectID: projectID, Status: "pending"})
+		// Project-scoped API keys (admins only).
+		if data.IsProjectAdmin {
+			data.ProjectKeys = listKeys(ctx, verb.APIKeyListRequest{ProjectID: projectID})
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

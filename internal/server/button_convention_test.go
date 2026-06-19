@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/verb"
 )
 
 // TestInviteFormButtonsUseGlobalStyle locks the global-button convention
@@ -107,6 +110,36 @@ func TestActionButtonsUseGlobalStyleAcrossTemplates(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no action buttons scanned — exemption too broad or templates moved?")
+	}
+}
+
+// TestAdminPeopleRendersAPIKeys (sty_f972d934) executes the people template with
+// workspace + project keys and a freshly-issued key, catching a bad field
+// reference (the convention test only reads the file as text). It pins the
+// key-management UI: issue forms, the show-once banner, the key rows, and revoke.
+func TestAdminPeopleRendersAPIKeys(t *testing.T) {
+	data := adminPeopleData{
+		WorkspaceID: "wksp_1", WorkspaceName: "ws", IsWorkspaceAdmin: true,
+		SelectedProjectID: "proj_1", SelectedProjectName: "pj", IsProjectAdmin: true,
+		WorkspaceKeys:  []verb.APIKeyRow{{KeyID: "ak_ws", AgentName: "ci", Role: "executor"}},
+		ProjectKeys:    []verb.APIKeyRow{{KeyID: "ak_pj", Role: "executor"}},
+		IssuedKey:      "sk-secret-once",
+		IssuedKeyScope: "workspace",
+	}
+	var buf bytes.Buffer
+	if err := adminPeopleTmpl.Execute(&buf, data); err != nil {
+		t.Fatalf("execute admin_people template: %v", err)
+	}
+	s := buf.String()
+	for _, want := range []string{
+		"issue_ws_key", "issue_pj_key", "revoke_key",
+		"sk-secret-once", // the show-once issued key
+		"ak_ws", "ak_pj", // both scopes' key rows
+		"api keys ·",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("rendered people page missing %q", want)
+		}
 	}
 }
 
