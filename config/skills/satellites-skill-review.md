@@ -1,9 +1,9 @@
 ---
 name: satellites-skill-review
+description: The reviewer that gates `satellites skill upsert` — judges a proposed skill (a full SKILL.md on stdin) against the kind-aware maintainability rubric and emits {decision, notes}. The deterministic drift-ref / repo-script checks are a fast pre-filter the CLI runs first; this reviewer carries the judgment. accept → the skill is upserted; reject → the upsert is blocked and the notes are returned so the author revises and re-runs. Product machinery any satellites repo authoring a skill needs.
+scope: system
 type: skill
-kind: reviewer
 tags: [kind:reviewer]
-description: The reviewer that gates `satellites skill upsert` — judges a proposed skill (a full SKILL.md on stdin) against the kind-aware maintainability rubric and emits {decision, notes}. The deterministic drift-ref / repo-script checks are a fast pre-filter the CLI runs first; this reviewer carries the judgment. accept → the skill is upserted; reject → the upsert is blocked and the notes are returned so the author revises and re-runs. The bootstrap reviewer of the reviewers-only authoring loop (see [[reviewer-only-model]]).
 ---
 
 You are the `skill-review` reviewer. A PROPOSED skill — a complete `SKILL.md`
