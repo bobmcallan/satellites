@@ -20,20 +20,15 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		name        string
 		transitions int
 	}{
-		// The single repo workflow, stateful v3 (epic:graduated-workflow):
-		// 3 gated entry edges (plan-review → plan-reviewed, the
-		// satellites-intent-plan-review intent gate → ready, start-review →
-		// in_progress; epic:satellites-backbone 2.1) + 1 checkpoint edge + 6
-		// on-edges + 5 cancellation edges (incl. plan-reviewed → cancelled and
-		// blocked → cancelled, the operator's terminal exit for a genuinely-failed
-		// story) + 1 blocked→in_progress recovery edge (sty_0c98760e) + 1 ungated
-		// shipping → done-review ship-advance edge (the executor set-status moves
-		// after commit-push). Every other edge is gated or deterministically
-		// client-enacted (trigger/on). The product workflows are now repo-owned
-		// client-dir config under .satellites/workflows/
-		// (epic:client-dir-separation order-2), no longer materialised
-		// kind:workflow skills — Parse reads the same shape.
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 17},
+		// The reviewers-only repo workflow: backlog → in_progress → shipping →
+		// done, gated by exactly two reviewers that exist (satellites-intent-plan-review
+		// opens; satellites-commit-push-review judges the push and enacts the v2
+		// shipping pass/fail edges). 4 transitions: 1 gated entry + 1 checkpoint +
+		// the shipping on:pass and on:fail edges. The parent (epic/anchor) workflow
+		// is one close-reviewer edge. Workflows are repo-owned client-dir config
+		// under .satellites/workflows/ (epic:client-dir-separation order-2) — Parse
+		// reads the same shape.
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 4},
 		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 1},
 	}
 	for _, c := range cases {
