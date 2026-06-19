@@ -67,7 +67,7 @@ and needs no credential file.`,
 	}
 	auth.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	auth.PersistentFlags().StringVar(&serverArg, "server", "", "Server URL (overrides satellites.toml server_url).")
-	auth.PersistentFlags().StringVar(&projectArg, "project", "", "Project id to mint the key against (overrides satellites.toml project_id).")
+	auth.PersistentFlags().StringVar(&projectArg, "project", "", "Project id to mint the key against (overrides satellites.toml project_id). OPTIONAL: omit it for cold-start — the key is minted against your personal workspace and `project match` binds project_id afterward.")
 	auth.PersistentFlags().BoolVar(&noBrowser, "no-browser", false, "Print the auth URL instead of opening a browser.")
 	auth.PersistentFlags().DurationVar(&timeout, "timeout", 3*time.Minute, "How long to wait for the browser approval.")
 
@@ -137,9 +137,11 @@ func doAuthFlow(ctx context.Context, out io.Writer, serverURL, projectID string,
 	if serverURL == "" {
 		return cliconfig.Credential{}, fmt.Errorf("auth: server_url not set (configure satellites.toml or pass --server)")
 	}
-	if strings.TrimSpace(projectID) == "" {
-		return cliconfig.Credential{}, fmt.Errorf("auth: project_id not set (configure satellites.toml or pass --project; run 'satellites project match' to resolve)")
-	}
+	// project_id is OPTIONAL (sty_5f8cd281): a brand-new operator authenticates
+	// BEFORE any project is resolved (the auth↔match deadlock). With no project_id
+	// the server mints a key against the caller's personal workspace; `project
+	// match` binds project_id afterward. An explicit project_id still scopes the
+	// mint to that project.
 
 	// 1. Loopback listener on an ephemeral port — the redirect target.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -129,7 +129,20 @@ func invokeAPIKeyCreate(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	projectID := strings.TrimSpace(req.ProjectID)
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	if projectID == "" && workspaceID == "" {
-		return nil, fmt.Errorf("apikey_create: workspace_id or project_id required")
+		// Cold-start bootstrap (sty_5f8cd281): a brand-new operator running `auth`
+		// before any project is resolved has no project_id/workspace_id to pass.
+		// Default to the caller's PERSONAL workspace so a key can be minted BEFORE
+		// `project match` — breaking the auth↔match deadlock. project_id binds later
+		// via init/match. Falls through to the membership check below (the caller is
+		// always a member of their own personal workspace).
+		if workspaceStore == nil {
+			return nil, fmt.Errorf("apikey_create: workspace store not configured")
+		}
+		pw, err := workspaceStore.GetPersonalForUser(ctx, caller.ID)
+		if err != nil {
+			return nil, fmt.Errorf("apikey_create: resolve personal workspace for cold-start mint: %w", err)
+		}
+		workspaceID = pw.ID
 	}
 
 	if projectID != "" {
