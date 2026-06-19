@@ -123,7 +123,7 @@ func runContextReview(ctx context.Context, storyID, configPath, userArg string, 
 	// SAME stream (AC2). A dispatch/parse failure warns but never fails the
 	// review — the structural findings still stand.
 	if semantic {
-		sem, sErr := semanticConflicts(ctx, body, claudeBin, stderr)
+		sem, sErr := semanticConflicts(ctx, configPath, userArg, body, claudeBin, stderr)
 		if sErr != nil {
 			fmt.Fprintf(stderr, "warn: semantic context review: %v\n", sErr)
 		}
@@ -235,8 +235,8 @@ func renderConflicts(w io.Writer, storyID string, findings []conflictFinding, no
 // semanticConflicts runs the claude -p semantic reviewer over the assembled
 // bundle (project principles + skills index + the story's ## Workflow) and parses
 // its findings. The judgement layer order:3 left to this story (AC1/AC4).
-func semanticConflicts(ctx context.Context, storyBody, claudeBin string, stderr io.Writer) ([]conflictFinding, error) {
-	skillBody, err := skillBodyOf(semanticReviewSkill)
+func semanticConflicts(ctx context.Context, configArg, userArg, storyBody, claudeBin string, stderr io.Writer) ([]conflictFinding, error) {
+	skillBody, err := skillBodyOf(ctx, serverGateFetcher(configArg, userArg), semanticReviewSkill)
 	if err != nil {
 		return nil, fmt.Errorf("read %s skill (run `satellites skill upload && satellites skill sync`?): %w", semanticReviewSkill, err)
 	}

@@ -174,7 +174,7 @@ func gatherCorpusFindings(ctx context.Context, opts contextValidateOpts, stderr 
 	// reads ALL principles + ALL skills; the per-story workflow slice is
 	// irrelevant corpus-wide, so pass an empty one. Failure warns, never fails.
 	if opts.Semantic {
-		sem, sErr := semanticConflicts(ctx, "", opts.ClaudeBin, stderr)
+		sem, sErr := semanticConflicts(ctx, opts.ConfigPath, opts.UserArg, "", opts.ClaudeBin, stderr)
 		if sErr != nil {
 			fmt.Fprintf(stderr, "warn: context validate semantic: %v\n", sErr)
 		}

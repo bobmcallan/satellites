@@ -6,8 +6,9 @@
 // records its stdout verbatim as a `step_summary` ledger row. The skill is
 // configuration (project-config `step_summariser_skill`); the invocation +
 // ledger write + portal render are code. Reuses the gate dispatcher's skill
-// resolution (resolveGateSkillBody) so a workflow/gate and a summariser are
-// the same kind of artifact — a SKILL.md in the worktree.
+// resolution (resolveSkillEmbedLocalServer: embed → local → server) so a
+// workflow/gate and a summariser are the same kind of artifact and a summariser
+// absent from .claude/skills resolves from the server like a gate.
 
 package verb
 
@@ -53,6 +54,11 @@ type ClaudeCLISummariser struct {
 	Model string
 	// DefaultTimeout caps a run when SummariserInput.Timeout is zero.
 	DefaultTimeout time.Duration
+	// Fetch is the server step of embed → local → server skill resolution
+	// (sty_b8de4776), shared with the gate dispatcher: a summariser skill absent
+	// from .claude/skills is fetched by name and injected, so the summariser
+	// needs no local install. Nil keeps embed → local only (fail-closed on miss).
+	Fetch GateBodyFetcher
 }
 
 // summariserAllowedTools is the read-only grant the summariser subprocess
@@ -112,7 +118,7 @@ func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) 
 		return "", fmt.Errorf("summariser: marshal payload: %w", err)
 	}
 
-	systemPrompt, err := resolveGateSkillBody(in.WorktreeRoot, in.SkillName)
+	_, systemPrompt, err := resolveSkillEmbedLocalServer(ctx, c.Fetch, in.WorktreeRoot, in.SkillName)
 	if err != nil {
 		return "", err
 	}

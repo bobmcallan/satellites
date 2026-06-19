@@ -476,6 +476,10 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
 			Model:          reviewerModel(opts.ConfigPath),
 			DefaultTimeout: summariserTimeout,
+			// Server-fetch fallback (sty_b8de4776): a summariser skill absent from
+			// .claude/skills resolves from the server, like a gate — so the
+			// summariser needs no local install.
+			Fetch: serverGateFetcher(opts.ConfigPath, opts.UserArg),
 		}
 		summary, sErr := summariser.Summarise(ctx, verb.SummariserInput{
 			SkillName:    summariserSkill,

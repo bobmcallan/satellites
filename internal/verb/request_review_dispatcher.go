@@ -235,16 +235,26 @@ var errGateSkillAbsent = errors.New("gate skill absent from worktree .claude/ski
 // fail-closed dispatch error naming all three. An embedded gate never reaches
 // the server, so the home-of-gate invariant (a gate lives in one home) holds.
 func (c ClaudeCLIGateDispatcher) resolveGate(ctx context.Context, worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
+	return resolveSkillEmbedLocalServer(ctx, c.Fetch, worktreeRoot, skillName)
+}
+
+// resolveSkillEmbedLocalServer is the shared embed → local materialised → server
+// resolution for any claude -p reader of a substrate skill body (sty_b8de4776):
+// the gate dispatcher AND the step summariser use it, so the source chain is
+// defined once. embed/local is tried first (a present cache costs no network);
+// only a plain local-miss (errGateSkillAbsent) falls through to fetch — any
+// other local error (corrupt body, permission fault) is fatal and surfaced
+// as-is. A nil fetch (or a name no scope holds) fails closed. An embedded skill
+// never reaches the server, so the home-of-gate invariant holds.
+func resolveSkillEmbedLocalServer(ctx context.Context, fetch GateBodyFetcher, worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
 	fm, body, err := resolveGateSkill(worktreeRoot, skillName)
 	if err == nil {
 		return fm, body, nil // embed or local hit
 	}
-	// Only a plain local-miss falls through to the server; any other local
-	// error (corrupt body, permission fault) is fatal and surfaced as-is.
-	if !errors.Is(err, errGateSkillAbsent) || c.Fetch == nil {
+	if !errors.Is(err, errGateSkillAbsent) || fetch == nil {
 		return frontmatter.Frontmatter{}, "", err
 	}
-	raw, ok, ferr := c.Fetch(ctx, skillName)
+	raw, ok, ferr := fetch(ctx, skillName)
 	if ferr != nil {
 		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: fetch gate skill %q from server: %w", skillName, ferr)
 	}

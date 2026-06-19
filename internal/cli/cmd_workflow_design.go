@@ -111,7 +111,7 @@ func runWorkflowDesign(ctx context.Context, storyID string, apply int, asJSON bo
 	}
 	designContext := buildDesignContext(replaceSection(body, "## Workflow", ""), configPath)
 
-	skillBody, err := skillBodyOf(workflowDesignSkill)
+	skillBody, err := skillBodyOf(ctx, serverGateFetcher(configPath, userArg), workflowDesignSkill)
 	if err != nil {
 		return fmt.Errorf("read %s skill (run `satellites skill upload && satellites skill sync`?): %w", workflowDesignSkill, err)
 	}
@@ -310,11 +310,28 @@ func failClosedGatePrinciple() string {
 	return string(body)
 }
 
-// skillBodyOf returns a materialised skill's body (frontmatter + sync-stamp stripped).
-func skillBodyOf(name string) (string, error) {
+// skillBodyOf returns a substrate skill's body (frontmatter + sync-stamp
+// stripped), resolving local materialised → server (sty_b8de4776): on a local
+// miss it fetches the body by name from the server through the same
+// scope-precedence resolution gate dispatch uses, so a capability skill absent
+// from .claude/skills still resolves for claude -p (no local install needed).
+func skillBodyOf(ctx context.Context, fetch verb.GateBodyFetcher, name string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(".claude", "skills", name, "SKILL.md"))
 	if err != nil {
-		return "", err
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		if fetch == nil {
+			return "", err
+		}
+		fetched, ok, ferr := fetch(ctx, name)
+		if ferr != nil {
+			return "", fmt.Errorf("fetch skill %q from server: %w", name, ferr)
+		}
+		if !ok {
+			return "", fmt.Errorf("skill %q resolves from no source (not in .claude/skills, not on the server)", name)
+		}
+		raw = fetched
 	}
 	_, body, err := frontmatter.Parse(frontmatter.StripSyncStamp(raw))
 	if err != nil {
