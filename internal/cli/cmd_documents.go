@@ -61,9 +61,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// skillReviewTimeout caps the per-skill satellites-skill-review reviewer run
-// (a read-and-judge claude -p, no build) that gates every skill upsert.
-const skillReviewTimeout = 5 * time.Minute
+// artifactReviewTimeout caps the per-artifact reviewer run (a read-and-judge
+// claude -p, no build) that gates every skill / principle upsert.
+const artifactReviewTimeout = 5 * time.Minute
 
 // substrateRootDefault is the DEFAULT parent directory holding a kind's
 // authoring source folder (documents/, principles/, skills/) — the original
@@ -155,6 +155,7 @@ type documentTarget struct {
 	Level     string   // optional declared visibility (system|project|global), from frontmatter
 	Scope     string   // optional explicit scope, from frontmatter (level fallback)
 	Body      string
+	Raw       string   // the full file (frontmatter + body) — what a reviewer judges, since Body strips frontmatter for documents/principles
 }
 
 func init() {
@@ -307,31 +308,33 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 				return fmt.Errorf("%s: content review blocked %d drift-prone reference(s)", t.Path, len(findings))
 			}
 		}
-		// 2) A skill is gated by the satellites-skill-review REVIEWER (a claude -p
-		// judgment): it judges the proposed SKILL.md on stdin and THIS command
-		// enacts the verdict — accept uploads, reject blocks with the reviewer's
+		// 2) A skill or principle is gated by its per-type REVIEWER (a claude -p
+		// judgment): it judges the proposed artifact on stdin and THIS command
+		// enacts the verdict — accept upserts, reject blocks with the reviewer's
 		// notes so the author revises and re-runs (the upsert analogue of a v2
 		// story edge the client enacts). The reviewer is independent (fresh
 		// context); the author never self-judges, and there is no bypass.
-		if kind == "skills" {
+		// Documents keep only the deterministic pre-filter — the freest-form
+		// substrate has no structural contract to judge.
+		if kind == "skills" || kind == "principles" {
 			disp := verb.ClaudeCLIGateDispatcher{
 				Model:          reviewerModel(configArg),
-				DefaultTimeout: skillReviewTimeout,
+				DefaultTimeout: artifactReviewTimeout,
 				Fetch:          serverGateFetcher(configArg, userArg),
 			}
 			verdict, rErr := disp.ReviewContent(ctx, verb.ContentReviewInput{
 				SkillName:    reviewSkill,
-				Content:      t.Body,
+				Content:      t.Raw, // full file incl. frontmatter — Body strips it for documents/principles
 				WorktreeRoot: ".",
 			})
 			if rErr != nil {
-				return fmt.Errorf("%s: skill review (%s): %w", t.Path, reviewSkill, rErr)
+				return fmt.Errorf("%s: review (%s): %w", t.Path, reviewSkill, rErr)
 			}
 			if verdict.Decision != verb.GateDecisionAccept {
-				fmt.Fprintf(out, "skill-review REJECTED %s:\n  %s\n", t.Path, strings.TrimSpace(verdict.Notes))
-				return fmt.Errorf("%s: skill-review rejected — revise per the notes and re-run", t.Path)
+				fmt.Fprintf(out, "%s REJECTED %s:\n  %s\n", reviewSkill, t.Path, strings.TrimSpace(verdict.Notes))
+				return fmt.Errorf("%s: %s rejected — revise per the notes and re-run", t.Path, reviewSkill)
 			}
-			fmt.Fprintf(out, "skill-review accepted %s\n", t.Path)
+			fmt.Fprintf(out, "%s accepted %s\n", reviewSkill, t.Path)
 		}
 		req, marshalErr := marshalUpsertRequest(t)
 		if marshalErr != nil {
@@ -615,6 +618,7 @@ func classifyDocumentFile(filePath, kind, projectID string) documentTarget {
 		Level:     strings.TrimSpace(fm.Level),
 		Scope:     strings.TrimSpace(fm.Scope),
 		Body:      storedBody,
+		Raw:       raw,
 	}
 }
 

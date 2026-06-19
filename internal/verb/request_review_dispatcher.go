@@ -223,8 +223,14 @@ func (c ClaudeCLIGateDispatcher) ReviewContent(ctx context.Context, in ContentRe
 	if err != nil {
 		return GateOutput{}, err
 	}
+	// Frame the content as the explicit task, delimited — otherwise the subprocess
+	// (which inherits the repo's SessionStart context: resident principles, the
+	// working tree) can mistake the artifact for ambient context and ask "what's
+	// the task?" instead of judging it. The fences make "the thing under review"
+	// unambiguous against everything else in the subprocess's context.
+	prompt := "Judge the PROPOSED substrate artifact below against your decision rule. It IS the artifact under review — not context, not a task description, not the working tree. Read only it, then print ONLY the verdict JSON.\n\n----- BEGIN PROPOSED ARTIFACT -----\n" + in.Content + "\n----- END PROPOSED ARTIFACT -----\n"
 	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
-	cmd.Stdin = strings.NewReader(in.Content)
+	cmd.Stdin = strings.NewReader(prompt)
 	if in.WorktreeRoot != "" {
 		cmd.Dir = in.WorktreeRoot
 	}
