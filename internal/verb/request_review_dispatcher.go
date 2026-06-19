@@ -185,6 +185,62 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	return ParseGateOutput(out)
 }
 
+// ContentReviewInput drives a reviewer over arbitrary PROPOSED substrate content
+// (a skill body) rather than a story. Unlike a story gate it enacts no lifecycle
+// edge — the caller (skill upsert) enacts the verdict by uploading on accept or
+// blocking on reject. The reviewer body resolves through the same embed → local →
+// server chain a gate uses; the proposed content arrives on stdin.
+type ContentReviewInput struct {
+	SkillName    string
+	Content      string
+	WorktreeRoot string
+	Timeout      time.Duration
+}
+
+// ReviewContent runs a reviewer skill against proposed content and returns its
+// {decision, notes} verdict. It reuses the gate dispatcher's resolution and argv
+// so there is ONE claude -p reviewer mechanism; the only difference from Dispatch
+// is the payload (the raw proposed content, not a story envelope) and that it
+// enacts nothing — the caller acts on the verdict.
+func (c ClaudeCLIGateDispatcher) ReviewContent(ctx context.Context, in ContentReviewInput) (GateOutput, error) {
+	if strings.TrimSpace(in.SkillName) == "" {
+		return GateOutput{}, fmt.Errorf("content review: skill_name required")
+	}
+	binary := c.BinaryPath
+	if binary == "" {
+		binary = "claude"
+	}
+	timeout := in.Timeout
+	if timeout == 0 {
+		timeout = c.DefaultTimeout
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	_, systemPrompt, err := c.resolveGate(ctx, in.WorktreeRoot, in.SkillName)
+	if err != nil {
+		return GateOutput{}, err
+	}
+	cmd := exec.CommandContext(ctx, binary, gateClaudeArgs(systemPrompt, c.Model)...)
+	cmd.Stdin = strings.NewReader(in.Content)
+	if in.WorktreeRoot != "" {
+		cmd.Dir = in.WorktreeRoot
+	}
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return GateOutput{}, fmt.Errorf("content review: subprocess exited: %s: %s",
+				exitErr.String(), strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return GateOutput{}, fmt.Errorf("content review: subprocess: %w", err)
+	}
+	return ParseGateOutput(out)
+}
+
 // gateAllowedTools is the tool grant the gate subprocess runs under. A
 // done-review gate must build the worktree and run its tests to honour its
 // rubric ("a criterion that claims a test exists is met only if that test

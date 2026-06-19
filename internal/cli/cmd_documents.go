@@ -52,12 +52,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workflow"
 	"github.com/spf13/cobra"
 )
+
+// skillReviewTimeout caps the per-skill satellites-skill-review reviewer run
+// (a read-and-judge claude -p, no build) that gates every skill upsert.
+const skillReviewTimeout = 5 * time.Minute
 
 // substrateRootDefault is the DEFAULT parent directory holding a kind's
 // authoring source folder (documents/, principles/, skills/) — the original
@@ -123,9 +129,13 @@ var kindDirs = map[string]string{
 // source must declare (sty_3359cb48), so the dynamic index can classify a
 // skill from frontmatter alone.
 var validSkillKinds = map[string]bool{
-	"workflow":   true,
-	"function":   true,
+	"workflow": true,
+	"function": true,
+	// gate is the legacy name for a reviewer (a claude -p judgment that enacts a
+	// transition); reviewer is the reviewers-only name. Both are accepted while
+	// the gate→reviewer rename lands (0c); new reviewers should declare reviewer.
 	"gate":       true,
+	"reviewer":   true,
 	"capability": true,
 	// task (epic:workspace-agents): a workspace agent's unit of work — a spec a
 	// server-side run executes over the workspace corpus (workspace_task_run).
@@ -195,8 +205,7 @@ type uploadConfig struct {
 // they walk under .satellites/.
 func newUploadCmd(cfg uploadConfig) *cobra.Command {
 	var (
-		dryRun     bool
-		skipReview bool
+		dryRun bool
 	)
 	cmd := &cobra.Command{
 		Use:   "upload",
@@ -234,11 +243,10 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 				}
 				return fmt.Errorf("upload refused: %d validation violation(s)", len(violations))
 			}
-			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, projectID, dryRun, skipReview)
+			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, projectID, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned dispatches (type, name) without calling the verbs")
-	cmd.Flags().BoolVar(&skipReview, "skip-review", false, "Skip the strict content review (drift-prone reference check) — use only after running the per-type review skill")
 	return cmd
 }
 
@@ -263,7 +271,7 @@ func projectIDFromConfig(configArg string) (string, error) {
 // validateUpload first (newUploadCmd does). Single source for the
 // plan+dispatch loop shared by the per-noun `upload` commands. `satellites
 // deploy` is pull-only and no longer calls this (sty_2fa6f087 follow-up).
-func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, projectID string, dryRun, skipReview bool) error {
+func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, projectID string, dryRun bool) error {
 	root := resolveSubstrateRoot(kind, configArg)
 	targets, err := planUpload(root, kind, projectID)
 	if err != nil {
@@ -281,23 +289,49 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 			fmt.Fprintf(out, "[dry-run] %s → (%s, project, %s)\n", t.Path, t.Type, t.Name)
 			continue
 		}
-		// Strict content review before dispatch (sty_f302bd8b): block a
-		// durable artifact that hard-codes drift-prone references. The
-		// per-type review skill carries the maintainability critique the
-		// local agent runs; --skip-review overrides after that review.
-		if !skipReview && !hasReviewExemptTag(t.Tags) {
+		// 1) Deterministic pre-filter (sty_f302bd8b): block an artifact that
+		// hard-codes drift-prone references (and, for a skill, an unversioned
+		// repo-script dependency). Always runs — the content-review:allow-refs tag
+		// is the only exemption; there is no --skip-review bypass under the
+		// reviewers-only model.
+		if !hasReviewExemptTag(t.Tags) {
 			findings := reviewContent(t.Body)
 			if kind == "skills" {
 				findings = append(findings, reviewSkillSelfContained(t.Body)...)
 			}
 			if len(findings) > 0 {
-				fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s); run skill %q for the maintainability critique, or pass --skip-review:\n",
-					t.Path, len(findings), reviewSkill)
+				fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s):\n", t.Path, len(findings))
 				for _, f := range findings {
 					fmt.Fprintf(out, "  ✗ %s\n", f.String())
 				}
-				return fmt.Errorf("%s: content review blocked %d drift-prone reference(s) (override with --skip-review)", t.Path, len(findings))
+				return fmt.Errorf("%s: content review blocked %d drift-prone reference(s)", t.Path, len(findings))
 			}
+		}
+		// 2) A skill is gated by the satellites-skill-review REVIEWER (a claude -p
+		// judgment): it judges the proposed SKILL.md on stdin and THIS command
+		// enacts the verdict — accept uploads, reject blocks with the reviewer's
+		// notes so the author revises and re-runs (the upsert analogue of a v2
+		// story edge the client enacts). The reviewer is independent (fresh
+		// context); the author never self-judges, and there is no bypass.
+		if kind == "skills" {
+			disp := verb.ClaudeCLIGateDispatcher{
+				Model:          reviewerModel(configArg),
+				DefaultTimeout: skillReviewTimeout,
+				Fetch:          serverGateFetcher(configArg, userArg),
+			}
+			verdict, rErr := disp.ReviewContent(ctx, verb.ContentReviewInput{
+				SkillName:    reviewSkill,
+				Content:      t.Body,
+				WorktreeRoot: ".",
+			})
+			if rErr != nil {
+				return fmt.Errorf("%s: skill review (%s): %w", t.Path, reviewSkill, rErr)
+			}
+			if verdict.Decision != verb.GateDecisionAccept {
+				fmt.Fprintf(out, "skill-review REJECTED %s:\n  %s\n", t.Path, strings.TrimSpace(verdict.Notes))
+				return fmt.Errorf("%s: skill-review rejected — revise per the notes and re-run", t.Path)
+			}
+			fmt.Fprintf(out, "skill-review accepted %s\n", t.Path)
 		}
 		req, marshalErr := marshalUpsertRequest(t)
 		if marshalErr != nil {
@@ -469,9 +503,9 @@ func validateUpload(rootForKind func(kind string) string, skillsRoot, projectID 
 				// workflow additionally declares the story types it binds.
 				switch k := strings.TrimSpace(fm.Kind); {
 				case k == "":
-					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|capability|task)"})
+					vs = append(vs, violation{p, "skill-dispatch", "skill missing required frontmatter: kind (workflow|function|gate|reviewer|capability|task)"})
 				case !validSkillKinds[k]:
-					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|capability|task", k)})
+					vs = append(vs, violation{p, "skill-dispatch", fmt.Sprintf("skill kind:%q is not one of workflow|function|gate|reviewer|capability|task", k)})
 				case k == "workflow" && len(fm.AppliesTo) == 0:
 					vs = append(vs, violation{p, "skill-dispatch", "workflow skill missing required frontmatter: applies_to"})
 				}
