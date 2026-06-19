@@ -14,9 +14,9 @@ package verb
 import "embed"
 
 // internalGatesFS holds the embedded internal gate definitions. Each file is a
-// <name>.md SKILL with ordinary frontmatter (kind:gate, an optional functional
-// check:) and a body — the same shape a materialised skill carries, minus the
-// sync stamp.
+// <name>.md SKILL with ordinary frontmatter (kind:reviewer, an optional
+// functional check:) and a body — the same shape a materialised skill carries,
+// minus the sync stamp.
 //
 //go:embed internalgates/*.md
 var internalGatesFS embed.FS

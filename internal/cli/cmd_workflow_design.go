@@ -231,7 +231,7 @@ func availableWorkflowSkills(configPath string) []map[string]string {
 func availableGateSkills() []map[string]string {
 	var out []map[string]string
 	for _, s := range materialisedSkills() {
-		if s.kind != "gate" {
+		if !isReviewerSkillKind(s.kind) {
 			continue
 		}
 		out = append(out, map[string]string{"name": s.name, "description": s.description})

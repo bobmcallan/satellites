@@ -139,11 +139,21 @@ func parseWorkflows(skills []matSkill) (map[string]*workflow.Workflow, []driftFi
 	return wfs, out
 }
 
+// isReviewerSkillKind reports whether a skill's frontmatter kind marks it a
+// reviewer (a claude -p judgment that enacts a transition). `reviewer` is the
+// canonical reviewers-only name; `gate` is the retired legacy synonym, still
+// RECOGNIZED here so an inherited skill from a not-yet-migrated publisher is not
+// mis-treated — but new authoring of `kind:gate` is blocked at upsert by the
+// skill reviewer (sty_11ab4e3e). This repo's own artifacts all declare reviewer.
+func isReviewerSkillKind(kind string) bool {
+	return kind == "reviewer" || kind == "gate"
+}
+
 // checkGateCoverage (classes 1 + 5) — the definition is the whole process:
-// every kind:gate skill must be named by some workflow (a transition's
-// reviewer_skill or a Checkpoint gates reference); a gate nothing names is a
+// every reviewer skill must be named by some workflow (a transition's
+// reviewer_skill or a Checkpoint gates reference); a reviewer nothing names is a
 // shadow gate that runs outside any definition (the techdebt case). And every
-// gate a workflow names must be materialised, or its transition fails closed
+// reviewer a workflow names must be materialised, or its transition fails closed
 // at dispatch.
 func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow, gateResolvable func(string) bool) []driftFinding {
 	named := map[string]bool{}
@@ -168,17 +178,17 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow, gat
 
 	var out []driftFinding
 	for _, s := range skills {
-		if s.kind != "gate" {
+		if !isReviewerSkillKind(s.kind) {
 			continue
 		}
-		// An INHERITED gate (materialised by sync from a publisher/system) that
+		// An INHERITED reviewer (materialised by sync from a publisher/system) that
 		// no workflow names is an opt-in PALETTE entry, not drift — under the
-		// gateless baseline a clean consumer inherits gates it names none of.
-		// Only a REPO-OWNED gate (authored here, s.local) that nothing wires is a
-		// genuine shadow gate (sty_f8f88f92).
+		// gateless baseline a clean consumer inherits reviewers it names none of.
+		// Only a REPO-OWNED reviewer (authored here, s.local) that nothing wires is
+		// a genuine shadow gate (sty_f8f88f92).
 		if !named[s.name] && s.local {
 			out = append(out, driftFinding{"block", "orphan-gate", s.name,
-				"repo-owned kind:gate skill no workflow definition names (transition or Checkpoint gates) — a shadow gate runs outside the defined process; wire it into a workflow or remove it"})
+				"repo-owned reviewer skill no workflow definition names (transition or Checkpoint gates) — a shadow gate runs outside the defined process; wire it into a workflow or remove it"})
 		}
 	}
 	for g := range named {
@@ -215,7 +225,7 @@ func checkGatePlacementConflict(skills []matSkill, wfs map[string]*workflow.Work
 	}
 	var out []driftFinding
 	for _, s := range skills {
-		if s.kind == "gate" || s.kind == "workflow" {
+		if isReviewerSkillKind(s.kind) || s.kind == "workflow" {
 			continue
 		}
 		for c, b := range commands {
@@ -242,7 +252,7 @@ var nonAtomicMarkers = []string{"Exit 1 (BLOCKED)", "exit 1 → **do not commit*
 func checkNonAtomicCandidates(skills []matSkill) []driftFinding {
 	var out []driftFinding
 	for _, s := range skills {
-		if s.kind == "gate" || s.kind == "workflow" {
+		if isReviewerSkillKind(s.kind) || s.kind == "workflow" {
 			continue
 		}
 		for _, m := range nonAtomicMarkers {

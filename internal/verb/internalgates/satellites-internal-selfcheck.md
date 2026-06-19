@@ -1,8 +1,8 @@
 ---
 name: satellites-internal-selfcheck
 type: skill
-kind: gate
-tags: [kind:gate, internal]
+kind: reviewer
+tags: [kind:reviewer, internal]
 check: "test -f go.mod"
 description: The spine's embedded mechanism self-check — injected into the gate context from the binary, never materialised to .claude/skills, carrying a functional check the harness folds into the verdict. It is the load-bearing subject of the ENSURE control (TestEmbeddedGateInjectedAndUsed) — the proof that an embedded gate absent from .claude/skills is actually injected into claude -p and used.
 ---

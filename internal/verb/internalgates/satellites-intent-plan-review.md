@@ -1,9 +1,9 @@
 ---
 name: satellites-intent-plan-review
 type: skill
-kind: gate
+kind: reviewer
 when: plan
-tags: [kind:gate]
+tags: [kind:reviewer]
 description: The spine plan gate — judges that a story is satellites-formatted (Purpose, Approach, numbered acceptance criteria, an embedded ## Workflow) and carries a clear story→done goal, before an executor starts. It does NOT judge config-over-code (that is satellites-intent-code-review, on the diff) nor re-judge code grounding. Emits {decision, notes} JSON.
 ---
 

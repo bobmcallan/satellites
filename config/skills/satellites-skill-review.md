@@ -24,7 +24,7 @@ skill's contract and maintainability.
 Read the whole skill, then judge each point. **reject** if any blocking point
 fails (name it specifically in the notes); **accept** only when all hold.
 
-1. **Dispatch contract.** Frontmatter declares `kind` (reviewer / workflow / function) and, for a workflow, `applies_to`. No clear kind → reject.
+1. **Dispatch contract.** Frontmatter declares `kind` (reviewer / workflow / function) and, for a workflow, `applies_to`. No clear kind → reject. **`kind:gate` (or `gate`) is retired** — it is the legacy name for a reviewer; reject it with a note to declare `kind:reviewer` instead.
 2. **Triggerable description.** The `description` says plainly when to use the skill. A vague or narrative description → reject.
 3. **Prescriptive.** The body opens in and stays in imperative voice — not scene-setting.
 4. **Followable + scope-true.** An agent could run it without guessing. Judge coupling BY SCOPE: a system-scope skill referencing repo-dev specifics (repo paths, CI workflow names, deploy hosts, version files, a host toolchain) is a blocking reject — system scope must work in any repository (the product's own install/distribution contract is not host coupling). A project-scope skill may be host-coupled by design — its repo IS its scope; flag only ambiguity.
