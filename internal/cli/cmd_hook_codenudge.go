@@ -15,6 +15,17 @@
 // deliberately TIGHT — a bare identifier only — so ordinary text/regex/config
 // searches are left alone. Stat-only; it opens no database, so it stays cheap on
 // high-frequency tools.
+//
+// Why ADVISORY, not enforcing (sty_560778c3 dogfood): an agent still reaches for
+// Grep/Read by default and frequently ignores the post-hoc suggestion — but that
+// is BY DESIGN, not a defect to fix with a blocking deny. Per [[reviewer-only-model]]
+// the agent's pre-read/search efficiency is the HARNESS's (Anthropic's) concern,
+// not satellites' to enforce; satellites' contribution ends at three things — the
+// index (SessionStart build), this advisory, and the crisp rule it teaches:
+// **symbols → `code search`/`code symbol`; non-symbol TEXT → Grep is correct.**
+// Grep/Read therefore remain acceptable, and the tight match keeps the nudge off
+// the cases where Grep is the right tool. The gap is closed by teaching, not
+// blocking — a deny here would fight the harness and misfire on legitimate scans.
 
 package cli
 
