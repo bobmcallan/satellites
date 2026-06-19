@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -60,6 +61,16 @@ type nounListItem struct {
 // docGetView mirrors internal/verb.DocumentGetResponse.RenderedBody.
 type docGetView struct {
 	RenderedBody string `json:"rendered_body"`
+}
+
+// docGetFullView adds the version the no-scope cascade reports when a name
+// resolves in more than one scope (sty_7d66f2a4), so the candidate list is
+// actionable.
+type docGetFullView struct {
+	RenderedBody string `json:"rendered_body"`
+	Document     struct {
+		LatestVersion int `json:"latest_version"`
+	} `json:"document"`
 }
 
 // docListRequest is the JSON-only request the CLI sends for
@@ -170,43 +181,120 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   cfg.Use + " <name>",
 		Short: cfg.Short,
-		Long:  cfg.Short + "\n\nThin shell over the document_get MCP verb.",
-		Args:  cobra.ExactArgs(1),
+		Long: cfg.Short + "\n\nThin shell over the document_get MCP verb. With NO --scope, " +
+			"the name is resolved through the default cascade project → workspace → system " +
+			"(most-local first); the project_id / workspace_id a scope needs are taken from " +
+			"satellites.toml. If the name resolves in more than one scope, the candidates are " +
+			"listed (pass --scope to choose). An explicit --scope forces that single scope.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req := struct {
-				Name        string `json:"name"`
-				Scope       string `json:"scope,omitempty"`
-				WorkspaceID string `json:"workspace_id,omitempty"`
-				ProjectID   string `json:"project_id,omitempty"`
-			}{
-				Name:        args[0],
-				Scope:       scopeArg,
-				WorkspaceID: wsArg,
-				ProjectID:   pjArg,
+			ctx := context.Background()
+			name := args[0]
+			out := cmd.OutOrStdout()
+
+			// Explicit scope: a single get, but auto-fill the project_id /
+			// workspace_id the scope needs from config when the caller omits them
+			// (so `--scope project` no longer demands a manual --project).
+			if strings.TrimSpace(scopeArg) != "" {
+				body, _, err := substrateGetOne(ctx, cfg, name, scopeArg, wsArg, pjArg)
+				if err != nil {
+					return err
+				}
+				printSubstrateBody(out, body)
+				return nil
 			}
-			raw, err := json.Marshal(req)
-			if err != nil {
-				return err
+
+			// No scope: cascade project → workspace → system (sty_7d66f2a4). Drop
+			// the "scope required" error — the default cascade resolves by name.
+			pid, _ := projectIDFromConfig(*cfg.ConfigArg)
+			wsID := ""
+			if pid != "" {
+				wsID, _ = resolveWorkspaceID(ctx, pid, *cfg.ConfigArg, *cfg.UserArg)
 			}
-			resp, err := dispatchVerb(context.Background(), "document_get", raw, *cfg.ConfigArg, *cfg.UserArg)
-			if err != nil {
-				return err
+			type hit struct {
+				scope   string
+				version int
+				body    string
 			}
-			var parsed docGetView
-			if err := json.Unmarshal(resp, &parsed); err != nil {
-				return fmt.Errorf("decode response: %w", err)
+			var hits []hit
+			for _, p := range []struct{ scope, ws, pj string }{
+				{"project", wsID, pid},
+				{"workspace", wsID, ""},
+				{"system", "", ""},
+			} {
+				if p.scope == "project" && pid == "" {
+					continue
+				}
+				if p.scope == "workspace" && wsID == "" {
+					continue
+				}
+				body, ver, err := substrateGetOne(ctx, cfg, name, p.scope, p.ws, p.pj)
+				if err == nil && strings.TrimSpace(body) != "" {
+					hits = append(hits, hit{p.scope, ver, body})
+				}
 			}
-			fmt.Fprint(cmd.OutOrStdout(), parsed.RenderedBody)
-			if parsed.RenderedBody != "" && !strings.HasSuffix(parsed.RenderedBody, "\n") {
-				fmt.Fprintln(cmd.OutOrStdout())
+			switch len(hits) {
+			case 0:
+				return fmt.Errorf("%s %q not found in project, workspace, or system scope — pass --scope to target one", cfg.FilterType, name)
+			case 1:
+				printSubstrateBody(out, hits[0].body)
+				return nil
+			default:
+				// AC2: a name in multiple scopes lists candidates, never silently picks.
+				fmt.Fprintf(out, "%s %q resolves in %d scopes — pass --scope to choose:\n", cfg.FilterType, name, len(hits))
+				for _, h := range hits {
+					fmt.Fprintf(out, "  --scope %s (v%d)\n", h.scope, h.version)
+				}
+				return nil
 			}
-			return nil
 		},
 	}
-	cmd.Flags().StringVar(&scopeArg, "scope", "", "Document scope (system / workspace / project; defaults to system)")
-	cmd.Flags().StringVar(&wsArg, "workspace", "", "workspace_id (required when scope=workspace or scope=project)")
-	cmd.Flags().StringVar(&pjArg, "project", "", "project_id (required when scope=project)")
+	cmd.Flags().StringVar(&scopeArg, "scope", "", "Scope to read (system / workspace / project). Omit to resolve by name through the default cascade project → workspace → system.")
+	cmd.Flags().StringVar(&wsArg, "workspace", "", "workspace_id (defaults from satellites.toml when scope=workspace/project)")
+	cmd.Flags().StringVar(&pjArg, "project", "", "project_id (defaults from satellites.toml when scope=project)")
 	return cmd
+}
+
+// substrateGetOne fetches one (scope, name) via document_get, auto-filling the
+// project_id / workspace_id a scope needs from repo config when the caller left
+// them blank. Returns the rendered body + latest version. A not-found surfaces as
+// an error, which the no-scope cascade treats as a miss for that scope.
+func substrateGetOne(ctx context.Context, cfg substrateNounConfig, name, scope, wsID, pjID string) (string, int, error) {
+	if scope == "project" && strings.TrimSpace(pjID) == "" {
+		pjID, _ = projectIDFromConfig(*cfg.ConfigArg)
+	}
+	if scope == "workspace" && strings.TrimSpace(wsID) == "" {
+		if pid, err := projectIDFromConfig(*cfg.ConfigArg); err == nil && pid != "" {
+			wsID, _ = resolveWorkspaceID(ctx, pid, *cfg.ConfigArg, *cfg.UserArg)
+		}
+	}
+	req := struct {
+		Name        string `json:"name"`
+		Scope       string `json:"scope,omitempty"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		ProjectID   string `json:"project_id,omitempty"`
+	}{Name: name, Scope: scope, WorkspaceID: wsID, ProjectID: pjID}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return "", 0, err
+	}
+	resp, err := dispatchVerb(ctx, "document_get", raw, *cfg.ConfigArg, *cfg.UserArg)
+	if err != nil {
+		return "", 0, err
+	}
+	var parsed docGetFullView
+	if err := json.Unmarshal(resp, &parsed); err != nil {
+		return "", 0, fmt.Errorf("decode response: %w", err)
+	}
+	return parsed.RenderedBody, parsed.Document.LatestVersion, nil
+}
+
+// printSubstrateBody writes a fetched body, ensuring a trailing newline.
+func printSubstrateBody(out io.Writer, body string) {
+	fmt.Fprint(out, body)
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		fmt.Fprintln(out)
+	}
 }
 
 // callerScopedList lists a noun's EFFECTIVE set for a configured caller —
