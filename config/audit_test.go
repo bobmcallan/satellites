@@ -140,6 +140,37 @@ func TestSkillSeedsCarrySatellitesPrefix(t *testing.T) {
 	}
 }
 
+// TestNamingConventionByType asserts the substrate naming convention
+// (constitution > "Substrate naming") over the embedded set, keyed off the
+// type subdir and frontmatter kind — no hardcoded name list. A principle
+// carries NO satellites prefix; a skill carries satellites-; an MCP/install
+// SCHEMA document (kind:install-schema|mcp-startup|mcp-reference|contract)
+// carries satellites_, while a standalone taxonomy/config document may be bare.
+func TestNamingConventionByType(t *testing.T) {
+	schemaKind := regexp.MustCompile(`kind:(install-schema|mcp-startup|mcp-reference|contract)\b`)
+	for _, path := range mdArtifacts(t) {
+		stem := strings.TrimSuffix(filepath.Base(path), ".md")
+		switch filepath.Dir(path) {
+		case "principles":
+			if strings.HasPrefix(stem, "satellites-") || strings.HasPrefix(stem, "satellites_") {
+				t.Errorf("%s · principle must be kebab-case with NO satellites prefix (constitution: Substrate naming)", path)
+			}
+		case "skills":
+			if !strings.HasPrefix(stem, "satellites-") {
+				t.Errorf("%s · skill must be named satellites-<kebab> (constitution: Substrate naming)", path)
+			}
+		case "documents":
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if schemaKind.MatchString(string(raw)) && !strings.HasPrefix(stem, "satellites_") {
+				t.Errorf("%s · MCP/install schema document must be named satellites_<snake> (constitution: Substrate naming)", path)
+			}
+		}
+	}
+}
+
 // stripFencedCode returns body with every ```...``` block replaced by
 // equal-length whitespace. Preserves byte offsets so violation
 // locations still line up with the original file, while keeping the

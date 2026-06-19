@@ -29,4 +29,22 @@ it to the substrate.
 - **Gates read this constitution,** so enforcement tracks evolving intent
   without a recompile.
 
+## Substrate naming
+
+A substrate artifact's name encodes its type so owner and kind read from the
+name alone:
+
+- **Principles** — kebab-case, NO prefix (`broken-windows`, `agent-goals`).
+- **Skills / capabilities** — `satellites-<kebab>` (`satellites-skill-review`);
+  reviewer gates are `satellites-<object>-<stage>-review`.
+- **MCP / install SCHEMA docs** — `satellites_<snake>` (`satellites_client_install`,
+  `satellites_mcp_load_context`): the machinery a client consumes verbatim.
+- **Standalone taxonomy / config docs** keep bare names (`system_variables`,
+  `agent-operating-prompt`) — the `satellites_` prefix marks SCHEMA machinery, not
+  every document.
+
+The `satellites-` skill prefix is also enforced in code (skill sync's
+localSkillName, the config embed guard); this section is the authored intent the
+gates read.
+
 See [[process-as-configuration]], [[agent-goals]].
