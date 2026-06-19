@@ -18,6 +18,22 @@ func TestReviewContextConflicts_Clean(t *testing.T) {
 	}
 }
 
+// TestReviewContextConflicts_ServerResolvedGateNotFlagged pins sty_f242eacf: a
+// gate the resolvable predicate accepts (e.g. pruned from .claude/skills but
+// held on the server) is NOT a missing gate; only a gate no tier resolves is
+// flagged.
+func TestReviewContextConflicts_ServerResolvedGateNotFlagged(t *testing.T) {
+	// plan-review resolves (server tier); done-review resolves from no tier.
+	resolvable := func(name string) bool { return name == "satellites-story-plan-review" }
+	got := reviewContextConflicts(cleanWorkflowBody, resolvable)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 finding (the unresolvable gate), got %d: %v", len(got), got)
+	}
+	if got[0].Code != "missing-gate-skill" {
+		t.Fatalf("unexpected code %q", got[0].Code)
+	}
+}
+
 func TestReviewContextConflicts_MissingGateSkill(t *testing.T) {
 	got := reviewContextConflicts(cleanWorkflowBody, noSkillsExist)
 	// both reviewer skills are absent -> two missing-gate-skill findings (deduped by name)

@@ -313,6 +313,19 @@ func resolveGateSkillBody(worktreeRoot, skillName string) (string, error) {
 	return body, err
 }
 
+// GateResolvable reports whether a gate skill resolves from ANY source the
+// dispatcher uses — embed → local materialised → server (sty_b8de4776). The
+// process VALIDATORS (context review, workflow check) use it so a gate pruned
+// from .claude/skills but present on the server is NOT falsely flagged as
+// missing/unresolvable: the dispatcher resolves it, so the validator must
+// agree. A nil fetch reduces resolution to embed → local. It reuses the shared
+// resolver verbatim — mechanism only, it decides nothing, it mirrors the
+// dispatcher's own resolution.
+func GateResolvable(ctx context.Context, fetch GateBodyFetcher, worktreeRoot, skillName string) bool {
+	_, _, err := resolveSkillEmbedLocalServer(ctx, fetch, worktreeRoot, skillName)
+	return err == nil
+}
+
 // runGateCheck runs a gate's functional `check:` (a `sh -c` command) in the
 // worktree and returns its exit code and trimmed combined output. The harness
 // only RUNS the deterministic half; the gate's body owns how the result folds

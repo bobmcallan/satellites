@@ -109,11 +109,13 @@ func runContextReview(ctx context.Context, storyID, configPath, userArg string, 
 	if err != nil {
 		return err
 	}
-	skillExists := func(name string) bool {
-		_, statErr := os.Stat(filepath.Join(".claude", "skills", name, "SKILL.md"))
-		return statErr == nil
-	}
-	findings := reviewContextConflicts(body, skillExists)
+	// A gate is resolvable when the dispatcher can resolve it from ANY tier —
+	// embed → local .claude/skills → server (sty_b8de4776). The validator must
+	// agree with the dispatcher, so a gate pruned locally but present on the
+	// server is not a missing gate (S5 dogfood, sty_f242eacf).
+	fetch := serverGateFetcher(configPath, userArg)
+	gateResolvable := func(name string) bool { return verb.GateResolvable(ctx, fetch, ".", name) }
+	findings := reviewContextConflicts(body, gateResolvable)
 	sources := make([]string, len(findings))
 	for i := range sources {
 		sources[i] = "context-review"
@@ -150,9 +152,11 @@ func runContextReview(ctx context.Context, storyID, configPath, userArg string, 
 
 // reviewContextConflicts is the pure structural check — parse the story's
 // ## Workflow, validate its lifecycle (reusing sty_1604064f), and cross-check
-// each transition's reviewer_skill against skillExists. Pure over its inputs so
-// it is unit-testable without dispatch or the filesystem.
-func reviewContextConflicts(storyBody string, skillExists func(string) bool) []conflictFinding {
+// each transition's reviewer_skill against gateResolvable. The predicate folds
+// the dispatcher's full embed → local → server resolution (sty_f242eacf), so a
+// gate it resolves is never flagged. Pure over its inputs so it is unit-testable
+// without dispatch or the filesystem.
+func reviewContextConflicts(storyBody string, gateResolvable func(string) bool) []conflictFinding {
 	wf, err := workflow.ParseBody([]byte(storyBody))
 	if err != nil {
 		return []conflictFinding{{
@@ -171,12 +175,12 @@ func reviewContextConflicts(storyBody string, skillExists func(string) bool) []c
 		if skill == "" || seen[skill] {
 			continue // an unguarded edge is allowed; report each missing skill once
 		}
-		if !skillExists(skill) && !verb.IsInternalGate(skill) {
+		if !gateResolvable(skill) {
 			seen[skill] = true
 			out = append(out, conflictFinding{
 				Severity: "error",
 				Code:     "missing-gate-skill",
-				Message:  fmt.Sprintf("transition %s→%s names reviewer_skill %q but no such skill is materialised in .claude/skills (and it is not an embedded internal gate)", t.From, t.To, skill),
+				Message:  fmt.Sprintf("transition %s→%s names reviewer_skill %q but it resolves from no source — not embedded, not in .claude/skills, not on the server", t.From, t.To, skill),
 			})
 		}
 	}

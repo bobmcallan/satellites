@@ -24,11 +24,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workstate"
 	"github.com/spf13/cobra"
 )
@@ -150,13 +149,14 @@ func gatherCorpusFindings(ctx context.Context, opts contextValidateOpts, stderr 
 		return validateReport{}, nil, err
 	}
 
-	skillExists := func(name string) bool {
-		_, statErr := os.Stat(filepath.Join(".claude", "skills", name, "SKILL.md"))
-		return statErr == nil
-	}
+	// Resolve gates the way the dispatcher does — embed → local → server
+	// (sty_f242eacf) — so a server-resolvable gate pruned from .claude/skills is
+	// not falsely flagged across the corpus.
+	fetch := serverGateFetcher(opts.ConfigPath, opts.UserArg)
+	gateResolvable := func(name string) bool { return verb.GateResolvable(ctx, fetch, ".", name) }
 	report := validateReport{
 		StoriesChecked: len(stories),
-		Findings:       aggregateStructural(stories, skillExists),
+		Findings:       aggregateStructural(stories, gateResolvable),
 	}
 
 	// Size dimension: the always-on surface is corpus-constant across the
@@ -280,10 +280,10 @@ func corpusBudget(ctx context.Context, storyID string, opts contextValidateOpts)
 // (reviewContextConflicts) across every story, tagging each finding with its
 // story id and a fix action. Pure over its inputs (mirrors reviewContextConflicts)
 // so it unit-tests without dispatch or the filesystem.
-func aggregateStructural(stories []validateStory, skillExists func(string) bool) []validateFinding {
+func aggregateStructural(stories []validateStory, gateResolvable func(string) bool) []validateFinding {
 	var out []validateFinding
 	for _, s := range stories {
-		for _, f := range reviewContextConflicts(s.Body, skillExists) {
+		for _, f := range reviewContextConflicts(s.Body, gateResolvable) {
 			out = append(out, validateFinding{
 				StoryID:  s.ID,
 				Severity: f.Severity,

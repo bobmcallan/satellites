@@ -249,6 +249,25 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 		}
 	})
 
+	t.Run("sty_f242eacf_server_resolved_gate_not_missing", func(t *testing.T) {
+		// debt-gate is named (checkpoint) but unmaterialised; a predicate that
+		// resolves it (server tier) must suppress missing-gate.
+		resolvable := func(g string) bool { return g == "debt-gate" }
+		skills := healthyCorpus()[:3] // drop debt-gate's materialised row
+		if find(runWorkflowChecksResolved(skills, nil, nil, resolvable), "missing-gate", "debt-gate") {
+			t.Error("a server-resolvable gate must not report missing-gate")
+		}
+	})
+
+	t.Run("sty_f242eacf_server_resolved_gate_not_unresolvable", func(t *testing.T) {
+		stories := []storyLite{{ID: "sty_ghost", Category: "x", Status: "backlog",
+			Body: "## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"ghost-review\"}\n```\n"}}
+		resolvable := func(g string) bool { return g == "ghost-review" }
+		if find(runWorkflowChecksResolved(healthyCorpus(), nil, stories, resolvable), "unresolvable-gate", "sty_ghost") {
+			t.Error("a server-resolvable gate must not report unresolvable-gate")
+		}
+	})
+
 	t.Run("class8_gate_placement_conflict", func(t *testing.T) {
 		// A workflow binding debt-gate's command to a state, plus a capability
 		// whose body restates running that command — the commit-push/techdebt

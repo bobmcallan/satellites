@@ -145,7 +145,7 @@ func parseWorkflows(skills []matSkill) (map[string]*workflow.Workflow, []driftFi
 // shadow gate that runs outside any definition (the techdebt case). And every
 // gate a workflow names must be materialised, or its transition fails closed
 // at dispatch.
-func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow, gateResolvable func(string) bool) []driftFinding {
 	named := map[string]bool{}
 	for name, wf := range wfs {
 		for _, tr := range wf.Transitions {
@@ -182,12 +182,14 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow) []d
 		}
 	}
 	for g := range named {
-		// An internal embedded gate (satellites' own governance, injected from
-		// the binary) is AVAILABLE even though it is never materialised to
-		// .claude/skills — naming it is not a missing gate (2.4.1).
-		if _, ok := byName[g]; !ok && !verb.IsInternalGate(g) {
+		// A gate the dispatcher can resolve is AVAILABLE even when not
+		// materialised to .claude/skills: an internal embedded gate (satellites'
+		// own governance, injected from the binary) OR a substrate gate fetched
+		// from the server (sty_f242eacf). gateResolvable folds both; only a gate
+		// that resolves from NO tier is a missing gate (2.4.1).
+		if _, ok := byName[g]; !ok && !gateResolvable(g) {
 			out = append(out, driftFinding{"block", "missing-gate", g,
-				"a workflow names this reviewer skill but it is not materialised in .claude/skills — its transition fails closed"})
+				"a workflow names this reviewer skill but it resolves from no source — not embedded, not in .claude/skills, not on the server — its transition fails closed"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Artifact < out[j].Artifact })
@@ -284,7 +286,7 @@ var terminalStoryStatuses = map[string]bool{"done": true, "cancelled": true, "de
 // checkStoryGovernance (class 5) — every non-terminal story is governed:
 // its own embedded ## Workflow (whose reviewer skills must be materialised),
 // or a workflow whose applies_to covers its category ("*" wildcard counts).
-func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string]*workflow.Workflow, gateResolvable func(string) bool) []driftFinding {
 	byName := map[string]bool{}
 	for _, s := range skills {
 		byName[s.name] = true
@@ -308,11 +310,13 @@ func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string
 		wf, err := workflow.ParseBody([]byte(st.Body))
 		if err == nil && wf != nil {
 			for _, tr := range wf.Transitions {
-				// An internal embedded gate is resolvable from the binary even
-				// when not materialised — not an unresolvable reviewer (2.4.1).
-				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] && !verb.IsInternalGate(g) {
+				// A gate the dispatcher resolves — embedded in the binary OR
+				// fetched from the server (sty_f242eacf) — lets the story move even
+				// when not materialised; only a gate that resolves from no tier is
+				// unresolvable (2.4.1).
+				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] && !gateResolvable(g) {
 					out = append(out, driftFinding{"block", "unresolvable-gate", st.ID,
-						fmt.Sprintf("embedded workflow names reviewer %q which is not materialised — the story cannot move", g)})
+						fmt.Sprintf("embedded workflow names reviewer %q which resolves from no source (not embedded, not materialised, not on the server) — the story cannot move", g)})
 				}
 			}
 			continue
@@ -416,18 +420,32 @@ func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding 
 // gates are covered, and its checkpoint-gate references resolve — exactly as a
 // kind:workflow skill was (epic:client-dir-separation order-2).
 func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []storyLite) []driftFinding {
+	// Default to embed-only gate resolution (verb.IsInternalGate): a named gate
+	// is available if materialised locally OR embedded in the binary. The command
+	// entry uses runWorkflowChecksResolved to add the server tier; the unit
+	// fixtures keep replaying this embed-only core.
+	return runWorkflowChecksResolved(skills, clientWorkflows, stories, verb.IsInternalGate)
+}
+
+// runWorkflowChecksResolved is runWorkflowChecks with the gate-resolution
+// predicate injected. gateResolvable reports whether a NAMED reviewer gate
+// resolves from a source beyond the materialised set — embedded, or (in prod)
+// the server (sty_f242eacf) — so the gate-coverage and story-governance checks
+// agree with the dispatcher's embed → local → server resolution and do not flag
+// a gate the dispatcher can run.
+func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, stories []storyLite, gateResolvable func(string) bool) []driftFinding {
 	wfBearing := append(append([]matSkill{}, skills...), clientWorkflows...)
 	var out []driftFinding
 	out = append(out, checkSyncedSkillUsable(skills)...)
 	wfs, wfFindings := parseWorkflows(wfBearing)
 	out = append(out, wfFindings...)
 	out = append(out, checkAmbiguousGovernance(wfs)...)
-	out = append(out, checkGateCoverage(wfBearing, wfs)...)
+	out = append(out, checkGateCoverage(wfBearing, wfs, gateResolvable)...)
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
 	out = append(out, checkGateHomeFork(skills)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
-	out = append(out, checkStoryGovernance(stories, wfBearing, wfs)...)
+	out = append(out, checkStoryGovernance(stories, wfBearing, wfs, gateResolvable)...)
 	out = append(out, checkFirstGateComprehensive(wfBearing, wfs)...)
 	return out
 }
@@ -529,7 +547,12 @@ pinned by integration tests — they are out of a client check's reach.`,
 			if err != nil {
 				return err
 			}
-			findings := runWorkflowChecks(markLocalAuthorship(materialisedSkills(), *configArg), clientWorkflows(*configArg), stories)
+			// Resolve named gates the way the dispatcher does — embed → local →
+			// server (sty_f242eacf) — so a substrate gate pruned from
+			// .claude/skills but present on the server is not flagged.
+			fetch := serverGateFetcher(*configArg, *userArg)
+			gateResolvable := func(g string) bool { return verb.GateResolvable(ctx, fetch, ".", g) }
+			findings := runWorkflowChecksResolved(markLocalAuthorship(materialisedSkills(), *configArg), clientWorkflows(*configArg), stories, gateResolvable)
 			blocking := 0
 			for _, f := range findings {
 				if f.Severity == "block" {
