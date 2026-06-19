@@ -1,8 +1,6 @@
 ---
 name: broken-windows
-type: document
-scope: system
-tags: [principles:global, principles:always]
+tags: [principles:project, principles:always]
 ---
 
 # Broken windows
