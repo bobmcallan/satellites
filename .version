@@ -5,7 +5,7 @@
 # release artifacts or docker images.
 
 satellites.version: 0.0.316
-satellites.build: 2026-06-20-09-37-38
+satellites.build: 2026-06-20-09-39-41
 
 satellites-server.version: 0.0.298
-satellites-server.build: 2026-06-20-09-37-38
+satellites-server.build: 2026-06-20-09-39-41

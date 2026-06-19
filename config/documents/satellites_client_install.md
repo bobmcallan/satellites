@@ -22,7 +22,7 @@ which stores the key in the user-level credential store
 `server_url`. An MCP-only client that cannot shell out still mints
 in-band via the `auth_bootstrap.mcp_only` fallback below.
 
-`satellites auth` does NOT require a resolved `project_id` (sty_5f8cd281):
+`satellites auth` does NOT require a resolved `project_id`:
 at cold start `project_id` is still empty (load-context Step 4 fills it via
 `project_match`), so the key is minted against the caller's PERSONAL workspace
 and `project match` binds `project_id` afterward — breaking the auth↔match
