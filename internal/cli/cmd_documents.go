@@ -284,6 +284,17 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		return nil
 	}
 	reviewSkill := reviewSkillForKind(kind)
+	// A kind is reviewer-gated IFF its per-type reviewer (satellites-<kind>-review)
+	// resolves AND declares kind:reviewer — config, not a hardcoded kind list
+	// (the constitution: which gate runs lives in the substrate). Authoring a new
+	// per-kind reviewer turns its gate on with NO code change here. Resolved once;
+	// the deterministic pre-filter in the loop always runs regardless.
+	reviewDisp := verb.ClaudeCLIGateDispatcher{
+		Model:          reviewerModel(configArg),
+		DefaultTimeout: artifactReviewTimeout,
+		Fetch:          serverGateFetcher(configArg, userArg),
+	}
+	gateWithReviewer, _ := reviewDisp.IsReviewer(ctx, ".", reviewSkill)
 	for _, t := range targets {
 		label := uploadLabel(t)
 		if dryRun {
@@ -314,15 +325,10 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		// notes so the author revises and re-runs (the upsert analogue of a v2
 		// story edge the client enacts). The reviewer is independent (fresh
 		// context); the author never self-judges, and there is no bypass.
-		// Documents keep only the deterministic pre-filter — the freest-form
-		// substrate has no structural contract to judge.
-		if kind == "skills" || kind == "principles" {
-			disp := verb.ClaudeCLIGateDispatcher{
-				Model:          reviewerModel(configArg),
-				DefaultTimeout: artifactReviewTimeout,
-				Fetch:          serverGateFetcher(configArg, userArg),
-			}
-			verdict, rErr := disp.ReviewContent(ctx, verb.ContentReviewInput{
+		// Documents (today) keep only the deterministic pre-filter — no per-type
+		// reviewer resolves for them, so gateWithReviewer is false.
+		if gateWithReviewer {
+			verdict, rErr := reviewDisp.ReviewContent(ctx, verb.ContentReviewInput{
 				SkillName:    reviewSkill,
 				Content:      t.Raw, // full file incl. frontmatter — Body strips it for documents/principles
 				WorktreeRoot: ".",

@@ -247,6 +247,30 @@ func (c ClaudeCLIGateDispatcher) ReviewContent(ctx context.Context, in ContentRe
 	return ParseGateOutput(out)
 }
 
+// IsReviewer resolves a per-kind reviewer skill through embed → local → server
+// and reports whether it is a REVIEWER — by its frontmatter `kind: reviewer`
+// field OR its `kind:reviewer` tag (system seeds declare kind via the tag,
+// project uploads via the field; either marks a reviewer). The caller gates on
+// this: a substrate kind is reviewer-gated IFF its `satellites-<kind>-review`
+// resolves AS a reviewer — config, not a hardcoded kind list (the constitution:
+// which gate runs lives in the substrate). ok=false when the skill resolves from
+// no source — the kind simply has no reviewer, so it is not gated.
+func (c ClaudeCLIGateDispatcher) IsReviewer(ctx context.Context, worktreeRoot, skillName string) (isReviewer bool, ok bool) {
+	fm, _, err := c.resolveGate(ctx, worktreeRoot, skillName)
+	if err != nil {
+		return false, false
+	}
+	if strings.EqualFold(strings.TrimSpace(fm.Kind), "reviewer") {
+		return true, true
+	}
+	for _, t := range fm.Tags {
+		if strings.EqualFold(strings.TrimSpace(t), "kind:reviewer") {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // gateAllowedTools is the tool grant the gate subprocess runs under. A
 // done-review gate must build the worktree and run its tests to honour its
 // rubric ("a criterion that claims a test exists is met only if that test
