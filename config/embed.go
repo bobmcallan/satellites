@@ -29,8 +29,21 @@ import (
 	"io/fs"
 )
 
-//go:embed documents/*.md principles/*.md skills/*.md mcp/*.md
+//go:embed documents/*.md principles/*.md skills/*.md mcp/*.md workflows/*.md
 var FS embed.FS
+
+// BaselineWorkflowMarkdown returns the raw order-zero baseline workflow
+// artifact bytes — the default story lifecycle init/rebase scaffold into a
+// fresh repo's .satellites/workflows/. Homed in the client embed (not a Go
+// const) so the default PROCESS is authored substrate, not baked-in code
+// (epic:system-substrate).
+func BaselineWorkflowMarkdown() []byte {
+	b, err := fs.ReadFile(FS, "workflows/satellites-baseline-workflow.md")
+	if err != nil {
+		panic("substrate: workflows/satellites-baseline-workflow.md missing from embed.FS: " + err.Error())
+	}
+	return b
+}
 
 // MCPLoadContextMarkdown returns the raw MCP load-context artifact
 // bytes — the document the MCP server returns to every client on

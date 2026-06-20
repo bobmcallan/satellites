@@ -384,17 +384,29 @@ func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, 
 	}
 	path := filepath.Join(root, ".claude", "skills", skillName, "SKILL.md")
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, errGateSkillAbsent)
+	if err == nil {
+		fm, body, perr := frontmatter.Parse(raw)
+		if perr != nil {
+			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse gate skill %q: %w", skillName, perr)
 		}
+		return fm, string(body), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
 	}
-	fm, body, err := frontmatter.Parse(raw)
-	if err != nil {
-		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse gate skill %q: %w", skillName, err)
+	// No local materialised override — fall back to the config/skills embed
+	// shipped in the client binary (epic:system-substrate). This is the home
+	// that makes a default reviewer binary-resident: a gate resolves with no
+	// server and no .claude/skills, while a local override (handled above)
+	// still wins over the embedded default.
+	if eraw, ok := configSkillRaw(skillName); ok {
+		fm, body, perr := frontmatter.Parse(eraw)
+		if perr != nil {
+			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse embedded config skill %q: %w", skillName, perr)
+		}
+		return fm, string(body), nil
 	}
-	return fm, string(body), nil
+	return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, errGateSkillAbsent)
 }
 
 // resolveGateSkillBody is the body-only convenience kept for callers/tests that

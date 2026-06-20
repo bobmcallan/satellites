@@ -63,25 +63,29 @@ func TestBaselineWorkflowDoc(t *testing.T) {
 	if !wild {
 		t.Errorf("baseline must be applies_to [\"*\"], got %v", wf.AppliesTo)
 	}
-	entryGated, exitUngated := false, false
+	entryGated, exitGated := false, false
 	for _, tr := range wf.Transitions {
 		switch {
 		case tr.From == "backlog" && tr.To == "in_progress":
 			entryGated = strings.TrimSpace(tr.ReviewerSkill) == "satellites-intent-plan-review"
 		case tr.From == "in_progress" && tr.To == "done":
-			exitUngated = strings.TrimSpace(tr.ReviewerSkill) == ""
+			exitGated = strings.TrimSpace(tr.ReviewerSkill) == "satellites-story-done-review"
 		}
 	}
 	if !entryGated {
 		t.Errorf("baseline entry backlog→in_progress must be gated by satellites-intent-plan-review")
 	}
-	if !exitUngated {
-		t.Errorf("baseline exit in_progress→done must stay ungated")
+	if !exitGated {
+		t.Errorf("baseline exit in_progress→done must be gated by satellites-story-done-review (epic:system-substrate)")
 	}
-	// The intent-gate must be an embedded internal gate — a clean repo with no
-	// materialised skills must still be able to run it.
+	// The entry gate is an embedded internal gate; the exit gate is a
+	// binary-resident config/skills reviewer — both run in a clean repo with no
+	// materialised skills (resolved from the embed).
 	if !verb.IsInternalGate("satellites-intent-plan-review") {
 		t.Errorf("the baseline's entry gate must be an embedded internal gate")
+	}
+	if !verb.IsConfigSkill("satellites-story-done-review") {
+		t.Errorf("the baseline's exit gate must be a binary-resident config/skills reviewer")
 	}
 	if !baselineHasEdge(wf, "backlog", "in_progress") || !baselineHasEdge(wf, "in_progress", "done") {
 		t.Errorf("baseline missing the backlog→in_progress→done lifecycle edges")
@@ -211,8 +215,8 @@ func TestSetStatusAllowed(t *testing.T) {
 	if setStatusAllowed("fix", "backlog", "in_progress", "", baseline) {
 		t.Errorf("the baseline entry is now gated by the intent-gate — set-status must refuse it")
 	}
-	if !setStatusAllowed("fix", "in_progress", "done", "", baseline) {
-		t.Errorf("ungated in_progress→done must be allowed under the baseline")
+	if setStatusAllowed("fix", "in_progress", "done", "", baseline) {
+		t.Errorf("the baseline exit is now gated by satellites-story-done-review — set-status must refuse it")
 	}
 	if setStatusAllowed("fix", "backlog", "done", "", baseline) {
 		t.Errorf("undeclared backlog→done must be refused")

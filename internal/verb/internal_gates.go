@@ -11,7 +11,37 @@
 
 package verb
 
-import "embed"
+import (
+	"embed"
+	"io/fs"
+
+	substrate "github.com/bobmcallan/satellites/config"
+)
+
+// configSkillRaw returns the raw bytes of an embedded config/skills artifact
+// (the client binary's authored-process reviewer home) and true when one is
+// registered under that name. Unlike an internal gate, a config/skills reviewer
+// is EDITABLE substrate — the resolver consults a local .claude/skills override
+// BEFORE this embed (epic:system-substrate). The file carries its frontmatter
+// verbatim, the same shape the gate resolver parses.
+func configSkillRaw(name string) ([]byte, bool) {
+	raw, err := fs.ReadFile(substrate.FS, "skills/"+name+".md")
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+// IsConfigSkill reports whether name resolves to an embedded config/skills
+// reviewer shipped in the client binary (epic:system-substrate). Like
+// IsInternalGate it lets the process validators (workflow check, story
+// governance) treat a binary-resident gate as AVAILABLE rather than
+// missing/unresolvable — the dispatcher resolves it from the embed with no
+// server.
+func IsConfigSkill(name string) bool {
+	_, ok := configSkillRaw(name)
+	return ok
+}
 
 // internalGatesFS holds the embedded internal gate definitions. Each file is a
 // <name>.md SKILL with ordinary frontmatter (kind:reviewer, an optional

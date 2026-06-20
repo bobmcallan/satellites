@@ -430,11 +430,14 @@ func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding 
 // gates are covered, and its checkpoint-gate references resolve — exactly as a
 // kind:workflow skill was (epic:client-dir-separation order-2).
 func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []storyLite) []driftFinding {
-	// Default to embed-only gate resolution (verb.IsInternalGate): a named gate
-	// is available if materialised locally OR embedded in the binary. The command
-	// entry uses runWorkflowChecksResolved to add the server tier; the unit
-	// fixtures keep replaying this embed-only core.
-	return runWorkflowChecksResolved(skills, clientWorkflows, stories, verb.IsInternalGate)
+	// Default to embed-only gate resolution: a named gate is available if it is
+	// an internal spine gate (verb.IsInternalGate) OR a config/skills reviewer
+	// shipped in the client binary (verb.IsConfigSkill) — both resolve from the
+	// embed with no server (epic:system-substrate). The command entry uses
+	// runWorkflowChecksResolved to add the server tier; the unit fixtures keep
+	// replaying this embed-only core.
+	embedResolvable := func(g string) bool { return verb.IsInternalGate(g) || verb.IsConfigSkill(g) }
+	return runWorkflowChecksResolved(skills, clientWorkflows, stories, embedResolvable)
 }
 
 // runWorkflowChecksResolved is runWorkflowChecks with the gate-resolution

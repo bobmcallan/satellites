@@ -51,8 +51,11 @@ func serverHomedSeed(docType, name string, tags []string) bool {
 		return false // client-resolved gate reviewer — embed is the source
 	}
 	for _, t := range tags {
-		if t == "kind:contract" {
+		switch t {
+		case "kind:contract":
 			return false // client-embed authored contract (e.g. satellites_surface_contract)
+		case "kind:workflow":
+			return false // client-embed default workflow — init/rebase scaffold it from the embed
 		}
 	}
 	return true

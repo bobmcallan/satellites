@@ -163,6 +163,10 @@ func TestNamingConventionByType(t *testing.T) {
 			if !strings.HasPrefix(stem, "satellites_") {
 				t.Errorf("%s · MCP-service document must be named satellites_<snake> (constitution: Substrate naming)", path)
 			}
+		case "workflows":
+			if !strings.HasPrefix(stem, "satellites-") {
+				t.Errorf("%s · workflow must be named satellites-<kebab> (constitution: Substrate naming)", path)
+			}
 		case "documents":
 			raw, err := os.ReadFile(path)
 			if err != nil {
