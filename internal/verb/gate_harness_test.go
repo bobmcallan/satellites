@@ -29,7 +29,7 @@ func TestRunGateCheck_ExitCodes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			code, out := runGateCheck(context.Background(), root, c.check)
+			code, out := runGateCheck(context.Background(), root, c.check, nil)
 			if code != c.wantCode {
 				t.Fatalf("exit = %d, want %d (out=%q)", code, c.wantCode, out)
 			}
@@ -37,6 +37,20 @@ func TestRunGateCheck_ExitCodes(t *testing.T) {
 				t.Fatalf("out = %q, want %q", out, c.wantOut)
 			}
 		})
+	}
+}
+
+// TestRunGateCheck_EnvInjection pins that the story context is folded into the
+// check's environment, so a deterministic check (e.g. parent-close enumerating
+// children) can act on the story it is gating via $SATELLITES_STORY_ID.
+func TestRunGateCheck_EnvInjection(t *testing.T) {
+	code, out := runGateCheck(context.Background(), "", `echo "id=$SATELLITES_STORY_ID status=$SATELLITES_STORY_STATUS"`,
+		map[string]string{"SATELLITES_STORY_ID": "sty_abc123", "SATELLITES_STORY_STATUS": "backlog"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (out=%q)", code, out)
+	}
+	if out != "id=sty_abc123 status=backlog" {
+		t.Fatalf("out = %q, want injected story context", out)
 	}
 }
 

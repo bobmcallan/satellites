@@ -25,6 +25,7 @@ func init() {
 	story.AddCommand(newStoryReviewCmd(&configArg, &userArg))
 	story.AddCommand(newStorySetStatusCmd(&configArg, &userArg))
 	story.AddCommand(newStoryGetCmd(&configArg, &userArg))
+	story.AddCommand(newStoryChildrenCmd(&configArg, &userArg))
 
 	register(story)
 }

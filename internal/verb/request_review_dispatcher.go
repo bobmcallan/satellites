@@ -146,7 +146,12 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	// gate's context. The harness only RUNS it — the gate's body owns how the
 	// result combines with the LLM judgment.
 	if check := strings.TrimSpace(fm.Check); check != "" {
-		code, out := runGateCheck(ctx, in.WorktreeRoot, check)
+		code, out := runGateCheck(ctx, in.WorktreeRoot, check, map[string]string{
+			"SATELLITES_STORY_ID":     in.StoryID,
+			"SATELLITES_PROJECT_ID":   in.ProjectID,
+			"SATELLITES_WORKSPACE_ID": in.WorkspaceID,
+			"SATELLITES_STORY_STATUS": in.StoryStatus,
+		})
 		systemPrompt = appendFunctionalCheck(systemPrompt, check, code, out)
 	}
 
@@ -417,12 +422,21 @@ func GateResolvable(ctx context.Context, fetch GateBodyFetcher, worktreeRoot, sk
 // only RUNS the deterministic half; the gate's body owns how the result folds
 // into the verdict. A command that cannot start (or is killed) reports a
 // non-zero code so the gate never reads a failed check as a pass.
-func runGateCheck(ctx context.Context, worktreeRoot, check string) (int, string) {
+func runGateCheck(ctx context.Context, worktreeRoot, check string, env map[string]string) (int, string) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", check)
 	if strings.TrimSpace(worktreeRoot) != "" {
 		cmd.Dir = worktreeRoot
 	}
 	cmd.Env = os.Environ()
+	// Fold the story context into the check's environment so a deterministic
+	// check can act on the story it is gating — e.g. a parent-close check that
+	// enumerates the anchor's children via $SATELLITES_STORY_ID. Mechanism only:
+	// the harness supplies the context; the gate's check owns what it does with it.
+	for k, v := range env {
+		if strings.TrimSpace(v) != "" {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
