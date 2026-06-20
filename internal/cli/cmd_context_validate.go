@@ -149,7 +149,7 @@ func gatherCorpusFindings(ctx context.Context, opts contextValidateOpts, stderr 
 		return validateReport{}, nil, err
 	}
 
-	// Resolve gates the way the dispatcher does — embed → local → server
+	// Resolve gates the way the dispatcher does — local → embed → server
 	// (sty_f242eacf) — so a server-resolvable gate pruned from .claude/skills is
 	// not falsely flagged across the corpus.
 	fetch := serverGateFetcher(opts.ConfigPath, opts.UserArg)

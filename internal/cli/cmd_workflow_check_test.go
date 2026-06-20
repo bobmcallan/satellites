@@ -13,9 +13,9 @@ import (
 // no first-gate-shallow when it is the entry reviewer (epic:satellites-backbone
 // 2.4.1).
 func TestWorkflowCheck_InternalGateRecognised(t *testing.T) {
-	const internalGate = "satellites-internal-selfcheck" // embedded in internal/verb
-	if !verb.IsInternalGate(internalGate) {
-		t.Fatalf("precondition: %q must be an embedded internal gate", internalGate)
+	const internalGate = "satellites-selfcheck-review" // embedded in config/skills
+	if !verb.IsConfigSkill(internalGate) {
+		t.Fatalf("precondition: %q must be an embedded config/skills reviewer", internalGate)
 	}
 
 	// A workflow whose ENTRY reviewer and a CHECKPOINT gate are both the internal

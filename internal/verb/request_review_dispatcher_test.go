@@ -109,26 +109,24 @@ func writeLocalGate(t *testing.T, root, name, marker string) {
 	}
 }
 
-// TestResolveGate_EmbedWins pins the home-of-gate invariant in the resolution
-// chain (sty_b8de4776 AC5): a satellites-INTERNAL gate resolves from the binary
-// FIRST and never consults the worktree or the server, even when a same-named
-// local copy exists and a fetcher is wired. The fetcher fails the test if called.
-func TestResolveGate_EmbedWins(t *testing.T) {
+// TestResolveGate_LocalWinsOverEmbed pins the operator's local-WINS model
+// (epic:system-substrate): a config/skills reviewer is binary-resident, but a
+// same-named .claude/skills copy OVERRIDES the embed — the local copy resolves
+// FIRST, so it is returned and the server fetcher is never consulted (the local
+// hit short-circuits before any network). The fetcher fails the test if called.
+func TestResolveGate_LocalWinsOverEmbed(t *testing.T) {
 	root := t.TempDir()
-	writeLocalGate(t, root, "satellites-intent-plan-review", "LOCAL IMPOSTOR BODY")
+	writeLocalGate(t, root, "satellites-intent-plan-review", "LOCAL OVERRIDE BODY")
 	disp := ClaudeCLIGateDispatcher{Fetch: func(_ context.Context, name string) ([]byte, bool, error) {
-		t.Fatalf("server fetch must not be consulted for embedded gate %q", name)
+		t.Fatalf("server fetch must not be consulted when a local override resolves %q", name)
 		return nil, false, nil
 	}}
 	_, body, err := disp.resolveGate(context.Background(), root, "satellites-intent-plan-review")
 	if err != nil {
 		t.Fatalf("resolveGate: %v", err)
 	}
-	if strings.Contains(body, "IMPOSTOR") {
-		t.Fatalf("embedded gate must win over local copy; got worktree body: %q", body)
-	}
-	if !strings.Contains(body, "satellites-formatted") {
-		t.Fatalf("expected embedded intent-plan-review rubric, got: %q", body)
+	if !strings.Contains(body, "OVERRIDE") {
+		t.Fatalf("local .claude/skills copy must WIN over the embed (local-WINS); got: %q", body)
 	}
 }
 

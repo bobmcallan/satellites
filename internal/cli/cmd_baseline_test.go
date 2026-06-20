@@ -78,14 +78,13 @@ func TestBaselineWorkflowDoc(t *testing.T) {
 	if !exitGated {
 		t.Errorf("baseline exit in_progress→done must be gated by satellites-story-done-review (epic:system-substrate)")
 	}
-	// The entry gate is an embedded internal gate; the exit gate is a
-	// binary-resident config/skills reviewer — both run in a clean repo with no
-	// materialised skills (resolved from the embed).
-	if !verb.IsInternalGate("satellites-intent-plan-review") {
-		t.Errorf("the baseline's entry gate must be an embedded internal gate")
+	// Entry and exit reviewers are both binary-resident config/skills reviewers —
+	// they run in a clean repo with no materialised skills (resolved from the embed).
+	if !verb.IsConfigSkill("satellites-intent-plan-review") {
+		t.Errorf("the baseline's entry reviewer must be a binary-resident config/skills reviewer")
 	}
 	if !verb.IsConfigSkill("satellites-story-done-review") {
-		t.Errorf("the baseline's exit gate must be a binary-resident config/skills reviewer")
+		t.Errorf("the baseline's exit reviewer must be a binary-resident config/skills reviewer")
 	}
 	if !baselineHasEdge(wf, "backlog", "in_progress") || !baselineHasEdge(wf, "in_progress", "done") {
 		t.Errorf("baseline missing the backlog→in_progress→done lifecycle edges")

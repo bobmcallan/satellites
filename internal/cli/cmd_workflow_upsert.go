@@ -143,7 +143,7 @@ func newWorkflowValidateCmd(configArg, userArg *string) *cobra.Command {
 // reused in the same shape by the upsert pre-filter and the drive-time gate.
 func reportWorkflowRefs(out io.Writer, label string, findings []reviewFinding) error {
 	if len(findings) == 0 {
-		fmt.Fprintf(out, "%s: every reviewer_skill and [[wikilink]] resolves (embed → local → server)\n", label)
+		fmt.Fprintf(out, "%s: every reviewer_skill and [[wikilink]] resolves (local → embed → server)\n", label)
 		return nil
 	}
 	fmt.Fprintf(out, "%s — %d unresolved reference(s):\n", label, len(findings))

@@ -127,10 +127,11 @@ var wikilinkRefPattern = regexp.MustCompile(`\[\[([a-z0-9-]+)\]\]`)
 // only resolves [[..]] inside a `## Checkpoint gates` section, never prose
 // wikilinks like the deleted [[satellites-commit-push]] capability.
 //
-// resolveSkill folds the dispatcher's embed→local→server gate resolution
-// (verb.GateResolvable / verb.IsInternalGate) so an embedded internal gate such
-// as satellites-intent-plan-review — named by every repo's entry edge but never
-// materialised — is correctly AVAILABLE, not a false positive. resolveDoc
+// resolveSkill folds the dispatcher's local→embed→server reviewer resolution
+// (verb.GateResolvable / verb.IsConfigSkill) so a config/skills embedded
+// reviewer such as satellites-intent-plan-review — named by every repo's entry
+// edge but resolved from the binary embed — is correctly AVAILABLE, not a false
+// positive. resolveDoc
 // resolves a substrate document/principle by bare name through the scope cascade
 // (a [[wikilink]] may point at a principle like [[reviewer-only-model]], not a
 // skill). A reference resolving as EITHER is fine; one resolving as neither is

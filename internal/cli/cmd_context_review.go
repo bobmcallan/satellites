@@ -153,7 +153,7 @@ func runContextReview(ctx context.Context, storyID, configPath, userArg string, 
 // reviewContextConflicts is the pure structural check — parse the story's
 // ## Workflow, validate its lifecycle (reusing sty_1604064f), and cross-check
 // each transition's reviewer_skill against gateResolvable. The predicate folds
-// the dispatcher's full embed → local → server resolution (sty_f242eacf), so a
+// the dispatcher's full local → embed → server resolution (sty_f242eacf), so a
 // gate it resolves is never flagged. Pure over its inputs so it is unit-testable
 // without dispatch or the filesystem.
 func reviewContextConflicts(storyBody string, gateResolvable func(string) bool) []conflictFinding {

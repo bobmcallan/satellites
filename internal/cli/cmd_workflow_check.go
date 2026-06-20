@@ -192,11 +192,11 @@ func checkGateCoverage(skills []matSkill, wfs map[string]*workflow.Workflow, gat
 		}
 	}
 	for g := range named {
-		// A gate the dispatcher can resolve is AVAILABLE even when not
-		// materialised to .claude/skills: an internal embedded gate (satellites'
-		// own governance, injected from the binary) OR a substrate gate fetched
-		// from the server (sty_f242eacf). gateResolvable folds both; only a gate
-		// that resolves from NO tier is a missing gate (2.4.1).
+		// A reviewer the dispatcher can resolve is AVAILABLE even when not
+		// materialised to .claude/skills: a config/skills reviewer embedded in the
+		// client binary (epic:system-substrate) OR a substrate reviewer fetched
+		// from the server (sty_f242eacf). gateResolvable folds both; only a
+		// reviewer that resolves from NO tier is a missing gate.
 		if _, ok := byName[g]; !ok && !gateResolvable(g) {
 			out = append(out, driftFinding{"block", "missing-gate", g,
 				"a workflow names this reviewer skill but it resolves from no source — not embedded, not in .claude/skills, not on the server — its transition fails closed"})
@@ -430,21 +430,20 @@ func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding 
 // gates are covered, and its checkpoint-gate references resolve — exactly as a
 // kind:workflow skill was (epic:client-dir-separation order-2).
 func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []storyLite) []driftFinding {
-	// Default to embed-only gate resolution: a named gate is available if it is
-	// an internal spine gate (verb.IsInternalGate) OR a config/skills reviewer
-	// shipped in the client binary (verb.IsConfigSkill) — both resolve from the
-	// embed with no server (epic:system-substrate). The command entry uses
-	// runWorkflowChecksResolved to add the server tier; the unit fixtures keep
-	// replaying this embed-only core.
-	embedResolvable := func(g string) bool { return verb.IsInternalGate(g) || verb.IsConfigSkill(g) }
-	return runWorkflowChecksResolved(skills, clientWorkflows, stories, embedResolvable)
+	// Default to embed-only reviewer resolution: a named reviewer is available
+	// when it is a config/skills reviewer shipped in the client binary
+	// (verb.IsConfigSkill) — it resolves from the embed with no server
+	// (epic:system-substrate). The command entry uses runWorkflowChecksResolved
+	// to add the server tier; the unit fixtures keep replaying this embed-only
+	// core.
+	return runWorkflowChecksResolved(skills, clientWorkflows, stories, verb.IsConfigSkill)
 }
 
 // runWorkflowChecksResolved is runWorkflowChecks with the gate-resolution
 // predicate injected. gateResolvable reports whether a NAMED reviewer gate
 // resolves from a source beyond the materialised set — embedded, or (in prod)
 // the server (sty_f242eacf) — so the gate-coverage and story-governance checks
-// agree with the dispatcher's embed → local → server resolution and do not flag
+// agree with the dispatcher's local → embed → server resolution and do not flag
 // a gate the dispatcher can run.
 func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, stories []storyLite, gateResolvable func(string) bool) []driftFinding {
 	wfBearing := append(append([]matSkill{}, skills...), clientWorkflows...)
@@ -455,7 +454,6 @@ func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, st
 	out = append(out, checkAmbiguousGovernance(wfs)...)
 	out = append(out, checkGateCoverage(wfBearing, wfs, gateResolvable)...)
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
-	out = append(out, checkGateHomeFork(skills)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
 	out = append(out, checkStoryGovernance(stories, wfBearing, wfs, gateResolvable)...)
@@ -463,24 +461,13 @@ func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, st
 	return out
 }
 
-// checkGateHomeFork enforces the home-of-gate invariant (epic:minimal-spine
-// order-8): a gate resolves from EXACTLY one home — the embedded spine OR the
-// materialised .claude/skills, never both. A name that is both embedded
-// (verb.IsInternalGate) and materialised is a divergent shadow: the dispatcher
-// resolves the embedded copy first, so the materialised one is silently dead.
-// This is a structural wiring invariant, like orphan-gate / missing-gate — no
-// allowlist, just one-home-per-gate. Fail closed on any fork so the "fork the
-// source of truth" failure cannot silently return.
-func checkGateHomeFork(skills []matSkill) []driftFinding {
-	var out []driftFinding
-	for _, s := range skills {
-		if verb.IsInternalGate(s.name) {
-			out = append(out, driftFinding{"block", "gate-home-fork", s.name,
-				fmt.Sprintf("gate %q is BOTH embedded in the binary and materialised in .claude/skills — the dispatcher resolves the embedded copy first, so the materialised one is a dead, divergent shadow. Give it ONE home: an embedded spine gate must be removed from .satellites/skills and the server (so it resolves only from the embed); a substrate gate must not be embedded.", s.name)})
-		}
-	}
-	return out
-}
+// checkGateHomeFork was RETIRED (epic:system-substrate): it enforced that a
+// reviewer resolves from EXACTLY one home, on the premise that an embedded gate
+// wins over a materialised .claude/skills copy (so a materialised copy of an
+// embedded gate was a dead shadow). Under the operator's local-WINS model the
+// .claude/skills copy WINS — a materialised copy of an embedded config/skills
+// reviewer is a deliberate, live OVERRIDE, not a dead shadow — so the fork
+// invariant no longer holds and the check is removed.
 
 // listProjectStories pulls the repo project's stories (id, category, status,
 // body) for the governance check; an unconfigured repo yields none.

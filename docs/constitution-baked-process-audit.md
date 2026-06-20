@@ -34,6 +34,13 @@ smallest possible internal spine:
 
 ## 1. Embedded gates — `internal/verb/internalgates/`
 
+> **RETIRED (epic:system-substrate).** `internal/verb/internalgates/` and the
+> `IsInternalGate`/"gate" mechanism are gone: the reviewers moved to
+> `config/skills/` (`satellites-intent-plan-review`, `satellites-selfcheck-review`)
+> and resolve from the config/skills binary embed via `configSkillRaw`. There is
+> no protected embed-wins home — a repo's `.claude/skills/<name>` overrides the
+> default (operator local-WINS). The section below is the pre-refactor record.
+
 `internal/verb/internal_gates.go:21` — `//go:embed internalgates/*.md`. Resolved
 by `internalGateRaw` / `resolveGateSkill` BEFORE the worktree, so the embedded
 copy wins and is never materialised to `.claude/skills/`.

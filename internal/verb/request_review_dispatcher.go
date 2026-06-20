@@ -359,25 +359,20 @@ func resolveSkillEmbedLocalServer(ctx context.Context, fetch GateBodyFetcher, wo
 	return pfm, string(pbody), nil
 }
 
-// resolveGateSkill returns a gate's parsed frontmatter and its body (with
-// frontmatter stripped) — the rubric delivered as the system prompt. A
-// satellites-INTERNAL gate (embedded in the binary) is resolved FIRST and wins
-// over any worktree copy: its governance ships protected and a user editing
-// `.claude/skills/<name>` cannot alter it (epic:satellites-backbone 2.2).
-// Otherwise the gate is read from the worktree
-// (.claude/skills/<name>/SKILL.md); an absent skill returns errGateSkillAbsent
-// so the dispatcher's resolveGate can fall through to the server fetch
-// (sty_b8de4776). This function itself stops at embed → local; it is the
-// embed+cache half the server step builds on (and the form callers/tests that
-// need no server still use).
+// resolveGateSkill returns a reviewer's parsed frontmatter and its body (with
+// frontmatter stripped) — the rubric delivered as the system prompt. Per the
+// operator's local-WINS model (epic:system-substrate) the worktree copy
+// (.claude/skills/<name>/SKILL.md) is consulted FIRST so a repo may override the
+// default; otherwise the reviewer resolves from the config/skills binary embed.
+// An absent reviewer returns errGateSkillAbsent so the dispatcher's resolveGate
+// can fall through to the server fetch (sty_b8de4776). This function itself stops
+// at local → embed; it is the local+embed half the server step builds on (and
+// the form callers/tests that need no server still use).
 func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, string, error) {
-	if raw, ok := internalGateRaw(skillName); ok {
-		fm, body, err := frontmatter.Parse(raw)
-		if err != nil {
-			return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: parse internal gate %q: %w", skillName, err)
-		}
-		return fm, string(body), nil
-	}
+	// LOCAL override wins (epic:system-substrate, operator local-WINS decision):
+	// a repo's .claude/skills/<name> is consulted FIRST so it overrides the
+	// embedded default. There is no protected internal-gate home — every system
+	// reviewer is editable substrate.
 	root := worktreeRoot
 	if strings.TrimSpace(root) == "" {
 		root = "."
@@ -394,11 +389,9 @@ func resolveGateSkill(worktreeRoot, skillName string) (frontmatter.Frontmatter, 
 	if !errors.Is(err, os.ErrNotExist) {
 		return frontmatter.Frontmatter{}, "", fmt.Errorf("gate dispatch: read gate skill %q at %s: %w", skillName, path, err)
 	}
-	// No local materialised override — fall back to the config/skills embed
-	// shipped in the client binary (epic:system-substrate). This is the home
-	// that makes a default reviewer binary-resident: a gate resolves with no
-	// server and no .claude/skills, while a local override (handled above)
-	// still wins over the embedded default.
+	// No local override — resolve from the config/skills embed shipped in the
+	// client binary. This is the home that makes a default reviewer
+	// binary-resident: it resolves with no server and no .claude/skills.
 	if eraw, ok := configSkillRaw(skillName); ok {
 		fm, body, perr := frontmatter.Parse(eraw)
 		if perr != nil {

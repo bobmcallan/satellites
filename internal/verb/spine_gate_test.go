@@ -11,9 +11,9 @@ import (
 // It is load-bearing on the reduction — if the gate ever reverts to deciding
 // config-over-code, this test fails.
 func TestIntentPlanReviewReducedToFormatGoal(t *testing.T) {
-	raw, ok := internalGateRaw("satellites-intent-plan-review")
+	raw, ok := configSkillRaw("satellites-intent-plan-review")
 	if !ok {
-		t.Fatal("satellites-intent-plan-review must remain embedded (the spine plan gate)")
+		t.Fatal("satellites-intent-plan-review must remain embedded in config/skills (the spine plan reviewer)")
 	}
 	body := string(raw)
 
