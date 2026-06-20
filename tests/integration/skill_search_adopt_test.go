@@ -95,10 +95,10 @@ func TestSkillSearchAdopt(t *testing.T) {
 	}
 	publish("proj_secteam",
 		"security team's vulnerability scanner",
-		"---\nname: sec-scan\ndescription: Run the vulnerability scan before release.\nkind: capability\n---\n<!-- satellites-library:begin {\"publisher\":\"proj_secteam\",\"repo\":\"https://github.com/example/sec.git\",\"commit\":\"aaa111\"} satellites-library:end -->\n\n# Sec scan\n\nScan, then triage.\n")
+		"---\nname: sec-scan\ndescription: Run the vulnerability scan before release.\nkind: function\n---\n<!-- satellites-library:begin {\"publisher\":\"proj_secteam\",\"repo\":\"https://github.com/example/sec.git\",\"commit\":\"aaa111\"} satellites-library:end -->\n\n# Sec scan\n\nScan, then triage.\n")
 	publish("proj_devops",
 		"devops flavoured scanner",
-		"---\nname: sec-scan\ndescription: Pipeline-stage vulnerability scanning.\nkind: capability\n---\n\n# Sec scan (devops)\n\nScan in CI.\n")
+		"---\nname: sec-scan\ndescription: Pipeline-stage vulnerability scanning.\nkind: function\n---\n\n# Sec scan (devops)\n\nScan in CI.\n")
 
 	// Consumer repo + headless credentials (API key bound to the consumer
 	// project, credential store, satellites.toml).
