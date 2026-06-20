@@ -29,7 +29,7 @@ import (
 	"io/fs"
 )
 
-//go:embed documents/*.md principles/*.md skills/*.md
+//go:embed documents/*.md principles/*.md skills/*.md mcp/*.md
 var FS embed.FS
 
 // MCPLoadContextMarkdown returns the raw MCP load-context artifact
@@ -37,21 +37,26 @@ var FS embed.FS
 // `initialize`. Held to the mcp_instructions_budget_bytes system
 // variable; reference material lives in the separate
 // satellites_mcp_reference_* artifacts which agents fetch on demand.
+// Homed under mcp/ — the MCP-service substrate the server embeds and
+// serves (epic:system-substrate); the authored-process substrate
+// (skills/principles/documents) is the client binary's concern.
 func MCPLoadContextMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "documents/satellites_mcp_load_context.md")
+	b, err := fs.ReadFile(FS, "mcp/satellites_mcp_load_context.md")
 	if err != nil {
 		// The file is embedded at compile time — a missing read is a
 		// build-time integrity break, not a runtime fallback.
-		panic("substrate: documents/satellites_mcp_load_context.md missing from embed.FS: " + err.Error())
+		panic("substrate: mcp/satellites_mcp_load_context.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }
 
 // ClientInstallMarkdown returns the raw install-schema artifact bytes.
+// Homed under mcp/ as satellites_mcp_install — a CLI-less MCP client
+// fetches it from the MCP service (epic:system-substrate).
 func ClientInstallMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "documents/satellites_client_install.md")
+	b, err := fs.ReadFile(FS, "mcp/satellites_mcp_install.md")
 	if err != nil {
-		panic("substrate: documents/satellites_client_install.md missing from embed.FS: " + err.Error())
+		panic("substrate: mcp/satellites_mcp_install.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }

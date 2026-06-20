@@ -42,7 +42,7 @@ func TestMCPCutover(t *testing.T) {
 		verb.SetSystemVariableResolver(nil, nil)
 	})
 
-	if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(substrate.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
+	if err := document.SeedSystem(context.Background(), docStore, "satellites_mcp_install", string(substrate.ClientInstallMarkdown()), "system:seed", time.Now()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestMCPCutover(t *testing.T) {
 
 	t.Run("agent's document_get call returns a usable install schema", func(t *testing.T) {
 		raw, err := verb.Dispatch(context.Background(), "document_get", json.RawMessage(
-			`{"name":"satellites_client_install","scope":"system","os":"linux","arch":"amd64","current_version":""}`,
+			`{"name":"satellites_mcp_install","scope":"system","os":"linux","arch":"amd64","current_version":""}`,
 		))
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)
@@ -145,16 +145,16 @@ func TestMCPCutover(t *testing.T) {
 		if err != nil {
 			t.Fatalf("frontmatter parse: %v", err)
 		}
-		if fm.Name != "satellites_client_install" || fm.Scope != "system" {
+		if fm.Name != "satellites_mcp_install" || fm.Scope != "system" {
 			t.Fatalf("frontmatter identity wrong: name=%q scope=%q", fm.Name, fm.Scope)
 		}
 		// Re-seed with body only (production behaviour) so the next
 		// dispatch reads the same row a freshly-booted server would.
-		if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", string(body), "system:seed", time.Now()); err != nil {
+		if err := document.SeedSystem(context.Background(), docStore, "satellites_mcp_install", string(body), "system:seed", time.Now()); err != nil {
 			t.Fatalf("seed body-only: %v", err)
 		}
 		dispatched, err := verb.Dispatch(context.Background(), "document_get", json.RawMessage(
-			`{"name":"satellites_client_install","scope":"system","os":"linux","arch":"amd64","current_version":""}`,
+			`{"name":"satellites_mcp_install","scope":"system","os":"linux","arch":"amd64","current_version":""}`,
 		))
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)

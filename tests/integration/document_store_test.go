@@ -57,7 +57,7 @@ func TestDocumentStore(t *testing.T) {
 	t.Run("system scope accepts writes via internal seed", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 		doc, v, err := store.Upsert(ctx, document.UpsertInput{
-			Key:                document.Key{Scope: document.ScopeSystem, Name: "satellites_client_install"},
+			Key:                document.Key{Scope: document.ScopeSystem, Name: "satellites_mcp_install"},
 			Body:               "seeded body",
 			SystemWriteAllowed: true,
 			CreatedBy:          "system:seed",

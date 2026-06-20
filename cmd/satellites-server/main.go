@@ -39,6 +39,25 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// serverHomedSeed decides whether an embedded config/ artifact is the
+// SERVER's to mirror into the system documents table, or the CLIENT
+// binary's own concern (epic:system-substrate). The server keeps the
+// MCP-service docs (mcp/), principles, the server-machinery docs, and
+// the summariser reviewer it runs; it drops the gate reviewers
+// (named *-review) and the authored kind:contract docs, both of which
+// resolve client-side from the binary embed.
+func serverHomedSeed(docType, name string, tags []string) bool {
+	if docType == document.TypeSkill && strings.HasSuffix(name, "-review") {
+		return false // client-resolved gate reviewer — embed is the source
+	}
+	for _, t := range tags {
+		if t == "kind:contract" {
+			return false // client-embed authored contract (e.g. satellites_surface_contract)
+		}
+	}
+	return true
+}
+
 func main() {
 	// Single flag — points at the TOML config file. Defaults in code,
 	// file overrides defaults, env overrides file. Anything operators
@@ -158,6 +177,22 @@ func main() {
 		docType := fm.Type
 		if docType == "" {
 			docType = document.TypeDocument
+		}
+		// epic:system-substrate — the server no longer mirrors the
+		// client's authored-process GATE substrate into system rows. A
+		// reviewer gate (named *-review) resolves client-side from the
+		// binary embed (embed → .claude/skills → server fallback), so a
+		// duplicate server row is dead weight; omitting it from `keep`
+		// lets the prune pass below tombstone any that linger. What STAYS
+		// server-homed: the MCP-service docs under mcp/, principles
+		// (served to CLI-less MCP clients), the server-machinery docs
+		// (agent-operating-prompt / system_variables), and the summariser
+		// reviewer satellites-story-summary, which the summary hook runs
+		// from the boot-loaded registry. The kind:contract authored docs
+		// (e.g. satellites_surface_contract) are client-embed only.
+		if !serverHomedSeed(docType, name, fm.Tags) {
+			arbor.Info("system seed skipped (client-homed authored substrate)", "name", name)
+			continue
 		}
 		// Skills preserve their frontmatter in the stored body so the
 		// document mirror is byte-identical to the SKILL.md a client

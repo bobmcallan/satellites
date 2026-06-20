@@ -37,8 +37,9 @@ name alone:
 - **Principles** — kebab-case, NO prefix (`broken-windows`, `agent-goals`).
 - **Skills / capabilities** — `satellites-<kebab>` (`satellites-skill-review`);
   reviewer gates are `satellites-<object>-<stage>-review`.
-- **MCP / install SCHEMA docs** — `satellites_<snake>` (`satellites_client_install`,
-  `satellites_mcp_load_context`): the machinery a client consumes verbatim.
+- **MCP / install SCHEMA docs** — `satellites_<snake>` (`satellites_mcp_install`,
+  `satellites_mcp_load_context`): the machinery a client consumes verbatim. These
+  live in `config/mcp/` — the MCP-service home (see "System scope: three homes").
 - **Standalone taxonomy / config docs** keep bare names (`system_variables`,
   `agent-operating-prompt`) — the `satellites_` prefix marks SCHEMA machinery, not
   every document.
@@ -46,5 +47,27 @@ name alone:
 The `satellites-` skill prefix is also enforced in code (skill sync's
 localSkillName, the config embed guard); this section is the authored intent the
 gates read.
+
+## System scope: three homes
+
+`scope:system` is not one lane — it splits by OWNER into three homes, so a
+duplicated row never competes with the authoritative source:
+
+- **Authored PROCESS substrate** (skills, principles, workflows, process docs) →
+  the CLIENT binary embed (`config/{skills,principles,documents}`), resolved
+  locally. A reviewer gate resolves embed-first, so the server holds no duplicate;
+  the boot reconcile does not mirror `*-review` gates or `kind:contract` docs, and
+  the prune pass tombstones any that linger.
+- **MCP-service docs** (`config/mcp/` — init, on-demand reference, install) → the
+  MCP SERVICE (server) embed, served to clients via `document_get`. NOT the client
+  binary's concern.
+- **Changelog** (`type:changelog`) → the server release-record lane.
+
+The server's only sanctioned system WRITERS are the MCP-doc seed (`config/mcp`)
+and the changelog lane; the client/authored upload path refuses `scope:system`.
+Server-machinery docs the runtime reads (`agent-operating-prompt`,
+`system_variables`) and the summariser reviewer (`satellites-story-summary`, run
+by the summary hook) stay server-homed; principles stay server-served so a
+CLI-less MCP client can fetch them.
 
 See [[process-as-configuration]], [[agent-goals]], [[reviewer-only-model]].

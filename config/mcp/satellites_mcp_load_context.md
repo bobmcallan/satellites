@@ -18,7 +18,7 @@ Fetch everything else only when a task needs it — **do not preload.**
 
 ## First-time setup (once per repo)
 
-`document_get {name:"satellites_client_install", scope:"system", os, arch, current_version}`
+`document_get {name:"satellites_mcp_install", scope:"system", os, arch, current_version}`
 and follow it — install, auth, TOML, `project_match`.
 
 ## Session start

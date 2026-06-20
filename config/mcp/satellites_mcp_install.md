@@ -1,5 +1,5 @@
 ---
-name: satellites_client_install
+name: satellites_mcp_install
 scope: system
 tags: [kind:install-schema, v2]
 ---

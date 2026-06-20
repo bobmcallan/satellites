@@ -59,10 +59,10 @@ func TestDocumentGet(t *testing.T) {
 	t.Run("seeded install schema is byte-equivalent to embedded source", func(t *testing.T) {
 		testbootstrap.Reset(t, env)
 		body := string(substrate.ClientInstallMarkdown())
-		if err := document.SeedSystem(context.Background(), docStore, "satellites_client_install", body, "system:seed", time.Now()); err != nil {
+		if err := document.SeedSystem(context.Background(), docStore, "satellites_mcp_install", body, "system:seed", time.Now()); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		req := `{"name":"satellites_client_install","scope":"system"}`
+		req := `{"name":"satellites_mcp_install","scope":"system"}`
 		raw, err := verb.Dispatch(ctxAdmin, "document_get", json.RawMessage(req))
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)
