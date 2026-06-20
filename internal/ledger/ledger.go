@@ -25,8 +25,14 @@ import (
 // layer emits. Operators can append entries of any kind via
 // ledger_append; these are the names the substrate itself uses.
 const (
-	KindStoryCreated   = "story_created"
-	KindStoryUpdated   = "story_updated"
+	KindStoryCreated = "story_created"
+	KindStoryUpdated = "story_updated"
+	// KindTaskCreated / KindTaskUpdated mark the lifecycle of a top-level
+	// project task (type:task, tsk_; epic:project-tasks). Tasks share the
+	// ledger primitive with stories but fire their own kinds — they do NOT
+	// emit the story reviewer/summary signals.
+	KindTaskCreated    = "task_created"
+	KindTaskUpdated    = "task_updated"
 	KindReviewFinding  = "review_finding"
 	KindSummaryUpdated = "summary_updated"
 	KindComment        = "comment"

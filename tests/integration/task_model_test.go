@@ -26,7 +26,9 @@ import (
 //   - migration 0018's type CHECK relaxation (else the insert fails)
 //   - createTask path in verb.invokeDocumentUpsert
 //   - document_list type='task' filter
-//   - parent_id semantic constraint (task can only hang off a story)
+//   - parent_id semantic constraint (when SET, a task hangs off a story)
+//   - parent_id OPTIONAL (epic:project-tasks): a top-level task with no
+//     parent, defaulting to status='ready'; and id-addressed task patch
 func TestTaskModel(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 	testbootstrap.Reset(t, env)
@@ -177,15 +179,52 @@ func TestTaskModel(t *testing.T) {
 		t.Errorf("error %q should mention parent-must-be-story constraint", err.Error())
 	}
 
-	// Missing parent_id rejected at the verb layer.
-	noParentReq, _ := json.Marshal(verb.DocumentUpsertRequest{
+	// Parent OPTIONAL (epic:project-tasks): a task with no parent_id is a
+	// top-level project object — it is created, minted tsk_, defaults to
+	// status='ready', and carries no parent.
+	topReq, _ := json.Marshal(verb.DocumentUpsertRequest{
 		Type:      "task",
 		ProjectID: pj.ID,
-		Name:      "task without parent",
+		Name:      "top-level secrets scan",
 	})
-	if _, err := verb.Dispatch(ctx, "document_upsert", noParentReq); err == nil {
-		t.Error("creating a task without parent_id should fail; got nil error")
-	} else if !strings.Contains(err.Error(), "parent_id") {
-		t.Errorf("error %q should mention parent_id requirement", err.Error())
+	topRaw, err := verb.Dispatch(ctx, "document_upsert", topReq)
+	if err != nil {
+		t.Fatalf("creating a top-level task (no parent) should succeed: %v", err)
+	}
+	var top verb.DocumentUpsertResponse
+	if err := json.Unmarshal(topRaw, &top); err != nil {
+		t.Fatalf("decode top-level task: %v", err)
+	}
+	if !strings.HasPrefix(top.Document.ID, "tsk_") {
+		t.Errorf("top-level task id %q does not start with tsk_", top.Document.ID)
+	}
+	if top.Document.ParentID != "" {
+		t.Errorf("top-level task parent_id = %q, want empty", top.Document.ParentID)
+	}
+	if top.Document.Status != "ready" {
+		t.Errorf("top-level task default status = %q, want ready", top.Document.Status)
+	}
+
+	// Id-addressed task patch: document_upsert with the task's id appends a new
+	// version and updates fields (the upsertTaskByID path).
+	newTitle := "top-level secrets scan (renamed)"
+	patchReq, _ := json.Marshal(verb.DocumentUpsertRequest{
+		ID:   top.Document.ID,
+		Name: newTitle,
+		Body: "scan the tracked files for committed secrets",
+	})
+	patchRaw, err := verb.Dispatch(ctx, "document_upsert", patchReq)
+	if err != nil {
+		t.Fatalf("patching a task by id should succeed: %v", err)
+	}
+	var patched verb.DocumentUpsertResponse
+	if err := json.Unmarshal(patchRaw, &patched); err != nil {
+		t.Fatalf("decode patched task: %v", err)
+	}
+	if patched.Document.Name != newTitle {
+		t.Errorf("patched task title = %q, want %q", patched.Document.Name, newTitle)
+	}
+	if patched.Document.LatestVersion < 2 {
+		t.Errorf("patched task latest_version = %d, want >= 2", patched.Document.LatestVersion)
 	}
 }

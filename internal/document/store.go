@@ -283,8 +283,11 @@ func (s *Store) UpdateStory(ctx context.Context, id string, patch UpdateStoryPat
 	if err != nil {
 		return Document{}, err
 	}
-	if doc.Type != TypeStory {
-		return Document{}, fmt.Errorf("document: %s is not a story", id)
+	// Stories and top-level tasks (epic:project-tasks) share this id-addressed
+	// patch path — both are documents-table rows with a versioned body. The
+	// caller (upsertByID) routes the type-specific after-hooks.
+	if doc.Type != TypeStory && doc.Type != TypeTask {
+		return Document{}, fmt.Errorf("document: %s is not a story or task", id)
 	}
 
 	if patch.Title != nil {
@@ -1249,12 +1252,14 @@ func newTaskID() string {
 }
 
 // CreateTaskInput is the write payload for CreateTask. ParentID is
-// required — every task belongs to a story. Optional fields fall back
-// to substrate defaults: status='planned', priority='medium', tags=[].
+// OPTIONAL (epic:project-tasks) — a task is a top-level project object, a
+// peer to stories; when set it must reference a type='story' row in the
+// same project (the legacy subtask shape). Optional fields fall back to
+// substrate defaults: status='ready', priority='medium', tags=[].
 type CreateTaskInput struct {
 	ProjectID   string
 	WorkspaceID string
-	ParentID    string // must reference a type='story' row
+	ParentID    string // optional; when set, must reference a type='story' row
 	Title       string
 	Body        string
 	Status      string
@@ -1264,7 +1269,8 @@ type CreateTaskInput struct {
 }
 
 // CreateTask inserts a new type='task' documents row plus its v1
-// document_versions body. The parent story is verified inside the same
+// document_versions body. A task is a top-level project object; ParentID is
+// optional. When a parent IS supplied it is verified inside the same
 // transaction so a deleted story can't orphan tasks via a TOCTOU race.
 func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Time) (Document, error) {
 	if in.ProjectID == "" {
@@ -1273,14 +1279,11 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Tim
 	if in.WorkspaceID == "" {
 		return Document{}, fmt.Errorf("document: workspace_id required")
 	}
-	if in.ParentID == "" {
-		return Document{}, fmt.Errorf("document: parent_id required for task")
-	}
 	if in.Title == "" {
 		return Document{}, fmt.Errorf("document: title required")
 	}
 	if in.Status == "" {
-		in.Status = "planned"
+		in.Status = "ready"
 	}
 	if in.Priority == "" {
 		in.Priority = "medium"
@@ -1297,24 +1300,27 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Tim
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Verify parent is a story under the same project — a task can't
-	// belong to a document, another task, or a story in a different
-	// project. The DB-level parent_id FK only checks the row exists;
-	// this query enforces the semantic constraint.
-	var parentType, parentProjectID string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT type, COALESCE(project_id,'') FROM documents WHERE id = $1`, in.ParentID,
-	).Scan(&parentType, &parentProjectID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Document{}, fmt.Errorf("document: parent_id %q not found: %w", in.ParentID, ErrNotFound)
+	// When a parent IS supplied, verify it is a story under the same project —
+	// a task can't belong to a document, another task, or a story in a
+	// different project. The DB-level parent_id FK only checks the row exists;
+	// this query enforces the semantic constraint. A parentless task is a
+	// top-level project object and skips this check (epic:project-tasks).
+	if in.ParentID != "" {
+		var parentType, parentProjectID string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT type, COALESCE(project_id,'') FROM documents WHERE id = $1`, in.ParentID,
+		).Scan(&parentType, &parentProjectID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return Document{}, fmt.Errorf("document: parent_id %q not found: %w", in.ParentID, ErrNotFound)
+			}
+			return Document{}, fmt.Errorf("document: parent lookup: %w", err)
 		}
-		return Document{}, fmt.Errorf("document: parent lookup: %w", err)
-	}
-	if parentType != TypeStory {
-		return Document{}, fmt.Errorf("document: task parent must be a story, got type=%s", parentType)
-	}
-	if parentProjectID != in.ProjectID {
-		return Document{}, fmt.Errorf("document: task project_id must match parent story project_id")
+		if parentType != TypeStory {
+			return Document{}, fmt.Errorf("document: task parent must be a story, got type=%s", parentType)
+		}
+		if parentProjectID != in.ProjectID {
+			return Document{}, fmt.Errorf("document: task project_id must match parent story project_id")
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -1326,7 +1332,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Tim
                 'task', $5, $6, $7, $8,
                 $9, $9)
     `, id, in.WorkspaceID, in.ProjectID, in.Title,
-		pq.Array(in.Tags), in.Status, in.Priority, in.ParentID,
+		pq.Array(in.Tags), in.Status, in.Priority, nullStr(in.ParentID),
 		now); err != nil {
 		return Document{}, fmt.Errorf("document: insert task: %w", err)
 	}

@@ -911,7 +911,8 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	}
 
 	// Mode 2b: create a new task. Always id-less; tasks are minted with
-	// a fresh tsk_<id>. parent_id is required and must reference a story.
+	// a fresh tsk_<id>. parent_id is optional (a top-level project object);
+	// when set it must reference a story (epic:project-tasks).
 	if req.Type == document.TypeTask {
 		return createTask(ctx, req)
 	}
@@ -1067,19 +1068,16 @@ func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessag
 }
 
 // createTask is the document_upsert path for {type:"task"} with no id.
-// Tasks are project-scoped + parent-required; the parent must be a
-// type='story' row in the same project. Tasks share the document_versions
-// body channel but don't fire the story reviewer/ledger/summary hooks —
-// those are story-specific signals.
+// A task is a top-level project object (epic:project-tasks); parent_id is
+// OPTIONAL — when set it must be a type='story' row in the same project.
+// Tasks share the document_versions body channel but fire only their own
+// task ledger hook, NOT the story reviewer/summary signals.
 func createTask(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage, error) {
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return nil, fmt.Errorf("document_upsert: %w: project_id required for type=task", ErrBadRequest)
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return nil, fmt.Errorf("document_upsert: %w: name (title) required for type=task", ErrBadRequest)
-	}
-	if strDeref(req.ParentID) == "" {
-		return nil, fmt.Errorf("document_upsert: %w: parent_id required for type=task", ErrBadRequest)
 	}
 	wsID := req.WorkspaceID
 	if wsID == "" {
@@ -1107,9 +1105,45 @@ func createTask(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if err != nil {
 		return nil, mapStoreError(err, "document_upsert")
 	}
+	taskAfterCreate(ctx, d)
 	return json.Marshal(DocumentUpsertResponse{
 		Document: d,
 		Version:  document.Version{DocumentID: d.ID, Version: 1, Body: req.Body, Status: document.StatusActive, CreatedAt: d.CreatedAt, CreatedBy: callerUserID(ctx)},
+	})
+}
+
+// upsertTaskByID patches a top-level task by id (epic:project-tasks). It reuses
+// the shared documents-row update path (UpdateStory accepts task rows) but skips
+// the story/epic reparent guards and fires only the task ledger hook. Status is
+// dropped for api-key callers — the same reviewer-only rule as stories: a task's
+// status moves through its reviewer gate's status_transition row, not here.
+func upsertTaskByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage, error) {
+	status := req.Status
+	if !upsertStatusHonoured(ctx) {
+		status = nil
+	}
+	patch := document.UpdateStoryPatch{
+		Title:     ptrIfNonEmpty(req.Name),
+		Body:      ptrIfPresent(req.Body, len(req.Body) > 0),
+		Status:    status,
+		Priority:  req.Priority,
+		ParentID:  req.ParentID,
+		Tags:      req.Tags,
+		CreatedBy: callerUserID(ctx),
+	}
+	d2, err := documentStore.UpdateStory(ctx, req.ID, patch, time.Now().UTC())
+	if err != nil {
+		return nil, mapStoreError(err, "document_upsert")
+	}
+	body := ""
+	if d2.LatestVersion > 0 {
+		_, b, _ := documentStore.GetByIDWithLatestBody(ctx, d2.ID)
+		body = b
+	}
+	taskAfterUpdate(ctx, d2)
+	return json.Marshal(DocumentUpsertResponse{
+		Document: d2,
+		Version:  document.Version{DocumentID: d2.ID, Version: d2.LatestVersion, Body: body, Status: document.StatusActive},
 	})
 }
 
@@ -1121,8 +1155,13 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	if err != nil {
 		return nil, mapStoreError(err, "document_upsert")
 	}
+	// Top-level tasks (epic:project-tasks) also patch by id, on their own path
+	// — no epic-reparent freeze, task ledger hook instead of the story signals.
+	if d.Type == document.TypeTask {
+		return upsertTaskByID(ctx, req)
+	}
 	if d.Type != document.TypeStory {
-		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
+		return nil, fmt.Errorf("document_upsert: %w: id-addressed upsert is only supported for stories and tasks (id=%s is type=%s)", ErrBadRequest, req.ID, d.Type)
 	}
 	// Epic membership freezes once a story has started: parent_id may change only
 	// while the story is still backlog/ready (sty_409c0af8). This keeps the epic
