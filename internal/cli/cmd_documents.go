@@ -217,8 +217,16 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 		dryRun bool
 	)
 	cmd := &cobra.Command{
-		Use:   "upload",
-		Short: fmt.Sprintf("Walk the top-level %s/ folder and upsert each file via document_upsert", cfg.Kind),
+		Use:   "upload [name]",
+		Short: fmt.Sprintf("Upsert %s via document_upsert (review-routed by type); an optional [name] uploads just that one artifact", cfg.Kind),
+		Long: fmt.Sprintf(`upload walks the top-level %s/ folder and upserts each file via
+document_upsert, ROUTING each through its per-type reviewer when one is
+configured (config-over-code: a kind is gated IFF satellites-<kind>-review
+resolves) — a plain document with no reviewer passes through.
+
+Pass an optional [name] to upload just THAT artifact (its review-and-write is
+decoupled from a sibling's reject — the per-artifact path, sty_7b667ae7).`, cfg.Kind),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			ctx := cmd.Context()
@@ -252,7 +260,11 @@ func newUploadCmd(cfg uploadConfig) *cobra.Command {
 				}
 				return fmt.Errorf("upload refused: %d validation violation(s)", len(violations))
 			}
-			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, projectID, dryRun)
+			only := ""
+			if len(args) == 1 {
+				only = strings.TrimSpace(args[0])
+			}
+			return uploadKind(ctx, out, cfg.Kind, *cfg.ConfigArg, *cfg.UserArg, projectID, only, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned dispatches (type, name) without calling the verbs")
@@ -275,12 +287,29 @@ func projectIDFromConfig(configArg string) (string, error) {
 	return pid, nil
 }
 
+// selectTargetByName narrows an upload plan to the single artifact matching
+// `only` — by its resolved document name or its source filename (sans .md). It
+// errors when no target matches, so a typo'd per-artifact selector fails closed
+// rather than silently uploading nothing. Pure (sty_7b667ae7).
+func selectTargetByName(targets []documentTarget, only string) ([]documentTarget, error) {
+	var picked []documentTarget
+	for _, t := range targets {
+		if t.Name == only || strings.TrimSuffix(filepath.Base(t.Path), ".md") == only {
+			picked = append(picked, t)
+		}
+	}
+	if len(picked) == 0 {
+		return nil, fmt.Errorf("no artifact named %q", only)
+	}
+	return picked, nil
+}
+
 // uploadKind plans and dispatches the document_upsert calls for one kind
 // directory under .satellites/. It does NOT validate — callers run
 // validateUpload first (newUploadCmd does). Single source for the
 // plan+dispatch loop shared by the per-noun `upload` commands. `satellites
 // deploy` is pull-only and no longer calls this (sty_2fa6f087 follow-up).
-func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, projectID string, dryRun bool) error {
+func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, projectID, only string, dryRun bool) error {
 	root := resolveSubstrateRoot(kind, configArg)
 	targets, err := planUpload(root, kind, projectID)
 	if err != nil {
@@ -290,6 +319,17 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		fmt.Fprintf(out, "no %s found under %s/ — nothing to upload\n", kind, filepath.Join(root, kind))
 		nudgeStaleSubstrateDir(out, kind, root)
 		return nil
+	}
+	// Per-artifact routing (sty_7b667ae7): an optional selector restricts the
+	// run to ONE artifact, so its review-and-write is decoupled from a sibling's
+	// reject — a single principle/skill/workflow lands without the all-or-nothing
+	// batch. The whole tree is still validated above; only the dispatch narrows.
+	if only != "" {
+		picked, perr := selectTargetByName(targets, only)
+		if perr != nil {
+			return fmt.Errorf("upload: %w (under %s/) — drop the selector to upload all, or fix the name", perr, root)
+		}
+		targets = picked
 	}
 	reviewSkill := reviewSkillForKind(kind)
 	// A kind is reviewer-gated IFF its per-type reviewer (satellites-<kind>-review)

@@ -38,9 +38,15 @@ For the agent and operator working a repository.
   grounding. Nothing unreviewed can progress; creation needs no second
   mechanism. The standing rule is the `review-actions-not-intent` principle;
   this contract only records where each write lands.
-- **Skills and principles ship only through the review-gated upload path**
-  (`satellites skill|principle upload`), where the matching review skill runs
-  before the write. Deletes of these artifacts are likewise client-side.
+- **Reviewable artifacts ship only through the review-gated upload path, ROUTED
+  by type.** `satellites skill|principle upload` and `workflow upsert` resolve the
+  per-type reviewer (`satellites-<kind>-review`) and run it before the write — a
+  kind is gated IFF its reviewer EXISTS (config-over-code), so a plain `document`
+  (no reviewer) passes through while a principle/skill/workflow cannot be written
+  unreviewed. An optional `[name]` uploads ONE artifact, decoupled from a
+  sibling's reject. The MCP door refuses these writes outright (no server-side
+  reviewer), making the client the single reviewer-gated home. Deletes of these
+  artifacts are likewise client-side.
 - Gates execute locally (`claude -p`) against the materialised skill set.
 
 ## Direction of travel

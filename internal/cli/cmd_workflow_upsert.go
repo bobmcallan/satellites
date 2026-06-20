@@ -87,14 +87,18 @@ func workflowRefResolvers(ctx context.Context, configArg, userArg string) (resol
 func newWorkflowUpsertCmd(configArg, userArg *string) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "upsert",
-		Short: "Upsert each .satellites/workflows/ file as a kind:workflow document (gated by satellites-workflow-review)",
+		Use:   "upsert [name]",
+		Short: "Upsert .satellites/workflows/ as kind:workflow documents (gated by satellites-workflow-review); an optional [name] upserts just one",
 		Long: `upsert stores this repo's workflows on the server so a fresh install governs
 by the authored workflow instead of silently falling back to the embedded
 default. It walks .satellites/workflows/*.md and upserts each as a kind:workflow
 document through the same review-gated path skills and principles use; the
 satellites-workflow-review reviewer must accept before any workflow is stored.
+
+Pass an optional [name] to upsert just THAT workflow — its review-and-write is
+decoupled from a sibling's reject (the per-artifact path, sty_7b667ae7).
 --dry-run prints the planned upserts without writing.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if ctx == nil {
@@ -105,7 +109,11 @@ satellites-workflow-review reviewer must accept before any workflow is stored.
 			if err != nil {
 				return err
 			}
-			return uploadKind(ctx, out, "workflows", *configArg, *userArg, projectID, dryRun)
+			only := ""
+			if len(args) == 1 {
+				only = strings.TrimSpace(args[0])
+			}
+			return uploadKind(ctx, out, "workflows", *configArg, *userArg, projectID, only, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned upserts without writing")
