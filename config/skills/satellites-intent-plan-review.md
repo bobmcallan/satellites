@@ -22,9 +22,9 @@ Judge the `story_body`:
 - **accept** — the story is satellites-formatted AND has a clear story→done goal:
   - a **Purpose** (why this story exists) and an **Approach** (how it will be done),
   - **numbered acceptance criteria** that are concrete and testable at the story's completion,
-  - an embedded **`## Workflow`** fenced-yaml block (the governing contract), and
+  - an embedded **`## Workflow`** fenced-yaml block (the governing contract) that is a COHERENT state machine — a non-terminal entry, a path to a terminal `done`, and edges naming standard reviewers (the story-level workflow assessment is HERE, at the plan gate, not in repo-wide `workflow check`), and
   - a coherent goal that a single story can drive to a terminal `done` (not an open-ended programme, not a vague aspiration).
-- **reject** — the story is malformed or its goal is not done-able: missing Purpose/Approach, no numbered acceptance criteria (or vague/untestable ones), no embedded `## Workflow` block, or a goal too broad/ambiguous to reach `done`. Name exactly what is missing or unfollowable.
+- **reject** — the story is malformed or its goal is not done-able: missing Purpose/Approach, no numbered acceptance criteria (or vague/untestable ones), no embedded `## Workflow` block (or one with an incoherent state machine / no path to `done`), or a goal too broad/ambiguous to reach `done`. Name exactly what is missing or unfollowable.
 
 Fail closed: if the story body cannot be read or its shape cannot be judged, reject with the reason named.
 

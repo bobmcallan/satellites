@@ -293,14 +293,17 @@ func checkSystemScopeCoupling(skills []matSkill) []driftFinding {
 // resting in one needs no governing workflow resolution.
 var terminalStoryStatuses = map[string]bool{"done": true, "cancelled": true, "deleted": true}
 
-// checkStoryGovernance (class 5) — every non-terminal story is governed:
-// its own embedded ## Workflow (whose reviewer skills must be materialised),
-// or a workflow whose applies_to covers its category ("*" wildcard counts).
-func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string]*workflow.Workflow, gateResolvable func(string) bool) []driftFinding {
-	byName := map[string]bool{}
-	for _, s := range skills {
-		byName[s.name] = true
-	}
+// checkStoryGovernance (class 5) — every non-terminal story is governed: it
+// carries its own embedded ## Workflow, or a workflow whose applies_to covers
+// its category ("*" wildcard counts). It does NOT audit the reviewer-
+// resolvability of a story's EMBEDDED ## Workflow (epic:system-substrate,
+// story 5): a story's embedded workflow is the story author's concern, judged
+// at engage/plan time — the drive-time gate (driveTimeWorkflowGate /
+// satellites-workflow-review's deterministic reference dry-run) resolves its
+// references at engagement, and the plan gate judges its coherence. Re-auditing
+// it repo-wide here conflated story content with standing workflow-definition
+// drift, so the per-story unresolvable-gate finding was removed.
+func checkStoryGovernance(stories []storyLite, wfs map[string]*workflow.Workflow) []driftFinding {
 	covered := func(category string) bool {
 		for _, wf := range wfs {
 			for _, at := range wf.AppliesTo {
@@ -317,23 +320,44 @@ func checkStoryGovernance(stories []storyLite, skills []matSkill, wfs map[string
 		if terminalStoryStatuses[strings.ToLower(st.Status)] {
 			continue
 		}
-		wf, err := workflow.ParseBody([]byte(st.Body))
-		if err == nil && wf != nil {
-			for _, tr := range wf.Transitions {
-				// A gate the dispatcher resolves — embedded in the binary OR
-				// fetched from the server (sty_f242eacf) — lets the story move even
-				// when not materialised; only a gate that resolves from no tier is
-				// unresolvable (2.4.1).
-				if g := strings.TrimSpace(tr.ReviewerSkill); g != "" && !byName[g] && !gateResolvable(g) {
-					out = append(out, driftFinding{"block", "unresolvable-gate", st.ID,
-						fmt.Sprintf("embedded workflow names reviewer %q which resolves from no source (not embedded, not materialised, not on the server) — the story cannot move", g)})
-				}
-			}
+		// A story with an embedded ## Workflow is self-governed — its reviewer
+		// resolvability is judged at engage/plan time, not here.
+		if wf, err := workflow.ParseBody([]byte(st.Body)); err == nil && wf != nil {
 			continue
 		}
 		if !covered(st.Category) {
 			out = append(out, driftFinding{"block", "ungoverned-story", st.ID,
 				fmt.Sprintf("no embedded ## Workflow and no workflow's applies_to covers category %q — the story has no defined process", st.Category)})
+		}
+	}
+	return out
+}
+
+// checkSystemContained enforces that a SYSTEM (embedded) workflow is
+// self-contained (epic:system-substrate, story 5): every reviewer it names must
+// resolve from the binary embed (config/skills, verb.IsConfigSkill), not the
+// server or a repo's .claude/skills. A scope:system workflow naming a reviewer
+// that is not embed-resolvable is a block — the default process must run from
+// the binary alone. The embedded config/workflows are also pinned at build time
+// by TestConfigWorkflowsSystemContained; this is the runtime guard for any
+// scope:system workflow that reaches the checked corpus.
+func checkSystemContained(skills []matSkill, wfs map[string]*workflow.Workflow) []driftFinding {
+	var out []driftFinding
+	for _, s := range skills {
+		if s.kind != "workflow" || !strings.EqualFold(s.scope, "system") {
+			continue
+		}
+		wf := wfs[s.name]
+		if wf == nil {
+			continue
+		}
+		for _, tr := range wf.Transitions {
+			g := strings.TrimSpace(tr.ReviewerSkill)
+			if g == "" || verb.IsConfigSkill(g) {
+				continue
+			}
+			out = append(out, driftFinding{"block", "system-not-contained", s.name,
+				fmt.Sprintf("system workflow names reviewer %q which is not resolvable from the binary embed (config/skills) — a system/embedded workflow must be self-contained: its reviewers must ship in the binary, not the server or .claude/skills", g)})
 		}
 	}
 	return out
@@ -456,7 +480,8 @@ func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, st
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
-	out = append(out, checkStoryGovernance(stories, wfBearing, wfs, gateResolvable)...)
+	out = append(out, checkStoryGovernance(stories, wfs)...)
+	out = append(out, checkSystemContained(wfBearing, wfs)...)
 	out = append(out, checkFirstGateComprehensive(wfBearing, wfs)...)
 	return out
 }
@@ -531,8 +556,13 @@ func newWorkflowCheckCmd(configArg, userArg *string) *cobra.Command {
   host-coupled-system   a system-scope skill referencing repo-dev specifics
   ungoverned-story      a non-terminal story with no embedded workflow and no applies_to cover
   ambiguous-governance  two non-wildcard workflows cover the same story category
-  unresolvable-gate     a story's embedded workflow names a non-materialised reviewer
+  system-not-contained  a scope:system workflow names a reviewer not resolvable from the binary embed
   first-gate-shallow    a workflow's entry gate skips comprehensive-review layers
+
+check audits WORKFLOW DEFINITIONS, not per-story content: a story's embedded
+## Workflow is the story author's concern, judged at engage/plan time (the
+drive-time reference gate + satellites-intent-plan-review), not standing
+repo-wide drift (epic:system-substrate).
 
 Blocking findings exit 1; advisory findings report and pass. The MCP write/
 read/delete bounds on skills and principles are enforced server-side and

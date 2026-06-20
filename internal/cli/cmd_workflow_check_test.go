@@ -241,11 +241,15 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 		}
 	})
 
-	t.Run("class5_unresolvable_embedded_gate", func(t *testing.T) {
+	t.Run("class5_embedded_workflow_is_not_repo_drift", func(t *testing.T) {
+		// epic:system-substrate story 5: a story's EMBEDDED ## Workflow naming a
+		// non-resolvable reviewer is the story author's concern (judged at
+		// engage/plan time), NOT standing repo-wide drift — so workflow check must
+		// NOT emit unresolvable-gate for it.
 		stories := []storyLite{{ID: "sty_ghost", Category: "x", Status: "backlog",
 			Body: "## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"ghost-review\"}\n```\n"}}
-		if !find(runWorkflowChecks(healthyCorpus(), nil, stories), "unresolvable-gate", "sty_ghost") {
-			t.Error("an embedded workflow naming a non-materialised reviewer must report unresolvable-gate")
+		if find(runWorkflowChecks(healthyCorpus(), nil, stories), "unresolvable-gate", "sty_ghost") {
+			t.Error("a story's embedded ## Workflow must NOT produce repo-wide unresolvable-gate (judged at the plan gate, not workflow check)")
 		}
 	})
 
@@ -259,12 +263,22 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 		}
 	})
 
-	t.Run("sty_f242eacf_server_resolved_gate_not_unresolvable", func(t *testing.T) {
-		stories := []storyLite{{ID: "sty_ghost", Category: "x", Status: "backlog",
-			Body: "## Workflow\n\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"ghost-review\"}\n```\n"}}
-		resolvable := func(g string) bool { return g == "ghost-review" }
-		if find(runWorkflowChecksResolved(healthyCorpus(), nil, stories, resolvable), "unresolvable-gate", "sty_ghost") {
-			t.Error("a server-resolvable gate must not report unresolvable-gate")
+	t.Run("system_contained_workflow", func(t *testing.T) {
+		// A scope:system workflow naming a reviewer that is NOT embed-resolvable
+		// (config/skills) is not self-contained — a block. A system workflow naming
+		// only embed-resolvable reviewers is clean.
+		sysWFBad := matSkill{name: "sys-wf", kind: "workflow", scope: "system",
+			description: "system workflow naming a non-embedded reviewer",
+			raw:         "---\nname: sys-wf\nkind: workflow\nscope: system\napplies_to: [\"*\"]\n---\n## Workflow\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"not-in-the-binary\"}\n```\n",
+			body:        "## Workflow\n```yaml\nstates:\n  - backlog\n  - done\ntransitions:\n  - {from: backlog, to: done, reviewer_skill: \"not-in-the-binary\"}\n```\n"}
+		if !find(runWorkflowChecks([]matSkill{sysWFBad}, nil, nil), "system-not-contained", "sys-wf") {
+			t.Error("a system workflow naming a non-embed-resolvable reviewer must report system-not-contained")
+		}
+		sysWFGood := sysWFBad
+		sysWFGood.raw = strings.ReplaceAll(sysWFBad.raw, "not-in-the-binary", "satellites-intent-plan-review")
+		sysWFGood.body = strings.ReplaceAll(sysWFBad.body, "not-in-the-binary", "satellites-intent-plan-review")
+		if find(runWorkflowChecks([]matSkill{sysWFGood}, nil, nil), "system-not-contained", "sys-wf") {
+			t.Error("a system workflow naming only embed-resolvable reviewers must be clean of system-not-contained")
 		}
 	})
 
