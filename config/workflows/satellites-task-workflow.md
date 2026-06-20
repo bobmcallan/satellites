@@ -42,6 +42,30 @@ run's rows; `satellites task executions <tsk-id>` lists every episode oldest-fir
 with its start/end timestamps. The task body holds the latest run's context; the
 ledger holds them all.
 
+## Executing a task
+
+"Implement `tsk_…`" is this loop — the agent (the `running` executor) drives the
+task to `complete`:
+
+1. **Resolve** — `document_get` the task (`satellites task get --body <tsk-id>`):
+   read its body (the work to do) and its tags.
+2. **Embed** — `satellites workflow embed <tsk-id>` stamps this workflow's
+   `## Workflow` into the task so the gates can resolve their targets.
+3. **Open** — `satellites task status_transition --skill satellites-task-upsert-review <tsk-id>`
+   (ready → running, or complete → running to re-run).
+4. **Work (at `running`, the executor)** — do the work the body describes. If the
+   task carries a **`skill:<name>` tag**, perform the work by running that skill
+   (the Skill tool / `.claude/skills/<name>`); when there is no `skill:` tag, do
+   the work inline. The `skill:` tag is the structured, resolvable bind from the
+   task to its work skill — prefer it over any prose mention.
+5. **Report** — record the result in the task body (a `## Report` section) or the
+   ledger; that is what the exit gate reads.
+6. **Close** — `satellites task status_transition --skill satellites-task-report-review <tsk-id>`
+   (running → complete). Re-run any time by repeating from step 3.
+
+The executor RUNS the skill and writes the report; it never moves the status — a
+reviewer gate is the sole status-updater (see [[reviewer-only-model]]).
+
 ## Workflow
 
 - ready to running — open for execution, gated by satellites-task-upsert-review (it IS a task + a resolvable workflow).
@@ -74,7 +98,7 @@ guardrails:
   always:
     - Drive the engaged task to a terminal state (complete) — do the work while running, then request the report gate.
     - Request satellites-task-upsert-review to open a task (ready → running); it checks the document is a well-formed task with a resolvable workflow.
-    - Perform the task's work while running — directly or by invoking a project .claude/skill — and record a report (in the body or the ledger) before requesting the exit.
+    - Perform the task's work while running by RUNNING the skill named in the task's `skill:<name>` tag (the Skill tool / .claude/skills/<name>); when the task has no `skill:` tag, do the work inline. Record a report (in the body or the ledger) before requesting the exit.
     - Request satellites-task-report-review to close a task (running → complete); it checks the work was done and a report is present.
     - To abandon a task, request satellites-task-cancel-review with a concrete ## Cancellation rationale — never set-status to cancelled.
   ask_first: []
