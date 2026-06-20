@@ -1323,13 +1323,17 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Tim
 		}
 	}
 
+	// category='task' is what makes the governing-workflow resolver pick
+	// satellites-task-workflow (applies_to:["task"]); the resolver matches a
+	// workflow's applies_to against the row's category, not its type
+	// (epic:project-tasks).
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO documents
             (id, scope, workspace_id, project_id, name, latest_version,
-             type, tags, status, priority, parent_id,
+             type, category, tags, status, priority, parent_id,
              created_at, updated_at)
         VALUES ($1, 'project', $2, $3, $4, 1,
-                'task', $5, $6, $7, $8,
+                'task', 'task', $5, $6, $7, $8,
                 $9, $9)
     `, id, in.WorkspaceID, in.ProjectID, in.Title,
 		pq.Array(in.Tags), in.Status, in.Priority, nullStr(in.ParentID),
@@ -1348,7 +1352,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput, now time.Tim
 	}
 
 	return Document{
-		ID: id, Type: TypeTask, Scope: ScopeProject,
+		ID: id, Type: TypeTask, Category: "task", Scope: ScopeProject,
 		WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID,
 		Name: in.Title, LatestVersion: 1,
 		Tags: in.Tags, Status: in.Status,

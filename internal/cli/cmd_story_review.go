@@ -821,8 +821,12 @@ func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, 
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return reviewStory{}, "", fmt.Errorf("decode story: %w", err)
 	}
-	if resp.Document.Type != "story" {
-		return reviewStory{}, "", fmt.Errorf("document %s is type=%q; review requires a story", opts.StoryID, resp.Document.Type)
+	// Stories and top-level tasks (epic:project-tasks) share this gate-dispatch
+	// path: both resolve a governing workflow by category and are driven by a
+	// reviewer that enacts a status_transition. The rest of the dispatch is
+	// type-agnostic (it keys on the object id + category).
+	if resp.Document.Type != "story" && resp.Document.Type != "task" {
+		return reviewStory{}, "", fmt.Errorf("document %s is type=%q; review requires a story or task", opts.StoryID, resp.Document.Type)
 	}
 	body := resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
