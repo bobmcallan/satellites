@@ -40,15 +40,9 @@ type CorpusDoc struct {
 // is written to (and excluded from its own corpus).
 const ObjectiveDocName = "objective"
 
-// AgentTaskNamePrefix is the reserved workspace-document name namespace holding
-// workspace agent-task CONFIGS (epic:workspace-agents). These are configuration,
-// not corpus content, so a generation run never feeds them into its prompt.
-const AgentTaskNamePrefix = "agent-task/"
-
 // objectiveSpec is the objective TASK's instruction — the one spec the objective
-// generation runs. It is now one caller of BuildTaskPrompt (epic:workspace-agents):
-// the objective is just a task whose spec happens to be embedded here, while other
-// task specs come from kind:task skills.
+// generation runs, and now the sole caller of GenerateOverCorpus (the legacy
+// workspace_task_run caller was retired with epic:project-tasks).
 const objectiveSpec = "You are assisting a delivery/project manager. Below are the documents collected for a client engagement (a workspace corpus). " +
 	"Synthesize a concise engagement OBJECTIVE: 2–4 short paragraphs stating what this engagement is about, its goal, and the current focus — grounded only in the documents. " +
 	"Do not invent facts not supported by the documents. Output the objective as plain markdown, no preamble."
@@ -273,9 +267,8 @@ func (s *ObjectiveService) GenerateText(ctx context.Context, workspaceID string)
 // GenerateOverCorpus runs an arbitrary task spec over a workspace's corpus: it
 // gathers the workspace documents (excluding excludeName — the task's own output,
 // so a run never feeds its previous result into itself), builds the task prompt,
-// and runs the generator. The objective generation is one caller (spec =
-// objectiveSpec, excludeName = ObjectiveDocName); workspace_task_run is another
-// (spec = a kind:task skill body, excludeName = the run's output document).
+// and runs the generator. The objective generation is the sole caller (spec =
+// objectiveSpec, excludeName = ObjectiveDocName).
 func (s *ObjectiveService) GenerateOverCorpus(ctx context.Context, workspaceID, spec, excludeName string) (string, error) {
 	if !s.Enabled() {
 		return "", fmt.Errorf("no generator configured")
@@ -290,9 +283,6 @@ func (s *ObjectiveService) GenerateOverCorpus(ctx context.Context, workspaceID, 
 	for _, d := range res.Items {
 		if excludeName != "" && d.Name == excludeName {
 			continue // never feed the task's own output back into the run
-		}
-		if strings.HasPrefix(d.Name, AgentTaskNamePrefix) {
-			continue // agent-task configs are configuration, not corpus content
 		}
 		got, err := s.docs.Get(ctx, document.Key{Scope: document.ScopeWorkspace, WorkspaceID: workspaceID, Name: d.Name}, document.GetOptions{})
 		if err != nil || len(got.Versions) == 0 {

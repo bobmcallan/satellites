@@ -145,9 +145,9 @@ var validSkillKinds = map[string]bool{
 	// was never bound to — under the reviewers-only model that belongs in a
 	// document or principle (a non-binding guide), not a skill kind. No
 	// enforcement path depends on it; kind:capability is no longer valid.
-	// task (epic:workspace-agents): a workspace agent's unit of work — a spec a
-	// server-side run executes over the workspace corpus (workspace_task_run).
-	"task": true,
+	// kind:task (the legacy epic:workspace-agents server-executor unit of work)
+	// is RETIRED: "task" is now the top-level project object (type:task, tsk_),
+	// not a skill kind — see epic:project-tasks.
 }
 
 // documentTarget describes one .md file scheduled for a dispatch. Every

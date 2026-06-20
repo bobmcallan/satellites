@@ -52,10 +52,10 @@ type Frontmatter struct {
 	// system→system); publish routes by it. Empty falls back to Scope.
 	Level string `yaml:"level"`
 
-	// Tools is the agent capability allowlist a kind:task skill declares
-	// (epic:workspace-agents): the policy of which tools the server agent may
-	// call lives in configuration here, not in the binary. Names are resolved
-	// against the harness's tool catalogue at run time.
+	// Tools is an optional tool allowlist a skill's frontmatter may declare. The
+	// legacy server-agent executor that consumed it (epic:workspace-agents) was
+	// retired with epic:project-tasks; the field is still parsed but currently
+	// has no in-binary consumer.
 	Tools []string `yaml:"tools"`
 
 	// Check is a kind:gate's optional FUNCTIONAL half (epic:satellites-backbone
