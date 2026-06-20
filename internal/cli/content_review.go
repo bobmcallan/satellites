@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/bobmcallan/satellites/internal/workflow"
 )
 
 // rottingRefPattern matches a concrete substrate identifier slug: a short
@@ -109,6 +111,77 @@ func reviewSkillSelfContained(body string) []reviewFinding {
 		}
 	}
 	return out
+}
+
+// wikilinkRefPattern matches a [[kebab-name]] reference anywhere in a workflow
+// body. Unlike checkpointGateRe (which scans only a `## Checkpoint gates`
+// section), this matches every prose reference — the dangling [[satellites-commit-push]]
+// class `workflow check` misses.
+var wikilinkRefPattern = regexp.MustCompile(`\[\[([a-z0-9-]+)\]\]`)
+
+// reviewWorkflowRefs is the deterministic DRY-RUN at the heart of
+// satellites-workflow-review (sty_fc39ca77 AC4): it resolves every artifact a
+// workflow references — each transition's reviewer_skill and every [[wikilink]]
+// in the prose — and returns a finding for any that resolves from NO tier. This
+// catches the dangling-reference class `workflow check` cannot: that validator
+// only resolves [[..]] inside a `## Checkpoint gates` section, never prose
+// wikilinks like the deleted [[satellites-commit-push]] capability.
+//
+// resolveSkill folds the dispatcher's embed→local→server gate resolution
+// (verb.GateResolvable / verb.IsInternalGate) so an embedded internal gate such
+// as satellites-intent-plan-review — named by every repo's entry edge but never
+// materialised — is correctly AVAILABLE, not a false positive. resolveDoc
+// resolves a substrate document/principle by bare name through the scope cascade
+// (a [[wikilink]] may point at a principle like [[reviewer-only-model]], not a
+// skill). A reference resolving as EITHER is fine; one resolving as neither is
+// dangling.
+func reviewWorkflowRefs(body string, resolveSkill, resolveDoc func(string) bool) []reviewFinding {
+	var out []reviewFinding
+	seen := map[string]bool{}
+
+	// 1) Transition reviewer_skills — a gate resolving from no tier fails closed
+	// at dispatch (the story cannot move), so a dangling reviewer_skill is a block.
+	if wf, err := workflow.Parse([]byte(body)); err == nil && wf != nil {
+		for _, tr := range wf.Transitions {
+			rs := strings.TrimSpace(tr.ReviewerSkill)
+			if rs == "" || seen["skill:"+rs] {
+				continue
+			}
+			seen["skill:"+rs] = true
+			if !resolveSkill(rs) {
+				out = append(out, reviewFinding{Line: firstLineContaining(body, rs), Rule: "unresolvable-reviewer", Text: rs})
+			}
+		}
+	}
+
+	// 2) Prose [[wikilinks]] — resolve as a skill/gate OR a substrate
+	// document/principle; one that resolves as neither is a dangling reference.
+	for i, line := range strings.Split(body, "\n") {
+		for _, m := range wikilinkRefPattern.FindAllStringSubmatch(line, -1) {
+			name := m[1]
+			if seen["link:"+name] {
+				continue
+			}
+			seen["link:"+name] = true
+			if resolveSkill(name) || resolveDoc(name) {
+				continue
+			}
+			out = append(out, reviewFinding{Line: i + 1, Rule: "dangling-reference", Text: name})
+		}
+	}
+	return out
+}
+
+// firstLineContaining returns the 1-based line number of the first line that
+// contains substr, or 0 when absent — used to point a reviewer_skill finding at
+// where the name sits in the workflow's ## Workflow block.
+func firstLineContaining(body, substr string) int {
+	for i, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, substr) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // reviewSkillForKind maps an upload kind dir to the per-type review skill the

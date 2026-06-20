@@ -72,6 +72,13 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 			if err := refuseNonExecutorActor("work init", args[0], resolvedStatus, actor); err != nil {
 				return err
 			}
+			// Drive-time gate (sty_fc39ca77): the reviewer runs BEFORE you start
+			// driving — the governing workflow must pass the reference dry-run, so a
+			// dangling reviewer_skill / [[wikilink]] is caught and fixed rather than
+			// failing closed mid-drive.
+			if err := driveTimeWorkflowGate(cmd.Context(), cmd.OutOrStdout(), configArg, "", args[0]); err != nil {
+				return err
+			}
 			if err := runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
 				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC()); err != nil {
 				return err
@@ -294,6 +301,67 @@ func resolveEngageGuards(ctx context.Context, configPath, storyID, status string
 		return true, "", status
 	}
 	return wf.IsEditable(status), wf.ActorOf(status), status
+}
+
+// driveTimeWorkflowGate runs satellites-workflow-review's deterministic reference
+// dry-run over the workflow that governs the story being engaged, refusing the
+// engagement when any reviewer_skill or [[wikilink]] resolves from no tier. This
+// is the drive-time half of the gate (the upsert half runs at `workflow upsert`,
+// sty_fc39ca77): the review runs BEFORE you start driving a workflow, so a
+// dangling reference is caught and fixed rather than failing closed mid-drive.
+//
+// Best-effort and fail-open on infrastructure trouble: a story it cannot resolve,
+// or an unreachable substrate (probed via the known-resident agent-goals
+// principle), skips the gate rather than block every server-backed reference as a
+// false dangling ref — the same "offline → don't over-block" stance
+// resolveEngageGuards takes.
+func driveTimeWorkflowGate(ctx context.Context, out io.Writer, configArg, userArg, storyID string) error {
+	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
+	if err != nil {
+		return nil
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, configArg, userArg)
+	if err != nil {
+		return nil // offline / not resolvable → don't over-block
+	}
+	var resp verb.DocumentGetResponse
+	if json.Unmarshal(raw, &resp) != nil {
+		return nil
+	}
+	storyBody := resp.RawBody
+	if storyBody == "" && len(resp.Versions) > 0 {
+		storyBody = resp.Versions[0].Body
+	}
+
+	// Resolve the workflow that ACTUALLY governs this story: the applies_to-matched
+	// .satellites/workflows source, falling back to the story's embedded ## Workflow.
+	govBody := storyBody
+	sources := governingWorkflowSources(configArg)
+	if _, name, ok := verb.ResolveGoverningWorkflow(resp.Document.Category, sources); ok {
+		for _, s := range sources {
+			if s.Name == name {
+				govBody = s.Body
+				break
+			}
+		}
+	}
+
+	resolveSkill, resolveDoc := workflowRefResolvers(ctx, configArg, userArg)
+	// Connectivity probe: a known-resident system principle (the minimal product
+	// contract per the constitution). If it does not resolve, the substrate is
+	// unreachable — skip rather than flag every server-backed reference offline.
+	if !resolveDoc("agent-goals") {
+		return nil
+	}
+	findings := reviewWorkflowRefs(govBody, resolveSkill, resolveDoc)
+	if len(findings) == 0 {
+		return nil
+	}
+	fmt.Fprintf(out, "satellites-workflow-review BLOCKED engagement of %s — the governing workflow has %d unresolved reference(s):\n", storyID, len(findings))
+	for _, f := range findings {
+		fmt.Fprintf(out, "  ✗ %s\n", f.String())
+	}
+	return fmt.Errorf("work init: governing workflow has %d unresolved reference(s) — fix the workflow (satellites workflow validate) and re-engage", len(findings))
 }
 
 // refuseNonExecutorActor is the actor handoff stop (epic:graduated-workflow):

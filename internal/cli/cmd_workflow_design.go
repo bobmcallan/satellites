@@ -83,6 +83,8 @@ is refused, and the command errors when none validates).`,
 	workflowCmd.AddCommand(newWorkflowCheckCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowShowCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowEmbedCmd(configArg, userArg))
+	workflowCmd.AddCommand(newWorkflowUpsertCmd(configArg, userArg))
+	workflowCmd.AddCommand(newWorkflowValidateCmd(configArg, userArg))
 	return workflowCmd
 }
 

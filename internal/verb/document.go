@@ -25,10 +25,33 @@ import (
 
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
+	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/workspace"
 )
+
+// isWorkflowUpsert reports whether a key-addressed upsert is storing a
+// kind:workflow document. A workflow stores as a type:skill row, so the kind is
+// read from the kind:workflow tag (set by the CLI upload from frontmatter) or,
+// defensively, the body's frontmatter — never the type. Used to require
+// project-admin for a workflow write (sty_fc39ca77 AC2): a workflow defines the
+// process governing every story, a privileged change above an ordinary document.
+func isWorkflowUpsert(req DocumentUpsertRequest) bool {
+	if req.Tags != nil {
+		for _, t := range *req.Tags {
+			if strings.EqualFold(strings.TrimSpace(t), "kind:workflow") {
+				return true
+			}
+		}
+	}
+	if fm, _, err := frontmatter.Parse([]byte(req.Body)); err == nil {
+		if strings.EqualFold(strings.TrimSpace(fm.Kind), "workflow") {
+			return true
+		}
+	}
+	return false
+}
 
 var documentStore *document.Store
 
@@ -929,6 +952,16 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 			return nil, fmt.Errorf("document_upsert: resolve workspace: %w", err)
 		}
 		key.WorkspaceID = p.WorkspaceID
+	}
+	// A workflow upsert is a privileged write — it changes the PROCESS that
+	// governs every story — so it requires project-admin, stricter than the
+	// RoleWrite an ordinary project document needs (sty_fc39ca77 AC2). Detected
+	// from the kind:workflow tag/frontmatter (a workflow stores as type:skill),
+	// enforced before the generic write authz.
+	if isWorkflowUpsert(req) && key.Scope == document.ScopeProject {
+		if err := enforceProjectScope(ctx, key.WorkspaceID, key.ProjectID, "workflow upsert", project.RoleAdmin); err != nil {
+			return nil, err
+		}
 	}
 	// A changelog (release notes) is a system-scope type:changelog document.
 	// authorizeWrite refuses every system write via verbs, so the changelog —

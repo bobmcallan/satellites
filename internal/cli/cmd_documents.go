@@ -123,6 +123,10 @@ var kindDirs = map[string]string{
 	"documents":  "document",
 	"skills":     "skill",
 	"principles": "document",
+	// A workflow stores as a type:skill, kind:workflow row (raw frontmatter
+	// preserved, like every skill) so it round-trips and document_list
+	// type:skill returns it (sty_fc39ca77). The dir is .satellites/workflows/.
+	"workflows": "skill",
 }
 
 // validSkillKinds is the dispatch-contract `kind` enum every type:skill
@@ -299,6 +303,14 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		Fetch:          serverGateFetcher(configArg, userArg),
 	}
 	gateWithReviewer, _ := reviewDisp.IsReviewer(ctx, ".", reviewSkill)
+	// A workflow upsert adds a deterministic reference dry-run to the pre-filter
+	// (sty_fc39ca77 AC4): every reviewer_skill and [[wikilink]] must resolve
+	// embed→local→server before the claude -p judgment runs. Resolvers are built
+	// once (each does a workspace lookup); only workflows need them.
+	var resolveSkill, resolveDoc func(string) bool
+	if kind == "workflows" {
+		resolveSkill, resolveDoc = workflowRefResolvers(ctx, configArg, userArg)
+	}
 	for _, t := range targets {
 		label := uploadLabel(t)
 		if dryRun {
@@ -314,6 +326,9 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 			findings := reviewContent(t.Body)
 			if kind == "skills" {
 				findings = append(findings, reviewSkillSelfContained(t.Body)...)
+			}
+			if kind == "workflows" {
+				findings = append(findings, reviewWorkflowRefs(t.Body, resolveSkill, resolveDoc)...)
 			}
 			if len(findings) > 0 {
 				fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s):\n", t.Path, len(findings))

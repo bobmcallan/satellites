@@ -673,6 +673,13 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 		}
 		fmt.Fprintf(out, "%-9s %s  (%s)\n", item.Action, item.Name, item.Action.reason())
 	}
+	// Pull server-stored workflows into .satellites/workflows/ (sty_fc39ca77): the
+	// single governing home, NOT .claude/skills, so a synced workflow is not read
+	// from two homes. Same stamp-reconcile, parallel target. A fresh install whose
+	// repo lacks .satellites/workflows then governs by the server copy.
+	if err := syncWorkflows(ctx, out, dispatch, ws, pj, clientWorkflowsDir(configArg), dryRun); err != nil {
+		return err
+	}
 	return nil
 }
 

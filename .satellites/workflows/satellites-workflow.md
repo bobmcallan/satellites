@@ -21,10 +21,9 @@ This workflow names only reviewers that exist, so every gated edge resolves.
    executor move (no gate, no `--skill`). The checkpoint is NEVER a side-effect
    of naming a gate: running a `--skill` gate at `in_progress` is refused, not
    silently advanced (sty_21d2c535).
-3. **shipping** (executor) — run the [[satellites-commit-push]] capability
-   (final commit folding the incremental ones, `.version` bump when a binary path
-   changed, push, watch the test → release → deploy CI chain). Then request the
-   reviewer.
+3. **shipping** (executor) — perform the commit-push (final commit folding the
+   incremental ones, `.version` bump when a binary path changed, push, watch the
+   test → release → deploy CI chain). Then request the reviewer.
 4. **shipping → done / in_progress** — `satellites-commit-push-review` judges that
    the push landed (HEAD pushed, clean tree, CI green, version bump when needed).
    The client enacts: **pass → done**, **fail → in_progress** to repair and
@@ -56,7 +55,7 @@ The entry is gated by the embedded intent spine; the commit-push exit is gated b
 guardrails:
   always:
     - Drive the engaged story to done through the reviewer.
-    - At shipping, run the satellites-commit-push capability (commit, .version bump, push, watch CI) BEFORE requesting satellites-commit-push-review.
+    - At shipping, perform the commit-push (commit, .version bump, push, watch CI) BEFORE requesting satellites-commit-push-review.
     - Advance shipping → done only through the reviewer's accept — never set-status across it.
   ask_first: []
   never:
