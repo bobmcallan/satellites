@@ -29,7 +29,7 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// under .satellites/workflows/ (epic:client-dir-separation order-2) — Parse
 		// reads the same shape.
 		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 4},
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 1},
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 2},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)

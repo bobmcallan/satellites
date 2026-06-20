@@ -627,11 +627,14 @@ func ensureGitignore(repoRoot string) (bool, error) {
 // (story-done gate); cancels ungated.
 var baselineWorkflowDoc = string(substrate.BaselineWorkflowMarkdown())
 
-// ensureBaselineWorkflow scaffolds the gateless baseline workflow into
+// ensureBaselineWorkflow scaffolds the default workflows into
 // .satellites/workflows/, create-if-absent: it writes nothing when a workflow
 // already exists there (so a repo that owns its workflows is never overwritten
-// and no two ["*"] workflows collide as ambiguous-governance). Returns whether
-// it wrote the baseline.
+// and no two ["*"] workflows collide as ambiguous-governance). On a fresh repo
+// it writes BOTH the order-zero baseline (applies_to ["*"]) and the default
+// parent/epic workflow (applies_to [parent]) from the client embed — a wildcard
+// + a specific, which do not collide (epic:system-substrate). Returns whether it
+// wrote the defaults.
 func ensureBaselineWorkflow(repoRoot string) (bool, error) {
 	wfDir := filepath.Join(repoRoot, ".satellites", "workflows")
 	if entries, err := os.ReadDir(wfDir); err == nil {
@@ -646,9 +649,15 @@ func ensureBaselineWorkflow(repoRoot string) (bool, error) {
 	if err := os.MkdirAll(wfDir, 0o755); err != nil {
 		return false, fmt.Errorf("init: create %s: %w", wfDir, err)
 	}
-	path := filepath.Join(wfDir, "satellites-baseline-workflow.md")
-	if err := os.WriteFile(path, []byte(baselineWorkflowDoc), 0o644); err != nil {
-		return false, fmt.Errorf("init: write %s: %w", path, err)
+	defaults := map[string][]byte{
+		"satellites-baseline-workflow.md": []byte(baselineWorkflowDoc),
+		"satellites-parent-workflow.md":   substrate.ParentWorkflowMarkdown(),
+	}
+	for name, body := range defaults {
+		path := filepath.Join(wfDir, name)
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			return false, fmt.Errorf("init: write %s: %w", path, err)
+		}
 	}
 	return true, nil
 }

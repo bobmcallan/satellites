@@ -45,6 +45,19 @@ func BaselineWorkflowMarkdown() []byte {
 	return b
 }
 
+// ParentWorkflowMarkdown returns the raw default parent/epic workflow artifact
+// bytes — the lifecycle an anchor (epic/parent) story follows, init/rebase
+// scaffold into a fresh repo's .satellites/workflows/ alongside the baseline.
+// Homed in the client embed (epic:system-substrate), not a Go const or a
+// repo-only file.
+func ParentWorkflowMarkdown() []byte {
+	b, err := fs.ReadFile(FS, "workflows/satellites-parent-workflow.md")
+	if err != nil {
+		panic("substrate: workflows/satellites-parent-workflow.md missing from embed.FS: " + err.Error())
+	}
+	return b
+}
+
 // MCPLoadContextMarkdown returns the raw MCP load-context artifact
 // bytes — the document the MCP server returns to every client on
 // `initialize`. Held to the mcp_instructions_budget_bytes system
