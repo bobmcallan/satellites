@@ -22,21 +22,24 @@ func TestStopGoalDecision(t *testing.T) {
 	}
 }
 
-// TestRunHookStopCheck: the wrapper releases (no block) for a terminal story and
-// for a non-terminal engagement in an UNGOVERNED repo (no workflow → unreachable
-// → report, not loop), and is silent/non-blocking with no engagement.
+// TestRunHookStopCheck: the wrapper blocks a non-terminal engagement even in a
+// repo with no .satellites/workflows — the config/workflows embed is always a
+// governance source, so the baseline wildcard governs every category and the
+// goal is reachable (sty_6c6056f9). It releases (no block) for a terminal story
+// and is silent/non-blocking with no engagement.
 func TestRunHookStopCheck(t *testing.T) {
 	fresh := time.Now().UTC().Add(time.Hour)
 
-	// Non-terminal engagement, ungoverned repo (no workflows) → report, no block.
+	// Non-terminal engagement, no client-dir workflows → still governed by the
+	// embed → reachable goal → blocks with the goal re-injected.
 	repo := writeRepo(t, true, "")
 	seedEngagement(t, repo, "sess1", "sty_x", "in_progress", true, fresh)
 	var out bytes.Buffer
-	if block := runHookStopCheck(strings.NewReader(`{"session_id":"sess1","cwd":"`+repo+`"}`), &out); block {
-		t.Errorf("ungoverned repo must not block (unreachable goal)")
+	if block := runHookStopCheck(strings.NewReader(`{"session_id":"sess1","cwd":"`+repo+`"}`), &out); !block {
+		t.Errorf("embed-governed repo must block a non-terminal engagement")
 	}
-	if !strings.Contains(out.String(), "unreachable") {
-		t.Errorf("expected an unreachable report, got %q", out.String())
+	if !strings.Contains(out.String(), "GOAL NOT MET") {
+		t.Errorf("expected a GOAL NOT MET block, got %q", out.String())
 	}
 
 	// Terminal story → released, silent.

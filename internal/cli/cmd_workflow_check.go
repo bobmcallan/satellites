@@ -582,7 +582,7 @@ pinned by integration tests — they are out of a client check's reach.`,
 			// .claude/skills but present on the server is not flagged.
 			fetch := serverGateFetcher(*configArg, *userArg)
 			gateResolvable := func(g string) bool { return verb.GateResolvable(ctx, fetch, ".", g) }
-			findings := runWorkflowChecksResolved(markLocalAuthorship(materialisedSkills(), *configArg), clientWorkflows(*configArg), stories, gateResolvable)
+			findings := runWorkflowChecksResolved(markLocalAuthorship(materialisedSkills(), *configArg), withEmbeddedWorkflows(clientWorkflows(*configArg)), stories, gateResolvable)
 			blocking := 0
 			for _, f := range findings {
 				if f.Severity == "block" {
