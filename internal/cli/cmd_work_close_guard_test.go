@@ -64,11 +64,8 @@ func seedEngagementAt(t *testing.T, repo, session, story, phase string, editable
 func TestWorkCloseGuard(t *testing.T) {
 	repo := gitRepoWithSatellites(t)
 	// The guard derives terminal-ness from the governing workflow (no hardcoded
-	// names), so the test repo must be governed — the baseline declares
-	// in_progress non-terminal and done terminal.
-	if _, err := ensureBaselineWorkflow(repo); err != nil {
-		t.Fatal(err)
-	}
+	// names). The repo is governed by the embedded baseline (a governance source,
+	// sty_6c6056f9) with no scaffolded copy — in_progress non-terminal, done terminal.
 	workDir := filepath.Join(repo, ".satellites", "work")
 	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Now().UTC()
@@ -159,9 +156,8 @@ func TestStopCheckGoalKeeper(t *testing.T) {
 	gitExec(t, repo, "commit", "--allow-empty", "-m", "work")
 
 	t.Run("blocks non-terminal in a governed repo", func(t *testing.T) {
-		if _, err := ensureBaselineWorkflow(repo); err != nil { // make the goal reachable
-			t.Fatal(err)
-		}
+		// The repo is governed by the embedded baseline (governance source) — the
+		// goal is reachable with no scaffolded workflow (sty_6c6056f9).
 		seedEngagementAt(t, repo, "sessA", "sty_open", "in_progress", true, past, lease)
 		in := bytes.NewBufferString(`{"session_id":"sessA","cwd":"` + repo + `"}`)
 		var out bytes.Buffer

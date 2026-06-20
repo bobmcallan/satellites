@@ -2,8 +2,8 @@
 name: satellites-workflow
 kind: workflow
 tags: [kind:workflow]
-applies_to: ["infrastructure"]
-description: The reviewers-only lifecycle for this repo's infrastructure stories — backlog to in_progress to shipping to done. Two reviewers gate it (the only enforcement) — satellites-intent-plan-review opens the story, and satellites-commit-push-review judges that the executor's commit-push landed and advances shipping to done (a v2 pass/fail edge the client enacts; a fail returns to in_progress to repair and re-ship). The executor reaches the goal any way it can; only a reviewer's accept moves the status.
+applies_to: ["infrastructure", "bug", "fix", "feature", "improvement", "skill", "chore", "documentation"]
+description: The reviewers-only lifecycle for this repo's executable-work stories (infrastructure, bug, fix, feature, improvement, skill, chore, documentation) — backlog to in_progress to shipping to done. Two reviewers gate it (the only enforcement) — satellites-intent-plan-review opens the story, and satellites-commit-push-review judges that the executor's commit-push landed and advances shipping to done (a v2 pass/fail edge the client enacts; a fail returns to in_progress to repair and re-ship). The executor reaches the goal any way it can; only a reviewer's accept moves the status.
 ---
 
 # Satellites workflow (reviewers-only)
@@ -47,7 +47,7 @@ transitions:
 
 ## Environment
 
-Drives this repo's infrastructure stories backlog → in_progress → shipping → done.
+Drives this repo's executable-work stories backlog → in_progress → shipping → done.
 The entry is gated by the embedded intent spine; the commit-push exit is gated by
 `satellites-commit-push-review` over a v2 pass/fail edge the client enacts.
 

@@ -14,10 +14,10 @@ import (
 
 // TestInitConfiguresConsumption pins the consumption contract (sty_985b05ec):
 // `satellites init` onboards a repo by CONSUMPTION for skills/documents — it
-// writes NO local .satellites/{skills,documents} and seeds the documented
-// library_pins block in the toml. It DOES scaffold the order-zero substrate
-// (the baseline workflow + a starter constitution under .satellites/principles;
-// epic:satellites-backbone 2.4).
+// writes NO local .satellites/{skills,documents,workflows} and seeds the
+// documented library_pins block in the toml. The baseline + parent workflows are
+// a governance SOURCE in the binary embed (sty_a69e8c61), not scaffolded; init
+// scaffolds only the starter constitution under .satellites/principles.
 func TestInitConfiguresConsumption(t *testing.T) {
 	repo := t.TempDir()
 	tomlPath := filepath.Join(repo, ".satellites", "satellites.toml")
@@ -48,10 +48,11 @@ func TestInitConfiguresConsumption(t *testing.T) {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
 
-	// No local skills/documents scaffolded (those are CONSUMED), but the
-	// ORDER-ZERO substrate IS scaffolded: the baseline workflow + a starter
-	// constitution under .satellites/principles (epic:satellites-backbone 2.4).
-	for _, sub := range []string{"skills", "documents"} {
+	// No local skills/documents scaffolded (those are CONSUMED), and NO workflow
+	// is scaffolded either — the baseline + parent defaults are a governance
+	// SOURCE in the binary embed (sty_6c6056f9/sty_a69e8c61). Init scaffolds only
+	// the starter constitution under .satellites/principles.
+	for _, sub := range []string{"skills", "documents", "workflows"} {
 		if _, statErr := os.Stat(filepath.Join(repo, ".satellites", sub)); !os.IsNotExist(statErr) {
 			t.Errorf("init must not scaffold .satellites/%s (statErr=%v)", sub, statErr)
 		}

@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/cliconfig"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
@@ -262,16 +261,12 @@ func runInit(out io.Writer, repoRoot string) error {
 		fmt.Fprintln(out, initLine(added, ".gitignore (.satellites local-state block)"))
 	}
 
-	// 5. Baseline workflow — scaffold the gateless backlog→in_progress→done
-	//    baseline so a fresh repo is governable out of the box (no
-	//    ungoverned-story). Create-if-absent: a repo that already owns a workflow
-	//    keeps it (no overwrite, no ambiguous-governance). Gates stay an opt-in
-	//    palette this baseline names none of (sty_1174c0b9).
-	if added, berr := ensureBaselineWorkflow(repoRoot); berr != nil {
-		return berr
-	} else {
-		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (intent-gated baseline)"))
-	}
+	// 5. Governance — the default baseline + parent workflows are now a GOVERNANCE
+	//    SOURCE in the binary embed (config/workflows, sty_6c6056f9), so a fresh
+	//    repo is governable out of the box with NO scaffolded copy (sty_a69e8c61).
+	//    The operator authors repo-specific workflows under .satellites/workflows/
+	//    only to OVERRIDE the embed defaults.
+	fmt.Fprintln(out, "  = governed by the embedded baseline + parent workflows (author .satellites/workflows/ to override)")
 
 	// 6. Starter constitution — scaffold a repo-owned principles:always
 	//    constitution the intent-gates enforce, create-if-absent so a repo that
@@ -619,48 +614,12 @@ func ensureGitignore(repoRoot string) (bool, error) {
 	}
 }
 
-// baselineWorkflowDoc is the order-zero baseline workflow init/rebase scaffold
-// into a fresh repo's .satellites/workflows/. It is authored SUBSTRATE embedded
-// in the client binary (config/workflows/satellites-baseline-workflow.md), read
-// here — NOT a Go const baking a default process into the binary
-// (epic:system-substrate). backlog -> in_progress (intent-plan gate) -> done
-// (story-done gate); cancels ungated.
-var baselineWorkflowDoc = string(substrate.BaselineWorkflowMarkdown())
-
-// ensureBaselineWorkflow scaffolds the default workflows into
-// .satellites/workflows/, create-if-absent: it writes nothing when a workflow
-// already exists there (so a repo that owns its workflows is never overwritten
-// and no two ["*"] workflows collide as ambiguous-governance). On a fresh repo
-// it writes BOTH the order-zero baseline (applies_to ["*"]) and the default
-// parent/epic workflow (applies_to [parent]) from the client embed — a wildcard
-// + a specific, which do not collide (epic:system-substrate). Returns whether it
-// wrote the defaults.
-func ensureBaselineWorkflow(repoRoot string) (bool, error) {
-	wfDir := filepath.Join(repoRoot, ".satellites", "workflows")
-	if entries, err := os.ReadDir(wfDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				return false, nil // a workflow already exists — leave it
-			}
-		}
-	} else if !os.IsNotExist(err) {
-		return false, fmt.Errorf("init: read %s: %w", wfDir, err)
-	}
-	if err := os.MkdirAll(wfDir, 0o755); err != nil {
-		return false, fmt.Errorf("init: create %s: %w", wfDir, err)
-	}
-	defaults := map[string][]byte{
-		"satellites-baseline-workflow.md": []byte(baselineWorkflowDoc),
-		"satellites-parent-workflow.md":   substrate.ParentWorkflowMarkdown(),
-	}
-	for name, body := range defaults {
-		path := filepath.Join(wfDir, name)
-		if err := os.WriteFile(path, body, 0o644); err != nil {
-			return false, fmt.Errorf("init: write %s: %w", path, err)
-		}
-	}
-	return true, nil
-}
+// The default baseline + parent workflows are NO LONGER scaffolded into a fresh
+// repo's .satellites/workflows/ (sty_a69e8c61): they are a GOVERNANCE SOURCE in
+// the binary embed (config/workflows, sty_6c6056f9), so the resolver and
+// `workflow check` consult them directly. A repo authors .satellites/workflows/
+// only to OVERRIDE a default. The retired ensureBaselineWorkflow used to write
+// both copies here, which then drifted from the embed.
 
 // starterConstitutionDoc is the repo-AGNOSTIC starter constitution init/rebase
 // scaffold into .satellites/principles/, create-if-absent. It is

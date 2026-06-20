@@ -61,7 +61,7 @@ func runRebase(out io.Writer, repoRoot string, doWF, doHook bool) error {
 	// hooks are merged, not replaced). Scope it with --workflows / --hooks.
 	fmt.Fprintln(out, "  ! rebase will modify this repo's governance (reversible):")
 	if doWF {
-		fmt.Fprintln(out, "      • archive .satellites/workflows/ → .satellites/workflows.archive-N/ (a rename, kept) and scaffold the gateless baseline")
+		fmt.Fprintln(out, "      • archive .satellites/workflows/ → .satellites/workflows.archive-N/ (a rename, kept) so the embedded baseline + parent defaults govern")
 	}
 	if doHook {
 		fmt.Fprintln(out, "      • reconcile .claude/settings.json hooks to the current init set (merge — adds missing, nothing removed)")
@@ -76,11 +76,7 @@ func runRebase(out io.Writer, repoRoot string, doWF, doHook bool) error {
 		if archived {
 			fmt.Fprintln(out, initLine(true, "archived .satellites/workflows/ → .satellites/"+filepath.Base(dest)))
 		}
-		added, err := ensureBaselineWorkflow(repoRoot)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(out, initLine(added, ".satellites/workflows/satellites-baseline-workflow.md (intent-gated baseline)"))
+		fmt.Fprintln(out, "  = workflows now governed by the embedded baseline + parent defaults (author .satellites/workflows/ to override)")
 		conAdded, cerr := ensureStarterConstitution(repoRoot)
 		if cerr != nil {
 			return cerr
@@ -102,9 +98,10 @@ func runRebase(out io.Writer, repoRoot string, doWF, doHook bool) error {
 }
 
 // archiveWorkflows reversibly moves the repo's current .satellites/workflows/ to
-// the next free .satellites/workflows.archive-N/ so ensureBaselineWorkflow can
-// scaffold a fresh baseline. A no-op (archived=false) when the dir is absent or
-// empty. Returns the archive path and whether it moved anything.
+// the next free .satellites/workflows.archive-N/ so the embedded baseline +
+// parent defaults govern (sty_a69e8c61 — rebase no longer scaffolds a copy). A
+// no-op (archived=false) when the dir is absent or empty. Returns the archive
+// path and whether it moved anything.
 func archiveWorkflows(repoRoot string) (string, bool, error) {
 	wfDir := filepath.Join(repoRoot, ".satellites", "workflows")
 	entries, err := os.ReadDir(wfDir)

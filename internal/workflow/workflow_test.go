@@ -29,7 +29,10 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// under .satellites/workflows/ (epic:client-dir-separation order-2) — Parse
 		// reads the same shape.
 		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 4},
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 2},
+		// The parent (epic/anchor) workflow is now a GOVERNANCE SOURCE in the
+		// config/workflows embed, no longer scaffolded into .satellites/workflows
+		// (sty_a69e8c61) — parse it from the embed source.
+		{filepath.Join("..", "..", "config", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 2},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)

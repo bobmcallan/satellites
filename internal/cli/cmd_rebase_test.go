@@ -119,10 +119,12 @@ func TestRunRebase_WorkflowsBaseline(t *testing.T) {
 	if err := runRebase(&out, repo, true, false); err != nil {
 		t.Fatalf("rebase --workflows: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(wfDir, "satellites-baseline-workflow.md")); err != nil {
-		t.Errorf("baseline not scaffolded after rebase --workflows")
-	}
+	// rebase --workflows archives the repo's workflows so the EMBEDDED baseline +
+	// parent defaults govern — it no longer scaffolds a copy (sty_a69e8c61).
 	if _, err := os.Stat(filepath.Join(repo, ".satellites", "workflows.archive-1", "old.md")); err != nil {
 		t.Errorf("old workflow not archived")
+	}
+	if _, err := os.Stat(filepath.Join(wfDir, "satellites-baseline-workflow.md")); !os.IsNotExist(err) {
+		t.Errorf("rebase must NOT scaffold a baseline copy (the embed governs)")
 	}
 }

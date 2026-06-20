@@ -7,37 +7,35 @@ import (
 	"strings"
 	"testing"
 
+	substrate "github.com/bobmcallan/satellites/config"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workflow"
 )
 
-// TestInitScaffoldsReducedSpine pins epic:minimal-spine order-6: `satellites
-// init` scaffolds the baseline workflow as the REDUCED spine — the entry is
-// gated by satellites-intent-plan-review (story format + a story→done goal),
-// the doc names no config-over-code judgment, and it does not reference the diff
-// gate (config-over-code moved off the spine, onto satellites-intent-code-review).
-func TestInitScaffoldsReducedSpine(t *testing.T) {
+// baselineWorkflowDoc is the embedded order-zero baseline workflow body — the
+// GOVERNANCE SOURCE in the binary (config/workflows), no longer scaffolded into a
+// repo (sty_a69e8c61). Read here so the baseline-shape tests below assert against
+// the authoritative embed.
+var baselineWorkflowDoc = string(substrate.BaselineWorkflowMarkdown())
+
+// TestInitNoWorkflowScaffold pins sty_a69e8c61: `satellites init` NO LONGER
+// scaffolds a baseline/parent workflow into .satellites/workflows/ — the embed is
+// the governance source, so a fresh repo is governed with no scaffolded copy (no
+// embed↔.satellites drift). It still scaffolds the starter constitution.
+func TestInitNoWorkflowScaffold(t *testing.T) {
 	repo := t.TempDir()
 	var out bytes.Buffer
 	if err := runInit(&out, repo); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(repo, ".satellites", "workflows", "satellites-baseline-workflow.md"))
-	if err != nil {
-		t.Fatalf("baseline workflow not scaffolded: %v", err)
+	for _, name := range []string{"satellites-baseline-workflow.md", "satellites-parent-workflow.md"} {
+		if _, err := os.Stat(filepath.Join(repo, ".satellites", "workflows", name)); !os.IsNotExist(err) {
+			t.Errorf("init must NOT scaffold %s (the embed governs), but it exists", name)
+		}
 	}
-	body := string(raw)
-	if !strings.Contains(body, `reviewer_skill: "satellites-intent-plan-review"`) {
-		t.Errorf("baseline entry must be gated by satellites-intent-plan-review:\n%s", body)
-	}
-	if !strings.Contains(body, "story→done goal") {
-		t.Errorf("baseline must describe the format + story→done spine gate:\n%s", body)
-	}
-	if strings.Contains(body, "satellites-intent-code-review") {
-		t.Errorf("baseline must NOT name the diff gate — config-over-code is not part of the spine:\n%s", body)
-	}
-	if strings.Contains(strings.ToLower(body), "config-over-code") {
-		t.Errorf("baseline workflow doc must carry no config-over-code language:\n%s", body)
+	// The starter constitution is still scaffolded.
+	if _, err := os.Stat(filepath.Join(repo, ".satellites", "principles", "constitution.md")); err != nil {
+		t.Errorf("init must still scaffold the starter constitution: %v", err)
 	}
 }
 
@@ -98,39 +96,6 @@ func baselineHasEdge(wf *workflow.Workflow, from, to string) bool {
 		}
 	}
 	return false
-}
-
-// TestEnsureBaselineWorkflow: scaffolds into an empty repo; create-if-absent
-// (no-op when any workflow already exists, so an owning repo is untouched).
-func TestEnsureBaselineWorkflow(t *testing.T) {
-	repo := t.TempDir()
-	added, err := ensureBaselineWorkflow(repo)
-	if err != nil || !added {
-		t.Fatalf("fresh ensureBaselineWorkflow: added=%v err=%v", added, err)
-	}
-	p := filepath.Join(repo, ".satellites", "workflows", "satellites-baseline-workflow.md")
-	if _, err := os.Stat(p); err != nil {
-		t.Fatalf("baseline not written: %v", err)
-	}
-	if added, _ := ensureBaselineWorkflow(repo); added {
-		t.Errorf("re-run scaffolded again — must be create-if-absent")
-	}
-
-	// A repo that already owns a DIFFERENT workflow is left untouched.
-	repo2 := t.TempDir()
-	wfDir := filepath.Join(repo2, ".satellites", "workflows")
-	if err := os.MkdirAll(wfDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wfDir, "my-workflow.md"), []byte("# mine"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if added, _ := ensureBaselineWorkflow(repo2); added {
-		t.Errorf("scaffolded over a repo that already owns a workflow")
-	}
-	if _, err := os.Stat(filepath.Join(wfDir, "satellites-baseline-workflow.md")); !os.IsNotExist(err) {
-		t.Errorf("baseline written despite an existing workflow")
-	}
 }
 
 // TestEnsureStarterConstitution: scaffolds the starter constitution into an

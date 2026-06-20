@@ -32,28 +32,15 @@ import (
 //go:embed documents/*.md principles/*.md skills/*.md mcp/*.md workflows/*.md
 var FS embed.FS
 
-// BaselineWorkflowMarkdown returns the raw order-zero baseline workflow
-// artifact bytes — the default story lifecycle init/rebase scaffold into a
-// fresh repo's .satellites/workflows/. Homed in the client embed (not a Go
-// const) so the default PROCESS is authored substrate, not baked-in code
-// (epic:system-substrate).
+// BaselineWorkflowMarkdown returns the raw order-zero baseline workflow artifact
+// bytes from the embed. The baseline (and the sibling parent workflow) are a
+// GOVERNANCE SOURCE the resolver and `workflow check` consult directly from the
+// embed (sty_6c6056f9); they are no longer scaffolded into a repo's
+// .satellites/workflows/ (sty_a69e8c61). Exposed for the baseline-shape tests.
 func BaselineWorkflowMarkdown() []byte {
 	b, err := fs.ReadFile(FS, "workflows/satellites-baseline-workflow.md")
 	if err != nil {
 		panic("substrate: workflows/satellites-baseline-workflow.md missing from embed.FS: " + err.Error())
-	}
-	return b
-}
-
-// ParentWorkflowMarkdown returns the raw default parent/epic workflow artifact
-// bytes — the lifecycle an anchor (epic/parent) story follows, init/rebase
-// scaffold into a fresh repo's .satellites/workflows/ alongside the baseline.
-// Homed in the client embed (epic:system-substrate), not a Go const or a
-// repo-only file.
-func ParentWorkflowMarkdown() []byte {
-	b, err := fs.ReadFile(FS, "workflows/satellites-parent-workflow.md")
-	if err != nil {
-		panic("substrate: workflows/satellites-parent-workflow.md missing from embed.FS: " + err.Error())
 	}
 	return b
 }
