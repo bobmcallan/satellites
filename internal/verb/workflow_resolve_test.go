@@ -41,7 +41,7 @@ func TestResolveGoverningWorkflow(t *testing.T) {
 func TestGoverningReconcile_Conformant(t *testing.T) {
 	// A skill-category story embedding the skills workflow verbatim: enacts the
 	// skills workflow's edges from publish-review, no drift.
-	edges, governing, drift := GoverningReconcile(skillsWFBody, "publish-review", "skill", sources())
+	edges, governing, drift := GoverningReconcile("", skillsWFBody, "publish-review", "skill", sources())
 	if governing != "skills-wf" {
 		t.Fatalf("governing=%q, want skills-wf", governing)
 	}
@@ -57,7 +57,7 @@ func TestGoverningReconcile_DriftSurfaced(t *testing.T) {
 	// A skill-category story that embedded the PRODUCT workflow (a divergent
 	// copy): the governing skills workflow is resolved, its edges enacted, and
 	// the divergence is surfaced as drift — the embedded copy is not honoured.
-	edges, governing, drift := GoverningReconcile(productWFBody, "in_progress", "skill", sources())
+	edges, governing, drift := GoverningReconcile("", productWFBody, "in_progress", "skill", sources())
 	if governing != "skills-wf" {
 		t.Fatalf("governing=%q, want skills-wf (resolved by category, not the embedded copy)", governing)
 	}
@@ -66,7 +66,7 @@ func TestGoverningReconcile_DriftSurfaced(t *testing.T) {
 	}
 	// The enacted checkpoint target is the governing workflow's (publish-review),
 	// not the embedded product copy's (done-review).
-	to, ok := GoverningCheckpoint(productWFBody, "in_progress", "skill", sources())
+	to, ok := GoverningCheckpoint("", productWFBody, "in_progress", "skill", sources())
 	if !ok || to != "publish-review" {
 		t.Fatalf("checkpoint enacted %q ok=%v, want publish-review (the governing workflow's)", to, ok)
 	}
@@ -76,11 +76,70 @@ func TestGoverningReconcile_DriftSurfaced(t *testing.T) {
 func TestGoverningReconcile_UngovernedFallsBackToEmbedded(t *testing.T) {
 	// No workflow covers the category → the embedded copy is used (legacy path).
 	only := []WorkflowSource{{Name: "skills-wf", Body: skillsWFBody}}
-	edges, governing, drift := GoverningReconcile(productWFBody, "done-review", "feature", only)
+	edges, governing, drift := GoverningReconcile("", productWFBody, "done-review", "feature", only)
 	if governing != "" || drift != "" {
 		t.Fatalf("ungoverned category should fall back silently, got governing=%q drift=%q", governing, drift)
 	}
 	if !edges.IsV2 || edges.PassTo != "done" {
 		t.Fatalf("embedded edges = %+v, want pass=done", edges)
+	}
+}
+
+// TestWorkflowSelector: the chosen workflow name is read from a `workflow:<name>`
+// tag; other tags and absence are handled (sty_cfbcc6e2).
+func TestWorkflowSelector(t *testing.T) {
+	if got := WorkflowSelector([]string{"area:substrate", "workflow:skills-wf", "epic-order:3"}); got != "skills-wf" {
+		t.Fatalf("selector = %q, want skills-wf", got)
+	}
+	if got := WorkflowSelector([]string{"area:substrate"}); got != "" {
+		t.Fatalf("no workflow tag should yield empty selector, got %q", got)
+	}
+}
+
+// TestResolveByName: resolves by frontmatter name and reports category coverage;
+// a dangling name is not ok (sty_cfbcc6e2 AC3).
+func TestResolveByName(t *testing.T) {
+	// skills-wf covers "skill" (specific), not "feature".
+	if wf, covers, ok := ResolveByName("skills-wf", "skill", sources()); !ok || !covers || wf == nil {
+		t.Fatalf("skills-wf/skill: ok=%v covers=%v", ok, covers)
+	}
+	if _, covers, ok := ResolveByName("skills-wf", "feature", sources()); !ok || covers {
+		t.Fatalf("skills-wf/feature: want ok=true covers=false, got ok=%v covers=%v", ok, covers)
+	}
+	// prod-wf is wildcard → covers any category.
+	if _, covers, ok := ResolveByName("prod-wf", "feature", sources()); !ok || !covers {
+		t.Fatalf("prod-wf/feature (wildcard): want ok=true covers=true, got ok=%v covers=%v", ok, covers)
+	}
+	// A dangling selector resolves nothing.
+	if _, _, ok := ResolveByName("nope-wf", "skill", sources()); ok {
+		t.Fatalf("dangling selector must not resolve")
+	}
+}
+
+// TestGoverningReconcile_SelectorAuthoritative: a valid selector loads THAT
+// workflow's edges (not category resolution, not the embedded copy) with no
+// drift; a dangling or non-matching selector fails closed — empty edges + drift
+// (sty_cfbcc6e2 AC1/AC3).
+func TestGoverningReconcile_SelectorAuthoritative(t *testing.T) {
+	// Selector names prod-wf (wildcard) for a skill story: the selector wins over
+	// the category default (skills-wf). Edges come from prod-wf; no drift.
+	edges, governing, drift := GoverningReconcile("prod-wf", skillsWFBody, "done-review", "skill", sources())
+	if governing != "prod-wf" || drift != "" {
+		t.Fatalf("selector prod-wf: governing=%q drift=%q, want prod-wf/no-drift", governing, drift)
+	}
+	if !edges.IsV2 || edges.PassTo != "done" {
+		t.Fatalf("prod-wf done-review edges = %+v, want v2 pass=done", edges)
+	}
+
+	// Dangling selector → fail closed (empty edges, drift names the gap).
+	edges, _, drift = GoverningReconcile("ghost-wf", skillsWFBody, "in_progress", "skill", sources())
+	if drift == "" || edges.IsV2 {
+		t.Fatalf("dangling selector must fail closed, got edges=%+v drift=%q", edges, drift)
+	}
+
+	// Non-matching selector (skills-wf does not cover feature) → fail closed.
+	edges, _, drift = GoverningReconcile("skills-wf", skillsWFBody, "in_progress", "feature", sources())
+	if drift == "" || edges.IsV2 {
+		t.Fatalf("non-matching selector must fail closed, got edges=%+v drift=%q", edges, drift)
 	}
 }

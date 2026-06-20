@@ -208,21 +208,21 @@ transitions:
 func TestSetStatusAllowed(t *testing.T) {
 	baseline := []verb.WorkflowSource{{Name: "satellites-baseline-workflow", Body: baselineWorkflowDoc}}
 
-	if !setStatusAllowed("parent", "done", "backlog", "", nil) {
+	if !setStatusAllowed("", "parent", "done", "backlog", "", nil) {
 		t.Errorf("parent reopen must be allowed")
 	}
-	if setStatusAllowed("fix", "backlog", "in_progress", "", baseline) {
+	if setStatusAllowed("", "fix", "backlog", "in_progress", "", baseline) {
 		t.Errorf("the baseline entry is now gated by the intent-gate — set-status must refuse it")
 	}
-	if setStatusAllowed("fix", "in_progress", "done", "", baseline) {
+	if setStatusAllowed("", "fix", "in_progress", "done", "", baseline) {
 		t.Errorf("the baseline exit is now gated by satellites-story-done-review — set-status must refuse it")
 	}
-	if setStatusAllowed("fix", "backlog", "done", "", baseline) {
+	if setStatusAllowed("", "fix", "backlog", "done", "", baseline) {
 		t.Errorf("undeclared backlog→done must be refused")
 	}
 
 	gated := []verb.WorkflowSource{{Name: "gated", Body: gatedTestWorkflow}}
-	if setStatusAllowed("fix", "backlog", "ready", "", gated) {
+	if setStatusAllowed("", "fix", "backlog", "ready", "", gated) {
 		t.Errorf("gated backlog→ready must be refused (it goes through the gate)")
 	}
 }

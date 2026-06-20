@@ -28,6 +28,62 @@ type WorkflowSource struct {
 	Body string
 }
 
+// WorkflowSelectorTag is the story-tag prefix recording the CHOSEN governing
+// workflow BY NAME (sty_cfbcc6e2). A story tagged `workflow:<name>` is governed
+// by that named workflow — resolved from the source set, not by category
+// auto-resolution and never by its embedded ## Workflow copy (tamper-proof, no
+// drift). The selector is the authority; the embedded YAML is display-only.
+const WorkflowSelectorTag = "workflow:"
+
+// WorkflowSelector returns the chosen workflow name from a story's tags (the
+// value of the first `workflow:<name>` tag), or "" when none is set. Pure.
+func WorkflowSelector(tags []string) string {
+	for _, t := range tags {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(t), WorkflowSelectorTag); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// appliesToCovers reports whether a workflow's `applies_to` covers a category —
+// a specific (case-insensitive) match or the "*" wildcard. Pure.
+func appliesToCovers(wf *workflow.Workflow, category string) bool {
+	category = strings.TrimSpace(category)
+	for _, at := range wf.AppliesTo {
+		at = strings.TrimSpace(at)
+		if at == "*" || (category != "" && strings.EqualFold(at, category)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveByName resolves the workflow a selector records — the source whose
+// frontmatter (or projected) name matches `name` — and reports whether it covers
+// `category`. ok is false when NO source carries that name (the selector is
+// dangling); covers is false when the named workflow's applies_to does not cover
+// the category (a non-matching selector). Both are fail-closed conditions the
+// caller surfaces (the engine reports, the plan gate rejects — sty_cfbcc6e2 AC3).
+// Pure (no I/O).
+func ResolveByName(name, category string, sources []WorkflowSource) (wf *workflow.Workflow, covers bool, ok bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, false, false
+	}
+	for _, s := range sources {
+		parsed, err := workflow.Parse([]byte(s.Body))
+		if err != nil || parsed == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(s.Name), name) && !strings.EqualFold(strings.TrimSpace(parsed.Name), name) {
+			continue
+		}
+		return parsed, appliesToCovers(parsed, category), true
+	}
+	return nil, false, false
+}
+
 // ResolveGoverningWorkflow picks the workflow whose `applies_to` covers the
 // story category. An exact (case-insensitive) category match wins over a "*"
 // wildcard; among wildcards or exact matches the first in source order wins
@@ -71,7 +127,21 @@ func ResolveGoverningWorkflow(category string, sources []WorkflowSource) (*workf
 // divergence is surfaced as drift instead. When no workflow covers the
 // category, it falls back to the embedded copy (the legacy/ungoverned path,
 // where plan-review owns the story shape).
-func GoverningReconcile(storyBody, status, category string, sources []WorkflowSource) (edges V2Edges, governing string, drift string) {
+func GoverningReconcile(selector, storyBody, status, category string, sources []WorkflowSource) (edges V2Edges, governing string, drift string) {
+	// A recorded selector is the authority (sty_cfbcc6e2): load the named
+	// workflow's edges, fail closed when it is dangling or non-matching. The
+	// embedded ## Workflow is never consulted on the selector path — the name is
+	// tamper-proof, so there is no drift to surface.
+	if selector != "" {
+		wf, covers, ok := ResolveByName(selector, category, sources)
+		if !ok {
+			return V2Edges{}, "", fmt.Sprintf("workflow selector %q names no workflow in the source set — fail closed (pick a valid one: satellites workflow list)", selector)
+		}
+		if !covers {
+			return V2Edges{}, selector, fmt.Sprintf("workflow selector %q does not cover category %q — fail closed (pick a matching workflow)", selector, category)
+		}
+		return edgesFromWorkflow(wf, status), selector, ""
+	}
 	auth, name, ok := ResolveGoverningWorkflow(category, sources)
 	if !ok {
 		e, _ := ResolveV2Edges(storyBody, status)
@@ -88,10 +158,19 @@ func GoverningReconcile(storyBody, status, category string, sources []WorkflowSo
 // out of `status` in the AUTHORITATIVE governing workflow (mirrors
 // CheckpointEdge but over the resolved definition, not the embedded copy).
 // Falls back to the embedded copy when no workflow covers the category.
-func GoverningCheckpoint(storyBody, status, category string, sources []WorkflowSource) (string, bool) {
-	auth, _, ok := ResolveGoverningWorkflow(category, sources)
-	if !ok {
-		return CheckpointEdge(storyBody, status)
+func GoverningCheckpoint(selector, storyBody, status, category string, sources []WorkflowSource) (string, bool) {
+	var auth *workflow.Workflow
+	if selector != "" {
+		if wf, covers, ok := ResolveByName(selector, category, sources); ok && covers {
+			auth = wf
+		}
+	}
+	if auth == nil {
+		w, _, ok := ResolveGoverningWorkflow(category, sources)
+		if !ok {
+			return CheckpointEdge(storyBody, status)
+		}
+		auth = w
 	}
 	to, count := "", 0
 	for _, t := range auth.TransitionsFrom(strings.TrimSpace(status)) {
@@ -114,12 +193,21 @@ func GoverningCheckpoint(storyBody, status, category string, sources []WorkflowS
 // that carries a reviewer skill) is NOT advanceable this way — it must go
 // through its gate; an undeclared edge returns false. Pure (no I/O) so the
 // set-status surface stays fixture-testable.
-func GoverningUngatedAdvance(storyBody, status, category, target string, sources []WorkflowSource) bool {
+func GoverningUngatedAdvance(selector, storyBody, status, category, target string, sources []WorkflowSource) bool {
 	var froms []workflow.Transition
-	if auth, _, ok := ResolveGoverningWorkflow(category, sources); ok {
-		froms = auth.TransitionsFrom(strings.TrimSpace(status))
-	} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
-		froms = embedded.TransitionsFrom(strings.TrimSpace(status))
+	resolved := false
+	if selector != "" {
+		if wf, covers, ok := ResolveByName(selector, category, sources); ok && covers {
+			froms = wf.TransitionsFrom(strings.TrimSpace(status))
+			resolved = true
+		}
+	}
+	if !resolved {
+		if auth, _, ok := ResolveGoverningWorkflow(category, sources); ok {
+			froms = auth.TransitionsFrom(strings.TrimSpace(status))
+		} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
+			froms = embedded.TransitionsFrom(strings.TrimSpace(status))
+		}
 	}
 	target = strings.TrimSpace(target)
 	for _, t := range froms {

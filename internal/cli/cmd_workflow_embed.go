@@ -60,28 +60,54 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 		return err
 	}
 
-	// Resolve the governing workflow by category over the merged sources.
+	// embed STAMPS THE CHOSEN workflow (sty_cfbcc6e2): honour an existing
+	// `workflow:<name>` selector; when none is set, default to the TOP-RANKED
+	// category match and RECORD it as the selector (parity with the old "resolve
+	// the governing one"). The recorded NAME is the authority; the stamped
+	// ## Workflow is display-only.
 	sources := governingWorkflowSources(configPath)
-	wf, name, ok := verb.ResolveGoverningWorkflow(story.Category, sources)
-	if !ok {
-		return fmt.Errorf("workflow embed: no workflow covers category %q — author one under .satellites/workflows (frontmatter applies_to) before embedding (fail closed)", story.Category)
+	selector := verb.WorkflowSelector(story.Tags)
+	var wf *workflow.Workflow
+	var name string
+	if selector != "" {
+		w, covers, ok := verb.ResolveByName(selector, story.Category, sources)
+		if !ok {
+			return fmt.Errorf("workflow embed: story %s selector %q names no workflow in the source set (fail closed) — `satellites workflow list %s` to pick a valid one", storyID, selector, storyID)
+		}
+		if !covers {
+			return fmt.Errorf("workflow embed: story %s selector %q does not cover category %q (fail closed) — pick a matching workflow (`satellites workflow list %s`)", storyID, selector, story.Category, storyID)
+		}
+		wf, name = w, selector
+	} else {
+		w, n, ok := verb.ResolveGoverningWorkflow(story.Category, sources)
+		if !ok {
+			return fmt.Errorf("workflow embed: no workflow covers category %q — author one under .satellites/workflows (frontmatter applies_to) or rely on the embedded baseline (fail closed)", story.Category)
+		}
+		wf, name = w, n
+		// Record the choice BY NAME so the engine resolves edges by name hereafter.
+		if err := setWorkflowSelectorTag(ctx, story, name, configPath, userArg); err != nil {
+			return fmt.Errorf("workflow embed: record selector %q: %w", name, err)
+		}
 	}
 
-	// Stamp the embedded `## Workflow` from the governing definition. Shared with
-	// the review path's self-heal (reembedGoverningWorkflow) so there is one
-	// stamping implementation; idempotent (writes only when absent/drifted).
-	_, changed, _, _, err := reembedGoverningWorkflow(ctx, story, body, configPath, userArg, sources)
-	if err != nil {
-		return fmt.Errorf("workflow embed: %w", err)
-	}
-
-	// srcBody for the printed table (state machine + checkpoint gates).
+	// Re-stamp the display `## Workflow` from the CHOSEN source (display-only;
+	// the selector is the authority). Idempotent — writes only when absent/drifted.
 	var srcBody string
 	for _, s := range sources {
 		if s.Name == name {
 			srcBody = s.Body
 			break
 		}
+	}
+	newBody, changed, sErr := stampWorkflowSection(body, wf, srcBody)
+	if sErr != nil {
+		return fmt.Errorf("workflow embed: %w", sErr)
+	}
+	if changed {
+		if aErr := applyStoryBody(ctx, story, newBody, configPath, userArg); aErr != nil {
+			return fmt.Errorf("workflow embed: write ## Workflow: %w", aErr)
+		}
+		body = newBody
 	}
 
 	// Next move out of the story's current status. Prefer a forward move: an
@@ -171,13 +197,48 @@ func syncEmbeddedWorkflowBody(body, category string, sources []verb.WorkflowSour
 			break
 		}
 	}
-	yamlBlock, yErr := workflow.ExtractYAMLBlock([]byte(srcBody))
-	if yErr != nil {
-		return body, false, name, true, fmt.Errorf("governing workflow %q carries no ```yaml block: %w", name, yErr)
+	newBody, changed, err = stampWorkflowSection(body, wf, srcBody)
+	if err != nil {
+		return body, false, name, true, err
+	}
+	return newBody, changed, name, true, nil
+}
+
+// stampWorkflowSection re-stamps a story body's `## Workflow` display block from
+// a CHOSEN workflow's source (its ```yaml block). changed is false when the
+// embedded copy already matches the workflow (no needless rewrite). Pure — the
+// `## Workflow` is a derived display cache; the recorded selector is the
+// authority the engine enacts (sty_cfbcc6e2).
+func stampWorkflowSection(body string, wf *workflow.Workflow, srcBody string) (string, bool, error) {
+	yamlBlock, err := workflow.ExtractYAMLBlock([]byte(srcBody))
+	if err != nil {
+		return body, false, fmt.Errorf("chosen workflow carries no ```yaml block: %w", err)
 	}
 	if embedded, perr := workflow.ParseBody([]byte(body)); perr == nil && embedded != nil && wf.Equivalent(embedded) {
-		return body, false, name, true, nil // already in sync — no needless story version
+		return body, false, nil
 	}
 	section := "## Workflow\n\n```yaml\n" + strings.TrimRight(string(yamlBlock), "\n") + "\n```\n"
-	return replaceSection(body, "## Workflow", section), true, name, true, nil
+	return replaceSection(body, "## Workflow", section), true, nil
+}
+
+// setWorkflowSelectorTag records the chosen workflow on the story BY NAME — it
+// drops any existing `workflow:<name>` tag, appends `workflow:<name>`, and writes
+// the tags via document_upsert (patch in place). The selector is the authority
+// the engine resolves edges from; this is how `workflow embed` persists the
+// default top-ranked choice (sty_cfbcc6e2).
+func setWorkflowSelectorTag(ctx context.Context, story reviewStory, name, configPath, userArg string) error {
+	tags := make([]string, 0, len(story.Tags)+1)
+	for _, t := range story.Tags {
+		if _, isSel := strings.CutPrefix(strings.TrimSpace(t), verb.WorkflowSelectorTag); isSel {
+			continue
+		}
+		tags = append(tags, t)
+	}
+	tags = append(tags, verb.WorkflowSelectorTag+name)
+	req, err := json.Marshal(verb.DocumentUpsertRequest{ID: story.ID, Tags: &tags})
+	if err != nil {
+		return err
+	}
+	_, err = dispatchVerb(ctx, "document_upsert", req, configPath, userArg)
+	return err
 }

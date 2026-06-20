@@ -67,7 +67,7 @@ func runStorySetStatus(ctx context.Context, out io.Writer, configPath, userArg, 
 	}
 
 	parent := d.Category == "parent"
-	if !setStatusAllowed(d.Category, d.Status, status, body, governingWorkflowSources(configPath)) {
+	if !setStatusAllowed(verb.WorkflowSelector(d.Tags), d.Category, d.Status, status, body, governingWorkflowSources(configPath)) {
 		return fmt.Errorf("set-status: %s (category=%q, status=%q) has no ungated %s→%s edge — a gated move goes through the reviewer gate (satellites story status_transition --skill <gate>); set-status is for a parent reopen or a gateless-workflow advance", storyID, d.Category, d.Status, d.Status, status)
 	}
 
@@ -90,11 +90,11 @@ func runStorySetStatus(ctx context.Context, out io.Writer, configPath, userArg, 
 // sanctioned: a parent reopen (the operator override) OR a gateless-baseline
 // advance along an ungated edge of the governing workflow. A move across a gated
 // edge — or one the workflow does not declare — is refused. Pure for tests.
-func setStatusAllowed(category, status, target, body string, sources []verb.WorkflowSource) bool {
+func setStatusAllowed(selector, category, status, target, body string, sources []verb.WorkflowSource) bool {
 	if category == "parent" {
 		return true
 	}
-	return verb.GoverningUngatedAdvance(body, status, category, target, sources)
+	return verb.GoverningUngatedAdvance(selector, body, status, category, target, sources)
 }
 
 // requireParent rejects a non-parent story — pure for tests.

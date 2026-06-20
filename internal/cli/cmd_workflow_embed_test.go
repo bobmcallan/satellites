@@ -29,7 +29,7 @@ func TestSyncEmbeddedWorkflowBody_ReSyncsAndClearsDrift(t *testing.T) {
 	sources := embedTestSources()
 
 	// Precondition: the stale embed diverges → GoverningReconcile surfaces drift.
-	if _, gov, drift := verb.GoverningReconcile(staleEmbedBody, "in_progress", "feature", sources); gov != "gov-wf" || drift == "" {
+	if _, gov, drift := verb.GoverningReconcile("", staleEmbedBody, "in_progress", "feature", sources); gov != "gov-wf" || drift == "" {
 		t.Fatalf("precondition: want governing=gov-wf with drift, got governing=%q drift=%q", gov, drift)
 	}
 
@@ -51,7 +51,7 @@ func TestSyncEmbeddedWorkflowBody_ReSyncsAndClearsDrift(t *testing.T) {
 
 	// AC1/AC2: after the resync, GoverningReconcile reports NO drift — the embed
 	// now mirrors the authoritative governing definition.
-	if _, gov2, drift := verb.GoverningReconcile(synced, "in_progress", "feature", sources); gov2 != "gov-wf" || drift != "" {
+	if _, gov2, drift := verb.GoverningReconcile("", synced, "in_progress", "feature", sources); gov2 != "gov-wf" || drift != "" {
 		t.Fatalf("post-resync want governing=gov-wf no drift, got governing=%q drift=%q", gov2, drift)
 	}
 

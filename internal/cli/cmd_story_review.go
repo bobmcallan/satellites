@@ -143,6 +143,7 @@ type reviewStory struct {
 	Category    string
 	ProjectID   string
 	WorkspaceID string
+	Tags        []string
 }
 
 // checkpointDecision is the single rule behind --checkpoint (sty_21d2c535): the
@@ -207,7 +208,20 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// Workflow` copy — so an embedded copy cannot weaken the gate. A divergent
 	// embedded copy is surfaced as drift, not honoured.
 	wfSources := governingWorkflowSources(opts.ConfigPath)
-	edges, governing, drift := verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+	// The story may RECORD its governing workflow BY NAME — a `workflow:<name>`
+	// tag (sty_cfbcc6e2). When set it is the authority: the engine loads that
+	// named workflow's edges, never the embedded ## Workflow. Fail closed up
+	// front on a dangling or non-matching selector so the gate never enacts a
+	// guessed workflow (the plan gate's reject is the sibling guard).
+	selector := verb.WorkflowSelector(story.Tags)
+	if selector != "" {
+		if _, covers, ok := verb.ResolveByName(selector, story.Category, wfSources); !ok {
+			return fmt.Errorf("status_transition: story %s names workflow selector %q which resolves to no workflow in the source set — pick a valid one (satellites workflow list %s) and re-tag", story.ID, selector, story.ID)
+		} else if !covers {
+			return fmt.Errorf("status_transition: story %s names workflow selector %q whose applies_to does not cover category %q — pick a matching workflow (satellites workflow list %s)", story.ID, selector, story.Category, story.ID)
+		}
+	}
+	edges, governing, drift := verb.GoverningReconcile(selector, body, story.Status, story.Category, wfSources)
 	if drift != "" {
 		// The embedded `## Workflow` diverged from the authoritative governing
 		// workflow — a governing-config edit staled this in-flight story's copy.
@@ -219,7 +233,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		// transition.
 		if synced, changed, gov, ok, rErr := reembedGoverningWorkflow(ctx, story, body, opts.ConfigPath, opts.UserArg, wfSources); ok && rErr == nil && changed {
 			body = synced
-			edges, governing, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+			edges, governing, _ = verb.GoverningReconcile(selector, body, story.Status, story.Category, wfSources)
 			fmt.Fprintf(opts.Stdout, "re-synced embedded ## Workflow from governing workflow %q\n", gov)
 		} else {
 			fmt.Fprintf(opts.Stderr, "workflow drift: %s\n", drift)
@@ -292,7 +306,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// advanced it to shipping and skipped the executor's work. checkpointDecision
 	// makes the contract explicit — the hop fires only under --checkpoint, and
 	// naming --skill at a pure-checkpoint state errors rather than transitions.
-	cpTo, cpOK := verb.GoverningCheckpoint(body, story.Status, story.Category, wfSources)
+	cpTo, cpOK := verb.GoverningCheckpoint(selector, body, story.Status, story.Category, wfSources)
 	isCheckpointState := cpOK && !edges.IsV2 && edges.Actor != "operator"
 	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, story.Status, cpTo, gateSkill)
 	if cpErr != nil {
@@ -304,7 +318,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 			map[string]any{"from_status": story.Status, "to_status": cpTo, "trigger": "checkpoint"})
 		fmt.Fprintf(opts.Stdout, "checkpoint: %s → %s\n", story.Status, cpTo)
 		story.Status = cpTo
-		edges, _, _ = verb.GoverningReconcile(body, story.Status, story.Category, wfSources)
+		edges, _, _ = verb.GoverningReconcile(selector, body, story.Status, story.Category, wfSources)
 		if edges.Actor != "satellites" {
 			// Landed where someone else acts (reviewer gate = its own
 			// request; operator = a human's turn; terminal = done).
@@ -821,6 +835,7 @@ func reviewGetStory(ctx context.Context, opts reviewOpts) (reviewStory, string, 
 		Category:    resp.Document.Category,
 		ProjectID:   resp.Document.ProjectID,
 		WorkspaceID: resp.Document.WorkspaceID,
+		Tags:        resp.Document.Tags,
 	}, body, nil
 }
 
