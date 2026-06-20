@@ -249,6 +249,12 @@ type matSkill struct {
 	description string
 	body        string
 	raw         string // full on-disk file content (stamp + frontmatter + body)
+	// source is the precedence tier a workflow candidate was gathered from —
+	// "local" (.satellites/workflows), "skill" (materialised .claude/skills), or
+	// "embed" (config/workflows). It mirrors the resolver's source order so the
+	// governance check ranks a category's palette the way the engine resolves it
+	// (sty_22571e7b). Empty for non-workflow skills.
+	source string
 	// local marks a skill AUTHORED in this repo's skill authoring dir
 	// (repo-owned), as opposed to one INHERITED by sync from a publisher/system
 	// (a palette). Populated by markLocalAuthorship on the workflow-check path
@@ -294,7 +300,7 @@ func materialisedSkills() []matSkill {
 		if name == "" {
 			name = e.Name()
 		}
-		out = append(out, matSkill{name: name, kind: strings.TrimSpace(fm.Kind), scope: strings.TrimSpace(fm.Scope), description: strings.TrimSpace(fm.Description), body: string(bodyB), raw: string(raw)})
+		out = append(out, matSkill{name: name, kind: strings.TrimSpace(fm.Kind), scope: strings.TrimSpace(fm.Scope), source: "skill", description: strings.TrimSpace(fm.Description), body: string(bodyB), raw: string(raw)})
 	}
 	return out
 }

@@ -330,3 +330,55 @@ func TestWorkflowCheck_DriftClasses(t *testing.T) {
 		}
 	})
 }
+
+// wfDup builds a kind:workflow matSkill (applies_to ["dup"]) at a given source
+// tier — for the palette/ambiguity ranking tests (sty_22571e7b).
+func wfDup(name, source string) matSkill {
+	body := "# " + name + "\n\n```yaml\nstates:\n  - backlog\n  - doing\n  - done\ntransitions:\n  - {from: backlog, to: doing, reviewer_skill: \"entry-review\"}\n  - {from: doing, to: done, reviewer_skill: \"exit-review\"}\n```\n"
+	raw := "---\nname: " + name + "\nkind: workflow\napplies_to: [\"dup\"]\ndescription: d\n---\n" + body
+	return matSkill{name: name, kind: "workflow", source: source, description: "d", body: body, raw: raw}
+}
+
+// TestWorkflowCheck_PaletteCrossTierNotAmbiguous: two workflows covering the
+// same category from DIFFERENT source tiers are a palette, not drift — local
+// wins, the default is deterministic, so no ambiguous-governance block.
+func TestWorkflowCheck_PaletteCrossTierNotAmbiguous(t *testing.T) {
+	skills := append(healthyCorpus(), wfDup("wf-local", "local"), wfDup("wf-embed", "embed"))
+	for _, f := range runWorkflowChecks(skills, nil, nil) {
+		if f.Code == "ambiguous-governance" {
+			t.Fatalf("cross-tier palette must not block (local > embed is deterministic): %s", f.Message)
+		}
+	}
+}
+
+// TestWorkflowCheck_SpecificOverWildcardNotAmbiguous: a specific match plus a
+// wildcard baseline for the same category is deterministic (specific wins) — not
+// a tie.
+func TestWorkflowCheck_SpecificOverWildcardNotAmbiguous(t *testing.T) {
+	wild := func() matSkill {
+		body := "# wild\n\n```yaml\nstates:\n  - backlog\n  - doing\n  - done\ntransitions:\n  - {from: backlog, to: doing, reviewer_skill: \"entry-review\"}\n  - {from: doing, to: done, reviewer_skill: \"exit-review\"}\n```\n"
+		raw := "---\nname: wild-wf\nkind: workflow\napplies_to: [\"*\"]\ndescription: d\n---\n" + body
+		return matSkill{name: "wild-wf", kind: "workflow", source: "embed", description: "d", body: body, raw: raw}
+	}
+	skills := append(healthyCorpus(), wfDup("wf-local", "local"), wild())
+	for _, f := range runWorkflowChecks(skills, nil, nil) {
+		if f.Code == "ambiguous-governance" {
+			t.Fatalf("specific over wildcard must not block: %s", f.Message)
+		}
+	}
+}
+
+// TestWorkflowCheck_SameTierTieBlocks: two SAME-tier specific workflows for a
+// category genuinely tie at the top precedence → the default is ambiguous → block.
+func TestWorkflowCheck_SameTierTieBlocks(t *testing.T) {
+	skills := append(healthyCorpus(), wfDup("wf-a", "local"), wfDup("wf-b", "local"))
+	hit := false
+	for _, f := range runWorkflowChecks(skills, nil, nil) {
+		if f.Code == "ambiguous-governance" && f.Severity == "block" {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Fatal("two same-tier (local) specifics for a category must tie and block")
+	}
+}

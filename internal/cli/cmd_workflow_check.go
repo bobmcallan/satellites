@@ -416,29 +416,100 @@ func checkFirstGateComprehensive(skills []matSkill, wfs map[string]*workflow.Wor
 	return out
 }
 
-// checkAmbiguousGovernance (multi-workflow resolution, sty_0889de7a): the
-// governing workflow for a story resolves by applies_to ↔ category, so a
-// category must map to exactly ONE non-wildcard workflow. Two workflows both
-// claiming the same specific category make resolution ambiguous — fail closed
-// (the "*" wildcard is the shared default and never conflicts).
-func checkAmbiguousGovernance(wfs map[string]*workflow.Workflow) []driftFinding {
-	byCat := map[string][]string{}
-	for name, wf := range wfs {
+// checkAmbiguousGovernance (palette resolution, sty_22571e7b): a category may be
+// covered by a PALETTE of workflows — the agent selects one (workflow list /
+// the recorded selector). Multiple matches are NO LONGER a block. What MUST hold
+// is that the DEFAULT (top-ranked) is well-defined: the engine ranks specific
+// applies_to over wildcard, and local (.satellites/workflows) over skill over
+// embed (config/workflows). The check fails closed only on a REMAINING EXACT TIE
+// — two distinct workflows sharing the top precedence for a category, so the
+// default is genuinely ambiguous. (Candidate validity — a parseable, lifecycle-
+// sound state machine — is asserted by parseWorkflows, which drops invalid ones
+// with their own finding; the "*" wildcard remains the shared default and never
+// conflicts.)
+func checkAmbiguousGovernance(wfBearing []matSkill) []driftFinding {
+	sourceRank := map[string]int{"local": 0, "skill": 1, "embed": 2}
+	// Collect every SPECIFIC (non-wildcard) category named anywhere — the
+	// categories with a governing palette to rank. Wildcard-only categories ride
+	// the shared "*" default and are not checked.
+	categories := map[string]bool{}
+	for _, s := range wfBearing {
+		if s.kind != "workflow" {
+			continue
+		}
+		wf, err := workflow.Parse([]byte(s.raw))
+		if err != nil || wf == nil {
+			continue
+		}
 		for _, at := range wf.AppliesTo {
 			at = strings.TrimSpace(at)
-			if at == "" || at == "*" {
+			if at != "" && at != "*" {
+				categories[strings.ToLower(at)] = true
+			}
+		}
+	}
+	// For each category, rank every covering candidate by precedence (lower is
+	// better): specific beats wildcard (+10), and within a tier local<skill<embed.
+	// Keep the best rank per distinct NAME (the same workflow surfacing in two
+	// tiers is not a self-tie — the resolver takes its higher tier).
+	byCat := map[string]map[string]int{}
+	for _, s := range wfBearing {
+		if s.kind != "workflow" {
+			continue
+		}
+		wf, err := workflow.Parse([]byte(s.raw))
+		if err != nil || wf == nil {
+			continue
+		}
+		sr, ok := sourceRank[s.source]
+		if !ok {
+			sr = sourceRank["skill"] // unknown source ranks mid (between local and embed)
+		}
+		for cat := range categories {
+			specific, wildcard := false, false
+			for _, at := range wf.AppliesTo {
+				at = strings.TrimSpace(at)
+				if at == "*" {
+					wildcard = true
+				} else if strings.EqualFold(at, cat) {
+					specific = true
+				}
+			}
+			if !specific && !wildcard {
 				continue
 			}
-			cat := strings.ToLower(at)
-			byCat[cat] = append(byCat[cat], name)
+			rank := sr
+			if !specific {
+				rank += 10 // wildcard tier sits below any specific match
+			}
+			m := byCat[cat]
+			if m == nil {
+				m = map[string]int{}
+				byCat[cat] = m
+			}
+			if cur, seen := m[s.name]; !seen || rank < cur {
+				m[s.name] = rank
+			}
 		}
 	}
 	var out []driftFinding
 	for cat, names := range byCat {
-		if len(names) > 1 {
-			sort.Strings(names)
-			out = append(out, driftFinding{"block", "ambiguous-governance", strings.Join(names, ","),
-				fmt.Sprintf("category %q is covered by %d workflows (%s) — applies_to↔category resolution is ambiguous; a category maps to exactly one governing workflow", cat, len(names), strings.Join(names, ", "))})
+		best := 1 << 30
+		for _, r := range names {
+			if r < best {
+				best = r
+			}
+		}
+		var tied []string
+		for n, r := range names {
+			if r == best {
+				tied = append(tied, n)
+			}
+		}
+		if len(tied) > 1 {
+			sort.Strings(tied)
+			out = append(out, driftFinding{"block", "ambiguous-governance", strings.Join(tied, ","),
+				fmt.Sprintf("category %q has %d workflows tied at the top precedence (%s) — the default is ambiguous; differentiate by applies_to specificity or source tier (local > skill > embed) so exactly one is the top-ranked default", cat, len(tied), strings.Join(tied, ", "))})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Artifact < out[j].Artifact })
@@ -475,7 +546,7 @@ func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, st
 	out = append(out, checkSyncedSkillUsable(skills)...)
 	wfs, wfFindings := parseWorkflows(wfBearing)
 	out = append(out, wfFindings...)
-	out = append(out, checkAmbiguousGovernance(wfs)...)
+	out = append(out, checkAmbiguousGovernance(wfBearing)...)
 	out = append(out, checkGateCoverage(wfBearing, wfs, gateResolvable)...)
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
@@ -555,7 +626,7 @@ func newWorkflowCheckCmd(configArg, userArg *string) *cobra.Command {
   nonatomic-candidate   (advisory) a non-gate skill carrying fail-closed verdict markers
   host-coupled-system   a system-scope skill referencing repo-dev specifics
   ungoverned-story      a non-terminal story with no embedded workflow and no applies_to cover
-  ambiguous-governance  two non-wildcard workflows cover the same story category
+  ambiguous-governance  two workflows tie at the top precedence for a category (no deterministic default)
   system-not-contained  a scope:system workflow names a reviewer not resolvable from the binary embed
   first-gate-shallow    a workflow's entry gate skips comprehensive-review layers
 
