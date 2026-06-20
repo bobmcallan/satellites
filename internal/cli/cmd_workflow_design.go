@@ -81,6 +81,7 @@ is refused, and the command errors when none validates).`,
 	workflowCmd.PersistentFlags().StringVar(userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
 	workflowCmd.AddCommand(design)
 	workflowCmd.AddCommand(newWorkflowCheckCmd(configArg, userArg))
+	workflowCmd.AddCommand(newWorkflowListCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowShowCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowEmbedCmd(configArg, userArg))
 	workflowCmd.AddCommand(newWorkflowUpsertCmd(configArg, userArg))
