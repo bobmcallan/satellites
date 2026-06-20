@@ -2,17 +2,19 @@
 name: satellites-task-upsert-review
 type: skill
 kind: reviewer
-when: status==ready
+when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry gate — the "task_reviewer". Judges that a ready task is a well-formed, executable TASK (a clear task statement the in-repo agent can act on) carrying a resolvable governing workflow, and only then opens it for execution (ready → running). The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry gate — the "task_reviewer". Judges that a task is a well-formed, executable TASK (a clear task statement the in-repo agent can act on) carrying a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
 be opened for execution? This is the task lifecycle's entry gate — the
 "task_reviewer". It checks the document IS a task (not a half-formed note), with
 a clear statement of the work to perform and a resolvable governing workflow,
-before it moves `ready → running`. It does NOT judge whether the work is done —
-that is the exit gate satellites-task-report-review.
+before it moves the task to `running` — whether opening it the first time
+(`ready → running`) or re-running a completed task (`complete → running`, a fresh
+execution episode). It does NOT judge whether the work is done — that is the exit
+gate satellites-task-report-review.
 
 ## Input
 

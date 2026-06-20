@@ -32,14 +32,21 @@ invoking a project `.claude/skill` (e.g. a scan skill) or do the work inline. Th
 reviewer never does the work and never moves status except through its gate.
 
 The cancel edges are gated by `satellites-task-cancel-review`, which accepts a
-move to `cancelled` only on a concrete `## Cancellation` rationale. Re-running a
-completed task (a fresh execution episode) is layered on by a later story
-(epic-order:3); this baseline is the single forward pass plus cancel.
+move to `cancelled` only on a concrete `## Cancellation` rationale.
+
+**Re-runnable.** A task is *executed multiple times*: a `complete` task can be
+re-run — `complete → running`, re-validated by `satellites-task-upsert-review` —
+opening a fresh **execution episode**. Each episode is the `→running … →complete`
+span recorded in the append-only ledger, so re-running never disturbs a prior
+run's rows; `satellites task executions <tsk-id>` lists every episode oldest-first
+with its start/end timestamps. The task body holds the latest run's context; the
+ledger holds them all.
 
 ## Workflow
 
 - ready to running — open for execution, gated by satellites-task-upsert-review (it IS a task + a resolvable workflow).
 - running to complete — close, gated by satellites-task-report-review (the work was done and a report is present).
+- complete to running — RE-RUN (a fresh execution episode), gated by satellites-task-upsert-review (re-validates the task).
 - ready/running to cancelled — abandon, gated by satellites-task-cancel-review (concrete cancellation rationale).
 
 ```yaml
@@ -51,6 +58,7 @@ states:
 transitions:
   - {from: ready, to: running, reviewer_skill: "satellites-task-upsert-review"}
   - {from: running, to: complete, reviewer_skill: "satellites-task-report-review"}
+  - {from: complete, to: running, reviewer_skill: "satellites-task-upsert-review"}
   - {from: ready, to: cancelled, reviewer_skill: "satellites-task-cancel-review"}
   - {from: running, to: cancelled, reviewer_skill: "satellites-task-cancel-review"}
 ```
