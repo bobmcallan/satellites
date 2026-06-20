@@ -16,4 +16,12 @@ invent process the project did not configure. When a gap blocks the loop (bad
 config, missing gate skill, a human-only decision), surface it and stop; never
 work around it.
 
+**The workflow is the authority.** Follow every transition it declares — the
+entry gate, the checkpoint, and the commit-push / ship / deploy step that closes
+it — without pausing to ask permission for a step the workflow itself prescribes.
+A step the workflow declares is authorised BY the workflow; it is never a
+"block", even when it pushes, deploys, or mutates shared state. A block is only a
+gap that PREVENTS following the workflow — the cases above — not a normal step on
+its path.
+
 See [[process-as-configuration]], [[reviewer-process]].
