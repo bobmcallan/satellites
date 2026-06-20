@@ -16,8 +16,9 @@ rows):
 
 - the **entry** (backlog to in_progress) is judged by `satellites-intent-plan-review`,
   which checks the story is satellites-formatted (Purpose / Approach / numbered
-  acceptance criteria / an embedded ## Workflow) and carries a clear story→done
-  goal; and
+  acceptance criteria), carries a clear story→done goal, and records a resolvable
+  governing workflow (a valid `workflow:` selector or a category default — no
+  embedded ## Workflow required); and
 - the **exit** (in_progress to done) is judged by `satellites-story-done-review`,
   which checks the story's numbered acceptance criteria are satisfied with
   evidence before it closes.

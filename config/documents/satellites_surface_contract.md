@@ -32,7 +32,9 @@ For the agent and operator working a repository.
 
 - **Refinement is judged at the workflow's FIRST gate**, not on upsert: when a
   story is picked up, the entry reviewer judges everything in one verdict —
-  story shape, plan, acceptance criteria, the embedded `## Workflow`, and code
+  story shape, plan, acceptance criteria, the workflow SELECTION (the recorded
+  `workflow:` selector, or the category default — not a hand-embedded
+  `## Workflow`, which is no longer required at create/upsert), and code
   grounding. Nothing unreviewed can progress; creation needs no second
   mechanism. The standing rule is the `review-actions-not-intent` principle;
   this contract only records where each write lands.
