@@ -125,6 +125,36 @@
       {{end}}
     </div>
   </section>
+
+  {{/* Tasks panel (epic:workflow-steps order-6) — peer to the stories list.
+       Read-only: surfaces type:task documents + their execution-episode counts
+       from the ledger; status still moves only through reviewer gates. */}}
+  <section class="panel" data-section="project-tasks">
+    <h3 class="panel-heading">Tasks <span class="panel-count" data-field="task-count">{{len .Tasks}}</span></h3>
+    {{if .Tasks}}
+    <table class="task-list" data-field="task-list">
+      <thead>
+        <tr><th>Task</th><th>Status</th><th>Runs</th><th>Last run</th></tr>
+      </thead>
+      <tbody>
+        {{range .Tasks}}
+        <tr class="task-row" data-section="task-row">
+          <td class="task-col-title">
+            <a href="/tasks/{{.ID}}" data-field="task-link">{{.Title}}</a>
+            <div class="task-row-id"><code>{{.ID}}</code></div>
+            {{if .Tags}}<div class="task-row-tags">{{range .Tags}}<span class="tag-chip" data-tag="{{.}}">{{.}}</span>{{end}}</div>{{end}}
+          </td>
+          <td class="task-col-status"><span class="status-pill" data-field="task-status">{{.Status}}</span></td>
+          <td class="task-col-runs" data-field="task-runcount">{{.RunCount}}</td>
+          <td class="task-col-lastrun" data-field="task-lastrun">{{if .LastRun}}{{.LastRun}}{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
+    {{end}}
+  </section>
 </main>
 
 <footer class="site-footer">

@@ -23,13 +23,16 @@ var projectDetailTmpl = template.Must(
 )
 
 type projectDetailData struct {
-	Title         string
-	UserEmail     string
-	UserName      string
-	UserAvatar    string
-	ActiveNav     string
-	Project       projectRow
-	Stories       []storyRow
+	Title      string
+	UserEmail  string
+	UserName   string
+	UserAvatar string
+	ActiveNav  string
+	Project    projectRow
+	Stories    []storyRow
+	// Tasks (type:task) for the read-only tasks panel, peer to the stories list
+	// (epic:workflow-steps order-6). Read-only — surfaces existing data only.
+	Tasks         []taskRow
 	StoryShown    int // rows rendered on this page = len(Stories)
 	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
 	StoryTotal    int // project-wide all-status total (indicator denominator)
@@ -139,6 +142,13 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
+		// Tasks panel (epic:workflow-steps order-6) — best-effort: a task-list
+		// error must not blank the whole project page (stories still render).
+		tasks, tErr := dispatchTaskList(ctx, projectID)
+		if tErr != nil {
+			arbor.WarnCtx(ctx, "project_detail: list tasks", "id", projectID, "err", tErr)
+		}
+
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -159,6 +169,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			UserAvatar:    userAvatar,
 			ActiveNav:     "projects",
 			Stories:       stories,
+			Tasks:         tasks,
 			StoryShown:    len(stories),
 			StoryFiltered: paginator.Filtered,
 			StoryTotal:    paginator.Total,

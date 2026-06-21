@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="/static/alpine.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand"><a href="/" class="brand-link">SATELLITES</a></h1>
+  <nav class="primary-nav">
+    <a href="/projects" class="nav-item {{if eq .ActiveNav "projects"}}active{{end}}" data-nav="projects">PROJECTS</a>
+    <a href="/workspaces" class="nav-item" data-nav="workspaces">WORKSPACES</a>
+    <a href="/library" class="nav-item" data-nav="library">LIBRARY</a>
+    <a href="/ledger" class="nav-item" data-nav="ledger">LEDGER</a>
+    <a href="/docs/mcp" class="nav-item" data-nav="mcp">MCP</a>
+    <a href="/changelog" class="nav-item" data-nav="changelog">CHANGELOG</a>
+    <a href="/help" class="nav-item" data-nav="help">HELP</a>
+    {{template "user_menu" .}}
+  </nav>
+</header>
+
+<main data-page="task-detail" x-data="{ tab: 'body' }">
+  <section class="changelog-intro" data-section="task-intro">
+    <h2 class="section-heading" data-field="task-title">{{.TaskTitle}}</h2>
+    <p class="changelog-lede">A read-only view of this task and its execution episodes. Status moves only through reviewer gates — this view never writes.</p>
+    <p class="task-meta" data-section="task-meta">
+      <span class="status-pill" data-field="task-status">{{.Status}}</span>
+      <code data-field="task-id">{{.TaskID}}</code>
+      {{if .ProjectID}}<a class="task-back" href="/projects/{{.ProjectID}}">← project</a>{{end}}
+    </p>
+  </section>
+
+  <nav class="tabbar" data-section="task-tabs" role="tablist">
+    <button type="button" role="tab" class="tab" :class="tab === 'body' ? 'active' : ''" @click="tab = 'body'" data-tab="body">Description</button>
+    <button type="button" role="tab" class="tab" :class="tab === 'executions' ? 'active' : ''" @click="tab = 'executions'" data-tab="executions">Executions ({{len .Episodes}})</button>
+  </nav>
+
+  <section class="task-body" data-section="task-body" x-show="tab === 'body'">
+    <div class="markdown-body" data-field="task-body">{{.Body}}</div>
+  </section>
+
+  <section class="task-executions" data-section="task-executions" x-show="tab === 'executions'">
+    {{if .Episodes}}
+    {{range .Episodes}}
+    <div class="execution-episode" data-section="episode" x-data="{ open: false }">
+      <button type="button" class="episode-header episode-expand-toggle" data-action="toggle-episode" @click="open = !open" :aria-expanded="open ? 'true' : 'false'">
+        <span class="episode-caret" x-text="open ? '▾' : '▸'">▸</span>
+        <span class="episode-run" data-field="episode-run">run-{{.Run}}</span>
+        <span class="episode-span" data-field="episode-span">{{.Start}} → {{if .End}}{{.End}}{{else}}—{{end}}</span>
+        <span class="episode-status status-pill {{if .Open}}is-open{{end}}" data-field="episode-status">{{.Status}}</span>
+        <span class="episode-rowcount" data-field="episode-rowcount">{{len .Rows}} rows</span>
+      </button>
+      <div class="episode-log" data-section="episode-log" x-show="open" x-cloak>
+        <table class="qa-ledger-table">
+          <thead>
+            <tr><th>When</th><th>Kind</th><th>Transition</th><th>Actor</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            {{range .Rows}}
+            <tr data-section="episode-row">
+              <td data-field="row-when">{{.When}}</td>
+              <td data-field="row-kind"><code>{{.Kind}}</code></td>
+              <td data-field="row-transition">{{if .Transition}}<span class="qa-badge-transition"><code>{{.Transition}}</code></span>{{else}}—{{end}}</td>
+              <td data-field="row-actor">{{.Actor}}</td>
+              <td data-field="row-body">{{.Body}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+    {{else}}
+    <p class="empty" data-field="no-executions">No executions yet — this task has not been run.</p>
+    {{end}}
+  </section>
+</main>
+
+</body>
+</html>

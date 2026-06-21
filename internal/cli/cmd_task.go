@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
+	"github.com/bobmcallan/satellites/internal/taskepisode"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
@@ -87,19 +87,6 @@ func newTaskReviewCmd(configArg, userArg *string) *cobra.Command {
 	return cmd
 }
 
-// execEpisode is one execution of a task — the span from a status_transition
-// into `running` to the next transition into a terminal state (complete /
-// cancelled). The run id is the 1-based episode index (run-1, run-2 …), derived
-// from the authoritative status_transition timeline rather than stored, so every
-// ledger row (including agent body-patches the gate never sees) groups correctly.
-type execEpisode struct {
-	run   int
-	start time.Time
-	end   time.Time // zero when the run is still open
-	endTo string    // terminal status that closed the run ("" while open)
-	rows  int       // ledger rows in this episode
-}
-
 func newTaskExecutionsCmd(configArg, userArg *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "executions <task-id>",
@@ -116,44 +103,9 @@ func newTaskExecutionsCmd(configArg, userArg *string) *cobra.Command {
 	return cmd
 }
 
-// episodeRow is one ledger row reduced to what episode projection needs: its
-// kind, the to_status (only meaningful for status_transition rows), and when it
-// landed.
-type episodeRow struct {
-	kind    string
-	to      string
-	created time.Time
-}
-
-// projectEpisodes derives execution episodes from a task's ledger rows
-// (oldest-first). A status_transition into `running` opens an episode; the next
-// transition into a terminal state (complete/cancelled) closes the open one.
-// Every row in between counts toward the open episode. Pure + deterministic so
-// it is unit-testable and so a future executions-tab UI can group the same way.
-func projectEpisodes(rows []episodeRow) []execEpisode {
-	var episodes []execEpisode
-	cur := -1
-	for _, e := range rows {
-		if e.kind == "status_transition" && e.to == "running" {
-			episodes = append(episodes, execEpisode{run: len(episodes) + 1, start: e.created, rows: 1})
-			cur = len(episodes) - 1
-			continue
-		}
-		if cur >= 0 {
-			episodes[cur].rows++
-			if e.kind == "status_transition" && (e.to == "complete" || e.to == "cancelled") {
-				episodes[cur].end = e.created
-				episodes[cur].endTo = e.to
-				cur = -1
-			}
-		}
-	}
-	return episodes
-}
-
 func runTaskExecutions(ctx context.Context, out io.Writer, configPath, userArg, taskID string) error {
 	// Page the full ledger oldest-first.
-	var rows []episodeRow
+	var rows []taskepisode.Row
 	cursor := ""
 	for {
 		req, err := json.Marshal(verb.LedgerListRequest{StoryID: taskID, Limit: 200, Cursor: cursor})
@@ -177,7 +129,7 @@ func runTaskExecutions(ctx context.Context, out io.Writer, configPath, userArg, 
 				_ = json.Unmarshal(e.Payload, &p)
 				to = p.To
 			}
-			rows = append(rows, episodeRow{kind: e.Kind, to: to, created: e.CreatedAt})
+			rows = append(rows, taskepisode.Row{Kind: e.Kind, To: to, Created: e.CreatedAt})
 		}
 		if resp.NextCursor == "" {
 			break
@@ -185,7 +137,7 @@ func runTaskExecutions(ctx context.Context, out io.Writer, configPath, userArg, 
 		cursor = resp.NextCursor
 	}
 
-	episodes := projectEpisodes(rows)
+	episodes := taskepisode.Project(rows)
 	if len(episodes) == 0 {
 		fmt.Fprintln(out, "(no executions — the task has not been run)")
 		return nil
@@ -193,12 +145,12 @@ func runTaskExecutions(ctx context.Context, out io.Writer, configPath, userArg, 
 	for _, ep := range episodes {
 		status := "running (open)"
 		end := "—"
-		if !ep.end.IsZero() {
-			status = ep.endTo
-			end = ep.end.Format("2006-01-02 15:04:05Z")
+		if !ep.Open() {
+			status = ep.EndTo
+			end = ep.End.Format("2006-01-02 15:04:05Z")
 		}
 		fmt.Fprintf(out, "run-%d  %s → %s  [%s]  (%d ledger rows)\n",
-			ep.run, ep.start.Format("2006-01-02 15:04:05Z"), end, status, ep.rows)
+			ep.Run, ep.Start.Format("2006-01-02 15:04:05Z"), end, status, ep.Rows)
 	}
 	return nil
 }

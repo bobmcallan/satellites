@@ -164,6 +164,9 @@ func Build(cfg Config) http.Handler {
 	// (/api/stories/{id}/events); the QA view now refetches off the shared bus.
 	mux.HandleFunc("GET /stories/{id}/trace.fragment", storyTraceFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
+	// Read-only task detail view (epic:workflow-steps order-6) — the task body
+	// + its execution episodes/log. Status still moves only via reviewer gates.
+	mux.HandleFunc("/tasks/", taskDetailHandler(cfg))
 	mux.HandleFunc("/ledger", ledgerHandler(cfg))
 	// Global skill-library browse page (epic:workspace-agents, sty_b2f77307).
 	mux.HandleFunc("GET /library", libraryHandler(cfg))
