@@ -52,3 +52,46 @@ as "test-fixture" or "placeholder"). End with a one-line verdict:
 
 Never include a secret's value. The report is what the task's
 `satellites-task-report-review` gate reads to close the run.
+
+## Durable dated report file (committed)
+
+Findings must ALSO be written as a durable, versioned deliverable — not only a
+ledger/body row — so an operator or auditor can read and diff scans over time.
+After the sweep, write a **dated** markdown report and commit it:
+
+1. **Path** — `docs/security/secrets-scan-YYYY-MM-DD.md` (today's UTC date, e.g.
+   `docs/security/secrets-scan-2026-06-21.md`). The date stamp makes each run a
+   NEW file: a later scan never overwrites or deletes a prior dated report, so
+   `docs/security/` accumulates the scan history. (If two runs land on the same
+   date, append a `-run-N` suffix rather than clobbering.)
+
+2. **Contents** — plain markdown, viewable, VALUES REDACTED:
+
+   ```markdown
+   # Secrets scan — YYYY-MM-DD
+
+   - Scan date: <UTC timestamp>
+   - HEAD commit: <git rev-parse --short HEAD>
+   - Scope: tracked files (git ls-files)
+
+   ## Findings
+
+   - `path/to/file:line` — <match kind> — <high|low> (<one-word reason>)
+
+   ## Verdict
+
+   CLEAN — no credentials found in tracked files.
+   ```
+
+   List one bullet per finding (`file:line` — kind — confidence), or state
+   `No findings.` when clean. NEVER write a secret's value — location + kind only.
+
+3. **Commit it** — `git add docs/security/secrets-scan-YYYY-MM-DD.md` and commit
+   it as part of the work (the report is a versioned artifact, not transient).
+
+4. **Reference it** — name the dated file's path in the task body's
+   `## Secrets scan report` section so the report gate sees the durable artifact
+   and the order-6 task detail view links to it.
+
+Create `docs/security/` if it does not exist. The file is the durable deliverable;
+the task-body section + ledger remain the run record the gate reads.
