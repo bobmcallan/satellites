@@ -51,9 +51,13 @@ type reviewFinding struct {
 	Line int
 	Rule string
 	Text string
+	Hint string // optional instructional suffix — how to fix, shown to the author
 }
 
 func (f reviewFinding) String() string {
+	if f.Hint != "" {
+		return fmt.Sprintf("line %d · %s · %s — %s", f.Line, f.Rule, f.Text, f.Hint)
+	}
 	return fmt.Sprintf("line %d · %s · %s", f.Line, f.Rule, f.Text)
 }
 
@@ -150,7 +154,11 @@ func reviewWorkflowRefs(body string, resolveSkill, resolveDoc func(string) bool)
 			}
 			seen["skill:"+rs] = true
 			if !resolveSkill(rs) {
-				out = append(out, reviewFinding{Line: firstLineContaining(body, rs), Rule: "unresolvable-reviewer", Text: rs})
+				f := reviewFinding{Line: firstLineContaining(body, rs), Rule: "unresolvable-reviewer", Text: rs}
+				if ln := localSkillName(rs); ln != rs {
+					f.Hint = fmt.Sprintf("no reviewer resolves under the materialised name %q; upload a reviewer that resolves there, or reference that name", ln)
+				}
+				out = append(out, f)
 			}
 		}
 	}

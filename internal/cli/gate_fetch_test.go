@@ -87,6 +87,27 @@ func TestResolveServerGateBody_PrefixMatch(t *testing.T) {
 	}
 }
 
+// TestResolveServerGateBody_UnprefixedReference pins sty_832bc70f: a project
+// reviewer authored AND referenced under its bare (un-prefixed) name resolves —
+// the VIRE case. Before the fix the reference side was compared raw, so a project
+// row stored as `vire-planned-review` (materialising as
+// `satellites-vire-planned-review`) never matched the bare `vire-planned-review`
+// a workflow's reviewer_skill named. Both forms must now resolve the same row.
+func TestResolveServerGateBody_UnprefixedReference(t *testing.T) {
+	rows := map[string][]struct{ Name, Body string }{
+		"project": {{"vire-planned-review", "PROJECT REVIEWER BODY"}},
+	}
+	for _, ref := range []string{"vire-planned-review", "satellites-vire-planned-review"} {
+		body, ok, err := resolveServerGateBody(context.Background(), fakeSkillDispatch(rows), emptyConfig(t), "ws1", "pj1", ref)
+		if err != nil || !ok {
+			t.Fatalf("resolve %q: ok=%v err=%v", ref, ok, err)
+		}
+		if string(body) != "PROJECT REVIEWER BODY" {
+			t.Fatalf("ref %q: expected project reviewer body, got %q", ref, body)
+		}
+	}
+}
+
 // TestResolveServerGateBody_NotFound: a name no scope holds resolves ok=false
 // (not an error) so the dispatcher fails closed naming all three sources.
 func TestResolveServerGateBody_NotFound(t *testing.T) {

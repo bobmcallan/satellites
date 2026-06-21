@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const refTestWorkflow = "---\n" +
 	"name: wf\n" +
@@ -30,15 +33,22 @@ func TestReviewWorkflowRefs(t *testing.T) {
 
 	findings := reviewWorkflowRefs(refTestWorkflow, resolveSkill, resolveDoc)
 
-	got := map[string]string{} // text → rule
+	got := map[string]string{}  // text → rule
+	hint := map[string]string{} // text → hint
 	for _, f := range findings {
 		got[f.Text] = f.Rule
+		hint[f.Text] = f.Hint
 	}
 	if len(got) != 2 {
 		t.Fatalf("want 2 findings, got %d: %#v", len(got), findings)
 	}
 	if got["ghost-review"] != "unresolvable-reviewer" {
 		t.Errorf("ghost-review: want unresolvable-reviewer, got %q", got["ghost-review"])
+	}
+	// sty_832bc70f AC2: an un-prefixed unresolvable reviewer's finding names the
+	// materialised candidate so the author isn't left guessing.
+	if !strings.Contains(hint["ghost-review"], "satellites-ghost-review") {
+		t.Errorf("ghost-review: hint must name the materialised name, got %q", hint["ghost-review"])
 	}
 	if got["satellites-commit-push"] != "dangling-reference" {
 		t.Errorf("satellites-commit-push: want dangling-reference, got %q", got["satellites-commit-push"])

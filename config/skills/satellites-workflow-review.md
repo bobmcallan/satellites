@@ -32,7 +32,7 @@ trust that its references resolve.
 ## Decision rule
 
 Read the whole workflow, then judge each point. **reject** if a blocking point
-fails (name it in the notes); **accept** only when all hold.
+fails — name it AND state the concrete fix the author should make in the notes; **accept** only when all hold.
 
 1. **Frontmatter shape.** Declares `kind: workflow`, a `name`, a non-empty
    `description`, and `applies_to` with at least one entry (a story category, or

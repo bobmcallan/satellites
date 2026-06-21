@@ -69,11 +69,15 @@ func resolveServerGateBody(ctx context.Context, dispatch verbDispatch, configArg
 		return nil, false, err
 	}
 
-	// Match on the materialised name so a row whose source name omits the
-	// `satellites-` prefix still resolves under the name the dispatch asked for.
+	// Match on the materialised name, normalising BOTH the stored row name AND
+	// the reference through localSkillName, so each resolves whether or not it
+	// carries the `satellites-` prefix. Without normalising the reference, a
+	// project reviewer authored and REFERENCED as `vire-planned-review` never
+	// resolves — it materialises as `satellites-vire-planned-review`, so the raw
+	// reference misses (sty_832bc70f).
 	union := mergeByPrecedence(libSet, sysSet, wsSet, pjSet)
 	for _, s := range union {
-		if localSkillName(s.Name) == skillName {
+		if localSkillName(s.Name) == localSkillName(skillName) {
 			return []byte(s.Body), true, nil
 		}
 	}

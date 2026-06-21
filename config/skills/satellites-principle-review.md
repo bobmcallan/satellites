@@ -25,7 +25,7 @@ re-run that.
 ## Decision rule
 
 Read the whole principle, then judge each point. **reject** if a blocking point
-fails (name it in the notes); **accept** only when all hold.
+fails — name it AND state the concrete fix the author should make in the notes; **accept** only when all hold.
 
 1. **Frontmatter shape.** Declares a kebab-case `name` with NO `satellites-`
    prefix (principles are bare-named), and at least one `principles:*` tag — a
