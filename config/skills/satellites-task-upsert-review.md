@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry gate — the "task_reviewer". Judges that a task is a well-formed, executable TASK (a clear task statement the in-repo agent can act on) carrying a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry gate — the "task_reviewer". Judges that a task is a well-formed, executable TASK (a clear task statement the in-repo agent can act on) carrying a resolvable governing workflow AND, when it delegates to a skill:<name>, a work skill that resolves in the substrate, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
@@ -37,11 +37,35 @@ Judge the `story_body`:
   governing workflow (a valid `workflow:` selector, or a category that resolves a
   default — see *Enact*; the governing workflow has a transition whose
   `from == story_status` and `reviewer_skill == satellites-task-upsert-review`).
-  The task is genuinely ready to be executed.
+  When the task delegates its work to a skill (a `skill:<name>` tag), that skill
+  MUST also resolve in the substrate — see *Resolve the work skill*. The task is
+  genuinely ready to be executed.
 - **reject** — the body is empty, a stub, or does not describe executable work; or
   the goal is too vague for the agent to act on; or no governing-workflow
-  transition matches this gate from the current status. Name exactly what is
-  missing.
+  transition matches this gate from the current status; or the task names a
+  `skill:<name>` work skill that does not resolve in the substrate (absent, or
+  present only as a local `.claude/skills/` file — an override, not a validated
+  dependency). Name exactly what is missing.
+
+## Resolve the work skill
+
+A task MAY delegate its work step to a named skill via a `skill:<name>` tag (read
+the task's tags with `.satellites/satellites exec story_get` / `document_get`).
+When it does, that skill MUST resolve in the SUBSTRATE before the task is ready —
+the runner injects the substrate copy by value, so a reference that does not
+resolve is a false-ready. Check it:
+
+```sh
+satellites skill get <name>
+```
+
+- Resolves (the skill body prints) → the dependency is satisfiable; proceed.
+- Does NOT resolve (error / empty) → REJECT, naming the unresolved skill. A
+  `.claude/skills/<name>` file does NOT satisfy this — it is an execution-time
+  OVERRIDE, not the substrate dependency the gate validates.
+
+When the task carries no `skill:<name>` tag, the work step is inline — judge the
+body alone, as usual.
 
 Fail closed: if the body cannot be read or the task cannot be judged, reject with
 the reason named.
@@ -55,6 +79,7 @@ rows below — no `document_upsert`, no git/file mutation.
 guardrails:
   always:
     - Judge ONLY whether the document is a well-formed, executable task with a resolvable governing workflow.
+    - When the task delegates to a skill:<name>, resolve it in the substrate (satellites skill get <name>) before accept; reject if it does not resolve (a local .claude/skills/ file does not count).
     - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
