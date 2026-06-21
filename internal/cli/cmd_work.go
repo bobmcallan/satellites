@@ -79,6 +79,13 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 			if err := driveTimeWorkflowGate(cmd.Context(), cmd.OutOrStdout(), configArg, "", args[0]); err != nil {
 				return err
 			}
+			// Epic-level collision detection (sty_6a045c2c): warn (default) or
+			// block when another live session already holds a sibling under the
+			// same epic — the coordination point the ungate (sty_6d2d0cd3) removed.
+			if err := checkEpicCollision(cmd.OutOrStdout(), cmd.Context(), configArg,
+				resolveStateDB(configArg), args[0], resolveSession(sessionArg), time.Now().UTC()); err != nil {
+				return err
+			}
 			if err := runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
 				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC()); err != nil {
 				return err
@@ -301,6 +308,98 @@ func resolveEngageGuards(ctx context.Context, configPath, storyID, status string
 		return true, "", status
 	}
 	return wf.IsEditable(status), wf.ActorOf(status), status
+}
+
+// resolveStoryParent returns a story's parent_id (its epic anchor) via
+// document_get, or "" when offline / unresolvable — the collision check then
+// no-ops rather than over-blocking (the same stance resolveEngageGuards takes).
+func resolveStoryParent(ctx context.Context, configPath, storyID string) string {
+	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
+	if err != nil {
+		return ""
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, configPath, "")
+	if err != nil {
+		return ""
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(resp.Document.ParentID)
+}
+
+// findEpicCollisions returns the live engagements held by OTHER sessions on a
+// SIBLING story under the same epic as (mySession, myStory) — same non-empty
+// parentID. Pure over its inputs: parentOf resolves a story's parent_id and
+// IsLeaseFresh(now) excludes stale/candidate rows. Empty myParent ⇒ no epic ⇒
+// nothing to collide on (sty_6a045c2c).
+func findEpicCollisions(mySession, myStory, myParent string, engs []workstate.Engagement, parentOf func(string) string, now time.Time) []workstate.Engagement {
+	if strings.TrimSpace(myParent) == "" {
+		return nil
+	}
+	var out []workstate.Engagement
+	for _, e := range engs {
+		if e.Session == mySession || e.Story == myStory {
+			continue
+		}
+		if !e.IsLeaseFresh(now) {
+			continue
+		}
+		if parentOf(e.Story) == myParent {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// checkEpicCollision warns (default) or blocks per the `collision` config knob
+// when another live session is already implementing the same epic. Best-effort:
+// offline resolution, a missing epic, or store trouble all skip rather than block.
+func checkEpicCollision(out io.Writer, ctx context.Context, configArg, stateDB, storyID, session string, now time.Time) error {
+	cfg, _, _ := cliconfig.Load(configArg)
+	mode := strings.TrimSpace(strings.ToLower(cfg.Collision))
+	if mode == "off" {
+		return nil
+	}
+	if mode == "" {
+		mode = "warn"
+	}
+	myParent := resolveStoryParent(ctx, configArg, storyID)
+	if myParent == "" {
+		return nil // no epic (or offline) — nothing to collide on
+	}
+	s, err := workstate.Open(stateDB)
+	if err != nil {
+		return nil // store trouble → don't block on a best-effort check
+	}
+	defer s.Close()
+	engs, err := s.ListCurrent()
+	if err != nil {
+		return nil
+	}
+	parentCache := map[string]string{storyID: myParent}
+	parentOf := func(sid string) string {
+		if p, ok := parentCache[sid]; ok {
+			return p
+		}
+		p := resolveStoryParent(ctx, configArg, sid)
+		parentCache[sid] = p
+		return p
+	}
+	collisions := findEpicCollisions(session, storyID, myParent, engs, parentOf, now)
+	if len(collisions) == 0 {
+		return nil
+	}
+	fmt.Fprintf(out, "⚠ epic collision: another live session is implementing the same epic (%s):\n", myParent)
+	for _, e := range collisions {
+		fmt.Fprintf(out, "  session %s · story %s · lease %s\n", e.Session, e.Story, e.LeaseUntil.Format(time.RFC3339))
+	}
+	if mode == "block" {
+		return fmt.Errorf("work init: blocked on epic collision — serialise with the session(s) above, or set collision=\"warn\"/\"off\" in satellites.toml")
+	}
+	fmt.Fprintln(out, "  (proceeding — coordinate to avoid trunk conflicts; set collision=\"block\" to serialise)")
+	return nil
 }
 
 // driveTimeWorkflowGate runs satellites-workflow-review's deterministic reference

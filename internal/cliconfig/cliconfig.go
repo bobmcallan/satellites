@@ -139,6 +139,12 @@ type Config struct {
 	// Bash and must be fast + offline-safe. See ResolveCommitGate.
 	CommitGate string `toml:"commit_gate"`
 
+	// Collision sets epic-level collision detection at `work init`
+	// (sty_6a045c2c): "" / "warn" (default) prints when another live session
+	// holds a sibling under the same epic and proceeds; "block" refuses the
+	// engagement so trunk-sharing sessions serialise; "off" disables the check.
+	Collision string `toml:"collision"`
+
 	// Measure configures measure mode — the client's session observability.
 	// It is DEFAULT ON: an absent [measure] section means enabled + record.
 	Measure MeasureConfig `toml:"measure"`
