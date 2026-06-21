@@ -631,15 +631,23 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
   padding: 0.4rem 0.5rem;
 }
 .panel-table tbody td { padding: 0.5rem 0.5rem; vertical-align: top; }
-.panel-table tbody tr.story-row { cursor: pointer; }
-.panel-table tbody tr.story-row:hover { background: #1a1a1a; }
-.panel-table tbody tr.story-row.is-expanded { background: #1f1f1f; }
+.panel-table tbody tr.story-row,
+.panel-table tbody tr.task-row { cursor: pointer; }
+.panel-table tbody tr.story-row:hover,
+.panel-table tbody tr.task-row:hover { background: #1a1a1a; }
+.panel-table tbody tr.story-row.is-expanded,
+.panel-table tbody tr.task-row.is-expanded { background: #1f1f1f; }
 .panel-table tbody td.col-id { cursor: copy; }
 .panel-table tbody td.col-id:hover code { color: #b8d8c0; text-decoration: underline dotted; }
 .panel-table tbody td.col-id.is-copied code { color: #b8d8c0; }
-.panel-table tbody tr.story-detail > td { background: #0a0a0a; padding: 0.75rem 1rem; }
-.panel-table tbody tr.story-row + tr.story-row > td { border-top: 1px solid #1c1c1c; }
-.panel-table tbody tr.story-detail + tr.story-row > td { border-top: 1px solid #1c1c1c; }
+.panel-table tbody tr.story-detail > td,
+.panel-table tbody tr.task-detail > td { background: #0a0a0a; padding: 0.75rem 1rem; }
+.panel-table tbody tr.story-row + tr.story-row > td,
+.panel-table tbody tr.task-row + tr.task-row > td { border-top: 1px solid #1c1c1c; }
+.panel-table tbody tr.story-detail + tr.story-row > td,
+.panel-table tbody tr.task-detail + tr.task-row > td { border-top: 1px solid #1c1c1c; }
+.panel-table tbody tr.task-row .task-row-title { color: #e0e0e0; line-height: 1.4; }
+.panel-table tbody tr.task-row .task-row-id { margin-top: 0.15rem; font-size: 0.7rem; color: #666; }
 
 .status-pill, .priority-pill {
   display: inline-block;
@@ -724,6 +732,43 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   overflow: auto;
   color: #c8c8c8;
 }
+
+/* Execution episodes (sty_f46fe4f2): the inline task expand lists the ledger
+   grouped by execution episode, each run-N collapsible to its own log rows. */
+.execution-episode { border: 1px solid #1c1c1c; border-radius: 3px; margin-bottom: 0.4rem; }
+.episode-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: #0d0d0d;
+  border: 0;
+  color: #c8c8c8;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.episode-header:hover { background: #161616; }
+.episode-caret { color: #888; width: 0.9rem; }
+.episode-run { font-weight: 600; color: #8ab4c9; }
+.episode-span { color: #888; }
+.episode-status.is-open { border-color: #c9a86a; background: #201c13; }
+.episode-rowcount { margin-left: auto; color: #666; font-size: 0.7rem; }
+.episode-log { padding: 0.3rem 0.6rem 0.6rem; }
+.qa-ledger-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+.qa-ledger-table th {
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6rem;
+  color: #777;
+  border-bottom: 1px solid #1c1c1c;
+  padding: 0.3rem 0.4rem;
+}
+.qa-ledger-table td { padding: 0.3rem 0.4rem; vertical-align: top; border-bottom: 1px solid #141414; color: #b8b8b8; }
+.qa-badge-transition code { color: #8ab4c9; }
 
 /* Status is display-only (epic:dynamic-workflow-status order:2): the read-only
    current status that replaced the editable status panel. */

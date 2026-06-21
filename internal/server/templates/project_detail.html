@@ -13,6 +13,8 @@
      first means its alpine:init listener is attached before Alpine
      fires the event. -->
 <script defer src="/static/story_panel.js"></script>
+<!-- task_panel.js: same load-before-alpine ordering as story_panel.js. -->
+<script defer src="/static/task_panel.js"></script>
 <script defer src="/static/alpine.min.js"></script>
 </head>
 <body>
@@ -126,25 +128,33 @@
     </div>
   </section>
 
-  {{/* Tasks panel (epic:workflow-steps order-6) — peer to the stories list.
-       Read-only: surfaces type:task documents + their execution-episode counts
-       from the ledger; status still moves only through reviewer gates. */}}
+  {{/* Tasks panel (epic:workflow-steps order-6; inline expand sty_f46fe4f2) —
+       peer to the stories list. Read-only: clicking a row expands it INLINE to
+       the task content + ledger/log grouped BY EXECUTION episode; status still
+       moves only through reviewer gates. /tasks/{id} deep-links a row open. */}}
   <section class="panel" data-section="project-tasks">
+    <div x-data="taskPanel" class="panel-tasks" data-field="panel-tasks-body" data-project-id="{{.Project.ID}}">
     <h3 class="panel-heading">Tasks <span class="panel-count" data-field="task-count">{{len .Tasks}}</span></h3>
     {{if .Tasks}}
-    <table class="task-list" data-field="task-list">
+    <table class="panel-table panel-table-tasks" data-field="task-list">
       <thead>
         <tr><th>Task</th><th>Status</th><th>Runs</th><th>Last run</th></tr>
       </thead>
       <tbody>
         {{range .Tasks}}
-        <tr class="task-row" data-section="task-row">
+        <tr class="task-row"
+            data-section="task-row"
+            data-id="{{.ID}}"
+            @click="toggleTaskRow"
+            :class="taskRowClass($el)"
+            data-field="task-row">
           <td class="task-col-title">
-            <a href="/tasks/{{.ID}}" data-field="task-link">{{.Title}}</a>
+            <div class="task-row-title" data-field="task-row-title">{{.Title}}</div>
             <div class="task-row-id"><code>{{.ID}}</code></div>
             {{/* category + tag chips, peer to the story rows (sty_f2f6465d): a
                  category chip + one clickable button PER tag — never a run-together
-                 string. The @click handlers feed the epic-order:3 task filter. */}}
+                 string. The @click.stop handlers stop row-toggle and feed the
+                 epic-order:3 task filter. */}}
             {{if .Category}}
             <div class="task-row-category" data-field="task-row-category">
               <button type="button" class="category-chip is-clickable" data-category="{{.Category}}" @click.stop="addCategoryToQuery" title="Click to filter by this category">category:{{.Category}}</button>
@@ -160,12 +170,63 @@
           <td class="task-col-runs" data-field="task-runcount">{{.RunCount}}</td>
           <td class="task-col-lastrun" data-field="task-lastrun">{{if .LastRun}}{{.LastRun}}{{else}}—{{end}}</td>
         </tr>
+        <tr class="task-detail"
+            data-detail-for="{{.ID}}"
+            x-show="isTaskExpanded($el)"
+            x-cloak
+            data-field="task-detail">
+          <td colspan="4">
+            <div class="story-detail-flat task-detail-flat">
+              <section class="story-detail-block" data-field="task-content">
+                <h4>content</h4>
+                {{if .BodyHTML}}<div class="changelog-content" data-field="task-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+              </section>
+              <section class="story-detail-block" data-field="task-executions">
+                <h4>executions ({{len .Episodes}})</h4>
+                {{if .Episodes}}
+                {{range .Episodes}}
+                <div class="execution-episode" data-section="episode" x-data="{ open: false }">
+                  <button type="button" class="episode-header episode-expand-toggle" data-action="toggle-episode" @click.stop="open = !open" :aria-expanded="open ? 'true' : 'false'">
+                    <span class="episode-caret" x-text="open ? '▾' : '▸'">▸</span>
+                    <span class="episode-run" data-field="episode-run">run-{{.Run}}</span>
+                    <span class="episode-span" data-field="episode-span">{{.Start}} → {{if .End}}{{.End}}{{else}}—{{end}}</span>
+                    <span class="episode-status status-pill {{if .Open}}is-open{{end}}" data-field="episode-status">{{.Status}}</span>
+                    <span class="episode-rowcount" data-field="episode-rowcount">{{len .Rows}} rows</span>
+                  </button>
+                  <div class="episode-log" data-section="episode-log" x-show="open" x-cloak>
+                    <table class="qa-ledger-table">
+                      <thead>
+                        <tr><th>When</th><th>Kind</th><th>Transition</th><th>Actor</th><th>Notes</th></tr>
+                      </thead>
+                      <tbody>
+                        {{range .Rows}}
+                        <tr data-section="episode-row">
+                          <td data-field="row-when">{{.When}}</td>
+                          <td data-field="row-kind"><code>{{.Kind}}</code></td>
+                          <td data-field="row-transition">{{if .Transition}}<span class="qa-badge-transition"><code>{{.Transition}}</code></span>{{else}}—{{end}}</td>
+                          <td data-field="row-actor">{{.Actor}}</td>
+                          <td data-field="row-body">{{.Body}}</td>
+                        </tr>
+                        {{end}}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                {{end}}
+                {{else}}
+                <p class="empty" data-field="no-executions">No executions yet — this task has not been run.</p>
+                {{end}}
+              </section>
+            </div>
+          </td>
+        </tr>
         {{end}}
       </tbody>
     </table>
     {{else}}
     <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
     {{end}}
+    </div>
   </section>
 </main>
 
