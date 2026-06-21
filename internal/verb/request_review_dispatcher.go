@@ -103,6 +103,13 @@ type ClaudeCLIGateDispatcher struct {
 	// step (resolution stays embed → local only), which keeps test fakes that
 	// do not need a server simple. The CLI wires the prod fetcher.
 	Fetch GateBodyFetcher
+
+	// ReadOnly runs the gate in VALIDATE-ONLY mode (sty_0454b437): Bash is
+	// withheld (the gate's only write channel is `satellites exec ledger_append`
+	// via Bash), so the gate physically cannot enact — it judges and returns the
+	// verdict only, changing no status or ledger. The functional check is skipped
+	// too. Used by `satellites task|story validate`.
+	ReadOnly bool
 }
 
 // GateBodyFetcher fetches a gate skill's raw SKILL.md (frontmatter + body) from
@@ -145,7 +152,14 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	// `check:`, the harness runs it and folds its deterministic result into the
 	// gate's context. The harness only RUNS it — the gate's body owns how the
 	// result combines with the LLM judgment.
-	if check := strings.TrimSpace(fm.Check); check != "" {
+	// Tool grant: a normal gate gets Bash (to run its functional check + enact
+	// via ledger_append); a READ-ONLY validate withholds Bash so it cannot enact
+	// (sty_0454b437) and skips the functional check entirely.
+	tools := gateAllowedTools
+	if c.ReadOnly {
+		tools = readOnlyGateAllowedTools
+		systemPrompt += validateOnlyDirective
+	} else if check := strings.TrimSpace(fm.Check); check != "" {
 		code, out := runGateCheck(ctx, in.WorktreeRoot, check, map[string]string{
 			"SATELLITES_STORY_ID":     in.StoryID,
 			"SATELLITES_PROJECT_ID":   in.ProjectID,
@@ -156,7 +170,7 @@ func (c ClaudeCLIGateDispatcher) Dispatch(ctx context.Context, in GateInput) (Ga
 	}
 
 	out, err := runClaudeCLI(ctx, c.BinaryPath,
-		claudeArgs(systemPrompt, gateAllowedTools, c.Model),
+		claudeArgs(systemPrompt, tools, c.Model),
 		string(payload), in.WorktreeRoot, "gate dispatch")
 	if err != nil {
 		return GateOutput{}, err
@@ -242,6 +256,18 @@ func (c ClaudeCLIGateDispatcher) IsReviewer(ctx context.Context, worktreeRoot, s
 // same grant rides along to plan-review, which simply does not use Bash
 // (harmless). Space-separated per the claude CLI's --allowedTools format.
 const gateAllowedTools = "Bash Read Grep Glob"
+
+// readOnlyGateAllowedTools is the VALIDATE-ONLY grant (sty_0454b437): Bash is
+// withheld so the gate cannot enact (its enact + functional check both need
+// Bash) — it can only read to judge. The hard guarantee behind `validate`.
+const readOnlyGateAllowedTools = "Read Grep Glob"
+
+// validateOnlyDirective is appended to a read-only gate's system prompt as
+// belt-and-braces with the withheld Bash: judge, emit the verdict, enact nothing.
+const validateOnlyDirective = "\n\n--- VALIDATE-ONLY (read-only) ---\n" +
+	"This is a READ-ONLY validation. Do NOT enact: run no `satellites exec`, " +
+	"`ledger_append`, `status_transition`, git, or file mutation. Judge the " +
+	"input and emit ONLY the final {\"decision\",\"notes\"} JSON."
 
 // claudeArgs builds the ONE `claude -p` argv (sty_3436e9f0): the gate/skill body
 // rides as an appended system prompt (`--append-system-prompt`, a real claude
