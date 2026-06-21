@@ -32,4 +32,12 @@ governed path — recurring work but no task workflow, so it would fall into a
 one-shot story/deploy workflow — that is a CONFIG GAP to surface (name the missing
 workflow), not a question to put to the user.
 
+**A task's work-step is contained, not borrowed.** When a task delegates to a
+named skill, that skill MUST resolve in the substrate (`.satellites/skills/`
+and/or the server) — it travels with the task, not as a file only some checkouts
+carry. A local `.claude/skills/<name>` is an OVERRIDE, not the source: it shadows
+the substrate copy at execution — the sanctioned way to customise. Default to
+containing the work-step (inline, or a named substrate skill); never point a task
+at a skill that may not be there.
+
 For the artifact-KIND test (skill vs principle vs document) see [[substrate-taxonomy]].

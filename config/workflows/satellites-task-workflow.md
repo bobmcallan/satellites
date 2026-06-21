@@ -29,6 +29,19 @@ record a `## Report` (body or ledger); then close it through the exit gate
 report; only a reviewer's accept moves status. The how-to lives in each gate's
 rubric and the task's work skill — not in this workflow.
 
+**Authoring a task** — create it TOGETHER with its work-step, so the task is
+self-sufficient (see [[work-artifact-selection]]):
+
+- **Inline** — write the procedure into the task body's `## How`. Nothing to
+  resolve; use it when the work runs only through this task.
+- **Contained skill** — when the work-step is reused or worth overriding, author a
+  NAMED skill in `.satellites/skills/`, upload it (`satellites skill upload`) so it
+  resolves in the substrate, then reference it from the task with a `skill:<name>`
+  tag. The entry gate checks that the reference resolves before opening the task;
+  a local `.claude/skills/<name>` overrides it at execution. Never reference a
+  skill that lives ONLY in `.claude/skills/` — that is an override, not a
+  substrate dependency the gate can validate.
+
 ## Workflow
 
 - ready to running — open for execution, gated by satellites-task-upsert-review (it IS a task + a resolvable workflow).
