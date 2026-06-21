@@ -6,6 +6,18 @@ tags: [principles:project, principles:always]
 
 How the agent drives a story to `done`.
 
+- **Choose the governing workflow at planning — and record it by name.** A story
+  is CREATED with only a category (no workflow). The workflow is chosen when YOU
+  plan the story — i.e. when driving it out of `backlog` toward `in_progress`,
+  BEFORE you request the `satellites-intent-plan-review` gate. Run
+  `satellites workflow list <story>` to see the ranked palette (the workflows
+  whose `applies_to` covers the category; the top row is the default), pick one,
+  then `satellites workflow embed <story>` to RECORD it as the story's
+  `workflow:<name>` selector. Choosing the default is fine — but it must be
+  recorded by name, so the workflow is known to you and the plan gate can
+  validate it. The plan gate REJECTS a story with no recorded selector; the
+  recorded name (not any embedded `## Workflow` copy) is the authority you then
+  follow. See [[reviewer-only-model]], [[process-as-configuration]].
 - **Run the checkpoint the governing workflow names** at every natural
   checkpoint (end of phase, end of meaningful change, before requesting
   review). The workflow definition — not this principle — owns which
