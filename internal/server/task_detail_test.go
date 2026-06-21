@@ -58,7 +58,9 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		Title:   "Demo · projects · satellites",
 		Project: projectRow{ID: "proj_demo", Name: "Demo"},
 		Tasks: []taskRow{
-			{ID: "tsk_demo", Title: "Secrets / code scan", Status: "complete", RunCount: 5, LastRun: "2026-06-21 01:05"},
+			{ID: "tsk_demo", Title: "Secrets / code scan", Status: "complete",
+				Category: "task", Tags: []string{"skill:secrets-scan", "workflow:satellites-task-workflow"},
+				RunCount: 5, LastRun: "2026-06-21 01:05"},
 		},
 	}
 	var buf bytes.Buffer
@@ -71,9 +73,21 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		"Secrets / code scan", // task title
 		"/tasks/tsk_demo",     // deep link to detail
 		"2026-06-21 01:05",    // last-run
+		// sty_f2f6465d: a category chip + one clickable button PER tag (mirrors
+		// the story rows), never a run-together string.
+		`data-field="task-row-category"`,
+		`class="category-chip is-clickable" data-category="task"`,
+		"category:task",
+		`data-field="task-row-tags"`,
+		`class="tag-chip is-clickable" data-tag="skill:secrets-scan"`,
+		`class="tag-chip is-clickable" data-tag="workflow:satellites-task-workflow"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("project_detail tasks panel missing %q", want)
 		}
+	}
+	// The two tags must render as SEPARATE chips, not a concatenated string.
+	if strings.Contains(out, "skill:secrets-scanworkflow:satellites-task-workflow") {
+		t.Error("project_detail tasks panel rendered tags as a run-together string")
 	}
 }

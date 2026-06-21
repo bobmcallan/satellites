@@ -142,7 +142,19 @@
           <td class="task-col-title">
             <a href="/tasks/{{.ID}}" data-field="task-link">{{.Title}}</a>
             <div class="task-row-id"><code>{{.ID}}</code></div>
-            {{if .Tags}}<div class="task-row-tags">{{range .Tags}}<span class="tag-chip" data-tag="{{.}}">{{.}}</span>{{end}}</div>{{end}}
+            {{/* category + tag chips, peer to the story rows (sty_f2f6465d): a
+                 category chip + one clickable button PER tag — never a run-together
+                 string. The @click handlers feed the epic-order:3 task filter. */}}
+            {{if .Category}}
+            <div class="task-row-category" data-field="task-row-category">
+              <button type="button" class="category-chip is-clickable" data-category="{{.Category}}" @click.stop="addCategoryToQuery" title="Click to filter by this category">category:{{.Category}}</button>
+            </div>
+            {{end}}
+            {{if .Tags}}
+            <div class="task-row-tags" data-field="task-row-tags">
+              {{range .Tags}}<button type="button" class="tag-chip is-clickable" data-tag="{{.}}" @click.stop="addTagToQuery" title="Click to filter by this tag">{{.}}</button>{{end}}
+            </div>
+            {{end}}
           </td>
           <td class="task-col-status"><span class="status-pill" data-field="task-status">{{.Status}}</span></td>
           <td class="task-col-runs" data-field="task-runcount">{{.RunCount}}</td>

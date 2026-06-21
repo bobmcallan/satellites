@@ -660,7 +660,8 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
   line-height: 1.4;
   color: #fff;
 }
-.story-row-tags {
+.story-row-tags,
+.task-row-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
@@ -682,7 +683,8 @@ button.tag-chip.is-clickable:focus-visible { outline: 2px solid #6a9fb5; outline
 
 /* category-chip (sty_7772f005): like tag-chip but a distinct amber accent so
    the category dimension reads apart from tags. */
-.story-row-category { margin-top: 0.3rem; }
+.story-row-category,
+.task-row-category { margin-top: 0.3rem; }
 button.category-chip.is-clickable {
   background: rgba(201, 162, 106, 0.18);
   color: #c9a86a;

@@ -34,6 +34,7 @@ type taskRow struct {
 	Title    string
 	Status   string
 	Priority string
+	Category string // rendered as its own chip, peer to storyRow.Category
 	Tags     []string
 	RunCount int    // execution episodes derived from the ledger
 	LastRun  string // formatted start of the most recent episode ("" = never run)
@@ -90,7 +91,7 @@ func dispatchTaskList(ctx context.Context, projectID string) ([]taskRow, error) 
 	}
 	out := make([]taskRow, 0, len(resp.Items))
 	for _, d := range resp.Items {
-		row := taskRow{ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority, Tags: d.Tags}
+		row := taskRow{ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority, Category: d.Category, Tags: d.Tags}
 		// Episode summary (run-count + last-run) from the ledger — best-effort;
 		// a ledger read error leaves the counts zero rather than failing the page.
 		if eps, lErr := taskEpisodes(ctx, d.ID); lErr == nil && len(eps) > 0 {
