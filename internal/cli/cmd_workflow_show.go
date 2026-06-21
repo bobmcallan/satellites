@@ -129,6 +129,9 @@ func printWorkflowTable(out io.Writer, wf *workflow.Workflow, gates []string) {
 		if t.On != "" {
 			attrs = append(attrs, "on: "+t.On)
 		}
+		if t.WorkSkill != "" {
+			attrs = append(attrs, "work: "+t.WorkSkill)
+		}
 		if t.ReviewerSkill != "" {
 			attrs = append(attrs, "gate: "+t.ReviewerSkill)
 		}

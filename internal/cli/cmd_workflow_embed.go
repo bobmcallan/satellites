@@ -114,16 +114,16 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 	// ungated checkpoint trigger, else a gated edge into a non-terminal state
 	// (so a cancellation edge — into a terminal state — is not surfaced as "the
 	// next step"). Pure projection over the resolved workflow shape.
-	nextGate, nextTo, checkpoint := "", "", false
+	nextGate, nextTo, nextWork, checkpoint := "", "", "", false
 	for _, t := range wf.TransitionsFrom(story.Status) {
 		if t.Trigger == "checkpoint" && strings.TrimSpace(t.ReviewerSkill) == "" {
-			nextTo, checkpoint = t.To, true
+			nextTo, nextWork, checkpoint = t.To, strings.TrimSpace(t.WorkSkill), true
 		}
 	}
 	if !checkpoint {
 		for _, t := range wf.TransitionsFrom(story.Status) {
 			if g := strings.TrimSpace(t.ReviewerSkill); g != "" && !wf.IsTerminal(t.To) {
-				nextGate, nextTo = g, t.To
+				nextGate, nextTo, nextWork = g, t.To, strings.TrimSpace(t.WorkSkill)
 			}
 		}
 	}
@@ -135,6 +135,7 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 			"story_id": storyID, "category": story.Category, "workflow": name,
 			"status": story.Status, "embedded_changed": changed,
 			"next_gate": nextGate, "next_status": nextTo, "next_is_checkpoint": checkpoint,
+			"next_work_skill": nextWork,
 		})
 	}
 
@@ -146,7 +147,11 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 	printWorkflowTable(out, wf, checkpointGates(srcBody))
 	switch {
 	case nextGate != "":
-		fmt.Fprintf(out, "\nnext: satellites story status_transition %s --skill %s   (→ %s)\n", storyID, nextGate, nextTo)
+		if nextWork != "" {
+			fmt.Fprintf(out, "\nnext step: run the %q work skill, then gate it — satellites story status_transition %s --skill %s   (→ %s)\n", nextWork, storyID, nextGate, nextTo)
+		} else {
+			fmt.Fprintf(out, "\nnext: satellites story status_transition %s --skill %s   (→ %s)\n", storyID, nextGate, nextTo)
+		}
 	case checkpoint:
 		fmt.Fprintf(out, "\nnext: at a checkpoint, request the traverse (→ %s) — see the checkpoint gates above.\n", nextTo)
 	default:

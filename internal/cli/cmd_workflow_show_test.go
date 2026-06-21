@@ -85,3 +85,23 @@ func TestPrintWorkflowTable(t *testing.T) {
 		}
 	}
 }
+
+// TestPrintWorkflowTable_WorkSkill pins epic:workflow-steps story 2 AC#3: a
+// transition's work_skill (the step's "do" half) is surfaced in the render so
+// the executor sees the skill to run, alongside the gate.
+func TestPrintWorkflowTable_WorkSkill(t *testing.T) {
+	wf, err := workflow.ParseBody([]byte("# t\n\n```yaml\n" +
+		"states: [shipping, done]\n" +
+		"transitions:\n" +
+		"  - {from: shipping, to: done, work_skill: commit-push, reviewer_skill: \"satellites-commit-push-review\"}\n" +
+		"```\n"))
+	if err != nil {
+		t.Fatalf("fixture parse: %v", err)
+	}
+	var b strings.Builder
+	printWorkflowTable(&b, wf, nil)
+	want := "shipping → done  [work: commit-push, gate: satellites-commit-push-review]"
+	if !strings.Contains(b.String(), want) {
+		t.Errorf("table missing %q\n%s", want, b.String())
+	}
+}

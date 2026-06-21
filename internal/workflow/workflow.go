@@ -99,7 +99,12 @@ func (s State) MarshalYAML() (interface{}, error) {
 //
 // ReviewerSkill names the reviewer the request_review verb invokes
 // before allowing the transition; empty string means the transition
-// is unguarded (typically the initial step into a phase). Dynamic
+// is unguarded (typically the initial step into a phase). WorkSkill
+// names the "do" half of the step — the work skill the executor runs on
+// this edge before requesting the reviewer (e.g. `commit-push`). It is
+// optional and display/route only: it names a skill to run, it never
+// enacts status (the reviewer remains the sole status-enactor). A
+// transition with both work_skill and reviewer_skill IS a step. Dynamic
 // marks a transition that the workflow can re-enter — used by
 // `dynamic-phase-insertion`-style flows in future workflows; v5
 // honours the field but the request_review verb won't act on it
@@ -116,6 +121,7 @@ type Transition struct {
 	From          string `yaml:"from"`
 	To            string `yaml:"to"`
 	ReviewerSkill string `yaml:"reviewer_skill"`
+	WorkSkill     string `yaml:"work_skill,omitempty"`
 	Dynamic       bool   `yaml:"dynamic,omitempty"`
 	On            string `yaml:"on,omitempty"`
 	MaxIterations int    `yaml:"max_iterations,omitempty"`
@@ -267,6 +273,7 @@ func (w *Workflow) validate() error {
 		w.Transitions[i] = Transition{
 			From: from, To: to,
 			ReviewerSkill: strings.TrimSpace(t.ReviewerSkill),
+			WorkSkill:     strings.TrimSpace(t.WorkSkill),
 			Dynamic:       t.Dynamic,
 			On:            on,
 			MaxIterations: t.MaxIterations,

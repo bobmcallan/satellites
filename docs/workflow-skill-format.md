@@ -43,6 +43,7 @@ Three sections, in order:
 | `from`            | string  | yes      | Source state — must appear in `states`.                                 |
 | `to`              | string  | yes      | Destination state — must appear in `states`.                            |
 | `reviewer_skill`  | string  | no       | Skill name the request_review verb dispatches; empty = unguarded.       |
+| `work_skill`      | string  | no       | The step's "do" half — the work skill the executor runs on this edge (e.g. `commit-push`). Display/route only; it never enacts status. A transition naming both `work_skill` and `reviewer_skill` IS a step. |
 | `dynamic`         | bool    | no       | Reserved for the dynamic-phase-insertion flow (parsed, not yet acted on). |
 
 ## Parser contract

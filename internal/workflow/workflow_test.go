@@ -321,6 +321,46 @@ transitions:
 	}
 }
 
+// TestParse_WorkSkill covers epic:workflow-steps story 2 AC#1: a transition may
+// declare an optional work_skill (the step's "do" half) alongside reviewer_skill,
+// it round-trips through the parser, and a transition that omits it parses
+// unchanged (empty WorkSkill) — existing workflows are not disturbed.
+func TestParse_WorkSkill(t *testing.T) {
+	input := `---
+name: x
+applies_to: [feature]
+---
+
+` + "```yaml" + `
+states: [a, b, c]
+transitions:
+  - {from: a, to: b, work_skill: commit-push, reviewer_skill: "satellites-commit-push-review"}
+  - {from: b, to: c, reviewer_skill: "done-review"}
+` + "```" + `
+`
+	wf, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	step, ok := wf.FindTransition("a", "b")
+	if !ok {
+		t.Fatalf("transition a->b missing")
+	}
+	if step.WorkSkill != "commit-push" {
+		t.Fatalf("work_skill lost: got %q want %q (%+v)", step.WorkSkill, "commit-push", step)
+	}
+	if step.ReviewerSkill != "satellites-commit-push-review" {
+		t.Fatalf("reviewer_skill lost alongside work_skill: %+v", step)
+	}
+	bare, ok := wf.FindTransition("b", "c")
+	if !ok {
+		t.Fatalf("transition b->c missing")
+	}
+	if bare.WorkSkill != "" {
+		t.Fatalf("a transition with no work_skill must parse with empty WorkSkill, got %q", bare.WorkSkill)
+	}
+}
+
 // TestParse_V2Sketch parses the graduated-workflow target model (the epic
 // anchor's sketch, verbatim) and asserts the v2 surface: state actors,
 // on:pass|fail edges, iteration bounds, exhaustion targets, and the
