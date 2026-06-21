@@ -103,10 +103,20 @@ gap to fill in the bootstrap process, not a runtime fallback.
 
 ## Process setup
 
-A freshly-installed project defines its own reviewer-gated workflow — the
-platform imposes none. Read `document_get {name:"project-setup",
-scope:"system"}` and follow it: it teaches the fixed structure (reviewer-only
-transitions, the story-as-contract) and walks the agent through defining the
-repo's states, transitions, and per-gate criteria from the admin's
-requirements and the repo's reality, then authoring the project-scoped
-workflow + gate skills. The loop runs once those exist.
+A freshly-installed project authors its own reviewer-gated workflow — the
+platform imposes none. No story is engaged first: drafting under
+`.satellites/{workflows,principles,skills}` is ungated; the per-type reviewer at
+`upload` is the control. Author these, then upload each (review-gated):
+
+1. **Principles** — `.satellites/principles/*.md`, then `satellites principle
+   upload`. The repo's beliefs / definition of "good" the gates read.
+2. **Reviewer skills** — `.satellites/skills/*.md` (`kind:reviewer`), then
+   `satellites skill upload`. One per transition you want gated; each judges a
+   story against its rule and enacts the edge on accept.
+3. **A workflow** — `.satellites/workflows/*.md` (`kind:workflow`), then
+   `satellites workflow upsert`. States + ordered transitions, each naming the
+   `reviewer_skill` that gates it; `applies_to` lists the story types it drives.
+
+Each upload runs the per-type reviewer; a reject returns notes to revise and
+re-run. A transition references a reviewer by name (the resolver normalises the
+`satellites-` prefix). The loop runs once a workflow + its reviewers exist.
