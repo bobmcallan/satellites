@@ -20,11 +20,12 @@ gate satellites-task-report-review.
 
 One JSON object on stdin carrying `story_id` (the task's `tsk_` id),
 `project_id`, `workspace_id`, `story_status` (current state — `ready`) and
-`story_body` (the task markdown, including a `## Workflow` fenced yaml block the
-dispatch embeds from the governing workflow). No `next_status` — resolve the
-target yourself (see *Enact*). The gate's `.satellites/satellites exec` calls
-authenticate as the operator's admin user, authorized to write
-status_transition / review_* rows.
+`story_body` (the task markdown). The governing workflow is resolved BY REFERENCE
+from the task's `workflow:` selector or its category default — the body need NOT
+carry a `## Workflow` block (reference-not-copy); when present it is display only.
+No `next_status` — resolve the target yourself (see *Enact*). The gate's
+`.satellites/satellites exec` calls authenticate as the operator's admin user,
+authorized to write status_transition / review_* rows.
 
 ## Decision rule
 
@@ -33,8 +34,9 @@ Judge the `story_body`:
 - **accept** — the document is a genuine task: it states, clearly enough for the
   in-repo agent to act on, WHAT work to perform (e.g. "scan the tracked files for
   committed secrets and produce a findings report"), and it carries a resolvable
-  governing workflow (the embedded `## Workflow` block parses, with a transition
-  whose `from == story_status` and `reviewer_skill == satellites-task-upsert-review`).
+  governing workflow (a valid `workflow:` selector, or a category that resolves a
+  default — see *Enact*; the governing workflow has a transition whose
+  `from == story_status` and `reviewer_skill == satellites-task-upsert-review`).
   The task is genuinely ready to be executed.
 - **reject** — the body is empty, a stub, or does not describe executable work; or
   the goal is too vague for the agent to act on; or no governing-workflow
@@ -53,7 +55,7 @@ rows below — no `document_upsert`, no git/file mutation.
 guardrails:
   always:
     - Judge ONLY whether the document is a well-formed, executable task with a resolvable governing workflow.
-    - Resolve to_status only from the task's ## Workflow transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review.
+    - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
     - Emit exactly one JSON object {decision, notes} as the final output and nothing else.
@@ -69,9 +71,13 @@ guardrails:
 
 You enact your decision, you do not just report it.
 
-Resolve your target from the task's `## Workflow`: parse its `transitions`, find
-the one whose `from == story_status` AND `reviewer_skill ==
-satellites-task-upsert-review`; its `to` is your `to_status`. If no such
+Resolve your target from the GOVERNING workflow — the one the task selects (its
+`workflow:<name>` tag), else the category default (the top row of
+`satellites workflow list <story_id>`). Render it with
+`satellites workflow show <name>` and find the transition whose
+`from == story_status` AND `reviewer_skill == satellites-task-upsert-review`; its
+`to` is your `to_status`. (An embedded `## Workflow`, if the body still carries
+one, is display only — the governing definition is the authority.) If no such
 transition exists, reject. Never invent a `to_status`.
 
 Run these with Bash before printing your decision.

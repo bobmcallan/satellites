@@ -17,9 +17,11 @@ report must be present in the task body or its ledger.
 
 One JSON object on stdin carrying `story_id` (the task's `tsk_` id),
 `project_id`, `workspace_id`, `story_status` (current state — `running`) and
-`story_body` (the task markdown, including a `## Workflow` fenced yaml block and,
-by now, the agent's report of the work done). No `next_status` — resolve the
-target yourself (see *Enact*). The gate's `.satellites/satellites exec` calls
+`story_body` (the task markdown — by now carrying the agent's report of the work
+done). The governing workflow is resolved BY REFERENCE from the task's `workflow:`
+selector or its category default — the body need NOT carry a `## Workflow` block
+(reference-not-copy); when present it is display only. No `next_status` — resolve
+the target yourself (see *Enact*). The gate's `.satellites/satellites exec` calls
 authenticate as the operator's admin user, authorized to write status_transition
 / review_* rows.
 
@@ -50,7 +52,7 @@ named ledger rows below — no `document_upsert`, no git/file mutation.
 guardrails:
   always:
     - Judge ONLY whether the requested work was performed and a report is present (body or ledger).
-    - Resolve to_status only from the task's ## Workflow transition whose from == story_status AND reviewer_skill == satellites-task-report-review.
+    - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-report-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
     - Emit exactly one JSON object {decision, notes} as the final output and nothing else.
@@ -66,9 +68,13 @@ guardrails:
 
 You enact your decision, you do not just report it.
 
-Resolve your target from the task's `## Workflow`: parse its `transitions`, find
-the one whose `from == story_status` AND `reviewer_skill ==
-satellites-task-report-review`; its `to` is your `to_status`. If no such
+Resolve your target from the GOVERNING workflow — the one the task selects (its
+`workflow:<name>` tag), else the category default (the top row of
+`satellites workflow list <story_id>`). Render it with
+`satellites workflow show <name>` and find the transition whose
+`from == story_status` AND `reviewer_skill == satellites-task-report-review`; its
+`to` is your `to_status`. (An embedded `## Workflow`, if the body still carries
+one, is display only — the governing definition is the authority.) If no such
 transition exists, reject. Never invent a `to_status`.
 
 Run these with Bash before printing your decision.
