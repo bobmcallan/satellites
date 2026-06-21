@@ -74,13 +74,25 @@ func TestGateOutcome_BootstrapConfigExempt(t *testing.T) {
 		}
 	}
 
-	// Still gated: arbitrary in-repo code, and a non-bootstrap file under .satellites/.
+	// Still gated: arbitrary in-repo source code.
 	for _, p := range []string{
 		filepath.Join(repo, "internal", "x.go"),
-		filepath.Join(repo, ".satellites", "principles", "constitution.md"),
 	} {
 		if allow, _ := gateOutcome(repo, "sess1", p, now); allow {
-			t.Errorf("non-bootstrap in-repo target %s must stay gated with no engagement", p)
+			t.Errorf("non-bootstrap in-repo source %s must stay gated with no engagement", p)
+		}
+	}
+
+	// Ungated pre-engagement (sty_6d2d0cd3): drafting governed substrate under
+	// .satellites/{workflows,principles,skills} needs no story — the per-type
+	// upload reviewer is the control, not the START door.
+	for _, p := range []string{
+		filepath.Join(repo, ".satellites", "principles", "constitution.md"),
+		filepath.Join(repo, ".satellites", "skills", "my-skill.md"),
+		filepath.Join(repo, ".satellites", "workflows", "my-workflow.md"),
+	} {
+		if allow, reason := gateOutcome(repo, "sess1", p, now); !allow {
+			t.Errorf("substrate-authoring path %s must be ungated with no engagement: reason=%q", p, reason)
 		}
 	}
 
@@ -109,6 +121,12 @@ func TestPathIsUngated(t *testing.T) {
 	// Inside the repo, not listed → gated.
 	if pathIsUngated(filepath.Join(root, "internal", "x.go"), root, nil) {
 		t.Errorf("an in-repo path with no exemption must be gated")
+	}
+	// Substrate-authoring dirs are ungated with no ungated_dirs entry (sty_6d2d0cd3).
+	for _, d := range []string{"skills", "principles", "workflows"} {
+		if !pathIsUngated(filepath.Join(root, ".satellites", d, "x.md"), root, nil) {
+			t.Errorf(".satellites/%s draft must be ungated (upload reviewer is the control)", d)
+		}
 	}
 	// Inside the repo, under a relative ungated_dirs entry → ungated.
 	if !pathIsUngated(filepath.Join(root, "docs", "scratch", "n.md"), root, []string{"docs/scratch"}) {

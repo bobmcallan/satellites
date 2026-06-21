@@ -163,6 +163,15 @@ func gateOutcomeEng(start, session, target string, now time.Time) (allow bool, r
 		if isBootstrapConfig(abs, root) {
 			return true, "", workstate.Engagement{}
 		}
+		// Substrate-authoring exemption (sty_6d2d0cd3): drafting under
+		// .satellites/{workflows,principles,skills} needs no engagement. A draft
+		// there is inert until `principle|skill|workflow upload`, where the
+		// per-type reviewer — the real control — judges it. So an agent authors
+		// substrate (the governance itself included) without first engaging a
+		// throwaway story; source code stays story-gated below.
+		if isSubstrateAuthoringPath(abs, root) {
+			return true, "", workstate.Engagement{}
+		}
 		if !isInsideRepo(abs, root) {
 			// Outside THIS repo. Cross-repo rule (sty_448d2024): a mutation into
 			// ANOTHER satellites-governed repo (one with its own
@@ -396,15 +405,38 @@ func isBootstrapConfig(abs, root string) bool {
 	return false
 }
 
+// substrateAuthoringDirs are the .satellites/ subtrees an agent DRAFTS governed
+// substrate in (sty_6d2d0cd3): a draft here is inert until `principle|skill|
+// workflow upload`, which runs the per-type reviewer — THAT review is the
+// control, not a story engagement.
+var substrateAuthoringDirs = []string{"workflows", "principles", "skills"}
+
+// isSubstrateAuthoringPath reports whether abs is under
+// .satellites/{workflows,principles,skills} — a substrate DRAFT the upload
+// reviewer gates, not the START door. Pure over its inputs.
+func isSubstrateAuthoringPath(abs, root string) bool {
+	abs = filepath.Clean(abs)
+	root = filepath.Clean(root)
+	for _, d := range substrateAuthoringDirs {
+		base := filepath.Join(root, ".satellites", d)
+		if abs == base || strings.HasPrefix(abs, base+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 // pathIsUngated reports whether an absolute target path is exempt from the
 // START-door's per-repo engagement check: a path NOT under the repo root (the
 // default boundary — Claude self-maintenance), the built-in bootstrap-config
-// exemption (satellites.toml + .mcp.json), OR an explicit ungated_dirs entry.
-// NOTE: the cross-repo rule (sty_448d2024) layers ON TOP of this in
-// gateOutcomeEng — an "outside this repo" path that lands in ANOTHER governed
-// repo is still gated against that repo. Pure over its inputs.
+// exemption (satellites.toml + .mcp.json), the substrate-authoring dirs
+// (.satellites/{workflows,principles,skills} — gated by the upload reviewer, not
+// the door), OR an explicit ungated_dirs entry. NOTE: the cross-repo rule
+// (sty_448d2024) layers ON TOP of this in gateOutcomeEng — an "outside this repo"
+// path that lands in ANOTHER governed repo is still gated against that repo. Pure
+// over its inputs.
 func pathIsUngated(abs, root string, ungatedDirs []string) bool {
-	return !isInsideRepo(abs, root) || isBootstrapConfig(abs, root) || pathInUngatedDirs(abs, root, ungatedDirs)
+	return !isInsideRepo(abs, root) || isBootstrapConfig(abs, root) || isSubstrateAuthoringPath(abs, root) || pathInUngatedDirs(abs, root, ungatedDirs)
 }
 
 // emitGateDeny writes the PreToolUse block decision as JSON on stdout.
