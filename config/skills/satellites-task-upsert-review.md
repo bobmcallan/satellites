@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED: its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED — its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
