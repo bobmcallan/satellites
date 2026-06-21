@@ -20,7 +20,7 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		TaskTotal:    3,
 		Tasks: []taskRow{
 			{
-				ID: "tsk_demo", Title: "Secrets / code scan", Status: "complete",
+				ID: "tsk_demo", Title: "Secrets / code scan", Status: "active",
 				Category: "task", Tags: []string{"skill:secrets-scan", "workflow:satellites-task-workflow"},
 				RunCount: 2, LastRun: "2026-06-21 01:05",
 				BodyHTML: template.HTML("<p>Scan tracked files for secrets.</p>"),
@@ -57,7 +57,8 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		`<th class="col-lastrun">last run</th>`,
 		`@click.stop="copyTaskID('tsk_demo', $event)"`,
 		`data-field="task-id-copy"`,
-		`<code class="status-pill" data-field="task-status">complete</code>`,
+		// sty_c54160e1: standing status vocabulary active/running/inactive.
+		`<code class="status-pill" data-field="task-status">active</code>`,
 		`colspan="5"`,                  // detail row spans all 5 columns
 		"2026-06-21 01:05",             // last-run
 		`@click="toggleTaskRow"`,       // row click expands inline
@@ -75,15 +76,19 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		// sty_f2f6465d chips (carried through the inline-expand rework)
 		`class="category-chip is-clickable" data-category="task"`,
 		`class="tag-chip is-clickable" data-tag="skill:secrets-scan"`,
-		// sty_80447ada search + Filtered/Total count + status toggle
+		// sty_80447ada search + Filtered/Total count
 		`data-field="panel-tasks-search"`,
 		`@keydown.enter.prevent="applyToServer()"`,
 		`data-field="tasks-count-indicator"`,
 		"1 / 3", // filtered / total
-		`data-action="task-status-toggle"`,
-		`@click="toggleStatusAll"`,
 		`data-task-filtered="1"`,
 		`data-task-total="3"`,
+		// sty_c54160e1: stories-style filter chip strip below the search (in the
+		// same position) replaces the lone header toggle.
+		`data-field="panel-tasks-chips"`,
+		`chip in getEffectiveChips()`,
+		`@click="removeChip(chip.key, chip.value)"`,
+		`data-action="panel-tasks-clear-all"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("project_detail tasks panel missing %q", want)
@@ -96,5 +101,16 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 	// Read-only invariant: the inline task view never offers a status-write path.
 	if strings.Contains(out, "toggleTaskStatus") || strings.Contains(out, `data-action="task-status-set"`) {
 		t.Error("project_detail tasks panel exposed a task status write path")
+	}
+	// sty_c54160e1: the lone header status toggle is gone (replaced by the chip strip).
+	if strings.Contains(out, "task-status-toggle") || strings.Contains(out, "toggleStatusAll") {
+		t.Error("project_detail tasks panel still has the removed status toggle")
+	}
+	// The count indicator lives in the tasks panel-header (top-right, like
+	// stories): it appears AFTER the <h2>tasks</h2> and BEFORE the search box.
+	hdr := strings.Index(out, `data-field="tasks-count-indicator"`)
+	search := strings.Index(out, `data-field="panel-tasks-search"`)
+	if hdr < 0 || search < 0 || hdr > search {
+		t.Error("tasks count indicator is not in the panel-header above the search box")
 	}
 }

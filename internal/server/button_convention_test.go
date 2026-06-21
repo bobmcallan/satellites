@@ -50,7 +50,7 @@ func TestInviteFormButtonsUseGlobalStyle(t *testing.T) {
 // chips, the avatar/menu trigger, modal-close, expand toggles, and search-clear
 // affordances. Substring-matched so a sibling variant (panel-filter-chip-clear,
 // etc.) needs no test edit. role="tab"/"menuitem" buttons are chrome too.
-var chromeButtonFamilies = []string{"chip", "avatar", "modal-close", "expand-toggle", "search-clear", "status-toggle"}
+var chromeButtonFamilies = []string{"chip", "avatar", "modal-close", "expand-toggle", "search-clear"}
 
 // isChromeButton reports whether a <button> open tag is decorative chrome (and so
 // exempt from the .btn action-button convention).

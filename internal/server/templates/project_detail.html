@@ -135,25 +135,44 @@
   <section class="panel" data-section="project-tasks">
     <div x-data="taskPanel" class="panel-tasks" data-field="panel-tasks-body"
          data-project-id="{{.Project.ID}}" data-task-filtered="{{.TaskFiltered}}" data-task-total="{{.TaskTotal}}">
+    {{/* Header mirrors the stories panel (sty_c54160e1): h2 + the Filtered/Total
+         count indicator only, so space-between puts the count top-right. */}}
     <div class="panel-header">
       <h2>tasks</h2>
       <span class="stories-count-indicator" data-field="tasks-count-indicator"
             title="matching the active filter / project total">
         <span x-text="filtered + ' / ' + total">{{.TaskFiltered}} / {{.TaskTotal}}</span>
       </span>
-      {{/* status filter (sty_80447ada AC#3): default open/non-terminal,
-           toggle to all — applied server-side via the shared filter. */}}
-      <button type="button" class="task-status-toggle" data-action="task-status-toggle"
-              @click="toggleStatusAll"
-              x-text="statusAll() ? 'status: all' : 'status: open'"
-              title="Toggle done/cancelled tasks into the view">status: open</button>
     </div>
     <input type="text"
            class="panel-search"
-           placeholder="search then press Enter (free text + chips: tags:foo status:open status:all)"
+           placeholder="search then press Enter (free text + chips: tags:foo status:active status:all)"
            x-model="query"
            @keydown.enter.prevent="applyToServer()"
            data-field="panel-tasks-search">
+    {{/* Filter chip strip — same markup/position as the stories panel
+         (sty_c54160e1): effective chips (status default, removable user chips)
+         + clear all, directly below the search. */}}
+    <div class="panel-filter-chips" data-field="panel-tasks-chips">
+      <template x-for="chip in getEffectiveChips()" :key="chip.key + ':' + chip.value + ':' + chip.isDefault">
+        <span class="panel-filter-chip"
+              :class="{ 'is-default': chip.isDefault, 'is-user': !chip.isDefault }"
+              :data-field="'panel-tasks-chip-' + chip.key + '-' + chip.value">
+          <span class="panel-filter-chip-label" x-text="chip.key + ':' + chip.value"></span>
+          <button type="button"
+                  class="panel-filter-chip-remove"
+                  x-show="!chip.isDefault"
+                  @click="removeChip(chip.key, chip.value)"
+                  :title="'Remove ' + chip.key + ':' + chip.value">&times;</button>
+        </span>
+      </template>
+      <button type="button"
+              class="panel-filter-chip-clear"
+              x-show="query.length > 0"
+              @click="clearAllFilters"
+              data-action="panel-tasks-clear-all"
+              title="Reset to default filters">clear all</button>
+    </div>
     {{if .Tasks}}
     {{/* The task grid mirrors the story table's column convention (sty_09e2ce68):
          lowercase headers + shared col-* classes + a dedicated id column with

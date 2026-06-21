@@ -96,14 +96,16 @@ func parseStoryQuery(s string) storyQuery {
 	return q
 }
 
-// isTerminalStatus reports whether a row's status is a terminal (non-open) one.
-// The story lifecycle ends at done/cancelled; the task lifecycle ends at
-// complete/cancelled — both share this predicate, so the union is terminal. A
-// status the other type never carries is harmless to the type that doesn't use
-// it (no story is "complete"; no task is "done").
+// isTerminalStatus reports whether a row's status is a terminal (non-open) one —
+// hidden by the default `status:open` view. Stories end at done/cancelled. Tasks
+// carry the panel's STANDING vocabulary (mapTaskStatus): `inactive` (cancelled)
+// is terminal, while `active` (ready/complete — complete is RE-RUNNABLE) and
+// `running` stay visible. `complete` is NOT listed: a task maps it to `active`
+// before filtering, and no story carries it. A status the other type never uses
+// is harmless to the type that doesn't (no story is "inactive"; no task is "done").
 func isTerminalStatus(st string) bool {
 	switch st {
-	case "done", "cancelled", "canceled", "complete":
+	case "done", "cancelled", "canceled", "inactive":
 		return true
 	}
 	return false

@@ -150,25 +150,40 @@ func mkTask(id, title, status, category string, tags ...string) taskRow {
 	return taskRow{ID: id, Title: title, Status: status, Category: category, Tags: tags}
 }
 
-// TestFilterTasks covers sty_80447ada AC#4: tasks reuse the SAME story-filter
-// predicate for search (free text + tags), status filtering (default open /
-// status:all), and the Filtered/Total count.
+// TestMapTaskStatus pins sty_c54160e1: the standing vocabulary — ready/complete
+// (complete is re-runnable) → active, running → running, cancelled → inactive.
+func TestMapTaskStatus(t *testing.T) {
+	cases := map[string]string{
+		"ready": "active", "complete": "active", "running": "running",
+		"cancelled": "inactive", "canceled": "inactive", "": "active",
+	}
+	for in, want := range cases {
+		if got := mapTaskStatus(in); got != want {
+			t.Errorf("mapTaskStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestFilterTasks covers sty_80447ada AC#4 + sty_c54160e1: tasks reuse the SAME
+// story-filter predicate over the MAPPED standing status (active/running/
+// inactive). The default open view lists active + running (a complete→active
+// task is shown — it is re-runnable, not terminal); only inactive is hidden.
 func TestFilterTasks(t *testing.T) {
 	all := []taskRow{
-		mkTask("tsk_1", "Secrets scan", "complete", "task", "skill:secrets-scan"),
-		mkTask("tsk_2", "Build cache warmup", "running", "task", "skill:cache"),
-		mkTask("tsk_3", "Dead task", "cancelled", "task", "skill:misc"),
+		mkTask("tsk_1", "Secrets scan", mapTaskStatus("complete"), "task", "skill:secrets-scan"), // → active
+		mkTask("tsk_2", "Build cache warmup", mapTaskStatus("running"), "task", "skill:cache"),   // → running
+		mkTask("tsk_3", "Dead task", mapTaskStatus("cancelled"), "task", "skill:misc"),           // → inactive
 	}
 	total := len(all)
 
-	// Default (empty) query = status:open → hides complete/cancelled.
+	// Default (empty) query = status:open → lists active + running, hides inactive.
 	def := parseStoryQuery("")
 	if def.isEmpty() {
 		def = parseStoryQuery("status:open")
 	}
 	open := filterTasks(all, def)
-	if len(open) != 1 || open[0].ID != "tsk_2" {
-		t.Fatalf("default open filter want [tsk_2]; got %+v", open)
+	if len(open) != 2 || open[0].ID != "tsk_1" || open[1].ID != "tsk_2" {
+		t.Fatalf("default open filter want [tsk_1 tsk_2] (active+running); got %+v", open)
 	}
 	if total != 3 {
 		t.Errorf("total want 3; got %d", total)
@@ -179,8 +194,12 @@ func TestFilterTasks(t *testing.T) {
 		t.Errorf("status:all want 3 rows; got %d", len(got))
 	}
 
-	// Free-text search matches id/title/tags (and respects the default
-	// open-status gate unless status is given).
+	// status:active → only the active (complete→active) task.
+	if got := filterTasks(all, parseStoryQuery("status:active")); len(got) != 1 || got[0].ID != "tsk_1" {
+		t.Errorf("status:active want [tsk_1]; got %+v", got)
+	}
+
+	// Free-text search matches id/title/tags.
 	if got := filterTasks(all, parseStoryQuery("status:all secrets")); len(got) != 1 || got[0].ID != "tsk_1" {
 		t.Errorf("search 'secrets' want [tsk_1]; got %+v", got)
 	}

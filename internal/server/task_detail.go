@@ -117,9 +117,28 @@ func dispatchTaskRows(ctx context.Context, projectID string) ([]taskRow, error) 
 	}
 	out := make([]taskRow, 0, len(resp.Items))
 	for _, d := range resp.Items {
-		out = append(out, taskRow{ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority, Category: d.Category, Tags: d.Tags})
+		out = append(out, taskRow{ID: d.ID, Title: d.Name, Status: mapTaskStatus(d.Status), Priority: d.Priority, Category: d.Category, Tags: d.Tags})
 	}
 	return out, nil
+}
+
+// mapTaskStatus projects a task's workflow status (ready → running → complete,
+// + cancelled) onto the panel's STANDING vocabulary (sty_c54160e1): a task is
+// `active` (available to run — `ready`, or `complete` which is RE-RUNNABLE via
+// the workflow's complete → running edge), `running` (executing), or `inactive`
+// (`cancelled` — abandoned). A `complete` task is NOT terminal the way a story's
+// `done` is, so it stays visible in the default view. Per-run outcomes
+// (complete/cancelled) keep their real labels on the execution episodes — this
+// maps only the task's standing status pill + the panel filter.
+func mapTaskStatus(workflowStatus string) string {
+	switch strings.ToLower(strings.TrimSpace(workflowStatus)) {
+	case "running":
+		return "running"
+	case "cancelled", "canceled":
+		return "inactive"
+	default: // ready, complete, or any other available state
+		return "active"
+	}
 }
 
 // enrichTaskRow adds the inline-expand payload to a visible row (sty_f46fe4f2):

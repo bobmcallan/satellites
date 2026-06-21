@@ -732,22 +732,6 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   color: #c8c8c8;
 }
 
-/* Task panel status toggle (sty_80447ada): open ⟷ all, peer to the stories
-   count indicator in the panel header. */
-.task-status-toggle {
-  margin-left: auto;
-  background: rgba(106, 159, 181, 0.18);
-  color: #8ab4c9;
-  border: 0;
-  border-radius: 3px;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-}
-.task-status-toggle:hover { background: rgba(106, 159, 181, 0.32); }
-.task-status-toggle:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
-
 /* Execution episodes (sty_f46fe4f2): the inline task expand lists the ledger
    grouped by execution episode, each run-N collapsible to its own log rows. */
 .execution-episode { border: 1px solid #1c1c1c; border-radius: 3px; margin-bottom: 0.4rem; }
