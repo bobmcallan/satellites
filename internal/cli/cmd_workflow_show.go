@@ -94,9 +94,11 @@ func resolveShowTarget(ctx context.Context, configPath, userArg, target string) 
 		return wf, nil, nil
 	}
 	// Client-dir workflows first (they win an applies_to tie at resolution, so
-	// `show` should render the same definition the dispatcher would enact), then
-	// the materialised kind:workflow skills.
-	for _, s := range append(clientWorkflows(configPath), materialisedSkills()...) {
+	// `show` renders the same definition the dispatcher would enact), then the
+	// SYSTEM EMBED workflows (satellites-task-workflow, satellites-workflow, …)
+	// resolved by name — withEmbeddedWorkflows keeps local winning a name tie
+	// (sty_34aac909) — then the materialised kind:workflow skills.
+	for _, s := range append(withEmbeddedWorkflows(clientWorkflows(configPath)), materialisedSkills()...) {
 		if s.name != target {
 			continue
 		}
@@ -106,7 +108,7 @@ func resolveShowTarget(ctx context.Context, configPath, userArg, target string) 
 		}
 		return wf, checkpointGates(s.body), nil
 	}
-	return nil, nil, fmt.Errorf("workflow show: %q is neither a sty_ id nor a workflow under .satellites/workflows or .claude/skills", target)
+	return nil, nil, fmt.Errorf("workflow show: %q is neither a sty_ id nor a workflow under .satellites/workflows, the system embed, or .claude/skills", target)
 }
 
 func printWorkflowTable(out io.Writer, wf *workflow.Workflow, gates []string) {
