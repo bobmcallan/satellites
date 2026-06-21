@@ -21,7 +21,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/db"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/embed"
-	"github.com/bobmcallan/satellites/internal/frontmatter"
 	"github.com/bobmcallan/satellites/internal/ingest"
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/ledger"
@@ -155,84 +154,69 @@ func main() {
 	// pass (after the loop) can remove system_seeds rows whose embed file
 	// was retired — making removal symmetrical with addition (sty_a1a74121).
 	keep := make(map[string]bool, len(docFilenames))
+	// skipped counts embed files that could not be safely seeded (malformed
+	// frontmatter / unsupported scope). They are LOGGED and SKIPPED, never fatal
+	// (sty_adad79f8) — one bad file must not crash-loop the service. The
+	// per-file decision is the pure planSeedFile (see seed.go), kept out of the
+	// DB/exit path so the skip behaviour is unit-testable.
+	skipped := 0
 	for _, filename := range docFilenames {
 		raw, err := fs.ReadFile(substrate.FS, filename)
 		if err != nil {
+			// An embed READ failure is binary corruption, not a per-file content
+			// problem — that is legitimately fatal.
 			arbor.Fatal("read embedded document", "file", filename, "err", err)
 		}
-		fm, body, err := frontmatter.Parse(raw)
-		if err != nil {
-			arbor.Fatal("parse document frontmatter", "file", filename, "err", err)
-		}
-		name := fm.Name
-		if name == "" {
-			name = strings.TrimSuffix(filename, ".md")
-		}
-		scope := fm.Scope
-		if scope == "" {
-			scope = "system"
-		}
-		if scope != "system" {
-			arbor.Fatal("config embed currently only supports scope=system",
-				"file", filename, "scope", scope)
-		}
-		docType := fm.Type
-		if docType == "" {
-			docType = document.TypeDocument
-		}
-		// epic:system-substrate — the server no longer mirrors the
-		// client's authored-process GATE substrate into system rows. A
-		// reviewer gate (named *-review) resolves client-side from the
-		// binary embed (embed → .claude/skills → server fallback), so a
-		// duplicate server row is dead weight; omitting it from `keep`
-		// lets the prune pass below tombstone any that linger. What STAYS
-		// server-homed: the MCP-service docs under mcp/, principles
-		// (served to CLI-less MCP clients), the server-machinery docs
-		// (agent-operating-prompt / system_variables), and the summariser
-		// reviewer satellites-story-summary, which the summary hook runs
-		// from the boot-loaded registry. The kind:contract authored docs
-		// (e.g. satellites_surface_contract) are client-embed only.
-		if !serverHomedSeed(docType, name, fm.Tags) {
-			arbor.Info("system seed skipped (client-homed authored substrate)", "name", name)
+		p := planSeedFile(filename, raw, serverHomedSeed)
+		if p.Skip {
+			arbor.Error("system seed SKIPPED — service starts degraded, not dead",
+				"file", filename, "reason", p.Reason)
+			skipped++
 			continue
 		}
-		// Skills preserve their frontmatter in the stored body so the
-		// document mirror is byte-identical to the SKILL.md a client
-		// would materialise into .claude/skills/<name>/SKILL.md.
-		// Documents strip frontmatter (substrate keys are not part of
-		// the rendered body for templated docs).
-		var storedBody string
-		if docType == document.TypeSkill {
-			storedBody = string(raw)
-		} else {
-			storedBody = string(body)
+		// epic:system-substrate — the server does not mirror the client's
+		// authored-process GATE substrate; a client-homed file is intentionally
+		// not seeded (omitted from `keep` so the prune pass tombstones any
+		// lingering server row). What stays server-homed: mcp/ docs, principles,
+		// the server-machinery docs, and the satellites-story-summary reviewer.
+		if p.ClientHomed {
+			arbor.Info("system seed skipped (client-homed authored substrate)", "name", p.Name)
+			continue
 		}
-		keep[name] = true
-		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, docType, name, storedBody, fm.Tags, fm.Headline, "system:seed", time.Now().UTC())
+		keep[p.Name] = true
+		res, err := document.ReconcileSystemSeedTyped(context.Background(), sysSeedStore, docStore, p.Type, p.Name, p.Body, p.Tags, p.Headline, "system:seed", time.Now().UTC())
 		if err != nil {
-			arbor.Fatal("reconcile system seed", "name", name, "err", err)
+			arbor.Fatal("reconcile system seed", "name", p.Name, "err", err)
 		}
 		switch {
 		case res.Created:
-			arbor.Info("system seed installed", "name", name)
+			arbor.Info("system seed installed", "name", p.Name)
 		case res.Changed:
-			arbor.Info("system seed updated (drift)", "name", name)
+			arbor.Info("system seed updated (drift)", "name", p.Name)
 		default:
-			arbor.Info("system seed unchanged", "name", name)
+			arbor.Info("system seed unchanged", "name", p.Name)
 		}
 	}
 	// Prune: a system_seeds row whose embed file was removed is retired here,
 	// the mirror of the upsert above — so a removed artifact propagates as a
 	// removed row on the next deploy instead of lingering immortal
 	// (sty_a1a74121). Scoped to system_seeds-tracked names only.
-	pruned, err := document.PruneSystemSeeds(context.Background(), sysSeedStore, docStore, keep, "system:prune", time.Now().UTC())
-	if err != nil {
-		arbor.Fatal("prune retired system seeds", "err", err)
+	// Prune only on a CLEAN boot: if any embed file was skipped (malformed /
+	// bad scope), suppress the prune so a transiently-bad embed cannot tombstone
+	// the prior good rows (sty_adad79f8).
+	if skipped == 0 {
+		pruned, err := document.PruneSystemSeeds(context.Background(), sysSeedStore, docStore, keep, "system:prune", time.Now().UTC())
+		if err != nil {
+			arbor.Fatal("prune retired system seeds", "err", err)
+		}
+		for _, name := range pruned {
+			arbor.Info("system seed pruned (embed removed)", "name", name)
+		}
+		arbor.Info("system seeds reconciled", "pruned", len(pruned))
+	} else {
+		arbor.Error("system seed prune SUPPRESSED — bad embed file(s) skipped this boot; not tombstoning",
+			"skipped", skipped)
 	}
-	for _, name := range pruned {
-		arbor.Info("system seed pruned (embed removed)", "name", name)
-	}
-	arbor.Info("system seeds reconciled", "pruned", len(pruned))
 
 	// Reviewer registry — load every type:"skill" row tagged
 	// `kind:reviewer` from the documents store (the reconciler seeded
