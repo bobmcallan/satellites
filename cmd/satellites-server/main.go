@@ -382,6 +382,16 @@ func main() {
 		)
 	}
 
+	// KV-backed dev-login principal (epic:portal-auth-ux): provisioned in every
+	// deployment so an agent can authenticate to the live portal through the
+	// same /login password door a human uses. The password is generated
+	// randomly on first boot and stored as an admin-only-readable secret
+	// variable — read it with variable_get reveal=true as a global admin.
+	if err := store.ReconcileDevLogin(context.Background(), variableStore); err != nil {
+		arbor.Fatal("reconcile dev-login", "err", err)
+	}
+	arbor.Info("dev-login principal reconciled", "email_var", auth.DevLoginEmailVar, "user_id", auth.DevLoginUserID)
+
 	// Session secret: env wins (handled by LoadServer); otherwise
 	// load-or-create from server_settings so sessions survive restarts.
 	var sessionSecret []byte

@@ -46,6 +46,37 @@ func TestVariableSet_RejectsComputedSystemName(t *testing.T) {
 	}
 }
 
+func TestVariableGetResponse_RevealGatesSecretValue(t *testing.T) {
+	secret := variable.Variable{Name: "dev_login.password", Value: "p4ss", Secret: true}
+	plain := variable.Variable{Name: "stories.page_size", Value: "25"}
+
+	if got := variableGetResponse(secret, "system", false); got.Value != "" || !got.Secret {
+		t.Fatalf("secret without reveal should redact: value=%q secret=%v", got.Value, got.Secret)
+	}
+	if got := variableGetResponse(secret, "system", true); got.Value != "p4ss" || !got.Secret {
+		t.Fatalf("secret with reveal should expose plaintext: value=%q secret=%v", got.Value, got.Secret)
+	}
+	if got := variableGetResponse(plain, "system", false); got.Value != "25" || got.Secret {
+		t.Fatalf("plain value should pass through: value=%q secret=%v", got.Value, got.Secret)
+	}
+}
+
+func TestVariableGet_RevealRequiresAdmin(t *testing.T) {
+	// A non-admin reveal is rejected before any store access — assert the
+	// gate fires with an empty store and an authStore wired.
+	prevVar, prevAuth := variableStore, authStore
+	variableStore = &variable.Store{}
+	authStore = &auth.Store{}
+	defer func() { variableStore, authStore = prevVar, prevAuth }()
+
+	ctx := auth.WithUser(context.Background(), &auth.User{ID: "usr_x", Role: auth.RoleUser})
+	_, err := Get("variable_get").Invoke(ctx,
+		json.RawMessage(`{"name":"dev_login.password","scope":"system","reveal":true}`))
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden for non-admin reveal, got %v", err)
+	}
+}
+
 func TestVariableGet_BadInput(t *testing.T) {
 	prev := variableStore
 	variableStore = &variable.Store{}

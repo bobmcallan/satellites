@@ -26,14 +26,17 @@ import (
 
 var variableStore *variable.Store
 
-// reservedSecretNames are system-scope names that hold LLM credentials and
-// MUST be written as secrets — a plain (non-secret) variable cannot hold a
-// key. The server-internal LLM-config resolver reads them directly; the
-// public read verbs redact them. Keep in sync with the resolver's env
-// fallbacks in cmd/satellites-server.
+// reservedSecretNames are system-scope names that hold credentials and MUST
+// be written as secrets — a plain (non-secret) variable cannot hold one, so it
+// can never be stored in a plaintext-readable form. The server-internal
+// resolvers read them directly; the public read verbs redact them unless an
+// admin opts into reveal. Keep in sync with the resolver's env fallbacks in
+// cmd/satellites-server and the dev-login reconcile (internal/auth/devlogin.go).
 var reservedSecretNames = map[string]bool{
-	"gemini.api_key":    true,
-	"anthropic.api_key": true,
+	"gemini.api_key":     true,
+	"anthropic.api_key":  true,
+	"dev_login.email":    true,
+	"dev_login.password": true,
 }
 
 // redactedSecretValue replaces a secret's plaintext on every public read
@@ -96,6 +99,10 @@ type VariableGetRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
 	Inherit     bool   `json:"inherit,omitempty"`
+	// Reveal opts a global-admin caller into reading a secret's plaintext.
+	// Default (false) keeps the redaction every other read path applies, so
+	// the UI and logs never see a secret. A non-admin reveal is rejected.
+	Reveal bool `json:"reveal,omitempty"`
 }
 
 // VariableGetResponse names the layer the value resolved at so callers
@@ -196,6 +203,11 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	// Revealing a secret's plaintext is admin-only. CLI-local dispatch
+	// without an auth store is exempt, like the rest of the authz surface.
+	if req.Reveal && authStore != nil && !callerIsGlobalAdmin(ctx) {
+		return nil, fmt.Errorf("variable_get: %w: revealing a secret requires a global admin", ErrForbidden)
+	}
 	for _, key := range buildVariableResolutionChain(req.Name, scope, req.WorkspaceID, req.ProjectID, callerUserID(ctx), req.Inherit) {
 		if key.Scope == variable.ScopeSystem {
 			// Stored-system rows take precedence over the computed
@@ -204,7 +216,7 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 			// and falls through to the resolver below.
 			v, lookupErr := variableStore.Get(ctx, key)
 			if lookupErr == nil {
-				return json.Marshal(variableGetResponse(v, "system"))
+				return json.Marshal(variableGetResponse(v, "system", req.Reveal))
 			}
 			if !errors.Is(lookupErr, variable.ErrNotFound) {
 				return nil, mapVariableStoreError(lookupErr, "variable_get")
@@ -219,7 +231,7 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 		}
 		v, lookupErr := variableStore.Get(ctx, key)
 		if lookupErr == nil {
-			return json.Marshal(variableGetResponse(v, string(v.Scope)))
+			return json.Marshal(variableGetResponse(v, string(v.Scope), req.Reveal))
 		}
 		if !errors.Is(lookupErr, variable.ErrNotFound) {
 			return nil, mapVariableStoreError(lookupErr, "variable_get")
@@ -228,13 +240,14 @@ func invokeVariableGet(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	return nil, fmt.Errorf("variable_get: %w: %s/%s", ErrNotFound, scope, req.Name)
 }
 
-// variableGetResponse builds the read response, blanking a secret's value
-// so its plaintext is never returned by variable_get.
-func variableGetResponse(v variable.Variable, resolvedScope string) VariableGetResponse {
-	if v.Secret {
+// variableGetResponse builds the read response, blanking a secret's value so
+// its plaintext is never returned — unless reveal is set, which the caller has
+// already gated to a global admin.
+func variableGetResponse(v variable.Variable, resolvedScope string, reveal bool) VariableGetResponse {
+	if v.Secret && !reveal {
 		return VariableGetResponse{Name: v.Name, Value: redactedSecretValue, ResolvedScope: resolvedScope, Secret: true}
 	}
-	return VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: resolvedScope}
+	return VariableGetResponse{Name: v.Name, Value: v.Value, ResolvedScope: resolvedScope, Secret: v.Secret}
 }
 
 func invokeVariableSet(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
