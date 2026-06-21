@@ -109,7 +109,10 @@ var hooksToInstall = []installedHook{
 }
 
 func init() {
-	var configArg string
+	var (
+		configArg    string
+		skipValidate bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Scaffold this repo for satellites and install the workflow hook",
@@ -140,10 +143,20 @@ Re-running is safe: existing files and settings are preserved and hooks are
 not duplicated. init reports what it added versus what was already present.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd.OutOrStdout(), initRepoRoot(configArg))
+			if err := runInit(cmd.OutOrStdout(), initRepoRoot(configArg)); err != nil {
+				return err
+			}
+			// Post-scaffold governance validate (non-fatal): surface drift an
+			// out-of-session `satellites update` introduced, instead of deferring
+			// it to the next gate failure (epic:governance-lifecycle order-3).
+			if !skipValidate {
+				_ = runInitValidate(cmd.Context(), cmd.OutOrStdout(), configArg, "")
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (resolves the repo root; defaults to walk-up from CWD).")
+	cmd.Flags().BoolVar(&skipValidate, "skip-validate", false, "Skip the post-scaffold governance validate pass.")
 	register(cmd)
 }
 

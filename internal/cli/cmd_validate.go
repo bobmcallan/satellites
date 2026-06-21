@@ -88,18 +88,10 @@ func runValidate(ctx context.Context, out io.Writer, configArg, userArg string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	stories, err := listProjectStories(ctx, configArg, userArg)
+	verdicts, err := validateGovernance(ctx, configArg, userArg)
 	if err != nil {
 		return err
 	}
-	skills := markLocalAuthorship(materialisedSkills(), configArg)
-	wfs := withEmbeddedWorkflows(clientWorkflows(configArg))
-	fetch := serverGateFetcher(configArg, userArg)
-	gateResolvable := func(g string) bool { return verb.GateResolvable(ctx, fetch, ".", g) }
-	findings := runWorkflowChecksResolved(skills, wfs, stories, gateResolvable)
-
-	roster := validateRoster(ctx, skills, wfs, configArg, userArg)
-	verdicts := rollupVerdicts(roster, findings)
 
 	if !asJSON && deep {
 		// Read-only content audit; the corpus reviewer prints its own SHIP/REVISE
@@ -112,6 +104,27 @@ func runValidate(ctx context.Context, out io.Writer, configArg, userArg string, 
 	}
 
 	return reportValidate(out, verdicts, asJSON)
+}
+
+// validateGovernance computes the per-artifact verdicts for the caller's
+// project — the STATIC resolver pass, read-only. It is the single source of
+// truth shared by the `validate` command and the `init` post-scaffold pass
+// (epic:governance-lifecycle order-3); neither re-implements the resolution.
+func validateGovernance(ctx context.Context, configArg, userArg string) ([]artifactVerdict, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stories, err := listProjectStories(ctx, configArg, userArg)
+	if err != nil {
+		return nil, err
+	}
+	skills := markLocalAuthorship(materialisedSkills(), configArg)
+	wfs := withEmbeddedWorkflows(clientWorkflows(configArg))
+	fetch := serverGateFetcher(configArg, userArg)
+	gateResolvable := func(g string) bool { return verb.GateResolvable(ctx, fetch, ".", g) }
+	findings := runWorkflowChecksResolved(skills, wfs, stories, gateResolvable)
+	roster := validateRoster(ctx, skills, wfs, configArg, userArg)
+	return rollupVerdicts(roster, findings), nil
 }
 
 // validateRoster builds the complete governance roster — every workflow-bearing
