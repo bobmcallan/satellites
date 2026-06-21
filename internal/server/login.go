@@ -21,6 +21,10 @@ type loginData struct {
 	FooterName  string
 	FooterEmail string
 	Version     string
+	// Next is the validated same-site return target (safeNext); the template
+	// threads it through the form + OAuth links so login returns the user to
+	// the view they were bounced from.
+	Next string
 }
 
 type devCred struct {
@@ -37,7 +41,7 @@ func loginHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			renderLogin(w, cfg, "")
+			renderLogin(w, cfg, "", safeNext(r.URL.Query().Get("next")))
 		case http.MethodPost:
 			handleLoginPost(w, r, cfg)
 		default:
@@ -46,7 +50,14 @@ func loginHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-func renderLogin(w http.ResponseWriter, cfg Config, errMsg string) {
+func renderLogin(w http.ResponseWriter, cfg Config, errMsg, next string) {
+	// Only carry a MEANINGFUL return target into the page; the default "/" is
+	// rendered as empty so the form/OAuth links stay clean (and login lands on
+	// "/" by default anyway).
+	rendered := safeNext(next)
+	if rendered == "/" {
+		rendered = ""
+	}
 	data := loginData{
 		Title:       "login · satellites",
 		Error:       errMsg,
@@ -55,6 +66,7 @@ func renderLogin(w http.ResponseWriter, cfg Config, errMsg string) {
 		FooterName:  footerName,
 		FooterEmail: footerEmail,
 		Version:     versionString(),
+		Next:        rendered,
 	}
 	if cfg.DevMode {
 		data.DevAdmin = devCred{auth.DevAdminEmail, auth.DevAdminPassword}
@@ -98,11 +110,12 @@ func handleLoginPost(w http.ResponseWriter, r *http.Request, cfg Config) {
 	}
 	email := r.FormValue("email")
 	password := r.FormValue("password")
+	next := safeNext(r.FormValue("next"))
 
 	u, err := cfg.Store.VerifyPassword(r.Context(), email, password)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidPassword) {
-			renderLogin(w, cfg, "Invalid email or password.")
+			renderLogin(w, cfg, "Invalid email or password.", next)
 			return
 		}
 		http.Error(w, "login error", http.StatusInternalServerError)
@@ -124,7 +137,7 @@ func handleLoginPost(w http.ResponseWriter, r *http.Request, cfg Config) {
 		http.Redirect(w, r, dest, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 // completeMCPSessionIfPresent checks for the mcp_session_id cookie

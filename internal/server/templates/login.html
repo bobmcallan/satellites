@@ -24,7 +24,7 @@
     {{if .Providers}}
     <div class="oauth-providers primary-auth" data-section="oauth-providers">
       {{range .Providers}}
-      <a href="/oauth/{{.Name}}/login" class="btn primary oauth" data-action="oauth-{{.Name}}">SIGN IN WITH {{.Label}}</a>
+      <a href="/oauth/{{.Name}}/login{{if $.Next}}?next={{$.Next | urlquery}}{{end}}" class="btn primary oauth" data-action="oauth-{{.Name}}">SIGN IN WITH {{.Label}}</a>
       {{end}}
     </div>
     <p class="oauth-divider"><span>OR USE EMAIL</span></p>
@@ -32,6 +32,7 @@
 
     <form method="POST" action="/login" class="login-form secondary-auth" data-form="login"
           x-data="{ loading: false }" x-on:submit="loading = true">
+      <input type="hidden" name="next" value="{{.Next}}">
       <label>
         <span>EMAIL</span>
         <input type="email" name="email" required autocomplete="username">
@@ -49,11 +50,13 @@
     <div class="dev-login" data-section="dev-login">
       <p class="warning">DEV MODE &mdash; one-click login as seeded users.</p>
       <form method="POST" action="/login" class="dev-quick">
+        <input type="hidden" name="next" value="{{.Next}}">
         <input type="hidden" name="email" value="{{.DevAdmin.Email}}">
         <input type="hidden" name="password" value="{{.DevAdmin.Password}}">
         <button type="submit" class="btn dev" data-action="dev-login-admin">DEV LOGIN: ADMIN</button>
       </form>
       <form method="POST" action="/login" class="dev-quick">
+        <input type="hidden" name="next" value="{{.Next}}">
         <input type="hidden" name="email" value="{{.DevUser.Email}}">
         <input type="hidden" name="password" value="{{.DevUser.Password}}">
         <button type="submit" class="btn dev" data-action="dev-login-user">DEV LOGIN: USER</button>

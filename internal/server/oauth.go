@@ -10,6 +10,12 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 )
 
+// oauthNextCookie carries a same-site `next` return target across the OAuth
+// provider round-trip. The state store mints only opaque CSRF tokens and the
+// provider drops our query params, so a short-lived HttpOnly Lax cookie set at
+// /login start and read at /callback is how `next` survives the hop.
+const oauthNextCookie = "oauth_next"
+
 // registerOAuthRoutes wires /oauth/<provider>/login + /callback for
 // every enabled provider in cfg.Providers. The callback path matches
 // what's registered in satellites-infra (the GitHub OAuth App points
@@ -38,6 +44,17 @@ func oauthStartHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
 			arbor.ErrorCtx(r.Context(), "oauth: state mint", "provider", p.Name, "err", err)
 			http.Error(w, "state mint failed", http.StatusInternalServerError)
 			return
+		}
+		// Carry a same-site return target across the provider round-trip.
+		if next := safeNext(r.URL.Query().Get("next")); next != "/" {
+			http.SetCookie(w, &http.Cookie{
+				Name:     oauthNextCookie,
+				Value:    next,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   600,
+			})
 		}
 		url := p.OAuth2.AuthCodeURL(state, oauth2.AccessTypeOnline)
 		arbor.InfoCtx(r.Context(), "oauth: start", "provider", p.Name)
@@ -104,10 +121,16 @@ func oauthCallbackHandler(cfg Config, p *auth.Provider) http.HandlerFunc {
 
 		cfg.Sessions.Issue(w, u.ID)
 		arbor.InfoCtx(r.Context(), "oauth: login", "provider", p.Name, "user_id", u.ID, "role", string(u.Role))
+		// Resolve + clear the same-site return target carried from /login.
+		next := "/"
+		if c, err := r.Cookie(oauthNextCookie); err == nil {
+			next = safeNext(c.Value)
+			http.SetCookie(w, &http.Cookie{Name: oauthNextCookie, Value: "", Path: "/", MaxAge: -1})
+		}
 		if dest := completeMCPSessionIfPresent(w, r, cfg, u.ID); dest != "" {
 			http.Redirect(w, r, dest, http.StatusSeeOther)
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
 }

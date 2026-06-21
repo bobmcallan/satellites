@@ -18,6 +18,19 @@
 
   var handlers = Object.create(null); // topic -> [fn, ...]
   var source = null;
+  var bounced = false;
+
+  // bounceToLogin navigates the whole page to /login, carrying the current
+  // view (path + query — the filter/expansion) as a same-site `next` so login
+  // returns the user exactly here. Guarded so concurrent live calls bounce once.
+  function bounceToLogin() {
+    if (bounced) return;
+    bounced = true;
+    var here = window.location.pathname + window.location.search;
+    window.location.assign("/login?next=" + encodeURIComponent(here));
+  }
+  window.satellites = window.satellites || {};
+  window.satellites.bounceToLogin = bounceToLogin;
 
   function dispatch(topic) {
     var fns = handlers[topic];
@@ -37,8 +50,15 @@
     source.addEventListener("trigger", function (ev) {
       dispatch(ev.data);
     });
-    // No onerror handler: EventSource reconnects on its own; logging every
-    // deploy-time blip would be noise.
+    // A transient drop (deploy blip) leaves readyState === CONNECTING and the
+    // browser auto-reconnects — no action. But an /events handshake that gets a
+    // 401 (stale session) closes the stream permanently (readyState === CLOSED);
+    // that is logout, so bounce the page to /login.
+    source.onerror = function () {
+      if (source && source.readyState === EventSource.CLOSED) {
+        bounceToLogin();
+      }
+    };
   }
 
   window.live = {

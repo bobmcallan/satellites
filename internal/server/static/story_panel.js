@@ -28,6 +28,18 @@
 (function () {
     'use strict';
 
+    // bounceToLogin reuses live.js's helper when present (it dedupes concurrent
+    // bounces); a self-contained fallback covers pages that load story_panel.js
+    // without live.js. Carries the current view as a same-site `next`.
+    function bounceToLogin() {
+        if (window.satellites && window.satellites.bounceToLogin) {
+            window.satellites.bounceToLogin();
+            return;
+        }
+        var here = window.location.pathname + window.location.search;
+        window.location.assign('/login?next=' + encodeURIComponent(here));
+    }
+
     // loadStoryFragment lazy-loads the merged Ledger/Log fragment into el on
     // first tab open in the inline story panel (sty_762730ad; merged view
     // epic:graduated-workflow ledger-log-merge). The fetched markup is plain
@@ -37,7 +49,10 @@
         if (!el) { return; }
         fetch('/stories/' + encodeURIComponent(storyID) + '/trace.fragment',
               { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
-            .then(function (r) { return r.ok ? r.text() : null; })
+            .then(function (r) {
+                if (r.status === 401) { bounceToLogin(); return null; }
+                return r.ok ? r.text() : null;
+            })
             .then(function (html) {
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
@@ -422,6 +437,7 @@
                         '/projects/' + encodeURIComponent(projectID) + '/stories.fragment' + window.location.search,
                         { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
                 } catch (e) { return; }
+                if (resp && resp.status === 401) { bounceToLogin(); return; }
                 if (!resp || !resp.ok) { return; }
                 const html = await resp.text();
                 const filtered = parseInt(resp.headers.get('X-Story-Filtered') || '', 10);
