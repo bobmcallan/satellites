@@ -1,12 +1,18 @@
 ---
-description: Basic repository secrets scan — sweep tracked files for committed credentials (API keys, private keys, tokens, password assignments, high-entropy strings) and produce a redacted findings report. Use when a task asks to scan the codebase for secrets/credentials. The initial implementation is deliberately BASIC — it REPORTS findings (file:line + match kind), it never auto-remediates, and it NEVER prints or persists a secret's value (only its location and kind).
+name: secrets-scan
+scope: project
+type: skill
+kind: function
+tags: [kind:function]
+description: Basic repository secrets scan — sweep tracked files for committed credentials (API keys, private keys, tokens, password assignments, high-entropy strings) and produce a redacted findings report. Use when a task asks to scan the codebase for secrets/credentials. It REPORTS findings (file:line + match kind), never auto-remediates, and NEVER prints or persists a secret's VALUE (only its location and kind).
 ---
 
 # Secrets scan (basic)
 
-The work-step skill the secrets-check task (epic:project-tasks) invokes during
-its `running` state. It scans **tracked** files only and emits a **redacted**
-report.
+The work-step skill the secrets-check task invokes during its `running` state. **Purpose:** answer "are there credential-shaped strings
+committed to tracked files?" and produce a redacted, reviewable report — without
+ever exposing a secret's value. It scans **tracked** files only and emits a
+**redacted** report; a human acts on the findings.
 
 ## Rules
 
@@ -53,17 +59,23 @@ as "test-fixture" or "placeholder"). End with a one-line verdict:
 Never include a secret's value. The report is what the task's
 `satellites-task-report-review` gate reads to close the run.
 
+## Verifier
+
+Success is the report itself, judged by the `satellites-task-report-review` gate
+(the task's exit gate): the sweep ran over tracked files and a
+`## Secrets scan report` with a one-line verdict (CLEAN / N findings) is present,
+values redacted. This skill NAMES that reviewer; it does not embed a verdict of
+its own.
+
 ## Durable dated report file (committed)
 
 Findings must ALSO be written as a durable, versioned deliverable — not only a
 ledger/body row — so an operator or auditor can read and diff scans over time.
 After the sweep, write a **dated** markdown report and commit it:
 
-1. **Path** — `docs/security/secrets-scan-YYYY-MM-DD.md` (today's UTC date, e.g.
-   `docs/security/secrets-scan-2026-06-21.md`). The date stamp makes each run a
-   NEW file: a later scan never overwrites or deletes a prior dated report, so
-   `docs/security/` accumulates the scan history. (If two runs land on the same
-   date, append a `-run-N` suffix rather than clobbering.)
+1. **Path** — `docs/security/secrets-scan-YYYY-MM-DD.md` (today's UTC date). The
+   date stamp makes each run a NEW file; a same-date re-run appends a `-run-N`
+   suffix rather than clobbering, so `docs/security/` accumulates the history.
 
 2. **Contents** — plain markdown, viewable, VALUES REDACTED:
 
@@ -83,15 +95,29 @@ After the sweep, write a **dated** markdown report and commit it:
    CLEAN — no credentials found in tracked files.
    ```
 
-   List one bullet per finding (`file:line` — kind — confidence), or state
-   `No findings.` when clean. NEVER write a secret's value — location + kind only.
+   List one bullet per finding, or state `No findings.` when clean. NEVER write a
+   secret's value — location + kind only.
 
 3. **Commit it** — `git add docs/security/secrets-scan-YYYY-MM-DD.md` and commit
    it as part of the work (the report is a versioned artifact, not transient).
 
 4. **Reference it** — name the dated file's path in the task body's
-   `## Secrets scan report` section so the report gate sees the durable artifact
-   and the order-6 task detail view links to it.
+   `## Secrets scan report` section so the report gate sees the durable artifact.
 
-Create `docs/security/` if it does not exist. The file is the durable deliverable;
-the task-body section + ledger remain the run record the gate reads.
+Create `docs/security/` if it does not exist.
+
+## Environment
+
+Acts on the repo: reads tracked files and writes a dated report file. It does not
+mutate source or external services.
+
+```yaml
+guardrails:
+  always:
+    - Scan only tracked files (git ls-files); redact every finding to file:line + kind.
+    - Write the dated report under docs/security/; name its path in the task body.
+  ask_first: []
+  never:
+    - Print, copy, or persist a secret's VALUE anywhere (report, task body, ledger).
+    - Edit, rotate, or delete a credential — this skill REPORTS only.
+```
