@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -272,6 +273,42 @@ func taskEpisodeViews(entries []taskLedgerEntry, eps []taskepisode.Episode) []ta
 		out = append(out, ev)
 	}
 	return out
+}
+
+// taskFragmentHandler renders just the task-rows table fragment for the current
+// query — the live-update refetch target (sty_4dc86c77), peer to
+// storyFragmentHandler. The browser swaps it into the tasks panel's <tbody> on a
+// project-scoped SSE trigger (the project:<id> topic already fires for task
+// mutations), so RUNS / LAST RUN / STATUS update without a reload. Counts ride
+// response headers. Same read verbs as the full page; no new MCP verb.
+func taskFragmentHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := cfg.Sessions.UserID(r)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := withSessionUser(r.Context(), cfg, userID)
+		projectID := strings.TrimSpace(r.PathValue("id"))
+		if projectID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		tasks, filtered, total, err := gatherTaskPanel(ctx, projectID, r.URL.Query())
+		if err != nil {
+			arbor.ErrorCtx(ctx, "task_fragment: gather", "id", projectID, "err", err)
+			http.Error(w, "could not list tasks", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("X-Task-Filtered", strconv.Itoa(filtered))
+		w.Header().Set("X-Task-Total", strconv.Itoa(total))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data := projectDetailData{Tasks: tasks, TaskFiltered: filtered, TaskTotal: total}
+		if err := projectDetailTmpl.ExecuteTemplate(w, "task-rows", data); err != nil {
+			arbor.ErrorCtx(ctx, "task_fragment: render", "id", projectID, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
 }
 
 // taskDetailHandler deep-links /tasks/{id} to the project page with that task's

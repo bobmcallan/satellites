@@ -187,7 +187,36 @@
           <th class="col-lastrun">last run</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody data-field="tasks-tbody">
+        {{template "task-rows" .}}
+      </tbody>
+    </table>
+    {{else}}
+    {{if .TaskTotal}}
+    <p class="empty" data-field="no-tasks">No tasks match the active filter.</p>
+    {{else}}
+    <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
+    {{end}}
+    {{end}}
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
+  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
+  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
+</footer>
+
+</body>
+</html>
+{{/* story-rows: the story <tbody> contents, rendered both inline (full page)
+     and standalone by storyFragmentHandler for the live SSE refetch
+     (sty_8f69be8b). Keep markup here only — both paths share it, no drift. */}}
+{{/* task-rows is the task table body — rendered inline by the project page and
+     standalone by taskFragmentHandler for the live SSE refetch (sty_4dc86c77),
+     mirroring story-rows. Keep markup here only; both paths share it, no drift. */}}
+{{define "task-rows"}}
         {{range .Tasks}}
         <tr class="task-row"
             data-section="task-row"
@@ -271,30 +300,8 @@
           </td>
         </tr>
         {{end}}
-      </tbody>
-    </table>
-    {{else}}
-    {{if .TaskTotal}}
-    <p class="empty" data-field="no-tasks">No tasks match the active filter.</p>
-    {{else}}
-    <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
-    {{end}}
-    {{end}}
-    </div>
-  </section>
-</main>
+{{end}}
 
-<footer class="site-footer">
-  <span class="footer-name" data-field="footer-name">{{.FooterName}}</span>
-  <a href="mailto:{{.FooterEmail}}" class="footer-email" data-field="footer-email">{{.FooterEmail}}</a>
-  <span class="footer-version" data-field="footer-version">{{.Version}}</span>
-</footer>
-
-</body>
-</html>
-{{/* story-rows: the story <tbody> contents, rendered both inline (full page)
-     and standalone by storyFragmentHandler for the live SSE refetch
-     (sty_8f69be8b). Keep markup here only — both paths share it, no drift. */}}
 {{define "story-rows"}}
 {{range .Stories}}
           <tr class="story-row"

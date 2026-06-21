@@ -125,6 +125,10 @@ func Build(cfg Config) http.Handler {
 	// Live story-list refetch fragment (sty_8f69be8b) — more specific than
 	// /projects/ so it wins under Go 1.22 pattern precedence.
 	mux.HandleFunc("GET /projects/{id}/stories.fragment", storyFragmentHandler(cfg))
+	// Live task-list refetch fragment (sty_4dc86c77) — peer to stories.fragment;
+	// the tasks panel swaps it in on the project:<id> SSE trigger (which already
+	// fires for task mutations), so RUNS / LAST RUN / STATUS update live.
+	mux.HandleFunc("GET /projects/{id}/tasks.fragment", taskFragmentHandler(cfg))
 	// Binary ingestion (sty_59652a7d): multipart upload to a project the caller
 	// can access, behind the same Bearer middleware as /mcp. More specific than
 	// /projects/ so it wins under Go 1.22 pattern precedence. Registered only

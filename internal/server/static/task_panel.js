@@ -55,6 +55,17 @@
         return out.join(' ');
     }
 
+    // debounce coalesces a burst of live triggers into one trailing refetch
+    // (ported from story_panel.js, sty_8f69be8b).
+    function debounce(fn, ms) {
+        let t = null;
+        return function () {
+            const args = arguments, self = this;
+            if (t) { clearTimeout(t); }
+            t = setTimeout(function () { t = null; fn.apply(self, args); }, ms);
+        };
+    }
+
     function taskPanel() {
         return {
             // The id of the currently-expanded task row ('' = none).
@@ -89,7 +100,42 @@
                     if (!isNaN(f0)) { this.filtered = f0; }
                     const t0 = parseInt(root.dataset.taskTotal || '', 10);
                     if (!isNaN(t0)) { this.total = t0; }
+                    // Live updates off the SSE bus (sty_4dc86c77). The
+                    // project:<id> topic already fires on any task mutation
+                    // (status_transition / new execution / body), so subscribe
+                    // and refetch the tasks-rows fragment — RUNS / LAST RUN /
+                    // STATUS update without a reload, reusing the story channel.
+                    const pid = root.dataset.projectId || '';
+                    if (pid && window.live && typeof window.live.on === 'function') {
+                        this._liveOff = window.live.on('project:' + pid,
+                            debounce(() => { this.liveRefresh(pid, root); }, 250));
+                    }
                 }
+            },
+
+            // liveRefresh refetches the CURRENT query's task-rows fragment and
+            // swaps it into the tbody, re-binding Alpine on the fresh rows and
+            // updating the filtered/total counts — no reload. The expanded row +
+            // filter survive because they live in component state, not the DOM.
+            async liveRefresh(projectID, root) {
+                const tbody = root.querySelector('tbody[data-field="tasks-tbody"]');
+                if (!tbody) { return; }
+                let resp;
+                try {
+                    resp = await fetch(
+                        '/projects/' + encodeURIComponent(projectID) + '/tasks.fragment' + window.location.search,
+                        { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+                } catch (e) { return; }
+                if (!resp || !resp.ok) { return; }
+                const html = await resp.text();
+                const filtered = parseInt(resp.headers.get('X-Task-Filtered') || '', 10);
+                const total = parseInt(resp.headers.get('X-Task-Total') || '', 10);
+                tbody.innerHTML = html;
+                if (window.Alpine && typeof window.Alpine.initTree === 'function') {
+                    window.Alpine.initTree(tbody);
+                }
+                if (!isNaN(filtered)) { this.filtered = filtered; }
+                if (!isNaN(total)) { this.total = total; }
             },
 
             toggleTaskRow(ev) {
