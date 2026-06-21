@@ -123,6 +123,9 @@ func validateGovernance(ctx context.Context, configArg, userArg string) ([]artif
 	fetch := serverGateFetcher(configArg, userArg)
 	gateResolvable := func(g string) bool { return verb.GateResolvable(ctx, fetch, ".", g) }
 	findings := runWorkflowChecksResolved(skills, wfs, stories, gateResolvable)
+	// Surface a non-task-shaped workflow claiming category:task (sty_d3fead0d) —
+	// it shadows the canonical satellites-task-workflow.
+	findings = append(findings, checkTaskWorkflowShadows(wfs)...)
 	roster := validateRoster(ctx, skills, wfs, configArg, userArg)
 	return rollupVerdicts(roster, findings), nil
 }
