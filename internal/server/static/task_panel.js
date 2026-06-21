@@ -90,6 +90,49 @@
                 return id && this.expanded === id ? 'is-expanded' : '';
             },
 
+            // copyTaskID writes the task id to the clipboard and flips the cell
+            // to "copied!" for ~1.2s — the task peer of storyPanel.copyStoryID,
+            // bound to the col-id cell with @click.stop so it short-circuits the
+            // row-expand. Falls back to a hidden-textarea + execCommand path on
+            // browsers without async clipboard (or over plain http).
+            copyTaskID(id, ev) {
+                if (!id) { return; }
+                const cell = ev && ev.currentTarget;
+                const flash = function () {
+                    if (!cell) { return; }
+                    const code = cell.querySelector('code');
+                    if (!code) { return; }
+                    const original = code.textContent;
+                    code.textContent = 'copied!';
+                    cell.classList.add('is-copied');
+                    setTimeout(function () {
+                        code.textContent = original;
+                        cell.classList.remove('is-copied');
+                    }, 1200);
+                };
+                const legacy = function () {
+                    try {
+                        const ta = document.createElement('textarea');
+                        ta.value = id;
+                        ta.setAttribute('readonly', '');
+                        ta.style.position = 'absolute';
+                        ta.style.left = '-9999px';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        const ok = document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        return ok;
+                    } catch (e) { return false; }
+                };
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(id).then(flash).catch(function () {
+                        if (legacy()) { flash(); }
+                    });
+                    return;
+                }
+                if (legacy()) { flash(); }
+            },
+
             // statusAll reports whether the panel is showing every status (the
             // toggle's "all" state) vs the default open/non-terminal view.
             statusAll() { return hasStatusAll(this.query); },

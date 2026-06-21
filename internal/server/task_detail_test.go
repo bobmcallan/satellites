@@ -48,7 +48,17 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		`x-data="taskPanel"`,          // inline-expand component
 		`data-field="task-row-title"`, // headline
 		"Secrets / code scan",         // task title
-		`<span class="status-pill" data-field="task-status">complete</span>`, // status pill
+		// sty_09e2ce68: grid parity with the story table — lowercase col-* headers,
+		// a dedicated col-id copy cell, and a <code> status pill.
+		`<th class="col-id">id</th>`,
+		`<th class="col-title">title</th>`,
+		`<th class="col-status">status</th>`,
+		`<th class="col-runs">runs</th>`,
+		`<th class="col-lastrun">last run</th>`,
+		`@click.stop="copyTaskID('tsk_demo', $event)"`,
+		`data-field="task-id-copy"`,
+		`<code class="status-pill" data-field="task-status">complete</code>`,
+		`colspan="5"`,                  // detail row spans all 5 columns
 		"2026-06-21 01:05",             // last-run
 		`@click="toggleTaskRow"`,       // row click expands inline
 		`data-detail-for="tsk_demo"`,   // the inline detail row

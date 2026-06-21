@@ -155,9 +155,18 @@
            @keydown.enter.prevent="applyToServer()"
            data-field="panel-tasks-search">
     {{if .Tasks}}
+    {{/* The task grid mirrors the story table's column convention (sty_09e2ce68):
+         lowercase headers + shared col-* classes + a dedicated id column with
+         click-to-copy + a <code> status pill — so the two grids read as one. */}}
     <table class="panel-table panel-table-tasks" data-field="task-list">
       <thead>
-        <tr><th>Task</th><th>Status</th><th>Runs</th><th>Last run</th></tr>
+        <tr>
+          <th class="col-id">id</th>
+          <th class="col-title">title</th>
+          <th class="col-status">status</th>
+          <th class="col-runs">runs</th>
+          <th class="col-lastrun">last run</th>
+        </tr>
       </thead>
       <tbody>
         {{range .Tasks}}
@@ -167,9 +176,12 @@
             @click="toggleTaskRow"
             :class="taskRowClass($el)"
             data-field="task-row">
-          <td class="task-col-title">
+          <td class="col-id"
+              @click.stop="copyTaskID('{{.ID}}', $event)"
+              title="Copy task id to clipboard"
+              data-field="task-id-copy"><code>{{.ID}}</code></td>
+          <td class="col-title">
             <div class="task-row-title" data-field="task-row-title">{{.Title}}</div>
-            <div class="task-row-id"><code>{{.ID}}</code></div>
             {{/* category + tag chips, peer to the story rows (sty_f2f6465d): a
                  category chip + one clickable button PER tag — never a run-together
                  string. The @click.stop handlers stop row-toggle and feed the
@@ -185,16 +197,16 @@
             </div>
             {{end}}
           </td>
-          <td class="task-col-status"><span class="status-pill" data-field="task-status">{{.Status}}</span></td>
-          <td class="task-col-runs" data-field="task-runcount">{{.RunCount}}</td>
-          <td class="task-col-lastrun" data-field="task-lastrun">{{if .LastRun}}{{.LastRun}}{{else}}—{{end}}</td>
+          <td class="col-status"><code class="status-pill" data-field="task-status">{{.Status}}</code></td>
+          <td class="col-runs" data-field="task-runcount">{{.RunCount}}</td>
+          <td class="col-lastrun muted" data-field="task-lastrun">{{if .LastRun}}{{.LastRun}}{{else}}—{{end}}</td>
         </tr>
         <tr class="task-detail"
             data-detail-for="{{.ID}}"
             x-show="isTaskExpanded($el)"
             x-cloak
             data-field="task-detail">
-          <td colspan="4">
+          <td colspan="5">
             <div class="story-detail-flat task-detail-flat">
               <section class="story-detail-block" data-field="task-content">
                 <h4>content</h4>

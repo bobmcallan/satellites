@@ -647,7 +647,6 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
 .panel-table tbody tr.story-detail + tr.story-row > td,
 .panel-table tbody tr.task-detail + tr.task-row > td { border-top: 1px solid #1c1c1c; }
 .panel-table tbody tr.task-row .task-row-title { color: #e0e0e0; line-height: 1.4; }
-.panel-table tbody tr.task-row .task-row-id { margin-top: 0.15rem; font-size: 0.7rem; color: #666; }
 
 .status-pill, .priority-pill {
   display: inline-block;
