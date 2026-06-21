@@ -146,6 +146,28 @@ type reviewStory struct {
 	Tags        []string
 }
 
+// enactMismatch returns a LOUD error (sty_7f8f2e11) when a gate ACCEPTED but
+// nothing enacted and the no-change is NOT the legitimate out-of-band v2
+// record-only case — i.e. no governing-workflow transition matched the
+// artifact's status, so this gate does not govern it (e.g. a story gate run on a
+// task). It names the workflow + status + gate so the wiring mismatch is
+// obvious. Returns nil when the no-change is expected (a reject, or an
+// out-of-band v2 verdict-only run). Pure — unit-testable without the dispatcher.
+func enactMismatch(decision string, isV2, enactV2 bool, gate, workflow, status string) error {
+	if decision != verb.GateDecisionAccept {
+		return nil // reject (or non-accept) — leaving status put is correct
+	}
+	if isV2 && !enactV2 {
+		return nil // an out-of-band gate at a v2 state only records its verdict
+	}
+	wf := strings.TrimSpace(workflow)
+	if wf == "" {
+		wf = "(category default)"
+	}
+	return fmt.Errorf("status_transition: gate %q accepted but workflow %q has no transition from status=%q — this gate does not govern this artifact (e.g. a story gate run on a task); nothing was enacted",
+		gate, wf, status)
+}
+
 // checkpointDecision is the single rule behind --checkpoint (sty_21d2c535): the
 // ungated `trigger: checkpoint` edge is the executor's DELIBERATE move, never a
 // silent side-effect of a gate request. Given whether --checkpoint was asked for
@@ -475,19 +497,17 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	if observed != "" && observed != story.Status {
 		fmt.Fprintf(opts.Stdout, "status: %s → %s\n", story.Status, observed)
 	} else {
-		fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
-		// An out-of-band gate at a v2 state (enactV2 false) is EXPECTED not to
-		// transition — it only records its verdict — so an accept that leaves the
-		// status put is correct, not a missed enactment (sty_26c94ca5).
-		if gateOut.Decision == verb.GateDecisionAccept && !(edges.IsV2 && !enactV2) {
-			// The gate accepted but the status did not advance — the skill
-			// did not enact. Surface it; do not silently paper over it by
-			// patching from the client (that is exactly what this story
-			// moved into the skill).
-			fmt.Fprintf(opts.Stderr,
-				"warn: gate accepted but status is still %q — the reviewer skill did not enact its transition\n",
-				story.Status)
+		// LOUD FAIL (sty_7f8f2e11): a gate that ACCEPTED but enacted nothing — for
+		// a reason that is NOT the legitimate out-of-band v2 record-only case — is
+		// a workflow-wiring mismatch (e.g. a story gate run on a task), not
+		// success. Fail with a named diagnostic; never warn-and-succeed (the
+		// earlier silent warn let a story gate "pass" against a task — the
+		// 2026-06-22 VIRE log). An out-of-band v2 verdict-only run (enactV2 false)
+		// is expected and stays a clean "unchanged".
+		if err := enactMismatch(gateOut.Decision, edges.IsV2, enactV2, gateSkill, governing, story.Status); err != nil {
+			return err
 		}
+		fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)
 	}
 
 	// 8a. Refresh the local engagement so the next edit isn't blocked by the
