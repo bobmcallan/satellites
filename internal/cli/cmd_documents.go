@@ -405,6 +405,16 @@ func uploadKind(ctx context.Context, out io.Writer, kind, configArg, userArg, pr
 		if marshalErr != nil {
 			return fmt.Errorf("%s: %w", t.Path, marshalErr)
 		}
+		// Mint the content-bound review attestation the verb REQUIRES for a
+		// behaviour kind (sty_e6226180). gateWithReviewer is true iff a per-type
+		// reviewer resolved AND just accepted above, so bind {skill, accept,
+		// sha256(body)} to this exact body. Free-form documents (no reviewer) mint
+		// none and the verb requires none.
+		if gateWithReviewer {
+			if req, marshalErr = attestReview(req, reviewSkill, t.Body); marshalErr != nil {
+				return fmt.Errorf("%s: %w", t.Path, marshalErr)
+			}
+		}
 		resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
 		if err != nil {
 			return fmt.Errorf("%s: %w", t.Path, err)
@@ -747,6 +757,20 @@ func marshalUpsertRequest(t documentTarget) (json.RawMessage, error) {
 		payload["headline"] = t.Headline
 	}
 	return json.Marshal(payload)
+}
+
+// attestReview injects a content-bound review attestation into a marshalled
+// document_upsert request (sty_e6226180). The verb REQUIRES it for behaviour
+// kinds (skill / principle / workflow); skill is the per-type reviewer that
+// accepted, body is the EXACT upsert body the attestation binds to (its
+// sha256 must equal the verb's hash of req.Body).
+func attestReview(req json.RawMessage, skill, body string) (json.RawMessage, error) {
+	var m map[string]any
+	if err := json.Unmarshal(req, &m); err != nil {
+		return nil, err
+	}
+	m["review"] = map[string]any{"skill": skill, "decision": "accept", "content_sha256": bodySHA256(body)}
+	return json.Marshal(m)
 }
 
 // summariseUploadResp reads the document_upsert response to report

@@ -17,6 +17,8 @@ package verb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +53,68 @@ func isWorkflowUpsert(req DocumentUpsertRequest) bool {
 		}
 	}
 	return false
+}
+
+// reviewRequiredKind reports whether a non-id upsert targets a BEHAVIOUR-kind
+// row whose content the per-type reviewer governs (sty_e6226180): a skill
+// (kind:workflow stores AS a type:skill row, so type=skill covers both) or a
+// principle (a principles:* tag on a type:document row). Stories, tasks, and
+// free-form documents are NOT behaviour kinds.
+func reviewRequiredKind(req DocumentUpsertRequest) bool {
+	switch strings.TrimSpace(strings.ToLower(req.Type)) {
+	case string(document.TypeSkill):
+		return true
+	case string(document.TypeStory), string(document.TypeTask):
+		return false
+	}
+	if req.Tags != nil {
+		for _, t := range *req.Tags {
+			if strings.HasPrefix(strings.TrimSpace(t), principleTagPrefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// uploadNounForReq names the CLI upload verb to point a refused author at.
+func uploadNounForReq(req DocumentUpsertRequest) string {
+	if isWorkflowUpsert(req) {
+		return "workflow"
+	}
+	if req.Tags != nil {
+		for _, t := range *req.Tags {
+			if strings.HasPrefix(strings.TrimSpace(t), principleTagPrefix) {
+				return "principle"
+			}
+		}
+	}
+	return "skill"
+}
+
+// sha256Hex is the content hash a review attestation binds to.
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// verifyReviewAttestation enforces the behaviour-kind review barrier: the
+// attestation must be present, decision=accept, and content_sha256 == the body's
+// hash (rejecting a stale/replayed accept for different content). A CLI upload
+// mints it after the per-type reviewer accepts; the raw verb does not review, so
+// an omitted attestation is refused with the path to the reviewed command.
+func verifyReviewAttestation(req DocumentUpsertRequest) error {
+	r := req.Review
+	if r == nil || strings.TrimSpace(r.Decision) == "" {
+		return fmt.Errorf("document_upsert: %w: a %s upsert needs a review attestation — author it under .satellites/ and run `satellites %s upload`, which runs the per-type reviewer then upserts; the raw verb does not review", ErrForbidden, uploadNounForReq(req), uploadNounForReq(req))
+	}
+	if !strings.EqualFold(strings.TrimSpace(r.Decision), "accept") {
+		return fmt.Errorf("document_upsert: %w: review decision is %q, not \"accept\"", ErrForbidden, r.Decision)
+	}
+	if want := sha256Hex(req.Body); !strings.EqualFold(strings.TrimSpace(r.ContentSHA256), want) {
+		return fmt.Errorf("document_upsert: %w: review attestation content_sha256 does not match the body (stale or replayed) — re-run `satellites %s upload`", ErrForbidden, uploadNounForReq(req))
+	}
+	return nil
 }
 
 var documentStore *document.Store
@@ -155,6 +219,23 @@ type DocumentUpsertRequest struct {
 	// non-nil applies (empty string clears). Stored as document-level metadata,
 	// not versioned with the body (epic:always-context).
 	Headline *string `json:"headline,omitempty"`
+
+	// Review is the CLI upload's evidence that the per-type reviewer accepted
+	// this exact content (sty_e6226180). REQUIRED on a behaviour-kind upsert
+	// (skill / principle / workflow); absent → the write is refused, redirecting
+	// to `satellites <kind> upload`. nil for stories, tasks, and free-form docs.
+	Review *ReviewAttestation `json:"review,omitempty"`
+}
+
+// ReviewAttestation is proof the per-type reviewer ACCEPTED a behaviour-kind
+// body. content_sha256 binds it to the body so a stale/replayed attestation for
+// different content is rejected. LIMIT (sty_e6226180): a CLI-controlling caller
+// can forge an accept — true non-forgeability needs SERVER-SIDE review (filed
+// follow-up). This closes the SILENT/omit bypass, not a deliberate forger.
+type ReviewAttestation struct {
+	Skill         string `json:"skill,omitempty"`
+	Decision      string `json:"decision,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 }
 
 // DocumentUpsertResponse mirrors document_get's shape so callers can
@@ -897,6 +978,17 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	// workspace (sty_c6de961e).
 	if reason := workspaceSkillRefused(req.Type, req.Scope); reason != "" {
 		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
+	}
+
+	// Behaviour-kind upserts (skill / workflow / principle) require a
+	// content-bound review attestation the CLI `upload` mints AFTER the per-type
+	// reviewer accepts (sty_e6226180). This refuses the silent exec/raw bypass —
+	// a behaviour write that skips review. Stories, tasks, free-form documents,
+	// and id-addressed patches are exempt.
+	if req.ID == "" && reviewRequiredKind(req) {
+		if err := verifyReviewAttestation(req); err != nil {
+			return nil, err
+		}
 	}
 
 	// Mode 1: patch by id. Currently only stories support id-addressed

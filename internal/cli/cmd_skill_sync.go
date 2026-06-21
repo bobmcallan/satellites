@@ -189,6 +189,14 @@ func hashBody(authored string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// bodySHA256 hashes the EXACT bytes sent as an upsert body — the content a
+// review attestation binds to (sty_e6226180). It must match the verb's
+// sha256Hex(req.Body); no stamp stripping, since the upsert body carries none.
+func bodySHA256(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
 // stampBlock renders the injected identity block for an authored body.
 func stampBlock(s skillStamp) string {
 	b, _ := json.Marshal(s)

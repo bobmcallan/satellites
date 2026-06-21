@@ -286,6 +286,12 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
+	// The skill was reviewed at upload; bind a review attestation to the stamped
+	// library body so the behaviour-kind verb gate (sty_e6226180) accepts the
+	// promotion rather than refusing it as an unreviewed write.
+	if req, err = attestReview(req, reviewSkillForKind("skills"), body); err != nil {
+		return fmt.Errorf("publish: %w", err)
+	}
 	resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
 	if err != nil {
 		return fmt.Errorf("publish %s: %w", path, err)

@@ -135,6 +135,17 @@ func fillHeadlineIfEmpty(ctx context.Context, out io.Writer, resp json.RawMessag
 	if err != nil {
 		return
 	}
+	// A principle is a behaviour kind: this headline patch re-sends its
+	// already-reviewed body, so bind a review attestation or the verb gate
+	// (sty_e6226180) refuses the metadata patch. Plain documents need none.
+	for _, tag := range patched.Tags {
+		if strings.HasPrefix(strings.TrimSpace(tag), "principles:") {
+			if req, err = attestReview(req, reviewSkillForKind("principles"), patched.Body); err != nil {
+				return
+			}
+			break
+		}
+	}
 	if _, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg); err != nil {
 		fmt.Fprintf(out, "  headline: generation succeeded but patch failed: %v\n", err)
 		return
