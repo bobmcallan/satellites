@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: status==running
 tags: [kind:reviewer]
-description: The default TASK exit gate — the "create_report" gate. Judges that a running task's requested work was actually performed and a result/findings REPORT is present (in the task body or its ledger) before the task closes (running → complete). The exit gate of satellites-task-workflow, the sibling of the entry gate satellites-task-upsert-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK exit gate — the "create_report" gate. Judges that a running task's requested ACTION was performed and its OUTPUT is present AND satisfies the task's own declared VERIFICATION (in the task body or its ledger) before the task closes (running → complete). The exit gate of satellites-task-workflow, the sibling of the entry gate satellites-task-upsert-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: was this task's **requested work actually performed, with a
@@ -33,12 +33,15 @@ the report may live there rather than in the body.
 
 Judge whether the task is genuinely done:
 
-- **accept** — the task's requested work was performed and a report is present:
-  the body or ledger shows WHAT was done and the result/findings (e.g. a secrets
-  scan that names where it looked and what it found, or a clean result). The task
-  has reached its stated goal, not merely "started".
-- **reject** — no report is present, the report is empty/placeholder, or it shows
-  the work is partial or was not actually run. Name exactly what is missing.
+- **accept** — the task's ACTION was performed and its OUTPUT is present AND meets
+  the task's own declared VERIFICATION: the body or ledger shows WHAT was done and
+  the result/findings, and that result satisfies the success signal the task
+  itself defined (e.g. a secrets scan that names where it looked and states its
+  verdict). Judge the output against the task's stated verification — not your own
+  taste. The task has reached its stated goal, not merely "started".
+- **reject** — no output/report is present, it is empty/placeholder, the work is
+  partial or was not actually run, or the output does NOT meet the task's declared
+  verification. Name exactly what is missing or unmet.
 
 Fail closed: if the body and ledger cannot be read or completion cannot be
 judged, reject with the reason named.
@@ -51,7 +54,7 @@ named ledger rows below — no `document_upsert`, no git/file mutation.
 ```yaml
 guardrails:
   always:
-    - Judge ONLY whether the requested work was performed and a report is present (body or ledger).
+    - Judge whether the requested work was performed and its output is present AND meets the task's own declared VERIFICATION (body or ledger).
     - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-report-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.

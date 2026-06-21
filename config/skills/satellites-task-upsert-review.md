@@ -4,14 +4,14 @@ type: skill
 kind: reviewer
 when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry gate — the "task_reviewer". Judges that a task is a well-formed, executable TASK (a clear task statement the in-repo agent can act on) carrying a resolvable governing workflow AND, when it delegates to a skill:<name>, a work skill that resolves in the substrate, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED: its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
 be opened for execution? This is the task lifecycle's entry gate — the
-"task_reviewer". It checks the document IS a task (not a half-formed note), with
-a clear statement of the work to perform and a resolvable governing workflow,
-before it moves the task to `running` — whether opening it the first time
+"task_reviewer". It checks the document IS a task (not a half-formed note) whose
+body declares its ACTION, OUTPUT, and VERIFICATION, with a resolvable governing
+workflow, before it moves the task to `running` — whether opening it the first time
 (`ready → running`) or re-running a completed task (`complete → running`, a fresh
 execution episode). It does NOT judge whether the work is done — that is the exit
 gate satellites-task-report-review.
@@ -31,41 +31,34 @@ authorized to write status_transition / review_* rows.
 
 Judge the `story_body`:
 
-- **accept** — the document is a genuine task: it states, clearly enough for the
-  in-repo agent to act on, WHAT work to perform (e.g. "scan the tracked files for
-  committed secrets and produce a findings report"), and it carries a resolvable
-  governing workflow (a valid `workflow:` selector, or a category that resolves a
-  default — see *Enact*; the governing workflow has a transition whose
-  `from == story_status` and `reviewer_skill == satellites-task-upsert-review`).
-  When the task delegates its work to a skill (a `skill:<name>` tag), that skill
-  MUST also resolve in the substrate — see *Resolve the work skill*. The task is
-  genuinely ready to be executed.
+- **accept** — the document is a genuine, well-formed task. Its body declares,
+  clearly enough for the in-repo agent to act on:
+  - **ACTION** — WHAT work to perform (e.g. "scan the tracked files for committed
+    secrets and produce a findings report");
+  - **OUTPUT** — the deliverable the run produces (a report section, a file, a
+    document);
+  - **VERIFICATION** — how success is judged (a stated verdict, a check, a
+    measurable signal). This is what the exit gate later judges the output
+    against, so it MUST be present.
+
+  And it carries a resolvable governing workflow (a valid `workflow:` selector, or
+  a category that resolves a default — see *Enact*; the governing workflow has a
+  transition whose `from == story_status` and
+  `reviewer_skill == satellites-task-upsert-review`). The task is genuinely ready
+  to be executed by the agent.
 - **reject** — the body is empty, a stub, or does not describe executable work; or
-  the goal is too vague for the agent to act on; or no governing-workflow
-  transition matches this gate from the current status; or the task names a
-  `skill:<name>` work skill that does not resolve in the substrate (absent, or
-  present only as a local `.claude/skills/` file — an override, not a validated
-  dependency). Name exactly what is missing.
+  it is missing any of ACTION / OUTPUT / VERIFICATION (name which); or the goal is
+  too vague for the agent to act on; or no governing-workflow transition matches
+  this gate from the current status. Name exactly what is missing.
 
-## Resolve the work skill
+## A referenced skill is a warning, not a gate
 
-A task MAY delegate its work step to a named skill via a `skill:<name>` tag (read
-the task's tags with `.satellites/satellites exec story_get` / `document_get`).
-When it does, that skill MUST resolve in the SUBSTRATE before the task is ready —
-the runner injects the substrate copy by value, so a reference that does not
-resolve is a false-ready. Check it:
-
-```sh
-satellites skill get <name>
-```
-
-- Resolves (the skill body prints) → the dependency is satisfiable; proceed.
-- Does NOT resolve (error / empty) → REJECT, naming the unresolved skill. A
-  `.claude/skills/<name>` file does NOT satisfy this — it is an execution-time
-  OVERRIDE, not the substrate dependency the gate validates.
-
-When the task carries no `skill:<name>` tag, the work step is inline — judge the
-body alone, as usual.
+A task MAY name a skill for the agent to use (a `skill:<name>` tag). That skill is
+the agent's Claude capability in its own environment — NOT satellites substrate to
+resolve or govern. Do NOT resolve it, and NEVER reject on it. When present, NOTE
+it in your accept notes as context for the executing agent (e.g. "uses
+skill:<name> — ensure it is available locally"). The task body itself is the work
+definition the agent acts on.
 
 Fail closed: if the body cannot be read or the task cannot be judged, reject with
 the reason named.
@@ -78,8 +71,8 @@ rows below — no `document_upsert`, no git/file mutation.
 ```yaml
 guardrails:
   always:
-    - Judge ONLY whether the document is a well-formed, executable task with a resolvable governing workflow.
-    - When the task delegates to a skill:<name>, resolve it in the substrate (satellites skill get <name>) before accept; reject if it does not resolve (a local .claude/skills/ file does not count).
+    - Judge whether the task's body declares ACTION + OUTPUT + VERIFICATION with a resolvable governing workflow; reject naming any missing element.
+    - A skill:<name> reference is the agent's Claude capability — note it as a warning in the accept notes; NEVER resolve it or reject on it.
     - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
     - Fail closed — if the status_transition ledger_append errors, treat the transition as not landed and print reject with the failure as the reason.
