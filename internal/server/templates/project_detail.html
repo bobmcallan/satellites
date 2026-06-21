@@ -133,8 +133,27 @@
        the task content + ledger/log grouped BY EXECUTION episode; status still
        moves only through reviewer gates. /tasks/{id} deep-links a row open. */}}
   <section class="panel" data-section="project-tasks">
-    <div x-data="taskPanel" class="panel-tasks" data-field="panel-tasks-body" data-project-id="{{.Project.ID}}">
-    <h3 class="panel-heading">Tasks <span class="panel-count" data-field="task-count">{{len .Tasks}}</span></h3>
+    <div x-data="taskPanel" class="panel-tasks" data-field="panel-tasks-body"
+         data-project-id="{{.Project.ID}}" data-task-filtered="{{.TaskFiltered}}" data-task-total="{{.TaskTotal}}">
+    <div class="panel-header">
+      <h2>tasks</h2>
+      <span class="stories-count-indicator" data-field="tasks-count-indicator"
+            title="matching the active filter / project total">
+        <span x-text="filtered + ' / ' + total">{{.TaskFiltered}} / {{.TaskTotal}}</span>
+      </span>
+      {{/* status filter (sty_80447ada AC#3): default open/non-terminal,
+           toggle to all — applied server-side via the shared filter. */}}
+      <button type="button" class="task-status-toggle" data-action="task-status-toggle"
+              @click="toggleStatusAll"
+              x-text="statusAll() ? 'status: all' : 'status: open'"
+              title="Toggle done/cancelled tasks into the view">status: open</button>
+    </div>
+    <input type="text"
+           class="panel-search"
+           placeholder="search then press Enter (free text + chips: tags:foo status:open status:all)"
+           x-model="query"
+           @keydown.enter.prevent="applyToServer()"
+           data-field="panel-tasks-search">
     {{if .Tasks}}
     <table class="panel-table panel-table-tasks" data-field="task-list">
       <thead>
@@ -224,7 +243,11 @@
       </tbody>
     </table>
     {{else}}
+    {{if .TaskTotal}}
+    <p class="empty" data-field="no-tasks">No tasks match the active filter.</p>
+    {{else}}
     <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
+    {{end}}
     {{end}}
     </div>
   </section>

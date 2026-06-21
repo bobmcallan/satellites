@@ -19,7 +19,9 @@ import (
 // instant same-page preview) and the server (authoritative filter) never
 // disagree:
 //
-//	status:<v[,v...]>    all|open|<status>  (open = not done/cancelled)
+//	status:<v[,v...]>    all|open|<status>  (open = not a terminal status;
+//	                     terminal = done/cancelled for stories, complete/cancelled
+//	                     for tasks — see isTerminalStatus, shared by both rows)
 //	priority:<v[,v...]>  all|<priority>
 //	category:<v[,v...]>  all|<category>
 //	tags:<v>             single tag; multiple tokens OR
@@ -94,6 +96,19 @@ func parseStoryQuery(s string) storyQuery {
 	return q
 }
 
+// isTerminalStatus reports whether a row's status is a terminal (non-open) one.
+// The story lifecycle ends at done/cancelled; the task lifecycle ends at
+// complete/cancelled — both share this predicate, so the union is terminal. A
+// status the other type never carries is harmless to the type that doesn't use
+// it (no story is "complete"; no task is "done").
+func isTerminalStatus(st string) bool {
+	switch st {
+	case "done", "cancelled", "canceled", "complete":
+		return true
+	}
+	return false
+}
+
 func sliceContains(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {
@@ -103,15 +118,17 @@ func sliceContains(ss []string, want string) bool {
 	return false
 }
 
-// matchStory is the server port of matchesRow (minus the expanded-row
-// special case, which is presentation-only). Free text uses OR (union)
+// matchFields is the ONE filter predicate, the server port of matchesRow (minus
+// the expanded-row special case, which is presentation-only). It works on the
+// primitive row fields so the SAME grammar gates both stories and tasks
+// (sty_80447ada) — no duplicated filter logic. Free text uses OR (union)
 // semantics: the row matches when its haystack contains ANY token.
-func matchStory(s storyRow, q storyQuery) bool {
-	st := strings.ToLower(s.Status)
+func matchFields(id, title, status, priority, category string, tags []string, q storyQuery) bool {
+	st := strings.ToLower(status)
 	switch {
 	case len(q.status) == 0:
-		// Default: hide done/cancelled.
-		if st == "done" || st == "cancelled" {
+		// Default: hide terminal rows.
+		if isTerminalStatus(st) {
 			return false
 		}
 	case sliceContains(q.status, "all"):
@@ -120,7 +137,7 @@ func matchStory(s storyRow, q storyQuery) bool {
 		ok := false
 		for _, want := range q.status {
 			if want == "open" {
-				if st != "done" && st != "cancelled" {
+				if !isTerminalStatus(st) {
 					ok = true
 					break
 				}
@@ -134,17 +151,17 @@ func matchStory(s storyRow, q storyQuery) bool {
 		}
 	}
 	if len(q.priority) > 0 && !sliceContains(q.priority, "all") {
-		if !sliceContains(q.priority, strings.ToLower(s.Priority)) {
+		if !sliceContains(q.priority, strings.ToLower(priority)) {
 			return false
 		}
 	}
 	if len(q.category) > 0 && !sliceContains(q.category, "all") {
-		if !sliceContains(q.category, strings.ToLower(s.Category)) {
+		if !sliceContains(q.category, strings.ToLower(category)) {
 			return false
 		}
 	}
 	if len(q.tags) > 0 {
-		rowTags := " " + strings.ToLower(strings.Join(s.Tags, " ")) + " "
+		rowTags := " " + strings.ToLower(strings.Join(tags, " ")) + " "
 		ok := false
 		for _, t := range q.tags {
 			if strings.Contains(rowTags, " "+t+" ") {
@@ -157,7 +174,7 @@ func matchStory(s storyRow, q storyQuery) bool {
 		}
 	}
 	if len(q.free) > 0 {
-		hay := strings.ToLower(s.ID + " " + s.Title + " " + strings.Join(s.Tags, " "))
+		hay := strings.ToLower(id + " " + title + " " + strings.Join(tags, " "))
 		ok := false
 		for _, t := range q.free {
 			if t != "" && strings.Contains(hay, t) {
@@ -172,11 +189,32 @@ func matchStory(s storyRow, q storyQuery) bool {
 	return true
 }
 
+// matchStory / matchTask adapt the shared predicate to each row type.
+func matchStory(s storyRow, q storyQuery) bool {
+	return matchFields(s.ID, s.Title, s.Status, s.Priority, s.Category, s.Tags, q)
+}
+
+func matchTask(t taskRow, q storyQuery) bool {
+	return matchFields(t.ID, t.Title, t.Status, t.Priority, t.Category, t.Tags, q)
+}
+
 // filterStories returns the subset of rows matching q, order preserved.
 func filterStories(rows []storyRow, q storyQuery) []storyRow {
 	out := make([]storyRow, 0, len(rows))
 	for _, r := range rows {
 		if matchStory(r, q) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// filterTasks returns the subset of task rows matching q, order preserved —
+// the same predicate as filterStories (sty_80447ada).
+func filterTasks(rows []taskRow, q storyQuery) []taskRow {
+	out := make([]taskRow, 0, len(rows))
+	for _, r := range rows {
+		if matchTask(r, q) {
 			out = append(out, r)
 		}
 	}

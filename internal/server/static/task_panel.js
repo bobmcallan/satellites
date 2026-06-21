@@ -1,23 +1,53 @@
-// task_panel.js — Alpine component for the project-detail tasks panel inline
-// expand (sty_f46fe4f2), peer to storyPanel. Read-only: clicking a task row
-// toggles its inline detail (task content + ledger/log by execution episode).
-// The ?task=<id> deep link (from the /tasks/{id} redirect) auto-expands and
-// scrolls that row on load, mirroring the stories ?story=<id> behaviour.
+// task_panel.js — Alpine component for the project-detail tasks panel
+// (sty_f46fe4f2 inline expand + sty_80447ada search / count / status filter),
+// peer to storyPanel. Read-only.
 //
-// MUST load before alpine.min.js (same ordering reason as story_panel.js): the
-// bundled Alpine starts via queueMicrotask(start) at script-eval time, so a
-// defer script after alpine.min.js would register its alpine:init listener too
-// late and x-data="taskPanel" would be treated as a bare expression.
+//   * Inline expand: clicking a task row toggles its detail (task content +
+//     ledger/log by execution episode). ?task=<id> (from the /tasks/{id}
+//     redirect) auto-expands + scrolls that row on load.
+//   * Filter: the search box + tag/category chips + a status toggle commit the
+//     query to the SERVER as ?tasks_q=<query>; the server applies the SAME
+//     story-filter grammar and re-renders the matching rows. The Filtered/Total
+//     count is server-authoritative (seeded from data attributes).
+//
+// MUST load before alpine.min.js (same ordering reason as story_panel.js).
 (function () {
+    // hasStatusAll reports whether the query already carries a status:all token
+    // (the "show every status" state). Lightweight — no full query parser.
+    function hasStatusAll(query) {
+        const parts = (query || '').trim().split(/\s+/);
+        for (let i = 0; i < parts.length; i++) {
+            if (parts[i].toLowerCase() === 'status:all') { return true; }
+        }
+        return false;
+    }
+
+    // stripStatusTokens drops every status:<v> token, returning the remaining
+    // query (so the status filter resets to the default open view).
+    function stripStatusTokens(query) {
+        const parts = (query || '').trim().split(/\s+/).filter(function (p) {
+            return p.length > 0 && p.toLowerCase().indexOf('status:') !== 0;
+        });
+        return parts.join(' ');
+    }
+
     function taskPanel() {
         return {
-            // The id of the currently-expanded task row ('' = none). Only one
-            // row is open at a time, like the stories panel.
+            // The id of the currently-expanded task row ('' = none).
             expanded: '',
+            // The panel query, seeded from ?tasks_q= so a reload/deep-link keeps
+            // the filter; mirrored back to the search box via x-model.
+            query: '',
+            // Server-authoritative count: filtered = tasks matching the active
+            // filter, total = project-wide task count.
+            filtered: 0,
+            total: 0,
 
             init() {
                 try {
                     const url = new URL(window.location.href);
+                    const seed = url.searchParams.get('tasks_q');
+                    if (seed) { this.query = seed; }
                     // Deep-link from /tasks/{id} → /projects/{id}?task=<id>:
                     // expand that row on load and scroll it into view.
                     const task = url.searchParams.get('task');
@@ -32,6 +62,15 @@
                         });
                     }
                 } catch (e) { /* URL ctor unavailable — best effort */ }
+
+                // Seed the count from the server-rendered data attributes.
+                const root = this.$root || this.$el;
+                if (root) {
+                    const f0 = parseInt(root.dataset.taskFiltered || '', 10);
+                    if (!isNaN(f0)) { this.filtered = f0; }
+                    const t0 = parseInt(root.dataset.taskTotal || '', 10);
+                    if (!isNaN(t0)) { this.total = t0; }
+                }
             },
 
             toggleTaskRow(ev) {
@@ -51,12 +90,73 @@
                 return id && this.expanded === id ? 'is-expanded' : '';
             },
 
-            // The category/tag chips ship clickable in epic-order:1; the actual
-            // task search/filter wiring lands in epic-order:3, which fills these
-            // in. They are stubs here so the chip @click.stop handlers resolve
-            // (stopping row-toggle propagation) without a console error.
-            addTagToQuery() { /* epic-order:3 wires the task filter */ },
-            addCategoryToQuery() { /* epic-order:3 wires the task filter */ },
+            // statusAll reports whether the panel is showing every status (the
+            // toggle's "all" state) vs the default open/non-terminal view.
+            statusAll() { return hasStatusAll(this.query); },
+
+            // toggleStatusAll flips between the default open view and the
+            // show-all view (sty_80447ada AC#3), then commits to the server.
+            toggleStatusAll() {
+                if (hasStatusAll(this.query)) {
+                    this.query = stripStatusTokens(this.query);
+                } else {
+                    const rest = stripStatusTokens(this.query);
+                    this.query = (rest ? rest + ' ' : '') + 'status:all';
+                }
+                this.applyToServer();
+            },
+
+            // addTagToQuery appends tags:<tag> (epic-order:1 chips wire here),
+            // then commits. Mirrors the stories panel.
+            addTagToQuery(ev) {
+                const target = ev && ev.currentTarget;
+                const tag = (target && target.dataset && target.dataset.tag) || '';
+                if (!tag) { return; }
+                const token = 'tags:' + tag;
+                const q = (this.query || '').trim();
+                const parts = q.length ? q.split(/\s+/) : [];
+                if (parts.indexOf(token) !== -1) { return; }
+                parts.push(token);
+                this.query = parts.join(' ');
+                this.applyToServer();
+            },
+
+            // addCategoryToQuery REPLACES any existing category:<v> token (a task
+            // has one category), then commits.
+            addCategoryToQuery(ev) {
+                const target = ev && ev.currentTarget;
+                const cat = (target && target.dataset && target.dataset.category) || '';
+                if (!cat) { return; }
+                const q = (this.query || '').trim();
+                const parts = (q.length ? q.split(/\s+/) : []).filter(function (p) {
+                    return p.toLowerCase().indexOf('category:') !== 0;
+                });
+                parts.push('category:' + cat);
+                this.query = parts.join(' ');
+                this.applyToServer();
+            },
+
+            // applyToServer commits the query to the SERVER via ?tasks_q= so the
+            // filter applies to the whole task set (not just rendered rows). It
+            // preserves any other params (e.g. the stories panel's stories_q) and
+            // drops the one-shot ?task= expand.
+            applyToServer() {
+                if (typeof window === 'undefined' || !window.location) { return; }
+                try {
+                    const url = new URL(window.location.href);
+                    const params = url.searchParams;
+                    const qv = (this.query || '').trim();
+                    if (qv) { params.set('tasks_q', qv); } else { params.delete('tasks_q'); }
+                    params.delete('task');
+                    const search = params.toString();
+                    window.location.assign(url.pathname + (search ? '?' + search : ''));
+                } catch (e) { /* URL ctor / assign unavailable — best effort */ }
+            },
+
+            clearTaskFilter() {
+                this.query = '';
+                this.applyToServer();
+            },
         };
     }
 

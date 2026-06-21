@@ -14,8 +14,10 @@ import (
 // pure view-model render (no verbs), so it runs anywhere.
 func TestProjectDetailTasksPanelRenders(t *testing.T) {
 	data := projectDetailData{
-		Title:   "Demo · projects · satellites",
-		Project: projectRow{ID: "proj_demo", Name: "Demo"},
+		Title:        "Demo · projects · satellites",
+		Project:      projectRow{ID: "proj_demo", Name: "Demo"},
+		TaskFiltered: 1,
+		TaskTotal:    3,
 		Tasks: []taskRow{
 			{
 				ID: "tsk_demo", Title: "Secrets / code scan", Status: "complete",
@@ -63,6 +65,15 @@ func TestProjectDetailTasksPanelRenders(t *testing.T) {
 		// sty_f2f6465d chips (carried through the inline-expand rework)
 		`class="category-chip is-clickable" data-category="task"`,
 		`class="tag-chip is-clickable" data-tag="skill:secrets-scan"`,
+		// sty_80447ada search + Filtered/Total count + status toggle
+		`data-field="panel-tasks-search"`,
+		`@keydown.enter.prevent="applyToServer()"`,
+		`data-field="tasks-count-indicator"`,
+		"1 / 3", // filtered / total
+		`data-action="task-status-toggle"`,
+		`@click="toggleStatusAll"`,
+		`data-task-filtered="1"`,
+		`data-task-total="3"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("project_detail tasks panel missing %q", want)

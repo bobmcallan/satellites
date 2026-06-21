@@ -145,3 +145,48 @@ func TestFilterStories_PreservesOrder(t *testing.T) {
 		t.Errorf("filter want [a c] in order; got %+v", got)
 	}
 }
+
+func mkTask(id, title, status, category string, tags ...string) taskRow {
+	return taskRow{ID: id, Title: title, Status: status, Category: category, Tags: tags}
+}
+
+// TestFilterTasks covers sty_80447ada AC#4: tasks reuse the SAME story-filter
+// predicate for search (free text + tags), status filtering (default open /
+// status:all), and the Filtered/Total count.
+func TestFilterTasks(t *testing.T) {
+	all := []taskRow{
+		mkTask("tsk_1", "Secrets scan", "complete", "task", "skill:secrets-scan"),
+		mkTask("tsk_2", "Build cache warmup", "running", "task", "skill:cache"),
+		mkTask("tsk_3", "Dead task", "cancelled", "task", "skill:misc"),
+	}
+	total := len(all)
+
+	// Default (empty) query = status:open → hides complete/cancelled.
+	def := parseStoryQuery("")
+	if def.isEmpty() {
+		def = parseStoryQuery("status:open")
+	}
+	open := filterTasks(all, def)
+	if len(open) != 1 || open[0].ID != "tsk_2" {
+		t.Fatalf("default open filter want [tsk_2]; got %+v", open)
+	}
+	if total != 3 {
+		t.Errorf("total want 3; got %d", total)
+	}
+
+	// status:all → every status, count = total.
+	if got := filterTasks(all, parseStoryQuery("status:all")); len(got) != 3 {
+		t.Errorf("status:all want 3 rows; got %d", len(got))
+	}
+
+	// Free-text search matches id/title/tags (and respects the default
+	// open-status gate unless status is given).
+	if got := filterTasks(all, parseStoryQuery("status:all secrets")); len(got) != 1 || got[0].ID != "tsk_1" {
+		t.Errorf("search 'secrets' want [tsk_1]; got %+v", got)
+	}
+
+	// Tag chip filter (the epic-order:1 chips add tags:<tag>).
+	if got := filterTasks(all, parseStoryQuery("status:all tags:skill:cache")); len(got) != 1 || got[0].ID != "tsk_2" {
+		t.Errorf("tags:skill:cache want [tsk_2]; got %+v", got)
+	}
+}

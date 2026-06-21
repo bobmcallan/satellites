@@ -33,6 +33,8 @@ type projectDetailData struct {
 	// Tasks (type:task) for the read-only tasks panel, peer to the stories list
 	// (epic:workflow-steps order-6). Read-only — surfaces existing data only.
 	Tasks         []taskRow
+	TaskFiltered  int // tasks matching the active filter (indicator numerator, sty_80447ada)
+	TaskTotal     int // project-wide task total (indicator denominator)
 	StoryShown    int // rows rendered on this page = len(Stories)
 	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
 	StoryTotal    int // project-wide all-status total (indicator denominator)
@@ -142,9 +144,11 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		// Tasks panel (epic:workflow-steps order-6) — best-effort: a task-list
-		// error must not blank the whole project page (stories still render).
-		tasks, tErr := dispatchTaskList(ctx, projectID)
+		// Tasks panel (epic:workflow-steps order-6; search/count/status-filter
+		// sty_80447ada) — best-effort: a task-list error must not blank the whole
+		// project page (stories still render). The panel applies the same query
+		// grammar as stories via gatherTaskPanel (tasks_q).
+		tasks, taskFiltered, taskTotal, tErr := gatherTaskPanel(ctx, projectID, r.URL.Query())
 		if tErr != nil {
 			arbor.WarnCtx(ctx, "project_detail: list tasks", "id", projectID, "err", tErr)
 		}
@@ -170,6 +174,8 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			ActiveNav:     "projects",
 			Stories:       stories,
 			Tasks:         tasks,
+			TaskFiltered:  taskFiltered,
+			TaskTotal:     taskTotal,
 			StoryShown:    len(stories),
 			StoryFiltered: paginator.Filtered,
 			StoryTotal:    paginator.Total,

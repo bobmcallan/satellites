@@ -101,10 +101,11 @@ func dispatchTaskGet(ctx context.Context, taskID string) (taskDoc, error) {
 	}, nil
 }
 
-// dispatchTaskList lists a project's tasks (document_list type:task) for the
-// project-detail panel, building each row's inline-expand payload (body +
-// per-execution episodes). Read-only.
-func dispatchTaskList(ctx context.Context, projectID string) ([]taskRow, error) {
+// dispatchTaskRows lists a project's tasks (document_list type:task) as
+// lightweight metadata rows — enough to FILTER + count (sty_80447ada) without
+// paging each task's ledger. The inline-expand payload (body + episodes) is
+// added later by enrichTaskRow, for the visible (filtered) rows only. Read-only.
+func dispatchTaskRows(ctx context.Context, projectID string) ([]taskRow, error) {
 	body, _ := json.Marshal(verb.DocumentListRequest{Type: "task", ProjectID: projectID, Limit: 200})
 	raw, err := verb.Dispatch(ctx, "document_list", body)
 	if err != nil {
@@ -116,30 +117,55 @@ func dispatchTaskList(ctx context.Context, projectID string) ([]taskRow, error) 
 	}
 	out := make([]taskRow, 0, len(resp.Items))
 	for _, d := range resp.Items {
-		row := taskRow{ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority, Category: d.Category, Tags: d.Tags}
-		// Inline-expand content (sty_f46fe4f2): the task body rendered as safe
-		// markdown — best-effort; a get error leaves the body empty rather than
-		// failing the page.
-		if doc, gErr := dispatchTaskGet(ctx, d.ID); gErr != nil {
-			arbor.WarnCtx(ctx, "task_list: body", "id", d.ID, "err", gErr)
-		} else if strings.TrimSpace(doc.RawBody) != "" {
-			row.BodyHTML = renderMarkdown(doc.RawBody)
-		}
-		// Inline-expand log + run summary: episodes grouped by execution from the
-		// full ledger — best-effort; a ledger read error leaves them empty.
-		if entries, lErr := dispatchTaskLedger(ctx, d.ID); lErr != nil {
-			arbor.WarnCtx(ctx, "task_list: episodes", "id", d.ID, "err", lErr)
-		} else {
-			eps := taskepisode.Project(taskEpisodeRows(entries))
-			row.RunCount = len(eps)
-			if len(eps) > 0 {
-				row.LastRun = eps[len(eps)-1].Start.Format("2006-01-02 15:04")
-			}
-			row.Episodes = taskEpisodeViews(entries, eps)
-		}
-		out = append(out, row)
+		out = append(out, taskRow{ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority, Category: d.Category, Tags: d.Tags})
 	}
 	return out, nil
+}
+
+// enrichTaskRow adds the inline-expand payload to a visible row (sty_f46fe4f2):
+// the task body rendered as safe markdown + the ledger/log grouped by execution
+// episode + the run summary. Best-effort — a read error leaves a field empty
+// rather than failing the page. Read-only.
+func enrichTaskRow(ctx context.Context, row *taskRow) {
+	if doc, gErr := dispatchTaskGet(ctx, row.ID); gErr != nil {
+		arbor.WarnCtx(ctx, "task_list: body", "id", row.ID, "err", gErr)
+	} else if strings.TrimSpace(doc.RawBody) != "" {
+		row.BodyHTML = renderMarkdown(doc.RawBody)
+	}
+	if entries, lErr := dispatchTaskLedger(ctx, row.ID); lErr != nil {
+		arbor.WarnCtx(ctx, "task_list: episodes", "id", row.ID, "err", lErr)
+	} else {
+		eps := taskepisode.Project(taskEpisodeRows(entries))
+		row.RunCount = len(eps)
+		if len(eps) > 0 {
+			row.LastRun = eps[len(eps)-1].Start.Format("2006-01-02 15:04")
+		}
+		row.Episodes = taskEpisodeViews(entries, eps)
+	}
+}
+
+// gatherTaskPanel resolves the tasks-panel slice for a project given the request
+// query (sty_80447ada): it lists all tasks (the project-wide total), applies the
+// EFFECTIVE task filter (an empty tasks_q = the default status:open view) via the
+// SHARED story-filter predicate, then enriches the MATCHING rows with their
+// inline-expand payload. Returns (rows, filteredCount, total). No pagination
+// (out of scope). Read-only.
+func gatherTaskPanel(ctx context.Context, projectID string, q url.Values) ([]taskRow, int, int, error) {
+	all, err := dispatchTaskRows(ctx, projectID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	total := len(all)
+	tq := parseStoryQuery(strings.TrimSpace(q.Get("tasks_q")))
+	if tq.isEmpty() {
+		tq = parseStoryQuery("status:open")
+	}
+	filtered := filterTasks(all, tq)
+	filteredCount := len(filtered)
+	for i := range filtered {
+		enrichTaskRow(ctx, &filtered[i])
+	}
+	return filtered, filteredCount, total, nil
 }
 
 // taskLedgerEntry mirrors one ledger_list row into the shape both episode
