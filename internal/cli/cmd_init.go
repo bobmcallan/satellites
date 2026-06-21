@@ -208,7 +208,7 @@ func runInit(out io.Writer, repoRoot string) error {
 	} else if appended {
 		fmt.Fprintln(out, initLine(true, ".satellites/satellites.toml (added global_publishers consumption note)"))
 	}
-	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the internal spine gate (story format + a story→done goal, injected from the binary). Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
+	fmt.Fprintln(out, "  → governance: the order-zero baseline workflow + a starter constitution are scaffolded below; the baseline's entry is gated by the embed-first spine reviewer (story format + a story→done goal), which a repo MAY override via `.claude/skills` like any other reviewer. Other gates/principles/skills are inherited (system baseline) or CONSUMED — add a `<publisher>` to global_publishers, then `satellites skill sync`.")
 
 	// 2c. Bind-ready config (sty_1dc6b146, epic:ootb-onboarding): make the repo
 	//     usable with no hand-edit. Activate the server_url default (upgrading a

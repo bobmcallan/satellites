@@ -23,10 +23,13 @@ rows):
   which checks the story's numbered acceptance criteria are satisfied with
   evidence before it closes.
 
-The entry gate is a satellites-INTERNAL gate (injected from the binary, never
-materialised to .claude/skills, so it cannot be edited); the done and cancel
-gates are editable `config/skills` reviewers resolved from the binary embed — a
-repo may override them via `.claude/skills`. The cancel edges are gated by
+All three gates are EDITABLE `config/skills` reviewers resolved from the binary
+embed — the resolver consults a repo's `.claude/skills/<name>` FIRST (operator
+local-WINS) and falls back to the embed, so a repo may override ANY of them,
+including the entry gate. There is no protected internal-gate home and no Go
+special-case: the binary holds only the mechanism (run the named reviewer at the
+edge, enforce reviewer-only), and an override flows through `satellites-skill-review`
+like any other skill (epic:workflow-steps order-3). The cancel edges are gated by
 `satellites-story-cancel-review`, which accepts a move to `cancelled` only on a
 concrete `## Cancellation` rationale. Other gates (start / techdebt review, and
 so on) remain an opt-in palette a richer repo-owned workflow composes.
@@ -53,9 +56,9 @@ transitions:
 ## Environment
 
 Drives a story document backlog to in_progress to done. The entry is gated by the
-internal intent spine; the exit is gated by the done reviewer; the cancels are
-gated by the cancel reviewer. The goal-keeper Stop hook holds the agent to a
-terminal state.
+embed-first, repo-overridable intent spine reviewer; the exit is gated by the
+done reviewer; the cancels are gated by the cancel reviewer. The goal-keeper Stop
+hook holds the agent to a terminal state.
 
 ```yaml
 guardrails:

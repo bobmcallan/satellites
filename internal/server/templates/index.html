@@ -198,7 +198,7 @@ satellites status   # → db UP, MCP connected — no flags, no hand-edits</code
     <pre class="code"><code>satellites work init &lt;story-id&gt;                              # engage the workflow
 satellites story status_transition --skill &lt;gate&gt; &lt;story-id&gt; # reviewer-gated transition
 satellites story set-status &lt;story-id&gt; done                  # advance an ungated edge</code></pre>
-    <p><code>.claude/skills</code> holds <strong>no gates</strong>: reviewer skills resolve <em>embed → local → server</em>. The baseline workflow gates only the entry transition with the spine reviewer <code>satellites-intent-plan-review</code> — injected from the binary, never written to <code>.claude/skills</code> — so a fresh repo is governable empty, and the agent's goal is simply to reach <code>done</code> through the transitions its workflow declares.</p>
+    <p><code>.claude/skills</code> holds <strong>no gates by default</strong>: reviewer skills resolve <em>local → embed → server</em>, so a fresh repo is governable empty. The baseline workflow gates the entry transition with the spine reviewer <code>satellites-intent-plan-review</code>, resolved from the binary embed — but it is ordinary, editable substrate: a repo MAY override it (or any reviewer) by authoring <code>.claude/skills/&lt;name&gt;</code>, which the resolver consults first. The agent's goal is simply to reach <code>done</code> through the transitions its workflow declares.</p>
   </section>
 
   <section class="panel" data-section="server">

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,59 @@ fi
 	}
 	if out.Decision != string(GateDecisionAccept) {
 		t.Fatalf("verdict = %q (%s) — the stub only accepts when the embedded reviewer body AND its functional-check result reached claude -p; a non-accept means it was not injected/used", out.Decision, out.Notes)
+	}
+}
+
+// TestSpineGateOverridableByLocalSkill is the load-bearing guard for
+// epic:workflow-steps story 3 AC#1/#2: the spine entry reviewer
+// (satellites-intent-plan-review) is ORDINARY overridable substrate, not a
+// protected internal gate. The resolver consults .claude/skills/<name> FIRST
+// (operator local-WINS); when a repo authors a local copy, THAT body resolves in
+// place of the config/skills embed. If a future change ever special-cased the
+// spine to ignore the override (the "injected, un-editable" path this story
+// removes), this test fails.
+func TestSpineGateOverridableByLocalSkill(t *testing.T) {
+	const spine = "satellites-intent-plan-review"
+
+	// Precondition: the spine ships embedded (the default a repo with no override
+	// resolves) — the subject of the override.
+	if _, ok := configSkillRaw(spine); !ok {
+		t.Fatalf("%s must remain embedded in config/skills (the default spine reviewer)", spine)
+	}
+
+	// A repo authors a local override at .claude/skills/<name>/SKILL.md.
+	worktree := t.TempDir()
+	dir := filepath.Join(worktree, ".claude", "skills", spine)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const sentinel = "REPO OVERRIDE of the spine gate — this body must win over the embed."
+	override := "---\nname: " + spine + "\nkind: reviewer\n---\n\n" + sentinel + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(override), 0o644); err != nil {
+		t.Fatalf("write override: %v", err)
+	}
+
+	// The resolver must return the LOCAL override, not the embed.
+	_, body, err := resolveGateSkill(worktree, spine)
+	if err != nil {
+		t.Fatalf("resolveGateSkill(%s): %v", spine, err)
+	}
+	if !strings.Contains(body, sentinel) {
+		t.Fatalf("local override NOT honoured — the spine resolved to a body without the sentinel; the spine must be ordinary overridable substrate, not a protected internal gate.\nresolved body:\n%s", body)
+	}
+
+	// And with NO local override, the same resolver falls back to the embed —
+	// AC#4 default preserved (a repo that does not override still runs the
+	// baseline spine).
+	bare := t.TempDir()
+	_, embedBody, err := resolveGateSkill(bare, spine)
+	if err != nil {
+		t.Fatalf("resolveGateSkill(embed default): %v", err)
+	}
+	if strings.Contains(embedBody, sentinel) {
+		t.Fatal("embed default leaked the override sentinel — resolution is not isolated per worktree")
+	}
+	if !strings.Contains(embedBody, "well-formed, drivable contract") {
+		t.Fatalf("embed default did not resolve the baseline spine rubric:\n%s", embedBody)
 	}
 }
