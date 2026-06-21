@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/bobmcallan/satellites/internal/taskepisode"
 	"github.com/bobmcallan/satellites/internal/verb"
@@ -42,6 +44,7 @@ func init() {
 	task.AddCommand(newTaskReviewCmd(&configArg, &userArg))
 	task.AddCommand(newTaskExecutionsCmd(&configArg, &userArg))
 	task.AddCommand(newTaskValidateCmd(&configArg, &userArg))
+	task.AddCommand(newTaskEditCmd(&configArg, &userArg))
 
 	register(task)
 }
@@ -157,20 +160,37 @@ func runTaskExecutions(ctx context.Context, out io.Writer, configPath, userArg, 
 }
 
 func newTaskGetCmd(configArg, userArg *string) *cobra.Command {
-	var withBody bool
+	var withBody, jsonFlag bool
+	var output string
 	cmd := &cobra.Command{
 		Use:   "get <task-id>",
 		Short: "Read a task's server-side state: status, priority, tags, parent, title",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskGet(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, args[0], withBody)
+			jsonOut := jsonFlag || strings.EqualFold(strings.TrimSpace(output), "json")
+			return runTaskGet(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, args[0], withBody, jsonOut)
 		},
 	}
 	cmd.Flags().BoolVar(&withBody, "body", false, "Also print the full task body after the metadata")
+	cmd.Flags().StringVarP(&output, "output", "o", "text", "Output format: text | json (json always includes the body)")
+	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Shorthand for -o json")
 	return cmd
 }
 
-func runTaskGet(ctx context.Context, out io.Writer, configPath, userArg, taskID string, withBody bool) error {
+// taskGetJSON is the machine-readable shape of `task get -o json` (sty_92adea9d).
+type taskGetJSON struct {
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	Status   string    `json:"status"`
+	Priority string    `json:"priority,omitempty"`
+	Category string    `json:"category,omitempty"`
+	ParentID string    `json:"parent_id,omitempty"`
+	Tags     []string  `json:"tags,omitempty"`
+	Updated  time.Time `json:"updated"`
+	Body     string    `json:"body,omitempty"`
+}
+
+func runTaskGet(ctx context.Context, out io.Writer, configPath, userArg, taskID string, withBody, jsonOut bool) error {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: taskID})
 	if err != nil {
 		return err
@@ -187,6 +207,21 @@ func runTaskGet(ctx context.Context, out io.Writer, configPath, userArg, taskID 
 		return fmt.Errorf("task get: %s is type=%q, not a task", taskID, resp.Document.Type)
 	}
 	d := resp.Document
+	body := resp.RawBody
+	if body == "" && len(resp.Versions) > 0 {
+		body = resp.Versions[len(resp.Versions)-1].Body
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(taskGetJSON{
+			ID: d.ID, Title: d.Name, Status: d.Status, Priority: d.Priority,
+			Category: d.Category, ParentID: d.ParentID, Tags: d.Tags,
+			Updated: d.UpdatedAt, Body: body,
+		})
+	}
+
 	fmt.Fprintf(out, "id:        %s\n", d.ID)
 	fmt.Fprintf(out, "title:     %s\n", d.Name)
 	fmt.Fprintf(out, "status:    %s\n", d.Status)
@@ -199,12 +234,77 @@ func runTaskGet(ctx context.Context, out io.Writer, configPath, userArg, taskID 
 	}
 	fmt.Fprintf(out, "updated:   %s\n", d.UpdatedAt.Format("2006-01-02 15:04:05Z"))
 	if withBody {
-		body := resp.RawBody
-		if body == "" && len(resp.Versions) > 0 {
-			body = resp.Versions[len(resp.Versions)-1].Body
-		}
 		fmt.Fprintf(out, "\n%s\n", body)
 	}
+
+	// Stale embedded ## Workflow warning (sty_92adea9d): a task body that carries
+	// its own ## Workflow block which diverges from the governing workflow
+	// resolved by reference/category — the governing definition is what enacts;
+	// the embedded copy is dead text that misleads a reader. GoverningReconcile
+	// computes the divergence; surface it so inspecting a task flags it (the
+	// review path already warns on this).
+	if strings.TrimSpace(body) != "" {
+		sources := governingWorkflowSources(configPath)
+		selector := verb.WorkflowSelector(d.Tags)
+		if _, _, drift := verb.GoverningReconcile(selector, body, d.Status, d.Category, sources); strings.TrimSpace(drift) != "" {
+			fmt.Fprintf(out, "\nwarning: %s\n", drift)
+		}
+	}
+	return nil
+}
+
+// newTaskEditCmd is the first-class task body-edit path (sty_92adea9d): replace a
+// task's body without hand-rolling `exec document_upsert`. It is a body-only
+// patch (metadata untouched) and rides the same engagement door as any governed
+// write — a non-engaged / non-editable phase is refused by the verb layer.
+func newTaskEditCmd(configArg, userArg *string) *cobra.Command {
+	var bodyFile, bodyInline string
+	cmd := &cobra.Command{
+		Use:   "edit <task-id>",
+		Short: "Replace a task's body (body-only patch; engagement-gated like any governed write)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskEdit(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, args[0], bodyFile, bodyInline)
+		},
+	}
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Path to a file whose contents become the new task body")
+	cmd.Flags().StringVar(&bodyInline, "body", "", "Inline task body (alternative to --body-file)")
+	return cmd
+}
+
+func runTaskEdit(ctx context.Context, out io.Writer, configPath, userArg, taskID, bodyFile, bodyInline string) error {
+	body := bodyInline
+	if strings.TrimSpace(bodyFile) != "" {
+		b, rErr := os.ReadFile(bodyFile)
+		if rErr != nil {
+			return fmt.Errorf("task edit: read body file: %w", rErr)
+		}
+		body = string(b)
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("task edit: empty body — provide --body or --body-file")
+	}
+
+	// Confirm the target is a task (a typo must not patch a story).
+	getReq, _ := json.Marshal(verb.DocumentGetRequest{ID: taskID})
+	raw, err := dispatchVerb(ctx, "document_get", getReq, configPath, userArg)
+	if err != nil {
+		return fmt.Errorf("task edit: resolve %s: %w", taskID, err)
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("task edit: decode %s: %w", taskID, err)
+	}
+	if resp.Document.Type != taskType {
+		return fmt.Errorf("task edit: %s is type=%q, not a task", taskID, resp.Document.Type)
+	}
+
+	// Body-only patch: pointer metadata left nil = leave alone.
+	upReq, _ := json.Marshal(verb.DocumentUpsertRequest{ID: taskID, Body: body})
+	if _, err := dispatchVerb(ctx, "document_upsert", upReq, configPath, userArg); err != nil {
+		return fmt.Errorf("task edit: upsert %s: %w", taskID, err)
+	}
+	fmt.Fprintf(out, "task %s body updated (%d bytes)\n", taskID, len(body))
 	return nil
 }
 
