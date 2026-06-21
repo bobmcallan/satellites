@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
@@ -45,6 +46,7 @@ func init() {
 		userArg   string
 		kindArg   string
 		dryrun    bool
+		force     bool
 		assumeYes bool
 	)
 	cmd := &cobra.Command{
@@ -61,25 +63,34 @@ Pick what to clear with --kind:
   all         principles + every project skill
 
 Rails: project scope only (never system/shared rows like agent-goals); stories
-are never touched (they hard-delete); --dryrun enumerates without writing, and a
-real run requires confirmation. Tombstones are recoverable and local
-.satellites/ sources are left on disk. Refresh with ` + "`satellites skill sync`" + ` afterwards.`,
+are never touched (they hard-delete); --dryrun enumerates without writing.
+
+Confirmation is TTY-aware. At an interactive terminal a real run prompts [y/N].
+When stdin is NOT a terminal (an agent via its harness, CI, a pipe) the CLI
+cannot prompt, so clear REFUSES rather than guess — re-run with --force. For an
+agent the operator's real confirmation gate is the harness permission prompt on
+this command, not a CLI prompt; the agent passes --force once approved.
+
+Tombstones are recoverable and local .satellites/ sources are left on disk.
+Refresh with ` + "`satellites skill sync`" + ` afterwards.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runClear(cmd.OutOrStdout(), cmd.InOrStdin(), kindArg, dryrun, assumeYes, configArg, userArg)
+			return runClear(cmd.OutOrStdout(), cmd.InOrStdin(), kindArg, dryrun, force || assumeYes, configArg, userArg)
 		},
 	}
 	cmd.Flags().StringVar(&kindArg, "kind", "", "What to clear: principle | skill | workflow | all (required)")
 	cmd.Flags().BoolVar(&dryrun, "dryrun", false, "Enumerate the kill-list and write nothing")
-	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Skip the confirmation prompt (for non-interactive use)")
+	cmd.Flags().BoolVar(&force, "force", false, "Delete without confirmation. REQUIRED when stdin is not an interactive terminal (agent/CI): there the CLI cannot prompt, so the operator's gate is the harness permission prompt on this command.")
+	cmd.Flags().BoolVar(&assumeYes, "yes", false, "Alias of --force (retained for back-compat).")
 	cmd.Flags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")
 	register(cmd)
 }
 
 // runClear resolves the caller's project, enumerates the requested kill-list,
-// and (outside --dryrun, after confirmation) soft-tombstones each row.
-func runClear(out io.Writer, in io.Reader, kind string, dryrun, assumeYes bool, configArg, userArg string) error {
+// and (outside --dryrun, after confirmation) soft-tombstones each row. `force`
+// is the resolved --force/--yes bypass; interactivity is detected from stdin.
+func runClear(out io.Writer, in io.Reader, kind string, dryrun, force bool, configArg, userArg string) error {
 	kind = strings.TrimSpace(strings.ToLower(kind))
 	if kind == "" {
 		return fmt.Errorf("clear: --kind is required (one of: %s)", strings.Join(clearKinds, ", "))
@@ -101,14 +112,16 @@ func runClear(out io.Writer, in io.Reader, kind string, dryrun, assumeYes bool, 
 	dispatch := func(c context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
 		return dispatchVerb(c, name, req, configArg, userArg)
 	}
-	return runClearVia(ctx, out, in, dispatch, kind, projectID, wsID, dryrun, assumeYes)
+	return runClearVia(ctx, out, in, dispatch, kind, projectID, wsID, dryrun, force, stdinIsInteractive(in))
 }
 
 // runClearVia is the config-free core: it enumerates and (outside --dryrun,
 // after confirmation) tombstones each row through the injected dispatch. Split
 // from runClear around the verbDispatch seam so the enumerate → confirm → delete
-// flow is unit-testable without a live substrate.
-func runClearVia(ctx context.Context, out io.Writer, in io.Reader, dispatch verbDispatch, kind, projectID, wsID string, dryrun, assumeYes bool) error {
+// flow is unit-testable without a live substrate. `interactive` is whether
+// confirmation may be prompted (passed explicitly so tests exercise both the
+// TTY and non-TTY paths deterministically).
+func runClearVia(ctx context.Context, out io.Writer, in io.Reader, dispatch verbDispatch, kind, projectID, wsID string, dryrun, force, interactive bool) error {
 	targets, err := clearTargets(ctx, dispatch, kind, projectID, wsID)
 	if err != nil {
 		return err
@@ -127,9 +140,24 @@ func runClearVia(ctx context.Context, out io.Writer, in io.Reader, dispatch verb
 		return nil
 	}
 
-	if !assumeYes {
+	if !force {
+		if !interactive {
+			// Clearly non-interactive (a pipe / redirect / non-file reader): the
+			// CLI cannot prompt, so refuse rather than silently abort or delete.
+			return fmt.Errorf("clear: refusing to archive %d row(s) without confirmation — stdin is not an interactive terminal; re-run with --force", len(targets))
+		}
 		fmt.Fprintf(out, "archive these %d row(s)? this soft-tombstones them (recoverable) [y/N]: ", len(targets))
-		if !confirmYes(in) {
+		yes, answered := readConfirm(in)
+		if !answered {
+			// A terminal was detected but no answer arrived (EOF) — the common
+			// case for an agent driving the command through its harness, where
+			// stdin is a pty with no human at it. Treat the absent answer as a
+			// REFUSAL demanding --force, never a silent abort: the operator's
+			// real gate here is the harness permission prompt on the command.
+			fmt.Fprintln(out)
+			return fmt.Errorf("clear: no confirmation received (stdin closed with no answer) — re-run with --force")
+		}
+		if !yes {
 			fmt.Fprintln(out, "aborted — nothing deleted.")
 			return nil
 		}
@@ -239,18 +267,37 @@ func clearDelete(ctx context.Context, dispatch verbDispatch, projectID, wsID, na
 	return fmt.Sprintf("%s (v%d)", status, parsed.Version.Version), nil
 }
 
-// confirmYes reads a single line and reports whether it is an affirmative
-// (y / yes, case-insensitive). EOF / empty / anything else is a no.
-func confirmYes(in io.Reader) bool {
+// stdinIsInteractive reports whether the reader is an interactive terminal —
+// true only when it is an *os.File backed by a character device. A pipe, a
+// regular file, or any non-*os.File reader (an agent's harness, CI, a test
+// buffer) is non-interactive, so clear refuses to prompt and demands --force.
+// Mirrors the stdin-is-a-TTY test cmd_exec.go uses (no new dependency).
+func stdinIsInteractive(in io.Reader) bool {
+	f, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+// readConfirm reads a single answer line. `answered` is false on EOF (no line
+// at all) — distinguished from an explicit "n" so the caller can treat an
+// absent answer (agent/CI with a pty but no responder) as a refusal demanding
+// --force rather than a silent abort. `yes` is true only for y / yes.
+func readConfirm(in io.Reader) (yes, answered bool) {
 	sc := bufio.NewScanner(in)
 	if !sc.Scan() {
-		return false
+		return false, false
 	}
 	switch strings.TrimSpace(strings.ToLower(sc.Text())) {
 	case "y", "yes":
-		return true
+		return true, true
 	}
-	return false
+	return false, true
 }
 
 func clearKindValid(set []string, v string) bool {

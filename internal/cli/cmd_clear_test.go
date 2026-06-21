@@ -112,11 +112,12 @@ func TestClearTargets_KindSelectors(t *testing.T) {
 }
 
 // TestRunClearVia_DryRunWritesNothing proves --dryrun enumerates but issues zero
-// document_delete calls.
+// document_delete calls, and never prompts (even non-interactive).
 func TestRunClearVia_DryRunWritesNothing(t *testing.T) {
 	s := newClearFakeStore()
 	var out bytes.Buffer
-	if err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", true, false); err != nil {
+	// dryrun=true, force=false, interactive=false → must still not error or delete.
+	if err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", true, false, false); err != nil {
 		t.Fatalf("runClearVia: %v", err)
 	}
 	if len(s.deleted) != 0 {
@@ -127,12 +128,13 @@ func TestRunClearVia_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// TestRunClearVia_DeletesEachRow proves a confirmed run issues exactly one
-// document_delete per enumerated row and never more.
-func TestRunClearVia_DeletesEachRow(t *testing.T) {
+// TestRunClearVia_ForceDeletesEachRow proves --force issues exactly one
+// document_delete per enumerated row, in any context (here non-interactive).
+func TestRunClearVia_ForceDeletesEachRow(t *testing.T) {
 	s := newClearFakeStore()
 	var out bytes.Buffer
-	if err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", false, true); err != nil {
+	// force=true, interactive=false → deletes without a prompt.
+	if err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", false, true, false); err != nil {
 		t.Fatalf("runClearVia: %v", err)
 	}
 	want := []string{"broken-windows", "constitution", "vire-done-review", "vire-release-workflow"}
@@ -141,19 +143,60 @@ func TestRunClearVia_DeletesEachRow(t *testing.T) {
 	}
 }
 
-// TestRunClearVia_AbortOnNoConfirm proves an unconfirmed interactive run deletes
-// nothing.
-func TestRunClearVia_AbortOnNoConfirm(t *testing.T) {
+// TestRunClearVia_NonInteractiveWithoutForceRefuses proves a non-TTY run with no
+// --force ERRORS and deletes nothing — neither silent abort nor silent delete.
+func TestRunClearVia_NonInteractiveWithoutForceRefuses(t *testing.T) {
 	s := newClearFakeStore()
 	var out bytes.Buffer
-	// assumeYes=false, stdin "n" → abort.
-	if err := runClearVia(context.Background(), &out, strings.NewReader("n\n"), s.dispatch, "all", "proj_A", "wksp_A", false, false); err != nil {
-		t.Fatalf("runClearVia: %v", err)
+	err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", false, false, false)
+	if err == nil {
+		t.Fatal("non-interactive run without --force must error")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error should instruct --force, got: %v", err)
 	}
 	if len(s.deleted) != 0 {
-		t.Errorf("declined confirmation still deleted %v", s.deleted)
+		t.Errorf("refused run still deleted %v", s.deleted)
+	}
+}
+
+// TestRunClearVia_InteractiveConfirm proves the interactive path: "y" deletes,
+// "n" aborts with nothing deleted.
+func TestRunClearVia_InteractiveConfirm(t *testing.T) {
+	yes := newClearFakeStore()
+	var out bytes.Buffer
+	if err := runClearVia(context.Background(), &out, strings.NewReader("y\n"), yes.dispatch, "all", "proj_A", "wksp_A", false, false, true); err != nil {
+		t.Fatalf("interactive yes: %v", err)
+	}
+	if len(yes.deleted) != 4 {
+		t.Errorf("interactive yes deleted %v, want all 4", yes.deleted)
+	}
+
+	no := newClearFakeStore()
+	out.Reset()
+	if err := runClearVia(context.Background(), &out, strings.NewReader("n\n"), no.dispatch, "all", "proj_A", "wksp_A", false, false, true); err != nil {
+		t.Fatalf("interactive no: %v", err)
+	}
+	if len(no.deleted) != 0 {
+		t.Errorf("interactive decline still deleted %v", no.deleted)
 	}
 	if !strings.Contains(out.String(), "aborted") {
 		t.Errorf("missing abort notice:\n%s", out.String())
+	}
+}
+
+// TestRunClearVia_InteractiveEOFRefuses proves the harness case: a terminal is
+// detected (interactive=true) but no answer arrives (EOF) → error demanding
+// --force, nothing deleted. This is the agent-via-pty path the silent-abort
+// bug lived in.
+func TestRunClearVia_InteractiveEOFRefuses(t *testing.T) {
+	s := newClearFakeStore()
+	var out bytes.Buffer
+	err := runClearVia(context.Background(), &out, strings.NewReader(""), s.dispatch, "all", "proj_A", "wksp_A", false, false, true)
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("EOF with no answer must error demanding --force, got: %v", err)
+	}
+	if len(s.deleted) != 0 {
+		t.Errorf("EOF refusal still deleted %v", s.deleted)
 	}
 }
