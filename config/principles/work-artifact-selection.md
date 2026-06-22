@@ -46,5 +46,3 @@ as a story (the agent does the work; reviewers gate it). A task MAY name a skill
 it wants the agent to use, but that skill is a Claude capability in the agent's
 environment, not satellites substrate to resolve or govern — at most a warning to
 the executing agent.
-
-For the artifact-KIND test (skill vs principle vs document) see [[substrate-taxonomy]].

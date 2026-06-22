@@ -24,4 +24,4 @@ A step the workflow declares is authorised BY the workflow; it is never a
 gap that PREVENTS following the workflow — the cases above — not a normal step on
 its path.
 
-See [[process-as-configuration]], [[reviewer-process]].
+See [[reviewer-only-model]].
