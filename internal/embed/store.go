@@ -93,12 +93,22 @@ func (s *ChunkStore) DocVersion(ctx context.Context, documentID string) (int, bo
 }
 
 // WorkspaceChunks loads every chunk (with embedding) for a workspace — the
-// brute-force search candidate set.
-func (s *ChunkStore) WorkspaceChunks(ctx context.Context, workspaceID string) ([]ScoredChunk, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-        SELECT id, workspace_id, document_id, chunk_index, content, embedding
-        FROM document_chunks WHERE workspace_id = $1
-    `, workspaceID)
+// brute-force search candidate set. When tags is non-empty the candidate set is
+// narrowed to chunks whose owning document carries all of them (the
+// `classification:<value>` tag convention, sty_7716a8e1): the filter is applied
+// at the store via a join to documents.tags so semantic search can be scoped to
+// a classification rather than ranking the whole corpus and filtering after.
+func (s *ChunkStore) WorkspaceChunks(ctx context.Context, workspaceID string, tags []string) ([]ScoredChunk, error) {
+	q := `
+        SELECT c.id, c.workspace_id, c.document_id, c.chunk_index, c.content, c.embedding
+        FROM document_chunks c WHERE c.workspace_id = $1`
+	args := []any{workspaceID}
+	if len(tags) > 0 {
+		q += `
+          AND EXISTS (SELECT 1 FROM documents d WHERE d.id = c.document_id AND d.tags @> $2)`
+		args = append(args, pq.Array(tags))
+	}
+	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("embed: list workspace chunks: %w", err)
 	}

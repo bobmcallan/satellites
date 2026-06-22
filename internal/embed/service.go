@@ -76,9 +76,13 @@ func (s *Service) RemoveDocument(ctx context.Context, documentID string) error {
 
 // Search embeds the query and returns the top-k workspace chunks by cosine
 // similarity, each carrying document provenance (AC4 — the internal API
-// epic-order:5 consumes). With no embedder or an empty query it returns an empty
+// epic-order:5 consumes). When tags is non-empty the candidate set is narrowed
+// to documents carrying all of them (the `classification:<value>` convention),
+// so search can be scoped to a classification (sty_7716a8e1). Candidates span
+// both workspace- and project(repo)-scope chunks, since both are stored keyed by
+// this workspace_id. With no embedder or an empty query it returns an empty
 // result, never an error (non-fatal).
-func (s *Service) Search(ctx context.Context, workspaceID, query string, k int) ([]ScoredChunk, error) {
+func (s *Service) Search(ctx context.Context, workspaceID, query string, k int, tags []string) ([]ScoredChunk, error) {
 	if s.embedder == nil || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
@@ -89,7 +93,7 @@ func (s *Service) Search(ctx context.Context, workspaceID, query string, k int) 
 	if len(vecs) == 0 {
 		return nil, nil
 	}
-	candidates, err := s.chunks.WorkspaceChunks(ctx, workspaceID)
+	candidates, err := s.chunks.WorkspaceChunks(ctx, workspaceID, tags)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +118,17 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// getKey builds the body-fetch key for a doc the reconcile pass listed. A
+// project-scope row is addressed by (project_id, name) — its resolveKey drops
+// workspace_id (sty_c6de961e) — while a workspace-scope row is addressed by
+// (workspace_id, name).
+func getKey(wsID string, d document.Document) document.Key {
+	if d.Scope == document.ScopeProject {
+		return document.Key{Scope: document.ScopeProject, WorkspaceID: wsID, ProjectID: d.ProjectID, Name: d.Name}
+	}
+	return document.Key{Scope: document.ScopeWorkspace, WorkspaceID: wsID, Name: d.Name}
+}
+
 func (s *Service) reconcileWorkspace(ctx context.Context, wsID string) {
 	res, err := s.docs.List(ctx,
 		document.ListFilter{Type: "document", Scope: document.ScopeWorkspace, WorkspaceID: wsID},
@@ -122,8 +137,19 @@ func (s *Service) reconcileWorkspace(ctx context.Context, wsID string) {
 		arbor.WarnCtx(ctx, "embed: reconcile list", "workspace_id", wsID, "err", err)
 		return
 	}
+	// Project(repo)-scope documents this workspace owns are embedded alongside
+	// workspace-scope ones, keyed by the same workspace_id, so repo-bound
+	// classified corpus is retrievable via the workspace search just like
+	// workspace-bound docs (sty_7716a8e1). Both passes share one `live` set so
+	// the prune below (which is workspace_id-keyed) does not drop project chunks.
+	projectDocs, err := s.docs.ListProjectDocsInWorkspace(ctx, wsID, 500)
+	if err != nil {
+		arbor.WarnCtx(ctx, "embed: reconcile list project", "workspace_id", wsID, "err", err)
+		// Non-fatal: still reconcile the workspace-scope docs we did list.
+	}
+	docs := append(res.Items, projectDocs...)
 	live := map[string]bool{}
-	for _, d := range res.Items {
+	for _, d := range docs {
 		live[d.ID] = true
 		cur, ok, err := s.chunks.DocVersion(ctx, d.ID)
 		if err != nil {
@@ -133,7 +159,7 @@ func (s *Service) reconcileWorkspace(ctx context.Context, wsID string) {
 		if ok && cur >= d.LatestVersion {
 			continue // chunks are current
 		}
-		got, err := s.docs.Get(ctx, document.Key{Scope: document.ScopeWorkspace, WorkspaceID: wsID, Name: d.Name}, document.GetOptions{})
+		got, err := s.docs.Get(ctx, getKey(wsID, d), document.GetOptions{})
 		if err != nil || len(got.Versions) == 0 {
 			arbor.WarnCtx(ctx, "embed: reconcile get body", "document_id", d.ID, "err", err)
 			continue

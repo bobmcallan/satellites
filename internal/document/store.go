@@ -904,6 +904,45 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 	return ListResult{Items: out, NextCursor: next}, nil
 }
 
+// ListProjectDocsInWorkspace returns every type='document' project-scope row
+// bound to the given workspace, across all of its projects. List deliberately
+// drops workspace_id for ScopeProject (a project list is keyed by project_id so
+// it survives a home-workspace move — sty_c6de961e); the embed reconcile worker
+// needs the opposite axis: "every project document this workspace owns" so it
+// can embed repo-bound classified corpus, not only workspace-bound docs. The
+// scope-coherence CHECK guarantees a live project row always has workspace_id
+// set, so the workspace_id equality is exact for present rows. Tombstones are
+// excluded; ordering matches List (bounded set — no cursor here).
+func (s *Store) ListProjectDocsInWorkspace(ctx context.Context, workspaceID string, limit int) ([]Document, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("document: workspace_id required")
+	}
+	if limit <= 0 {
+		limit = listDefaultLimit
+	}
+	if limit > listMaxLimit {
+		limit = listMaxLimit
+	}
+	q := selectDocumentColumns + ` FROM documents
+        WHERE type = $1 AND scope = $2 AND workspace_id = $3 AND status != $4
+        ORDER BY created_at DESC, id DESC
+        LIMIT $5`
+	rows, err := s.DB.QueryContext(ctx, q, TypeDocument, string(ScopeProject), workspaceID, string(StatusDeleted), limit)
+	if err != nil {
+		return nil, fmt.Errorf("document: list project docs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Document, 0, limit)
+	for rows.Next() {
+		d, err := scanDocumentFull(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // Count returns the number of rows matching the filter. Mirrors List's
 // WHERE clause exactly so the count is consistent with what a cursor
 // walk would surface across pages.

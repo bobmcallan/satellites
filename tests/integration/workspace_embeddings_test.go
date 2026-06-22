@@ -64,7 +64,7 @@ func TestWorkspaceEmbeddings(t *testing.T) {
 	if err := svc.EmbedDocument(ctx, ws.ID, infra.ID, infra.LatestVersion, infraBody); err != nil {
 		t.Fatalf("embed infra: %v", err)
 	}
-	chunks, err := chunkStore.WorkspaceChunks(ctx, ws.ID)
+	chunks, err := chunkStore.WorkspaceChunks(ctx, ws.ID, nil)
 	if err != nil {
 		t.Fatalf("list chunks: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestWorkspaceEmbeddings(t *testing.T) {
 	}
 
 	// AC4/AC5: a revenue query ranks the growth document first.
-	res, err := svc.Search(ctx, ws.ID, "what is the revenue growth plan?", 3)
+	res, err := svc.Search(ctx, ws.ID, "what is the revenue growth plan?", 3, nil)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}

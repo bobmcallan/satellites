@@ -3,7 +3,30 @@ package embed
 import (
 	"math"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/document"
 )
+
+// TestGetKey pins the reconcile body-fetch key routing (sty_7716a8e1): a
+// project(repo)-scope doc is addressed by (project_id, name) within its
+// workspace so repo-bound classified corpus is embedded; a workspace-scope doc
+// keeps the (workspace_id, name) key it always had.
+func TestGetKey(t *testing.T) {
+	proj := getKey("wksp_1", document.Document{Scope: document.ScopeProject, ProjectID: "proj_x", Name: "report"})
+	if proj.Scope != document.ScopeProject || proj.WorkspaceID != "wksp_1" || proj.ProjectID != "proj_x" || proj.Name != "report" {
+		t.Errorf("project key wrong: %+v", proj)
+	}
+	if err := proj.Validate(); err != nil {
+		t.Errorf("project key must be scope-coherent: %v", err)
+	}
+	ws := getKey("wksp_1", document.Document{Scope: document.ScopeWorkspace, Name: "report"})
+	if ws.Scope != document.ScopeWorkspace || ws.WorkspaceID != "wksp_1" || ws.ProjectID != "" || ws.Name != "report" {
+		t.Errorf("workspace key wrong: %+v", ws)
+	}
+	if err := ws.Validate(); err != nil {
+		t.Errorf("workspace key must be scope-coherent: %v", err)
+	}
+}
 
 func TestChunker_Window(t *testing.T) {
 	// words=7, window=4, overlap=1 → advance=3: chunks start at 0 then 3.

@@ -21,6 +21,7 @@ func init() {
 		userArg   string
 		wsArg     string
 		limitArg  int
+		tagsArg   []string
 	)
 	cmd := &cobra.Command{
 		Use:   "semantic-search <query>",
@@ -44,7 +45,7 @@ func init() {
 				wsID = ws
 			}
 
-			req, err := json.Marshal(verb.SemanticSearchRequest{WorkspaceID: wsID, Query: args[0], Limit: limitArg})
+			req, err := json.Marshal(verb.SemanticSearchRequest{WorkspaceID: wsID, Query: args[0], Limit: limitArg, Tags: tagsArg})
 			if err != nil {
 				return err
 			}
@@ -76,5 +77,6 @@ func init() {
 	cmd.Flags().StringVar(&userArg, "user", "", "Caller user id")
 	cmd.Flags().StringVar(&wsArg, "workspace", "", "Workspace id to search (default: the configured project's workspace)")
 	cmd.Flags().IntVar(&limitArg, "limit", 10, "Maximum number of results")
+	cmd.Flags().StringSliceVar(&tagsArg, "tags", nil, "Narrow to documents carrying all tags (e.g. classification:security)")
 	register(cmd)
 }

@@ -26,6 +26,10 @@ type SemanticSearchRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	Query       string `json:"query"`
 	Limit       int    `json:"limit,omitempty"`
+	// Tags narrows the ranked candidate set to documents carrying all of them —
+	// the `classification:<value>` convention (sty_7716a8e1). Empty → whole
+	// workspace corpus (workspace- and project/repo-scope alike).
+	Tags []string `json:"tags,omitempty"`
 }
 
 // SemanticSearchResult is one ranked chunk with its document provenance + score.
@@ -48,7 +52,7 @@ type SemanticSearchResponse struct {
 func init() {
 	Register(&Verb{
 		Name:        "semantic_search",
-		Description: "Search a workspace's document corpus by semantic similarity. Returns ranked chunks with document provenance + score. Requires server-side embeddings (GEMINI_API_KEY).",
+		Description: "Search a workspace's document corpus (workspace- and project/repo-scope alike) by semantic similarity. Optional tags narrow to a classification (e.g. [\"classification:security\"]). Returns ranked chunks with document provenance + score. Requires server-side embeddings (GEMINI_API_KEY).",
 		Invoke:      invokeSemanticSearch,
 	})
 }
@@ -82,7 +86,7 @@ func invokeSemanticSearch(ctx context.Context, raw json.RawMessage) (json.RawMes
 	if limit <= 0 {
 		limit = 10
 	}
-	scored, err := embedService.Search(ctx, wsID, req.Query, limit)
+	scored, err := embedService.Search(ctx, wsID, req.Query, limit, req.Tags)
 	if err != nil {
 		return nil, fmt.Errorf("semantic_search: %w", err)
 	}
