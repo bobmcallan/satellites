@@ -179,7 +179,7 @@ func enactMismatch(decision string, isV2, enactV2 bool, gate, workflow, status s
 //   - checkpoint state + --skill      → error: the state has no gate; use --checkpoint.
 //   - other state     + --checkpoint → error: nothing to checkpoint here.
 //   - other state     + --skill      → no checkpoint; proceed to the gate path.
-func checkpointDecision(wantCheckpoint, isCheckpointState bool, status, cpTo, gateSkill string) (enact bool, err error) {
+func checkpointDecision(wantCheckpoint, isCheckpointState bool, status, cpTo, gateSkill, edgesHint string) (enact bool, err error) {
 	switch {
 	case isCheckpointState && wantCheckpoint:
 		return true, nil
@@ -187,7 +187,7 @@ func checkpointDecision(wantCheckpoint, isCheckpointState bool, status, cpTo, ga
 		return false, fmt.Errorf("status_transition: state %q has no reviewer gate — its only transition is the ungated checkpoint %q → %q; advance it with --checkpoint (a deliberate executor move), not --skill %q",
 			status, status, cpTo, gateSkill)
 	case !isCheckpointState && wantCheckpoint:
-		return false, fmt.Errorf("status_transition: --checkpoint given but state %q has no single ungated checkpoint edge to advance", status)
+		return false, fmt.Errorf("status_transition: --checkpoint given but state %q has no single ungated checkpoint edge to advance%s", status, edgesHint)
 	default:
 		return false, nil
 	}
@@ -330,7 +330,8 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// naming --skill at a pure-checkpoint state errors rather than transitions.
 	cpTo, cpOK := verb.GoverningCheckpoint(selector, body, story.Status, story.Category, wfSources)
 	isCheckpointState := cpOK && !edges.IsV2 && edges.Actor != "operator"
-	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, story.Status, cpTo, gateSkill)
+	edgeHint := verb.GoverningEdgesHint(selector, body, story.Status, story.Category, wfSources)
+	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, story.Status, cpTo, gateSkill, edgeHint)
 	if cpErr != nil {
 		return cpErr
 	}

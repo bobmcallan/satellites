@@ -154,6 +154,49 @@ func GoverningReconcile(selector, storyBody, status, category string, sources []
 	return edges, name, drift
 }
 
+// GoverningEdgesHint names every transition out of `status` in the AUTHORITATIVE
+// governing workflow (selector first, else the category default, else the story's
+// embedded copy), each with the --skill <gate> (or --checkpoint) that drives it.
+// It is the discoverability fix behind sty_4300e117: an agent stuck at `running`
+// could not see that satellites-task-report-review drives running→complete and
+// hand-stamped the task instead. Returns "" when no edge resolves; otherwise a
+// clause that appends to a dead-end error. The formatting lives here (not the CLI)
+// because the CLI layering guard forbids importing internal/workflow.
+func GoverningEdgesHint(selector, storyBody, status, category string, sources []WorkflowSource) string {
+	var auth *workflow.Workflow
+	if selector != "" {
+		if wf, covers, ok := ResolveByName(selector, category, sources); ok && covers {
+			auth = wf
+		}
+	}
+	if auth == nil {
+		if w, _, ok := ResolveGoverningWorkflow(category, sources); ok {
+			auth = w
+		} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil {
+			auth = embedded
+		}
+	}
+	if auth == nil {
+		return ""
+	}
+	edges := auth.TransitionsFrom(strings.TrimSpace(status))
+	if len(edges) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, t := range edges {
+		switch {
+		case strings.TrimSpace(t.ReviewerSkill) != "":
+			parts = append(parts, fmt.Sprintf("→ %s (--skill %s)", t.To, strings.TrimSpace(t.ReviewerSkill)))
+		case t.Trigger == "checkpoint":
+			parts = append(parts, fmt.Sprintf("→ %s (--checkpoint)", t.To))
+		default:
+			parts = append(parts, fmt.Sprintf("→ %s", t.To))
+		}
+	}
+	return fmt.Sprintf(" — from %q the governing workflow's transitions are: %s", strings.TrimSpace(status), strings.Join(parts, " · "))
+}
+
 // GoverningCheckpoint resolves the single ungated `trigger: checkpoint` edge
 // out of `status` in the AUTHORITATIVE governing workflow (mirrors
 // CheckpointEdge but over the resolved definition, not the embedded copy).

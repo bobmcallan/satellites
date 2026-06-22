@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/cliconfig"
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
@@ -118,7 +119,7 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 				if items, ok, err := callerScopedList(ctx, cfg, nameContainsArg, tags); err != nil {
 					return err
 				} else if ok {
-					renderNounList(cmd.OutOrStdout(), filterByTagPrefix(items, cfg.FilterTagPrefix))
+					renderNounList(cmd.OutOrStdout(), mergeEmbeddedSkills(filterByTagPrefix(items, cfg.FilterTagPrefix), cfg.FilterType))
 					return nil
 				}
 			}
@@ -158,7 +159,7 @@ func newSubstrateListCmd(cfg substrateNounConfig) *cobra.Command {
 			if err := json.Unmarshal(resp, &parsed); err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
-			items := filterByTagPrefix(parsed.Items, cfg.FilterTagPrefix)
+			items := mergeEmbeddedSkills(filterByTagPrefix(parsed.Items, cfg.FilterTagPrefix), cfg.FilterType)
 			renderNounList(cmd.OutOrStdout(), items)
 			return nil
 		},
@@ -235,6 +236,16 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 			}
 			switch len(hits) {
 			case 0:
+				// Embedded system reviewers (satellites-*-review) ship in the binary,
+				// not the document store, so the scope cascade misses them. Surface the
+				// embed so `skill get` resolves a binary-resident gate instead of
+				// reporting "not found" (sty_4300e117).
+				if cfg.FilterType == "skill" {
+					if body, ok := verb.ConfigSkillBody(name); ok {
+						printSubstrateBody(out, body)
+						return nil
+					}
+				}
 				return fmt.Errorf("%s %q not found in project, workspace, or system scope — pass --scope to target one", cfg.FilterType, name)
 			case 1:
 				printSubstrateBody(out, hits[0].body)
@@ -414,6 +425,26 @@ func filterByTagPrefix(items []nounListItem, tagPrefix string) []nounListItem {
 		}
 	}
 	return out
+}
+
+// mergeEmbeddedSkills appends binary-embedded system reviewers (satellites-*-review)
+// to a `skill list`, de-duped by name. Those gates ship in the embed and are
+// invisible to the server-backed document_list, so without this an agent probing
+// `skill list` concludes they don't exist (sty_4300e117). No-op for non-skill nouns.
+func mergeEmbeddedSkills(items []nounListItem, filterType string) []nounListItem {
+	if filterType != "skill" {
+		return items
+	}
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		seen[it.Name] = true
+	}
+	for _, n := range verb.ConfigSkillNames() {
+		if !seen[n] {
+			items = append(items, nounListItem{Name: n, Scope: "system", Type: "skill", LatestVersion: 1, Tags: []string{"kind:reviewer", "embedded"}})
+		}
+	}
+	return items
 }
 
 func hasTagWithPrefix(tags []string, prefix string) bool {

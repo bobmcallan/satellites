@@ -68,23 +68,28 @@ func TestRunReviewSkillAndCheckpointConflict(t *testing.T) {
 // a non-checkpoint state errors; and a gate request elsewhere proceeds normally.
 func TestCheckpointDecision(t *testing.T) {
 	// checkpoint state + --checkpoint → enact.
-	if enact, err := checkpointDecision(true, true, "in_progress", "shipping", ""); err != nil || !enact {
+	if enact, err := checkpointDecision(true, true, "in_progress", "shipping", "", ""); err != nil || !enact {
 		t.Fatalf("checkpoint+checkpoint-state: enact=%v err=%v, want enact=true err=nil", enact, err)
 	}
 	// checkpoint state + --skill → error, NO enact (the silent-shadow bug).
-	enact, err := checkpointDecision(false, true, "in_progress", "shipping", "satellites-intent-plan-review")
+	enact, err := checkpointDecision(false, true, "in_progress", "shipping", "satellites-intent-plan-review", "")
 	if err == nil || enact {
 		t.Fatalf("skill-at-checkpoint-state: enact=%v err=%v, want enact=false err!=nil", enact, err)
 	}
 	if !strings.Contains(err.Error(), "--checkpoint") {
 		t.Fatalf("skill-at-checkpoint-state error = %q, want it to steer to --checkpoint", err)
 	}
-	// non-checkpoint state + --checkpoint → error.
-	if enact, err := checkpointDecision(true, false, "shipping", "", ""); err == nil || enact {
-		t.Fatalf("checkpoint-at-non-checkpoint: enact=%v err=%v, want enact=false err!=nil", enact, err)
+	// non-checkpoint state + --checkpoint → error; the edges-hint clause is appended
+	// so a stuck agent is pointed at the real gate (sty_4300e117), never left to guess.
+	enact2, err2 := checkpointDecision(true, false, "running", "", "", " — from \"running\" the governing workflow's transitions are: → complete (--skill satellites-task-report-review)")
+	if err2 == nil || enact2 {
+		t.Fatalf("checkpoint-at-non-checkpoint: enact=%v err=%v, want enact=false err!=nil", enact2, err2)
+	}
+	if !strings.Contains(err2.Error(), "satellites-task-report-review") {
+		t.Fatalf("checkpoint-at-non-checkpoint error = %q, want it to name the available gate from the edges hint", err2)
 	}
 	// non-checkpoint state + --skill → no checkpoint, proceed to gate path.
-	if enact, err := checkpointDecision(false, false, "shipping", "", "satellites-commit-push-review"); err != nil || enact {
+	if enact, err := checkpointDecision(false, false, "shipping", "", "satellites-commit-push-review", ""); err != nil || enact {
 		t.Fatalf("gate-elsewhere: enact=%v err=%v, want enact=false err=nil", enact, err)
 	}
 }
