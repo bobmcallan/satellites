@@ -79,6 +79,8 @@ after large changes), then ` + "`code search`" + ` / ` + "`code symbol`" + ` to 
 	symbolCmd.Flags().StringVar(&symbolConfig, "config", "", "Path to satellites.toml (resolves repo root; defaults to walk-up from CWD).")
 	code.AddCommand(symbolCmd)
 
+	code.AddCommand(newCodeMapCmd())
+
 	register(code)
 }
 

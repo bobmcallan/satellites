@@ -228,6 +228,17 @@ var exposedVerbs = []string{
 	"system_status",
 }
 
+// ExposedVerbs returns the names of the verbs the MCP HTTP transport
+// advertises and dispatches, as a fresh copy. It is the registry-derived
+// source of truth for "which verbs are reachable as MCP tools" — read by
+// reachability tooling (satellites code map) so the exposed/exec-only split
+// is derived, never hardcoded.
+func ExposedVerbs() []string {
+	out := make([]string, len(exposedVerbs))
+	copy(out, exposedVerbs)
+	return out
+}
+
 // New returns a configured *mcpserver.MCPServer exposing the verbs in
 // exposedVerbs. The orientation instructions tell native CLI agents to
 // install the binary and run every other verb through it; MCP-only
