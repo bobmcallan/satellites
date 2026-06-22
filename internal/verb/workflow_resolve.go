@@ -432,6 +432,26 @@ func isInitialForCategoryIn(status, category string, sources []WorkflowSource) b
 	return s == "backlog" || s == "ready"
 }
 
+// IsEditableForCategory reports whether `status` is an editable WORKING state of
+// the system-default workflow governing `category` — past the entry/pre-start
+// state and before a terminal one. Falls back to "not in {backlog, ready, done,
+// cancelled}" (i.e. a started, non-terminal status) when no governing workflow
+// resolves or it does not declare the status (sty_9f97ff5c).
+func IsEditableForCategory(status, category string) bool {
+	return isEditableForCategoryIn(status, category, SystemWorkflowSources())
+}
+
+func isEditableForCategoryIn(status, category string, sources []WorkflowSource) bool {
+	s := strings.TrimSpace(status)
+	if wf, _, ok := ResolveGoverningWorkflow(category, sources); ok && wf != nil && wf.HasState(s) {
+		return wf.IsEditable(s)
+	}
+	if s == "" || s == "backlog" || s == "ready" || s == "done" || s == "cancelled" {
+		return false
+	}
+	return true
+}
+
 // EntryReviewer resolves the reviewer that gates a governing workflow's FORWARD
 // entry edge — the gate the read-only `validate` pre-flight runs against a freshly
 // created artifact. It is the reviewer_skill on the transition out of the

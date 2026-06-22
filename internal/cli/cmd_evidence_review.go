@@ -122,7 +122,9 @@ func buildReviewMetrics(trace processtrace.ProcessTrace, findings []processtrace
 	}
 
 	m.Outcome.TerminalStatus = trace.CurrentStatus
-	m.Outcome.ReachedTerminal = trace.CurrentStatus == "done" || trace.CurrentStatus == "cancelled"
+	// Workflow-derived terminal check (sty_9f97ff5c), not a hardcoded
+	// done/cancelled; falls back to the canonical terminal set.
+	m.Outcome.ReachedTerminal = verb.IsTerminalForCategory(trace.CurrentStatus, trace.StoryType)
 	for _, e := range evidence {
 		if e.Kind == workstate.EvidenceCI {
 			m.Outcome.CI = append(m.Outcome.CI, ciOutcome{Stage: e.Label, Result: e.Decision, Ref: e.Ref})
@@ -267,6 +269,8 @@ func runEvidenceReview(ctx context.Context, out io.Writer, opts evidenceReviewOp
 		StoryType:     resp.Document.Type,
 		CurrentStatus: resp.Document.Status,
 		Entries:       entries,
+		Terminal:      func(st string) bool { return verb.IsTerminalForCategory(st, resp.Document.Category) },
+		Editable:      func(st string) bool { return verb.IsEditableForCategory(st, resp.Document.Category) },
 	})
 
 	// 6. Evidence store (gate runs + CI) — best-effort: an absent store yields none.

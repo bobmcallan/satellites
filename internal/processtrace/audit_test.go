@@ -179,3 +179,38 @@ func TestAudit_CleanStoryNoFindings(t *testing.T) {
 		}
 	}
 }
+
+// TestAudit_WorkflowDerivedClassifier (sty_9f97ff5c): the detectors classify
+// terminal/editable via the caller's GOVERNING-workflow classifier, not a fixed
+// status set. A renamed terminal status ("shipped") is recognised as terminal and
+// a renamed working status ("doing") as editable — proving the literals are gone.
+func TestAudit_WorkflowDerivedClassifier(t *testing.T) {
+	has := func(fs []Finding, a string) bool {
+		for _, f := range fs {
+			if f.Anomaly == a {
+				return true
+			}
+		}
+		return false
+	}
+	term := func(st string) bool { return st == "shipped" }
+	edit := func(st string) bool { return st == "doing" }
+
+	// reject-with-no-follow-up: a story at the renamed terminal "shipped" must NOT
+	// be flagged stalled — terminal() drives the early return, not a "done" literal.
+	notStalled := Audit(StoryAudit{StoryID: "sty_w", CurrentStatus: "shipped", Terminal: term, Editable: edit, Entries: []LedgerEntry{
+		entry(1, kindReviewReject, "AC2 missing", map[string]any{"from_status": "doing", "gate": "g"}),
+	}})
+	if has(notStalled, AnomalyRejectNoFollowUp) {
+		t.Errorf("a story at the renamed terminal 'shipped' must not be flagged stalled: %+v", notStalled)
+	}
+
+	// ungated-deploy: a deploy=success at the non-terminal renamed status "doing"
+	// IS flagged (terminal() returns false for it).
+	ungated := Audit(StoryAudit{StoryID: "sty_w2", CurrentStatus: "doing", Terminal: term, Editable: edit, Entries: []LedgerEntry{
+		entry(1, kindCIResult, "deploy", map[string]any{"stage": "deploy", "result": "success", "ref": "v1"}),
+	}})
+	if !has(ungated, AnomalyUngatedDeploy) {
+		t.Errorf("deploy at non-terminal 'doing' must flag ungated-deploy: %+v", ungated)
+	}
+}

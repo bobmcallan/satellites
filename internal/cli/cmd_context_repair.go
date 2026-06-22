@@ -111,6 +111,13 @@ func (o contextRepairOpts) validateOpts() contextValidateOpts {
 // startedStatus reports whether a story has begun execution — past the point
 // where its ## Workflow should be embedded. A pre-start story legitimately has
 // none yet (it is stamped at start), so a workflow finding there is expected.
+//
+// NOTE (sty_9f97ff5c): deliberately kept as a literal allowlist. Migrating it to
+// the governing workflow's IsEditable needs FULL-source (on-disk project workflow)
+// resolution to recognise repo-specific WORKING states (e.g. blocked / shipping)
+// that the embed-only classifier cannot see — and threading that resolution
+// breaks this planner's pure unit-testability. Deferred: this is a
+// repair-classification heuristic, not a gate.
 func startedStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "in_progress", "techdebt-review", "integration-review", "done-review", "blocked":

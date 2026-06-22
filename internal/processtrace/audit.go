@@ -42,9 +42,6 @@ const (
 	SeverityError = "error"
 )
 
-// shipStatuses are the terminal/ship statuses a gated transition must precede.
-var shipStatuses = map[string]bool{"done": true, "deploy": true}
-
 // Finding is one detected anomaly, addressable by story.
 type Finding struct {
 	StoryID  string `json:"story_id"`
@@ -61,6 +58,34 @@ type StoryAudit struct {
 	StoryType     string
 	CurrentStatus string
 	Entries       []LedgerEntry
+	// Terminal / Editable classify a status against the story's GOVERNING workflow
+	// when the caller resolved one (sty_9f97ff5c) — so the detectors are
+	// workflow-derived, not status-coded. nil falls back to the canonical
+	// lifecycle ({done,cancelled} terminal; started-non-terminal editable), which
+	// preserves behaviour for an unresolved/legacy story.
+	Terminal func(string) bool
+	Editable func(string) bool
+}
+
+// terminal reports whether `status` is a terminal state — the caller's
+// workflow-derived classifier when set, else the canonical {done, cancelled}.
+func (s StoryAudit) terminal(status string) bool {
+	if s.Terminal != nil {
+		return s.Terminal(status)
+	}
+	st := strings.TrimSpace(status)
+	return st == "done" || st == "cancelled"
+}
+
+// editable reports whether `status` is a started, non-terminal working state —
+// the caller's workflow-derived classifier when set, else "not pre-start and not
+// terminal".
+func (s StoryAudit) editable(status string) bool {
+	if s.Editable != nil {
+		return s.Editable(status)
+	}
+	st := strings.TrimSpace(status)
+	return st != "" && st != "backlog" && st != "ready" && st != "done" && st != "cancelled"
 }
 
 // ciPayload is the structured payload of a ci_result row (order:8).
@@ -139,7 +164,7 @@ func auditShipThenNoGate(s StoryAudit, sorted []LedgerEntry, add emit) {
 			continue
 		}
 		p := parseSpine(e)
-		if !shipStatuses[strings.TrimSpace(p.ToStatus)] {
+		if !s.terminal(p.ToStatus) {
 			continue
 		}
 		accepted := false
@@ -198,7 +223,7 @@ func auditRejectNoFollowUp(s StoryAudit, sorted []LedgerEntry, add emit) {
 			lastReject = e.CreatedAt
 		}
 	}
-	if lastReject.IsZero() || s.CurrentStatus == "done" {
+	if lastReject.IsZero() || s.terminal(s.CurrentStatus) {
 		return
 	}
 	for _, e := range sorted {
@@ -225,9 +250,9 @@ func auditUngatedDeploy(s StoryAudit, sorted []LedgerEntry, add emit) {
 		if len(e.Payload) > 0 {
 			_ = json.Unmarshal(e.Payload, &c)
 		}
-		if strings.TrimSpace(c.Stage) == "deploy" && strings.TrimSpace(c.Result) == "success" && s.CurrentStatus != "done" {
+		if strings.TrimSpace(c.Stage) == "deploy" && strings.TrimSpace(c.Result) == "success" && !s.terminal(s.CurrentStatus) {
 			add(AnomalyUngatedDeploy, SeverityError,
-				fmt.Sprintf("deploy succeeded (%s) but the story status is %q, not done", c.Ref, s.CurrentStatus))
+				fmt.Sprintf("deploy succeeded (%s) but the story status is %q, not terminal", c.Ref, s.CurrentStatus))
 		}
 	}
 }
@@ -252,7 +277,7 @@ var processSpineKinds = map[string]bool{
 // 59 legacy stories). Best-effort: the spike marked full coverage server-side
 // (engagement-store cross-reference); this is the ledger-visible proxy.
 func auditUnengagedWork(s StoryAudit, sorted []LedgerEntry, add emit) {
-	if s.CurrentStatus != "in_progress" && s.CurrentStatus != "done" {
+	if !s.editable(s.CurrentStatus) && !s.terminal(s.CurrentStatus) {
 		return
 	}
 	sawProcess := false

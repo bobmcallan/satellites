@@ -111,9 +111,10 @@ func auditAssembleStory(ctx context.Context, dispatch verbDispatch, storyID stri
 	}
 	var got struct {
 		Document struct {
-			ID     string `json:"id"`
-			Type   string `json:"type"`
-			Status string `json:"status"`
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Status   string `json:"status"`
+			Category string `json:"category"`
 		} `json:"document"`
 	}
 	if err := json.Unmarshal(getRaw, &got); err != nil {
@@ -127,11 +128,16 @@ func auditAssembleStory(ctx context.Context, dispatch verbDispatch, storyID stri
 	if err != nil {
 		return processtrace.StoryAudit{}, err
 	}
+	cat := got.Document.Category
 	return processtrace.StoryAudit{
 		StoryID:       got.Document.ID,
 		StoryType:     got.Document.Type,
 		CurrentStatus: got.Document.Status,
 		Entries:       entries,
+		// Workflow-derived terminal/editable classification (sty_9f97ff5c) so the
+		// detectors are not coded to a fixed status vocabulary.
+		Terminal: func(st string) bool { return verb.IsTerminalForCategory(st, cat) },
+		Editable: func(st string) bool { return verb.IsEditableForCategory(st, cat) },
 	}, nil
 }
 

@@ -740,12 +740,12 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// (sty_db5cdef0).
 	flushLocalInbox(ctx, opts, store, story)
 
-	// 11. Terminal cleanup (sty_676e070c): once the story reaches its terminal
-	// status (`done`), its working-state rows have nothing more to flush — drop
-	// them so a completed story leaves no residue in the store. The client
-	// holds no workflow knowledge, so it keys on the canonical terminal status
-	// the fix/feature/parent/urgent workflows share.
-	if observed == "done" {
+	// 11. Terminal cleanup (sty_676e070c): once the story reaches a TERMINAL
+	// status of its governing workflow, its working-state rows have nothing more
+	// to flush — drop them so a completed story leaves no residue in the store.
+	// Workflow-derived via verb.IsTerminalForCategory, not a hardcoded "done"
+	// (sty_9f97ff5c); the canonical terminal set {done, cancelled} is the fallback.
+	if verb.IsTerminalForCategory(observed, story.Category) {
 		if err := store.CleanupWork(story.ID); err != nil {
 			fmt.Fprintf(opts.Stderr, "warn: cleanup work store for %s: %v\n", story.ID, err)
 		}
