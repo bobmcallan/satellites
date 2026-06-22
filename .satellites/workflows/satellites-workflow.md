@@ -21,6 +21,12 @@ At `shipping` the executor performs the **commit-push step** (final commit,
 deploy CI chain), then requests `satellites-commit-push-review`, which enacts
 **pass → done** or **fail → in_progress** (repair and re-ship, bounded).
 
+**Abandon.** A story still in `backlog` or `in_progress` may be retired to the
+terminal `cancelled` state via `satellites-story-cancel-review`, which accepts the
+move only on a concrete `## Cancellation` rationale (superseded by a named
+artifact, or not-required with a reason). Cancellation is orthogonal to the
+forward lifecycle.
+
 **Shared step.** The commit-push edge is the reusable `{work_skill, reviewer}`
 atom — `work_skill: commit-push` + `reviewer_skill: satellites-commit-push-review`
 — the SAME step a task workflow can name (see `document:project/workflow-schema`,
@@ -38,9 +44,12 @@ states:
   - {name: shipping, actor: executor}
   - {name: blocked, actor: operator}
   - done
+  - cancelled
 transitions:
   - {from: backlog, to: in_progress, reviewer_skill: "satellites-intent-plan-review"}
   - {from: in_progress, to: shipping, trigger: checkpoint}
   - {from: shipping, to: done, work_skill: "commit-push", reviewer_skill: "satellites-commit-push-review", on: pass}
   - {from: shipping, to: in_progress, work_skill: "commit-push", reviewer_skill: "satellites-commit-push-review", on: fail, max_iterations: 3, on_exhausted: blocked}
+  - {from: backlog, to: cancelled, reviewer_skill: "satellites-story-cancel-review"}
+  - {from: in_progress, to: cancelled, reviewer_skill: "satellites-story-cancel-review"}
 ```
