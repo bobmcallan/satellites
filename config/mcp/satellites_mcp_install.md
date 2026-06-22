@@ -29,6 +29,26 @@ and `project match` binds `project_id` afterward — breaking the auth↔match
 deadlock so a brand-new user reaches `status = db UP` with only the browser
 approval. An explicit `--project` still scopes the mint to that project.
 
+## Validate first (idempotence guard)
+
+Before running `install` or `auth_bootstrap`, run the `validate` block. A re-run
+of this schema must never disturb an already-good env — and the two steps are NOT
+equally safe to repeat:
+
+- **`install` is idempotent.** It no-ops on a matching version and refuses to
+  overwrite a different version without `--force`, and never touches a repo's
+  `.satellites/` working state. Re-running it cannot break an existing install.
+- **`auth` is NOT idempotent.** Every run starts a fresh browser login and
+  OVERWRITES the stored executor key. Re-running it needlessly disrupts a working
+  credential.
+
+So check first: `satellites version` proves the binary is present, and a
+successful `satellites status` proves the server is reachable AND the stored key
+is accepted (every non-`/oauth/` path 401s without a valid credential, so a
+returned status is itself proof of auth — there is no separate `whoami`). **If
+both pass, stop — change nothing.** Otherwise run ONLY the step whose check
+failed.
+
 ## Schema
 
 ```yaml
@@ -44,6 +64,18 @@ default_config:
   worktree_root: ./.satellites/worktree
   log_path: ./.satellites/logs
   branch_template: client-{task_id}-from-{base_sha}
+validate:
+  # RUN THIS FIRST — before auth_bootstrap or install. It is the idempotence
+  # guard that keeps a re-run from disturbing an already-installed, already-
+  # authorised env. Re-running install is safe (no-ops on a matching version,
+  # refuses to clobber without --force); re-running auth is NOT — it always
+  # starts a fresh browser login and OVERWRITES the stored key. So validate
+  # first and skip whichever step already holds.
+  check_installed:  satellites version   # exits 0 with a version line ⇒ binary present + runnable
+  check_authorised: satellites status    # exits 0 ⇒ server reachable AND the stored executor key
+                                         # was accepted (the server 401s without a valid credential)
+  if_both_pass: stop                     # already installed + authorised — change NOTHING; do not reinstall or re-auth
+  else: run only the failing step        # check_installed fails → install; check_authorised fails → auth_bootstrap
 auth_bootstrap:
   # Shell-capable clients: run `satellites auth` (browser login). The CLI
   # stores an executor key in the user-level credential store — never the TOML.
@@ -78,6 +110,10 @@ install:
 | `default_config.worktree_root`   | TOML `worktree_root` — where per-task worktrees materialise.                                                       |
 | `default_config.log_path`        | TOML `log_path` — CLI + per-task log destination.                                                                  |
 | `default_config.branch_template` | TOML `branch_template` — git branch name template. The inner `{task_id}` / `{base_sha}` are CLI-time substitutions, not server-side. |
+| `validate.check_installed`       | Idempotence guard, run FIRST: `satellites version` — exits 0 with a version line when the binary is present + runnable. A non-zero exit / missing binary means run `install`. |
+| `validate.check_authorised`      | Idempotence guard, run FIRST: `satellites status` — a successful response proves the server is reachable AND the stored executor key was accepted (the server 401s on any non-`/oauth/` path without a valid credential, so a returned status IS proof of auth). A failure / 401 means run `auth_bootstrap`. |
+| `validate.if_both_pass`          | `stop` — when both checks pass the env is already installed + authorised; change NOTHING. Do not reinstall, do not re-auth. |
+| `validate.else`                  | Run ONLY the failing step: `check_installed` failed → `install`; `check_authorised` failed → `auth_bootstrap`. Never run a step whose check already passed. |
 | `auth_bootstrap.kind`            | Auth flow to run after install. `auth_login` = run `satellites auth` (browser login); the CLI stores an executor key in the user-level credential store (`$XDG_CONFIG_HOME/satellites/credentials.toml`, 0600). The api-key is NOT written to the TOML. |
 | `auth_bootstrap.command`         | The shell command a shell-capable client runs — `satellites auth`.                                                |
 | `auth_bootstrap.mcp_only`        | Fallback for MCP-only clients that cannot shell out: `kind: mcp_mint` dispatches `apikey_create` on the already-authenticated MCP session to mint a project-scoped key. |
