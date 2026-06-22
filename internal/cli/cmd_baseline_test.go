@@ -111,8 +111,13 @@ func TestEnsureStarterConstitution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("constitution not written: %v", err)
 	}
-	if !strings.Contains(string(b), "principles:always") || !strings.Contains(string(b), "configuration, not code") {
-		t.Errorf("starter constitution missing the resident tag / config-over-code rule")
+	// The starter ships effectively BLANK — resident frontmatter (name +
+	// principles:always) plus guidance to complete it, NOT satellites' own opinion.
+	if !strings.Contains(string(b), "principles:always") || !strings.Contains(string(b), "name: constitution") {
+		t.Errorf("starter constitution missing the resident frontmatter (name: constitution, principles:always)")
+	}
+	if !strings.Contains(string(b), "complete it") {
+		t.Errorf("starter constitution should ship blank with guidance to complete it")
 	}
 	if added, _ := ensureStarterConstitution(repo); added {
 		t.Errorf("re-run scaffolded again — must be create-if-absent")
