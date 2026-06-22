@@ -62,12 +62,30 @@ func newStoryValidateCmd(configArg, userArg *string) *cobra.Command {
 	return cmd
 }
 
-// validateGateForKind maps a kind to its entry reviewer.
+// validateGateForKind is the per-kind FALLBACK entry reviewer, used only when no
+// governing workflow resolves a forward entry edge (an unresolved/legacy
+// artifact). The authoritative selection is entryReviewerForArtifact, which reads
+// the gate from the workflow — "which gate runs" is configuration, not a Go switch
+// (sty_8e9d409b).
 func validateGateForKind(kind string) string {
 	if kind == "story" {
 		return "satellites-intent-plan-review"
 	}
 	return "satellites-task-upsert-review"
+}
+
+// entryReviewerForArtifact resolves the entry reviewer from the artifact's
+// GOVERNING workflow (selector → category default → embedded copy) — the
+// reviewer_skill on its forward entry edge — so the gate `validate` runs is the
+// one the workflow declares, not a hardcoded kind→name map (sty_8e9d409b). Falls
+// back to the per-kind default only when no governing workflow resolves a forward
+// entry edge, preserving today's behaviour for an ungoverned artifact.
+func entryReviewerForArtifact(tags []string, category, body, kind, configPath string) string {
+	sources := governingWorkflowSources(configPath)
+	if r := verb.EntryReviewer(verb.WorkflowSelector(tags), body, category, sources); r != "" {
+		return r
+	}
+	return validateGateForKind(kind)
 }
 
 func runArtifactValidate(ctx context.Context, kind, id string, o reviewOpts) error {
@@ -84,7 +102,7 @@ func runArtifactValidate(ctx context.Context, kind, id string, o reviewOpts) err
 	if body == "" && len(got.Versions) > 0 {
 		body = got.Versions[len(got.Versions)-1].Body
 	}
-	gate := validateGateForKind(kind)
+	gate := entryReviewerForArtifact(got.Document.Tags, got.Document.Category, body, kind, o.ConfigPath)
 
 	disp := verb.ClaudeCLIGateDispatcher{
 		BinaryPath:     strings.TrimSpace(o.ClaudeBin),

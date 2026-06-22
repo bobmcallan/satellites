@@ -17,6 +17,31 @@ func sources() []WorkflowSource {
 	return []WorkflowSource{{Name: "prod-wf", Body: productWFBody}, {Name: "skills-wf", Body: skillsWFBody}}
 }
 
+// TestEntryReviewer (sty_8e9d409b) pins that the validate pre-flight's entry
+// reviewer is read FROM the governing workflow's forward entry edge — not a
+// hardcoded kind→name switch. The cancel edge (to a terminal state) is skipped,
+// and a repo that wires a different entry reviewer gets THAT reviewer.
+func TestEntryReviewer(t *testing.T) {
+	srcs := sources()
+	// prod-wf (applies_to "*") covers "feature"; its forward entry edge is
+	// backlog→ready reviewer_skill "plan".
+	if got := EntryReviewer("", "", "feature", srcs); got != "plan" {
+		t.Errorf("EntryReviewer(feature) = %q, want \"plan\"", got)
+	}
+	// A custom workflow whose initial state has BOTH a cancel edge (to a terminal
+	// state) and a forward entry edge resolves to the FORWARD one — proving the
+	// gate is config, and the terminal cancel edge is skipped.
+	custom := WorkflowSource{Name: "custom-wf", Body: "---\nname: custom-wf\nkind: workflow\napplies_to: [\"bug\"]\n---\n# C\n\n```yaml\nstates:\n  - intake\n  - {name: doing, actor: executor}\n  - done\n  - cancelled\ntransitions:\n  - {from: intake, to: cancelled, reviewer_skill: \"my-cancel\"}\n  - {from: intake, to: doing, reviewer_skill: \"my-entry-gate\"}\n  - {from: doing, to: done, reviewer_skill: \"my-done\"}\n```\n"}
+	if got := EntryReviewer("", "", "bug", append(srcs, custom)); got != "my-entry-gate" {
+		t.Errorf("EntryReviewer(bug) = %q, want \"my-entry-gate\" (forward edge, not the cancel edge)", got)
+	}
+	// No governing workflow covers the category and there is no embedded body →
+	// "" so the caller falls back to its own default.
+	if got := EntryReviewer("", "", "uncovered", []WorkflowSource{{Name: "skills-wf", Body: skillsWFBody}}); got != "" {
+		t.Errorf("EntryReviewer(uncovered) = %q, want \"\"", got)
+	}
+}
+
 func TestResolveGoverningWorkflow(t *testing.T) {
 	// AC1: a specific category resolves the specific workflow over the wildcard.
 	if _, name, ok := ResolveGoverningWorkflow("skill", sources()); !ok || name != "skills-wf" {

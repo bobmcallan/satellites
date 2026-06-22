@@ -397,6 +397,41 @@ func GoverningGatedEdge(selector, storyBody, status, category, gateSkill string,
 	return gatedEdgeFrom(auth, status, gateSkill)
 }
 
+// EntryReviewer resolves the reviewer that gates a governing workflow's FORWARD
+// entry edge — the gate the read-only `validate` pre-flight runs against a freshly
+// created artifact. It is the reviewer_skill on the transition out of the
+// workflow's initial state to a NON-terminal state (the forward open edge, e.g.
+// backlog→in_progress or ready→running — never a cancel edge whose target is a
+// terminal state). Resolution mirrors enactment: selector → category default →
+// the artifact's embedded copy. Returns "" when no governing workflow resolves or
+// it declares no forward gated entry edge, so the caller falls back to its own
+// default. This is what makes "which gate runs" configuration, not a hardcoded
+// kind→name switch (sty_8e9d409b). Pure (no I/O).
+func EntryReviewer(selector, storyBody, category string, sources []WorkflowSource) string {
+	var auth *workflow.Workflow
+	if selector != "" {
+		if wf, covers, ok := ResolveByName(selector, category, sources); ok && covers {
+			auth = wf
+		}
+	}
+	if auth == nil {
+		if w, _, ok := ResolveGoverningWorkflow(category, sources); ok {
+			auth = w
+		} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
+			auth = embedded
+		}
+	}
+	if auth == nil {
+		return ""
+	}
+	for _, t := range auth.TransitionsFrom(auth.InitialState()) {
+		if strings.TrimSpace(t.ReviewerSkill) != "" && !auth.IsTerminal(t.To) {
+			return strings.TrimSpace(t.ReviewerSkill)
+		}
+	}
+	return ""
+}
+
 // gatedEdgeFrom finds the unconditional reviewer-gated edge for `skill` out of
 // `status` in a parsed workflow — an edge with no on: condition and no trigger
 // whose reviewer_skill is `skill`. The shared core of GoverningGatedEdge.
