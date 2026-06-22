@@ -204,6 +204,35 @@ func TestNewSubstrateGetCmd_ArgsRequired(t *testing.T) {
 	}
 }
 
+// sty_f3c242f7: a `<noun> get` argument that is a bare row id routes to an
+// id lookup; a document name still routes to the name+scope cascade.
+func TestLooksLikeSubstrateID(t *testing.T) {
+	ids := []string{
+		"sty_dbc4e3ff", "doc_9df7a883", "wksp_6f048cd8", "proj_fc7d72d8",
+		"sty_0d183153",
+	}
+	for _, id := range ids {
+		if !looksLikeSubstrateID(id) {
+			t.Errorf("id %q should be recognised as a substrate id", id)
+		}
+	}
+	names := []string{
+		"agent-goals",                   // principle name (kebab, no prefix)
+		"satellites-commit-push-review", // skill name
+		"system_variables",              // snake doc name
+		"definitely-not-a-real-doc",
+		"sty_",         // prefix only, no hex tail
+		"sty_nothex",   // non-hex tail
+		"Sty_dbc4e3ff", // uppercase prefix — names are lower-id only
+		"",
+	}
+	for _, n := range names {
+		if looksLikeSubstrateID(n) {
+			t.Errorf("name %q should NOT be treated as a substrate id", n)
+		}
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

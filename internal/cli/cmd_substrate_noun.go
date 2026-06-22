@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,6 +28,20 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
+
+// substrateIDPattern matches a bare substrate row id — a short type prefix,
+// an underscore, then a hex tail (sty_dbc4e3ff, doc_9df7a883, wksp_6f048cd8,
+// proj_fc7d72d8). When a `<noun> get` argument matches, it is resolved by id
+// (server-side, scope-independent) rather than by name through the scope
+// cascade — so a bare story/document id works wherever a get is offered, from
+// any project's directory, with no --scope (sty_f3c242f7).
+var substrateIDPattern = regexp.MustCompile(`^[a-z]{2,6}_[0-9a-f]{6,}$`)
+
+// looksLikeSubstrateID reports whether arg is a bare substrate row id rather
+// than a document name.
+func looksLikeSubstrateID(arg string) bool {
+	return substrateIDPattern.MatchString(strings.TrimSpace(arg))
+}
 
 // substrateNounConfig describes one noun's list/get command shape.
 // Exactly one of FilterType / FilterTagPrefix is set — list/get
@@ -193,6 +208,21 @@ func newSubstrateGetCmd(cfg substrateNounConfig) *cobra.Command {
 			name := args[0]
 			out := cmd.OutOrStdout()
 
+			// A bare row id resolves by id, not by name. An id is globally
+			// unique and scope-independent, so the scope cascade (and any
+			// --scope) does not apply — this is the same id lookup the MCP
+			// `story:<id>` bootstrap uses, and it works from any project's
+			// directory (sty_f3c242f7). It is intentionally NOT constrained to
+			// cfg.FilterType: `document get <story-id>` resolves the story.
+			if looksLikeSubstrateID(name) {
+				body, err := substrateGetByID(ctx, cfg, name)
+				if err != nil {
+					return err
+				}
+				printSubstrateBody(out, body)
+				return nil
+			}
+
 			// Explicit scope: a single get, but auto-fill the project_id /
 			// workspace_id the scope needs from config when the caller omits them
 			// (so `--scope project` no longer demands a manual --project).
@@ -298,6 +328,28 @@ func substrateGetOne(ctx context.Context, cfg substrateNounConfig, name, scope, 
 		return "", 0, fmt.Errorf("decode response: %w", err)
 	}
 	return parsed.RenderedBody, parsed.Document.LatestVersion, nil
+}
+
+// substrateGetByID fetches a row by its bare id (document_get id=<id>), the
+// scope-independent lookup behind a `<noun> get <id>` (sty_f3c242f7). Any row
+// the server holds resolves — including a story fetched via `document get
+// <story-id>` — so the type filter is deliberately not applied.
+func substrateGetByID(ctx context.Context, cfg substrateNounConfig, id string) (string, error) {
+	raw, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{ID: strings.TrimSpace(id)})
+	if err != nil {
+		return "", err
+	}
+	resp, err := dispatchVerb(ctx, "document_get", raw, *cfg.ConfigArg, *cfg.UserArg)
+	if err != nil {
+		return "", err
+	}
+	var parsed docGetFullView
+	if err := json.Unmarshal(resp, &parsed); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	return parsed.RenderedBody, nil
 }
 
 // printSubstrateBody writes a fetched body, ensuring a trailing newline.
