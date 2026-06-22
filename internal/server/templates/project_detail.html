@@ -87,7 +87,9 @@
                 title="Reset to default filters">clear all</button>
       </div>
 
-      {{if .Stories}}
+      {{/* The table is ALWAYS rendered (even at zero rows) so the live SSE refetch
+           has a stable tbody to swap into — the empty state is a row in the
+           story-rows fragment, so the 0→1 transition renders live (sty_33342052). */}}
       <table class="panel-table panel-table-stories" data-field="stories-table">
         <thead>
           <tr>
@@ -102,9 +104,6 @@
           {{template "story-rows" .}}
         </tbody>
       </table>
-      {{else}}
-      <p class="empty" data-field="stories-empty">No stories under this project yet.</p>
-      {{end}}
 
       {{if or .Paginator.HasPrev .Paginator.HasNext}}
       <nav class="panel-paginator" aria-label="Stories pagination" data-field="panel-stories-paginator">
@@ -173,10 +172,12 @@
               data-action="panel-tasks-clear-all"
               title="Reset to default filters">clear all</button>
     </div>
-    {{if .Tasks}}
     {{/* The task grid mirrors the story table's column convention (sty_09e2ce68):
          lowercase headers + shared col-* classes + a dedicated id column with
-         click-to-copy + a <code> status pill — so the two grids read as one. */}}
+         click-to-copy + a <code> status pill — so the two grids read as one.
+         The table is ALWAYS rendered (even at zero rows) so the live SSE refetch
+         has a stable tbody to swap into — the empty state is a row in the
+         task-rows fragment, so the 0→1 transition renders live (sty_33342052). */}}
     <table class="panel-table panel-table-tasks" data-field="task-list">
       <thead>
         <tr>
@@ -191,13 +192,6 @@
         {{template "task-rows" .}}
       </tbody>
     </table>
-    {{else}}
-    {{if .TaskTotal}}
-    <p class="empty" data-field="no-tasks">No tasks match the active filter.</p>
-    {{else}}
-    <p class="empty" data-field="no-tasks">No tasks in this project yet.</p>
-    {{end}}
-    {{end}}
     </div>
   </section>
 </main>
@@ -299,6 +293,10 @@
             </div>
           </td>
         </tr>
+        {{else}}
+        <tr class="panel-empty-row" data-field="no-tasks">
+          <td colspan="5" class="empty">{{if .TaskTotal}}No tasks match the active filter.{{else}}No tasks in this project yet.{{end}}</td>
+        </tr>
         {{end}}
 {{end}}
 
@@ -386,6 +384,10 @@
                 </div>
               </div>
             </td>
+          </tr>
+{{else}}
+          <tr class="panel-empty-row" data-field="stories-empty">
+            <td colspan="5" class="empty">{{if .StoryTotal}}No stories match the active filter.{{else}}No stories under this project yet.{{end}}</td>
           </tr>
 {{end}}
 {{end}}
