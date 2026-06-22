@@ -65,7 +65,7 @@ func engagedStoryForSession(configPath, session string) string {
 	return ""
 }
 
-// recordGateVerdictTo is the injectable core (mirrors runEvidenceCI): one
+// recordGateVerdictTo is the injectable core: one
 // local evidence row + one ci_result ledger row carrying
 // {gate, verdict, blocking_findings, duration_ms}. Pure enough for tests to
 // pin the row shape without a server.

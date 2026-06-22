@@ -79,7 +79,7 @@ func handlerLoc(c *cobra.Command, repoRoot string) (string, int, bool) {
 }
 
 // handlerShortName returns the trailing symbol name of a command's RunE/Run
-// (e.g. "runEvidenceCI"), or "" if it has no handler. Closures resolve to their
+// (e.g. "runCodeIndex"), or "" if it has no handler. Closures resolve to their
 // synthesised name (e.g. "glob..func1") which the index will not match — those
 // keep an empty File:Line, which is honest.
 func handlerShortName(c *cobra.Command) string {
@@ -96,7 +96,7 @@ func handlerShortName(c *cobra.Command) string {
 }
 
 // FuncShortName resolves a function value to its trailing symbol name via
-// runtime (e.g. "runEvidenceCI", "invokeDocumentGet"). Used for both cobra
+// runtime (e.g. "runCodeIndex", "invokeDocumentGet"). Used for both cobra
 // RunE closures and verb Invoke funcs so handler resolution is registry-derived.
 func FuncShortName(fn interface{}) string {
 	pc := reflect.ValueOf(fn).Pointer()
@@ -104,7 +104,7 @@ func FuncShortName(fn interface{}) string {
 	if f == nil {
 		return ""
 	}
-	full := f.Name() // e.g. github.com/.../internal/cli.runEvidenceCI
+	full := f.Name() // e.g. github.com/.../internal/cli.runCodeIndex
 	if i := strings.LastIndex(full, "."); i >= 0 {
 		return full[i+1:]
 	}

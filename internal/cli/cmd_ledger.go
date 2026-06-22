@@ -91,6 +91,16 @@ func runLedgerList(ctx context.Context, out io.Writer, configPath, userArg, stor
 	return nil
 }
 
+// firstLine returns the first non-blank, trimmed line of s, or "".
+func firstLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(ln); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
 // formatLedgerRow renders one ledger row — pure for tests. A
 // status_transition payload is annotated as "from → to"; other kinds show
 // their body's first line.

@@ -65,6 +65,23 @@ the original audit missed entirely, plus several `workflow check` opinions.
 > by-design carve-out. The commitgate ship-step bake was removed (F1); **the same
 > class survives in `evidence` + `processtrace`.**
 
+> **✅ N1 RECONCILED (2026-06-23, epic:code-reachability) — resolved by DELETION,
+> not configuration.** A reachability trace
+> (`docs/reports/reachability-2026-06-23.md`, sty_d739fc2f) proved the whole
+> `evidence`-ci / QA-audit subsystem was **dead code**: `evidence
+> ci/audit/review/show` had no system invoker (a story that ran the full
+> test→release→deploy chain, `sty_028c3f92`, wrote **zero `ci_result` rows**), and
+> `processtrace.Audit`/`auditUngatedDeploy` were reachable only from those
+> un-invoked commands. The honest fix superseded "make the CI chain configurable":
+> the dead subsystem was **removed** (sty_d78b0c11) — `cmd_evidence*.go`,
+> `processtrace/audit.go`, and with them the entire **N1a/N1b/N1c literal family**
+> (`ciStages`, `validCIStages`, `Stage == "deploy"`). The live ledger-trace view
+> (`processtrace.Reconcile`/`AnnotateLedger`, server story-detail) and the
+> gate-shape `ci_result` path (`recordGateVerdict`, used by `surface`/`workflow
+> check`) were preserved. A re-runnable `satellites code map` (sty_8834343c) now
+> guards against the regression — post-deletion it reports **zero high-confidence
+> orphans**.
+
 ### N2 — `workflow check` bakes reviewer-content + terminal opinions
 
 | # | Site | What's baked | Clause |
@@ -113,7 +130,7 @@ the original audit missed entirely, plus several `workflow check` opinions.
 
 | Pri | Group | Fix |
 |---|---|---|
-| 1 | **N1** CI-chain bake | make the CI chain configuration (a TOML/`config` list of stage names) that `evidence ci`, `cmd_evidence_fromhead`, and `audit.go`'s ungated-deploy rule read — drop the `{test,release,deploy}` / `"deploy"` literals. Highest-leverage: it's a whole repo's CI shape in the binary. |
+| 1 | **N1** CI-chain bake | ✅ **DONE — by deletion, not config (epic:code-reachability).** The `evidence ci`/`cmd_evidence_fromhead`/`audit.go` cluster was orphaned dead code (no system invoker); removing it (sty_d78b0c11) dropped the whole `{test,release,deploy}`/`"deploy"` literal family at once. ~~make the CI chain configuration~~ superseded — see the N1-RECONCILED note above. |
 | 2 | **N2b** `terminalStoryStatuses` | route through `IsTerminalForCategory` (the sanctioned fallback pattern) — both `workflow_check.go:292` and `context_validate.go:233`. Drop-in. |
 | 3 | **N2a** `firstGateLayers` | make the required first-gate layers configuration (or drop the substring checklist) — a reviewer's rubric is substrate, not a binary checklist. |
 | 4 | **N3** `taskShapedWorkflow` | derive task-lifecycle soundness structurally (reachable terminal, gate resolvability) instead of pinning `ready/running/complete`. |
