@@ -56,19 +56,34 @@ There is one verb (`invokeDocumentUpsert`) and one store write per mode
 (`Upsert` / `CreateStory` / `CreateTask` / `UpdateStory`). No second code path
 writes a documents row, so the barrier cannot be sidestepped by a parallel writer.
 
-## Residual (tracked as a follow-up)
+## Non-forgeability — decision: accept client-trust (sty_a6d9a0fd)
 
-Two items remain and are **not** a single bounded change — they carry design
-decisions, so they are split out rather than forced here:
+"An accept happened" is **client-trust**, and the property spans BOTH write channels:
 
-1. **Non-forgeability.** The attestation is client-trust: a client that knows the
-   body hash can forge `{decision:accept, content_sha256:…}`. True
-   non-forgeability needs SERVER-SIDE review (the server running the reviewer),
-   which has constitution implications (the server holds mechanism; gates run
-   client-side). Noted at `document.go:233`.
-2. **Edge raw-write paths to verify.** A few CLI helpers issue a key-addressed
-   `document_upsert` directly (e.g. `setPrincipleAlways` in
-   `cmd_context_curate.go`, the workspace-objective write in `cmd_workspace.go`).
-   A `principles:`-tagged write hits the barrier and is refused without an
-   attestation, so these need case-by-case verification — confirm each either
-   carries an attestation, is exempt by design, or must be routed.
+- **Document attestation** — a client that knows the body hash can forge
+  `{decision:accept, content_sha256:…}` on a `document_upsert` (`document.go:233`).
+- **Status enact via `ledger_append`** — an api-key caller can write a
+  `status_transition` (and `review_accept`) row directly, self-completing a story
+  or task without a real gate. This is how `tsk_28f62807` was hand-stamped to
+  `complete`. The gate's OWN enact uses the same `ledger_append` path under the
+  operator's admin auth (`ledger.go:238`), so the two are indistinguishable at the
+  verb layer — the same client-trust property.
+
+**Decision: accept client-trust; do NOT add server-side review.** Rationale: the
+enact credential is the operator's own admin key — forging an accept requires
+already holding it, at which point the holder could equally run the real gate, so
+the attestation raises no privilege. True non-forgeability would require the SERVER
+to run the reviewer (`claude -p`), which the constitution forbids (mechanism-only
+server; gates run client-side on the operator machine where the worktree + `claude`
+live). The boundary holds because the executor will not breach it — the
+`reviewer-only-model` principle, not a server check. The hand-stamp risk is
+mitigated at the point of use by the discoverability fix (sty_4300e117): the tooling
+now names the real gate from any state, so an agent no longer needs to route around
+a gate it could not find.
+
+## Edge raw-write audit (sty_a6d9a0fd)
+
+| Helper | Reviewed type? | Status |
+| --- | --- | --- |
+| workspace-objective write (`cmd_workspace.go`) | no — a free-form `type:document`, `scope:workspace` row (no behaviour kind, no `principles:` tag) | **exempt by design** — `reviewRequiredKind`=false; not a gated artifact |
+| `setPrincipleAlways` (`cmd_context_curate.go`) | yes — a `principles:`-tagged write | **REGRESSION** — `context curate --drop/--restore` toggles `principles:always` (a TAG/metadata-only patch, body unchanged) but the barrier (`reviewRequiredKind`=true on the `principles:` tag) refuses it without an attestation. Its unit test mocks dispatch, so CI never caught it. Fix tracked separately: exempt a body-unchanged metadata patch from the CONTENT barrier. |
