@@ -66,8 +66,9 @@ func init() {
 		file      string
 	)
 	changelog := &cobra.Command{
-		Use:   "changelog",
-		Short: "Changelog (release-notes) operations — system-scope type:changelog documents",
+		Use:     "changelog",
+		Aliases: []string{"changelogs"},
+		Short:   "Changelog (release-notes) operations — system-scope type:changelog documents",
 	}
 	changelog.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	changelog.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

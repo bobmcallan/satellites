@@ -22,8 +22,9 @@ func init() {
 	)
 
 	project := &cobra.Command{
-		Use:   "project",
-		Short: "Project commands (match a git remote to a project_id, …)",
+		Use:     "project",
+		Aliases: []string{"projects"},
+		Short:   "Project commands (match a git remote to a project_id, …)",
 	}
 	project.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	project.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

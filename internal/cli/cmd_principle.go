@@ -12,8 +12,9 @@ func init() {
 		userArg   string
 	)
 	principle := &cobra.Command{
-		Use:   "principle",
-		Short: "Principle document operations (list / get)",
+		Use:     "principle",
+		Aliases: []string{"principles"},
+		Short:   "Principle document operations (list / get)",
 	}
 	principle.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	principle.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

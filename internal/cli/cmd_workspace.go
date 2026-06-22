@@ -22,8 +22,9 @@ func init() {
 		userArg   string
 	)
 	ws := &cobra.Command{
-		Use:   "workspace",
-		Short: "Workspace commands (synthesize a workspace's objective from its corpus).",
+		Use:     "workspace",
+		Aliases: []string{"workspaces"},
+		Short:   "Workspace commands (synthesize a workspace's objective from its corpus).",
 	}
 	ws.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml")
 	ws.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id")

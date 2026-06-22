@@ -33,8 +33,9 @@ func init() {
 	)
 
 	task := &cobra.Command{
-		Use:   "task",
-		Short: "Top-level project task commands (read a task; list a project's tasks)",
+		Use:     "task",
+		Aliases: []string{"tasks"},
+		Short:   "Top-level project task commands (read a task; list a project's tasks)",
 	}
 	task.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	task.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

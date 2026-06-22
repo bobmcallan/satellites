@@ -16,8 +16,9 @@ func init() {
 	)
 
 	story := &cobra.Command{
-		Use:   "story",
-		Short: "Story commands (gate a story's transitions via claude -p)",
+		Use:     "story",
+		Aliases: []string{"stories"},
+		Short:   "Story commands (gate a story's transitions via claude -p)",
 	}
 	story.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	story.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

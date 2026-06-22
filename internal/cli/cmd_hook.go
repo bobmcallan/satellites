@@ -38,8 +38,9 @@ import (
 
 func init() {
 	hookCmd := &cobra.Command{
-		Use:   "hook",
-		Short: "Claude Code hook handlers (harness-enforced workflow doors)",
+		Use:     "hook",
+		Aliases: []string{"hooks"},
+		Short:   "Claude Code hook handlers (harness-enforced workflow doors)",
 		Long: `hook holds the handlers Claude Code invokes from .claude/settings.json.
 Each subcommand reads the hook event JSON on stdin and emits the hook's
 decision. They are installed into a repo by ` + "`satellites init`" + `.`,

@@ -16,8 +16,9 @@ func init() {
 		userArg   string
 	)
 	skill := &cobra.Command{
-		Use:   "skill",
-		Short: "Skill substrate operations (list / get)",
+		Use:     "skill",
+		Aliases: []string{"skills"},
+		Short:   "Skill substrate operations (list / get)",
 	}
 	skill.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	skill.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

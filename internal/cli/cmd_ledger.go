@@ -25,8 +25,9 @@ func init() {
 		userArg   string
 	)
 	ledgerCmd := &cobra.Command{
-		Use:   "ledger",
-		Short: "Read the server evidence ledger (story history: transitions, gate verdicts, summaries)",
+		Use:     "ledger",
+		Aliases: []string{"ledgers"},
+		Short:   "Read the server evidence ledger (story history: transitions, gate verdicts, summaries)",
 	}
 	ledgerCmd.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	ledgerCmd.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

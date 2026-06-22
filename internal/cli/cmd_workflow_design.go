@@ -74,8 +74,9 @@ is refused, and the command errors when none validates).`,
 	design.Flags().StringVar(&claudeBin, "claude-bin", "", "Path to the claude binary (defaults to $SATELLITES_CLAUDE_BIN or `claude`).")
 
 	workflowCmd := &cobra.Command{
-		Use:   "workflow",
-		Short: "Workflow tooling (design a story's ## Workflow)",
+		Use:     "workflow",
+		Aliases: []string{"workflows"},
+		Short:   "Workflow tooling (design a story's ## Workflow)",
 	}
 	workflowCmd.PersistentFlags().StringVar(configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	workflowCmd.PersistentFlags().StringVar(userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID).")

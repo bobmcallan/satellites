@@ -172,8 +172,9 @@ func init() {
 		userArg   string
 	)
 	docs := &cobra.Command{
-		Use:   "document",
-		Short: "Substrate document operations (list / get / upload)",
+		Use:     "document",
+		Aliases: []string{"documents"},
+		Short:   "Substrate document operations (list / get / upload)",
 	}
 	docs.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	docs.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")

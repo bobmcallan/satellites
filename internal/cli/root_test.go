@@ -58,6 +58,50 @@ func TestUnknownCommand_NoCloseMatchStillErrors(t *testing.T) {
 	}
 }
 
+// sty_dbc4e3ff: every noun command group accepts both the singular and the
+// plural form, so `satellites skills sync` resolves to the same command as
+// `satellites skill sync`. The alternate form is a cobra alias (not a
+// duplicate command), so root help still lists each noun once.
+func TestNounGroups_SingularPluralAliases(t *testing.T) {
+	// canonical (the command's Name) → the alias the user may also type.
+	want := map[string]string{
+		"skill":     "skills",
+		"story":     "stories",
+		"project":   "projects",
+		"document":  "documents",
+		"principle": "principles",
+		"workspace": "workspaces",
+		"workflow":  "workflows",
+		"task":      "tasks",
+		"ledger":    "ledgers",
+		"changelog": "changelogs",
+		"hook":      "hooks",
+	}
+	root := NewRootCmd()
+	for canonical, plural := range want {
+		// The plural resolves to the very same command object as the canonical.
+		cSing, _, err := root.Find([]string{canonical})
+		if err != nil || cSing == nil || cSing.Name() != canonical {
+			t.Fatalf("canonical %q did not resolve: cmd=%v err=%v", canonical, cSing, err)
+		}
+		cPlur, _, err := root.Find([]string{plural})
+		if err != nil || cPlur == nil {
+			t.Fatalf("plural %q did not resolve: err=%v", plural, err)
+		}
+		if cPlur != cSing {
+			t.Errorf("plural %q resolved to a different command than %q", plural, canonical)
+		}
+		// The alias is carried on the command (so `--help` prints it) rather
+		// than registered as a separate top-level command.
+		if !cSing.HasAlias(plural) {
+			t.Errorf("command %q missing alias %q", canonical, plural)
+		}
+		if cPlur.Name() != canonical {
+			t.Errorf("plural %q surfaced as its own command %q (should be an alias)", plural, cPlur.Name())
+		}
+	}
+}
+
 // AC3: a known command is unaffected — it neither errors as unknown nor
 // gets a usage dump appended.
 func TestKnownCommand_Unaffected(t *testing.T) {
