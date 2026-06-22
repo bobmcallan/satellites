@@ -635,28 +635,45 @@ func ensureGitignore(repoRoot string) (bool, error) {
 // both copies here, which then drifted from the embed.
 
 // starterConstitutionDoc is the repo-AGNOSTIC starter constitution init/rebase
-// scaffold into .satellites/principles/, create-if-absent. It is
-// principles:always (resident every session) and a STARTER the repo adapts to
-// its own intent; the config-over-code rule it encodes is enforced on the DIFF
-// by satellites-intent-code-review (an opt-in substrate gate), not by the
-// format+goal spine plan-gate (epic:satellites-backbone 2.4; epic:minimal-spine).
+// scaffolds into .satellites/principles/, create-if-absent. It is
+// principles:always (resident every session) but ships effectively BLANK — a
+// template the operator/agent completes with THIS repo's own principles, never
+// satellites' opinions. Satellites is a harness: it imposes no process of its
+// own on a consuming repo, so the starter carries only guidance comments (why
+// it exists, how it is used, how to fill it), not content. Reviewer gates read
+// whatever the repo authors here; an unfilled constitution simply adds no
+// repo-specific rules until the team writes them.
 const starterConstitutionDoc = `---
 name: constitution
 tags: [principles:always]
 ---
-# Constitution
+<!--
+  THIS REPO'S CONSTITUTION — complete it. It ships effectively blank on purpose.
 
-This repo's process is configuration, not code. Workflows, gates, reviews, and
-opinions live in the substrate — documents, principles, skills, and workflow
-config the team authors and edits without a binary release — never as branches
-baked into a binary. A check that is deterministic is still configuration: a
-command a gate carries, not a hardcoded decision.
+  WHY THIS EXISTS
+  Satellites is a harness: it ships no process of its own. YOUR process, gates,
+  and opinions live in the substrate — this file and the documents, skills, and
+  workflows beside it — authored by you, never baked into a binary. This file is
+  where you state the non-negotiable principles an agent must honour in this repo.
 
-When a change proposes baking a process, a gate, or an opinion into the binary
-instead of the substrate, that is the violation — move it to configuration.
+  HOW IT IS USED
+  - It is principles:always — injected into EVERY agent session, so the agent
+    reads it before acting. Keep it short and high-signal.
+  - Reviewer gates may read it to judge changes against your stated intent, so it
+    evolves with your repo without a binary release.
+  - Put durable principles here (what "good" means, what must never happen) — not
+    transient tasks or anything the code/README already records.
 
-Adapt the rest of this document to your repo's own intent and definition of
-"good"; the rule above is the spine the intent-gates enforce.
+  HOW TO COMPLETE IT
+  Replace this comment with your principles. Prompts to consider, delete the rest:
+    - What does "done" mean in this repo?
+    - What must never happen (safety, data loss, security, irreversible actions)?
+    - Which conventions are non-negotiable (architecture, testing, review)?
+    - Who decides what, and when must the agent stop and ask rather than proceed?
+
+  Leaving it blank is valid — the agent then follows only the satellites baseline
+  until you author your own. Edit this any time; no binary release is needed.
+-->
 `
 
 // ensureStarterConstitution scaffolds the starter constitution into
