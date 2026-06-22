@@ -534,6 +534,68 @@ func runWorkflowChecks(skills []matSkill, clientWorkflows []matSkill, stories []
 	return runWorkflowChecksResolved(skills, clientWorkflows, stories, verb.IsConfigSkill)
 }
 
+// checkGateEnactmentModel flags a reviewer gate wired with two INCOMPATIBLE
+// enactment models across the resolved workflow set (sty_8afdae71). An edge
+// enacts one of two ways: a v2 edge (`on: pass|fail`) is enacted by the CLIENT
+// when the invoked gate matches; a legacy edge (a `reviewer_skill` with no
+// `on:`) is enacted by the GATE itself, which must write its own
+// status_transition. A gate is written for ONE of these — so naming the same
+// gate on a v2 edge in one workflow and a legacy edge in another means that on
+// the mismatched edge the gate ACCEPTS but moves nothing, and the story stalls
+// (the sty_0d183153 failure: the v2 commit-push gate placed on a legacy
+// `in_progress → committed` edge). validation catches it at author time instead
+// of at runtime.
+//
+// The check is purely structural — it needs no gate-body introspection: a gate's
+// model is INFERRED from its v2 wiring, so a gate that is only ever legacy (or
+// only ever v2) is consistent and never flagged. The check resolves over the
+// SAME set the command assembles (materialised + client-dir + embedded
+// workflows), so a local workflow's legacy mis-wire is seen against the system
+// workflow's v2 usage of the same gate.
+func checkGateEnactmentModel(wfs map[string]*workflow.Workflow) []driftFinding {
+	type usage struct{ wf, edge string }
+	v2 := map[string]usage{}     // gate → first edge wiring it as a v2 (client-enact) edge
+	legacy := map[string]usage{} // gate → first edge wiring it as a legacy (self-enact) edge
+
+	names := make([]string, 0, len(wfs))
+	for n := range wfs {
+		names = append(names, n)
+	}
+	sort.Strings(names) // deterministic "first" usage per model
+	for _, n := range names {
+		for _, tr := range wfs[n].Transitions {
+			g := strings.TrimSpace(tr.ReviewerSkill)
+			if g == "" {
+				continue
+			}
+			edge := fmt.Sprintf("%s→%s", tr.From, tr.To)
+			if tr.On == "pass" || tr.On == "fail" {
+				if _, ok := v2[g]; !ok {
+					v2[g] = usage{n, edge}
+				}
+			} else if _, ok := legacy[g]; !ok {
+				legacy[g] = usage{n, edge}
+			}
+		}
+	}
+
+	var conflicted []string
+	for g := range v2 {
+		if _, ok := legacy[g]; ok {
+			conflicted = append(conflicted, g)
+		}
+	}
+	sort.Strings(conflicted)
+
+	var out []driftFinding
+	for _, g := range conflicted {
+		a, b := v2[g], legacy[g]
+		out = append(out, driftFinding{"block", "gate-model-conflict", g,
+			fmt.Sprintf("reviewer gate is wired with two enactment models: v2 client-enact (%s %s, on:pass/fail) and legacy self-enact (%s %s, no on:). A gate is written for one model — on the other its accept enacts nothing and the story stalls. Wire every edge that names this gate the same way", a.wf, a.edge, b.wf, b.edge)})
+	}
+	return out
+}
+
 // runWorkflowChecksResolved is runWorkflowChecks with the gate-resolution
 // predicate injected. gateResolvable reports whether a NAMED reviewer gate
 // resolves from a source beyond the materialised set — embedded, or (in prod)
@@ -549,6 +611,7 @@ func runWorkflowChecksResolved(skills []matSkill, clientWorkflows []matSkill, st
 	out = append(out, checkAmbiguousGovernance(wfBearing)...)
 	out = append(out, checkGateCoverage(wfBearing, wfs, gateResolvable)...)
 	out = append(out, checkGatePlacementConflict(wfBearing, wfs)...)
+	out = append(out, checkGateEnactmentModel(wfs)...)
 	out = append(out, checkNonAtomicCandidates(skills)...)
 	out = append(out, checkSystemScopeCoupling(skills)...)
 	out = append(out, checkStoryGovernance(stories, wfs)...)

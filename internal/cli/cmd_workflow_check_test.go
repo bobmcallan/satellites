@@ -96,6 +96,42 @@ func TestWorkflowCheck_AmbiguousGovernance(t *testing.T) {
 	}
 }
 
+// TestWorkflowCheck_GateModelConflict (sty_8afdae71): a reviewer gate wired as a
+// v2 (on:pass/fail) edge in one workflow and a legacy (no-on:) edge in another
+// is flagged — the cross-workflow mis-wire behind the sty_0d183153 stall. A gate
+// wired with a single consistent model is clean.
+func TestWorkflowCheck_GateModelConflict(t *testing.T) {
+	mkWF := func(name, applies, body string) matSkill {
+		raw := "---\nname: " + name + "\nkind: workflow\napplies_to: [\"" + applies + "\"]\ndescription: d\n---\n" + body
+		return matSkill{name: name, kind: "workflow", description: "d", body: body, raw: raw}
+	}
+	// "commit-review" is wired v2 here (on:pass/fail, client-enact). The fail edge
+	// goes to a distinct terminal state so the lifecycle is valid (no unbounded
+	// fail cycle).
+	v2WF := mkWF("ship-wf", "ship",
+		"# ship\n\n```yaml\nstates:\n  - backlog\n  - {name: shipping, actor: executor}\n  - done\n  - failed\ntransitions:\n  - {from: backlog, to: shipping, trigger: checkpoint}\n  - {from: shipping, on: pass, to: done, reviewer_skill: \"commit-review\"}\n  - {from: shipping, on: fail, to: failed, reviewer_skill: \"commit-review\"}\n```\n")
+	// Same gate placed on a LEGACY edge (no on:) — the mis-wire.
+	legacyWF := mkWF("probe-wf", "probe",
+		"# probe\n\n```yaml\nstates:\n  - backlog\n  - {name: in_progress, actor: executor}\n  - committed\ntransitions:\n  - {from: backlog, to: in_progress, reviewer_skill: \"plan-review\"}\n  - {from: in_progress, to: committed, reviewer_skill: \"commit-review\"}\n```\n")
+
+	conflicted := false
+	for _, f := range runWorkflowChecks([]matSkill{v2WF, legacyWF}, nil, nil) {
+		if f.Code == "gate-model-conflict" && f.Artifact == "commit-review" && f.Severity == "block" {
+			conflicted = true
+		}
+	}
+	if !conflicted {
+		t.Fatal("a gate wired v2 in one workflow and legacy in another must raise gate-model-conflict")
+	}
+
+	// Consistent wiring (v2 only) → no conflict.
+	for _, f := range runWorkflowChecks([]matSkill{v2WF}, nil, nil) {
+		if f.Code == "gate-model-conflict" {
+			t.Errorf("a single-model gate must not be flagged: %+v", f)
+		}
+	}
+}
+
 // TestWorkflowCheck_CleanCorpus: a healthy corpus and governed stories yield
 // zero blocking findings.
 func TestWorkflowCheck_CleanCorpus(t *testing.T) {
