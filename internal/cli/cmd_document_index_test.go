@@ -88,3 +88,21 @@ func TestBuildDocumentIndexTruncates(t *testing.T) {
 		t.Fatalf("want %d capped entries, got %d", documentIndexCap, len(index))
 	}
 }
+
+// TestEmptyIndexHint (sty_56bfddd2): an empty index names the queried scope and
+// steers to the others, so blank output reads as "look elsewhere", not "broken".
+func TestEmptyIndexHint(t *testing.T) {
+	cases := map[string][]string{
+		"project":   {"0 documents in project scope", "--scope system"},
+		"workspace": {"0 documents in workspace scope", "--scope system"},
+		"system":    {"0 documents in system scope", "--scope workspace"},
+	}
+	for scope, wants := range cases {
+		got := emptyIndexHint(scope)
+		for _, w := range wants {
+			if !strings.Contains(got, w) {
+				t.Errorf("scope %q hint %q missing %q", scope, got, w)
+			}
+		}
+	}
+}

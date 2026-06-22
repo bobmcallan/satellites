@@ -102,6 +102,22 @@ func buildDocumentIndex(ctx context.Context, dispatch verbDispatch, scope, wsID,
 	return out, truncated, nil
 }
 
+// emptyIndexHint is the one-line steer printed when `document index` finds no
+// rows in the queried scope — it names the scope and the others worth trying, so
+// an empty result reads as "look elsewhere", not "broken" (sty_56bfddd2).
+func emptyIndexHint(scope string) string {
+	alts := map[string]string{
+		"project":   "system (or workspace)",
+		"workspace": "system (or project)",
+		"system":    "workspace (or project)",
+	}
+	hint := alts[scope]
+	if hint == "" {
+		hint = "system / workspace / project"
+	}
+	return fmt.Sprintf("document index: 0 documents in %s scope — try --scope %s", scope, hint)
+}
+
 func hasTag(tags []string, want string) bool {
 	for _, t := range tags {
 		if t == want {
@@ -145,6 +161,16 @@ listing is bounded by a hard cap; truncation is reported on stderr.`,
 			index, truncated, err := buildDocumentIndex(ctx, dispatch, scopeArg, wsArg, pjArg)
 			if err != nil {
 				return err
+			}
+			// An empty index in the queried scope prints nothing from the loop
+			// below, which reads as "broken" to an agent that does not know the
+			// row it wants lives in another scope (the baseline workflow and
+			// principles are system-scope, while the default here is project).
+			// Emit one explicit line naming the scope and the others to try
+			// (sty_56bfddd2). Still exit 0 — an empty scope is not an error.
+			if len(index) == 0 {
+				fmt.Fprintln(cmd.ErrOrStderr(), emptyIndexHint(scopeArg))
+				return nil
 			}
 			out := cmd.OutOrStdout()
 			for _, e := range index {
