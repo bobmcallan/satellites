@@ -32,6 +32,14 @@ governed path — recurring work but no task workflow, so it would fall into a
 one-shot story/deploy workflow — that is a CONFIG GAP to surface (name the missing
 workflow), not a question to put to the user.
 
+**One clarification is allowed — recurrence, never the primitive.** Whether work
+will RECUR is a user fact you cannot derive, and the primitive follows from it. So
+when the recurrence signal is genuinely ambiguous:
+
+- Elicit the requirement once, at intake, while intent is freshest: *"a one-off, or will you re-run it and want each run recorded?"*
+- Choose the primitive from the answer YOURSELF — never ask "task or story?".
+- Don't lean on the word "task": it is both an everyday noun and a primitive name, so it is a weak signal — weigh recurrence and per-run/dated output instead.
+
 **A task IS its work definition.** A task's body states the action, the output,
 and how success is verified — that is the work, judged by the same reviewer model
 as a story (the agent does the work; reviewers gate it). A task MAY name a skill
