@@ -9,6 +9,17 @@ import (
 
 var embedWikilinkRe = regexp.MustCompile(`\[\[([a-z0-9_-]+)\]\]`)
 
+// TestAuthoringReferenceShips guards sty_0993988b: the workflow/reviewer authoring
+// reference must ship in the SYSTEM embed so a CONSUMER repo can fetch it via
+// document_get / document index. The format reference was previously only in
+// satellites' own project substrate, so a consumer-repo agent had nothing to copy
+// and fumbled the type:skill + kind:<...> convention by trial and error.
+func TestAuthoringReferenceShips(t *testing.T) {
+	if _, err := FS.ReadFile("documents/workflow-authoring.md"); err != nil {
+		t.Fatalf("workflow-authoring reference missing from the embed — a consumer repo would have no authoring format reference: %v", err)
+	}
+}
+
 // TestEmbeddedWikilinksResolve guards against a dangling [[wikilink]] in any
 // embedded substrate artifact (sty_4bd0a0e9). The satellites-task-workflow linked
 // [[reviewer-only-model]], which lived ONLY in the satellites repo's .satellites/
