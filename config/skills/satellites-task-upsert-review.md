@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED — its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED — its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and is a RE-RUNNABLE definition (rejecting a story-shaped/literal body — past-tense narration, Purpose/Approach/AC scaffolding, or an embedded story workflow section) and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
@@ -48,8 +48,34 @@ Judge the `story_body`:
   to be executed by the agent.
 - **reject** — the body is empty, a stub, or does not describe executable work; or
   it is missing any of ACTION / OUTPUT / VERIFICATION (name which); or the goal is
-  too vague for the agent to act on; or no governing-workflow transition matches
+  too vague for the agent to act on; or it is STORY-SHAPED rather than a re-runnable
+  task definition (see *Structure*); or no governing-workflow transition matches
   this gate from the current status. Name exactly what is missing.
+
+## Structure — a task is a RE-RUNNABLE definition, not a story
+
+This is the priority check. A task body states work to be performed AGAIN and
+judged per run — NOT a narrative of a one-off already done. Reject a STORY-SHAPED
+body even when its `type` is `task`, naming the structural defect:
+
+- **Past-tense / one-off narration** — "Ran X, produced the report at <path>, found
+  N issues" describes a completed deliverable, not a repeatable action.
+  ACTION / OUTPUT / VERIFICATION must read in the present/imperative: *each run*
+  performs the ACTION → emits the OUTPUT → judged by the VERIFICATION.
+- **Story scaffolding copied in** — a body built around Purpose / Approach /
+  numbered acceptance-criteria (the STORY contract) is a story typed as a task. A
+  task's contract is ACTION + OUTPUT + VERIFICATION, not story ACs.
+- **Wrong embedded workflow section** — if the body carries a `## Workflow` block it
+  MUST be the task lifecycle (`ready → running → complete`). A story workflow
+  (`backlog → in_progress → done`) embedded in a task is a sure tell the content was
+  copied from a story — reject as wrong-structure, naming it. (The governing
+  workflow is still resolved BY REFERENCE; this is a structural tell, not the
+  authority — consistent with reference-not-copy.)
+
+On reject, name the structural defect (story-shaped narration, story ACs, or a
+story workflow section) and tell the author to RE-AUTHOR the body as a re-runnable
+ACTION / OUTPUT / VERIFICATION definition — converting a story to a task is a
+re-authoring, not a type-swap.
 
 ## A referenced skill is a warning, not a gate
 
@@ -72,6 +98,7 @@ rows below — no `document_upsert`, no git/file mutation.
 guardrails:
   always:
     - Judge whether the task's body declares ACTION + OUTPUT + VERIFICATION with a resolvable governing workflow; reject naming any missing element.
+    - Reject a STORY-SHAPED body — past-tense/one-off narration, Purpose/Approach/AC story scaffolding, or an embedded story workflow section (backlog→in_progress→done). A task is a re-runnable ACTION/OUTPUT/VERIFICATION definition, not a story typed as a task; tell the author to re-author it.
     - A skill:<name> reference is the agent's Claude capability — note it as a warning in the accept notes; NEVER resolve it or reject on it.
     - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review; the embedded ## Workflow, if present, is display only.
     - Pair every accept with exactly two ledger_append rows: review_accept then status_transition.
