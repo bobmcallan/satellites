@@ -47,7 +47,9 @@ fails — name it AND state the concrete fix the author should make in the notes
    `trigger: checkpoint` edge (no `reviewer_skill`). REJECT any edge or state that
    bakes process the binary would have to enforce as code, any `kind: gate`
    terminology (the retired name — reviewers-only uses `reviewer`/`reviewer_skill`),
-   or a non-reviewer skill wired as a transition's gate.
+   or a non-reviewer skill wired as a transition's gate. The gate a transition
+   names must be a reviewer-only judge — it decides accept/reject and the CLIENT
+   enacts the edge; never a skill that performs the work (see [[reviewer-only-model]]).
 4. **References name real, current artifacts.** Every `reviewer_skill` and every
    `[[wikilink]]` names an artifact that exists (a reviewer that resolves, a live
    skill/principle/document) — NOT a deleted capability or a renamed gate. The
