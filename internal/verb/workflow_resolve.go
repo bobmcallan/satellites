@@ -204,15 +204,17 @@ type ExplainEdge struct {
 	On      string // "pass" | "fail" | "" (unconditional)
 	Trigger string // "checkpoint" | ""
 	Gate    string // reviewer_skill driving the edge; "" when ungated
-	// Model is how the edge ENACTS, the distinction that decides whether a gate
-	// accept actually moves the story:
+	// Model is how the edge ENACTS. Every gated edge is client-enacted — the gate
+	// JUDGES and the client writes the transition (epic:enactment-convergence
+	// retired legacy-self-enact, where the gate wrote its own status_transition
+	// and a judge-only gate stalled the story: the sty_0d183153 stall):
 	//   v2-client-enact   — an on:pass/fail edge; the CLIENT enacts when the
 	//                        invoked gate matches the edge's reviewer_skill.
-	//   legacy-self-enact — a gated edge with no on:; the GATE itself must write
-	//                        the status_transition. A judge-only gate accepts but
-	//                        never moves it (the sty_0d183153 stall).
+	//   v1-client-enact   — an unconditional {from,to,reviewer_skill} edge; the
+	//                        CLIENT enacts on the named gate's accept (a reject
+	//                        records its verdict and stays put).
 	//   checkpoint        — the executor's --checkpoint move (no gate).
-	//   ungated           — e.g. a cancel edge.
+	//   ungated           — an edge with no gate, trigger, or on: condition.
 	Model string
 }
 
@@ -279,7 +281,7 @@ func ExplainTransition(selector, storyBody, status, category, gateSkill string, 
 		case e.On == "pass" || e.On == "fail":
 			e.Model = "v2-client-enact"
 		case e.Gate != "":
-			e.Model = "legacy-self-enact"
+			e.Model = "v1-client-enact"
 		case e.Trigger == "checkpoint":
 			e.Model = "checkpoint"
 		default:
@@ -311,8 +313,8 @@ func explainVerdict(res ExplainResult, matched *ExplainEdge, otherGate string) s
 		switch matched.Model {
 		case "v2-client-enact":
 			return fmt.Sprintf("gate %q governs %s → %s as a v2 pass/fail edge — on accept the CLIENT enacts the move", res.Gate, res.Status, matched.To)
-		case "legacy-self-enact":
-			return fmt.Sprintf("gate %q governs %s → %s as a LEGACY edge — the GATE must write the status_transition itself; a judge-only gate accepts but never moves the story", res.Gate, res.Status, matched.To)
+		case "v1-client-enact":
+			return fmt.Sprintf("gate %q governs %s → %s — on accept the CLIENT enacts the move (a reject stays put); the gate judges only", res.Gate, res.Status, matched.To)
 		}
 	}
 	if res.Actor == "operator" {
@@ -357,6 +359,55 @@ func GoverningCheckpoint(selector, storyBody, status, category string, sources [
 		}
 	}
 	return to, count == 1
+}
+
+// GoverningGatedEdge resolves the unconditional reviewer-gated edge
+// ({from,to,reviewer_skill} with no on:/trigger) out of `status` whose
+// reviewer_skill matches `gateSkill`, from the AUTHORITATIVE governing workflow
+// (selector → category → embedded fallback) — the same resolution path the v2
+// edges take. Returns the edge's target status. These are the edges the client
+// enacts on the named gate's accept (epic:enactment-convergence — the gate
+// JUDGES, the client ENACTS; there is no self-enacting gate). A state may
+// declare several gated edges to different targets (e.g. backlog → in_progress
+// vs backlog → cancelled), so the match is BY gateSkill — the right edge enacts
+// for the gate actually run. Resolving from the governing workflow (not the
+// embedded ## Workflow) means a reference-resolved workflow with no embedded
+// copy (baseline / task) still enacts, and an embedded copy cannot weaken it.
+func GoverningGatedEdge(selector, storyBody, status, category, gateSkill string, sources []WorkflowSource) (to string, ok bool) {
+	gateSkill = strings.TrimSpace(gateSkill)
+	if gateSkill == "" {
+		return "", false
+	}
+	var auth *workflow.Workflow
+	if selector != "" {
+		if wf, covers, k := ResolveByName(selector, category, sources); k && covers {
+			auth = wf
+		}
+	}
+	if auth == nil {
+		if w, _, k := ResolveGoverningWorkflow(category, sources); k {
+			auth = w
+		} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
+			auth = embedded
+		}
+	}
+	if auth == nil {
+		return "", false
+	}
+	return gatedEdgeFrom(auth, status, gateSkill)
+}
+
+// gatedEdgeFrom finds the unconditional reviewer-gated edge for `skill` out of
+// `status` in a parsed workflow — an edge with no on: condition and no trigger
+// whose reviewer_skill is `skill`. The shared core of GoverningGatedEdge.
+func gatedEdgeFrom(wf *workflow.Workflow, status, skill string) (string, bool) {
+	skill = strings.TrimSpace(skill)
+	for _, t := range wf.TransitionsFrom(strings.TrimSpace(status)) {
+		if t.On == "" && t.Trigger == "" && strings.EqualFold(strings.TrimSpace(t.ReviewerSkill), skill) {
+			return t.To, true
+		}
+	}
+	return "", false
 }
 
 // GoverningUngatedAdvance reports whether the AUTHORITATIVE governing workflow

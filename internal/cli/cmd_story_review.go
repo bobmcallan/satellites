@@ -154,25 +154,29 @@ type reviewStory struct {
 	Tags        []string
 }
 
-// enactMismatch returns a LOUD error (sty_7f8f2e11) when a gate ACCEPTED but
-// nothing enacted and the no-change is NOT the legitimate out-of-band v2
-// record-only case — i.e. no governing-workflow transition matched the
-// artifact's status, so this gate does not govern it (e.g. a story gate run on a
-// task). It names the workflow + status + gate so the wiring mismatch is
-// obvious. Returns nil when the no-change is expected (a reject, or an
-// out-of-band v2 verdict-only run). Pure — unit-testable without the dispatcher.
-func enactMismatch(decision string, isV2, enactV2 bool, gate, workflow, status string) error {
+// enactMismatch returns a LOUD error (sty_7f8f2e11) when a gate ACCEPTED but the
+// client enacted no transition — the gate judged but the governing workflow
+// declares no edge from this status for it (e.g. a story gate run on a task, or a
+// gate run at a v2 state it does not govern). It names the workflow + status +
+// gate so the wiring mismatch is obvious. Returns nil when the no-change is
+// expected: a reject (or non-accept), or an accept the client DID enact
+// (clientEnacted — a v2 or v1 edge), or an out-of-band run (a non-lifecycle gate
+// at a v2 state, which only records its verdict). Pure — unit-testable.
+func enactMismatch(decision string, clientEnacted, outOfBand bool, gate, workflow, status string) error {
 	if decision != verb.GateDecisionAccept {
 		return nil // reject (or non-accept) — leaving status put is correct
 	}
-	if isV2 && !enactV2 {
-		return nil // an out-of-band gate at a v2 state only records its verdict
+	if clientEnacted {
+		return nil // the client enacted the edge (v2 or v1) — success
+	}
+	if outOfBand {
+		return nil // a non-lifecycle gate at a v2 state only records its verdict
 	}
 	wf := strings.TrimSpace(workflow)
 	if wf == "" {
 		wf = "(category default)"
 	}
-	return fmt.Errorf("status_transition: gate %q accepted but no edge from status=%q enacted in workflow %q — the gate JUDGED but moved nothing. Either the workflow has no edge from %q, or the edge there is gated by a different reviewer, or it is a legacy edge whose gate must self-enact. Run `satellites story status_transition <story> --skill %s --explain` to see which gate governs which edge",
+	return fmt.Errorf("status_transition: gate %q accepted but no edge from status=%q enacted in workflow %q — the gate JUDGED but the workflow declares no edge from %q for this gate (a different reviewer may govern it, or the gate was run on the wrong artifact). Run `satellites story status_transition <story> --skill %s --explain` to see which gate governs which edge",
 		gate, status, wf, status, gate)
 }
 
@@ -404,7 +408,7 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// state still stops. Without this, a fail-loop-blocked story has no CLI exit
 	// and the recovery gate (its reason to exist) can never run.
 	if edges.Actor == "operator" {
-		if _, ok := verb.RecoveryEdgeFrom(body, story.Status, gateSkill); !ok {
+		if _, ok := verb.GoverningGatedEdge(selector, body, story.Status, story.Category, gateSkill, wfSources); !ok {
 			return fmt.Errorf("status_transition: story %s is in state %q whose actor is %q — it is the operator's turn; not your state → stop",
 				story.ID, story.Status, edges.Actor)
 		}
@@ -577,14 +581,18 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stdout, "notes: %s\n", gateOut.Notes)
 	}
 
-	// 7b. v2 enactment (epic:graduated-workflow): on a v2 state the client —
-	// not the skill — enacts the decision's edge: review_* row + the
-	// status_transition row for the pass/fail target, or the exhaustion
-	// transition when this reject spends the bound. Deterministic code; the
-	// executor decides none of it. Only the gate the workflow declares for this
-	// state (or its command, on an actor:satellites state) enacts — a non-matching
-	// gate ran out of band (enactV2 false) and records only its verdict below.
-	if enactV2 {
+	// 7b. Client enactment (epic:enactment-convergence): the gate JUDGED; the
+	// CLIENT writes the transition. No gate writes its own status_transition —
+	// legacy-self-enact is retired, so a judge-only gate can never stall a story.
+	// Two client-enacted edge shapes, same gate-judges/client-enacts contract;
+	// only the gate the workflow declares for the edge enacts — any other gate
+	// ran out of band (records its verdict, moves nothing):
+	//   v2 — on:pass/fail edges with bounded fail loops (PlanV2Enactment).
+	//   v1 — an unconditional {from,to,reviewer_skill} edge: accept → to; a
+	//        reject records its verdict and stays put.
+	clientEnacted := false
+	switch {
+	case enactV2:
 		plan, perr := verb.PlanV2Enactment(gateOut.Decision, gateSkill, story.Status, gateOut.Notes, edges, priorRejects)
 		if perr != nil {
 			return fmt.Errorf("v2 enactment: %w", perr)
@@ -592,34 +600,48 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		for _, row := range plan.Rows {
 			reviewAppendLedger(ctx, opts, story, row.Kind, row.Body, row.Payload)
 		}
+		clientEnacted = true
 		if plan.Exhausted {
 			fmt.Fprintf(opts.Stdout, "exhausted: fail loop bound reached — escalated to %s\n", plan.ToStatus)
 		}
+	case !edges.IsV2:
+		// A v1 (unconditional) reviewer-gated edge for THIS gate, resolved from the
+		// governing workflow so a reference-resolved workflow (baseline / task, no
+		// embedded ## Workflow) still enacts and an embedded copy cannot weaken it.
+		// The match is by gateSkill: a state may carry several gated edges to
+		// different targets (e.g. backlog → in_progress vs backlog → cancelled).
+		if v1To, ok := verb.GoverningGatedEdge(selector, body, story.Status, story.Category, gateSkill, wfSources); ok {
+			switch gateOut.Decision {
+			case verb.GateDecisionAccept:
+				reviewAppendLedger(ctx, opts, story, "review_accept", gateOut.Notes,
+					map[string]any{"from_status": story.Status, "to_status": v1To, "gate": gateSkill})
+				reviewAppendLedger(ctx, opts, story, "status_transition", fmt.Sprintf("%s → %s", story.Status, v1To),
+					map[string]any{"from_status": story.Status, "to_status": v1To, "gate": gateSkill})
+				clientEnacted = true
+			case verb.GateDecisionReject:
+				reviewAppendLedger(ctx, opts, story, "review_reject", gateOut.Notes,
+					map[string]any{"from_status": story.Status, "gate": gateSkill})
+				clientEnacted = true
+			}
+		}
 	}
 
-	// 8. The reviewer skill enacts its own verdict (sty_db5cdef0). Running
-	// under the operator's inherited admin auth, the gate skill writes the
-	// review_accept/review_reject + status_transition spine rows and, on
-	// accept, patches the story status toward the target it derived from the
-	// story's `## Workflow`. The client no longer performs the status patch or
-	// those spine writes — it requests the gate (step 6b) and reports;
-	// enactment is configuration in the skill, not code here.
-	//
-	// Read the status back (operator's own key — a plain read) so the
-	// operator sees whether the skill enacted. This read is observability,
-	// NOT enactment: the client never patches the status itself.
+	// 8. Read the status back (the client's own key — a plain read) so the
+	// operator sees the transition the client enacted in step 7b. This read is
+	// observability, NOT enactment: the client already wrote the status_transition
+	// (the ledger_append projects it onto the story's status).
 	observed, _ := reviewObserveStatus(ctx, opts, story.ID)
 	if observed != "" && observed != story.Status {
 		fmt.Fprintf(opts.Stdout, "status: %s → %s\n", story.Status, observed)
 	} else {
-		// LOUD FAIL (sty_7f8f2e11): a gate that ACCEPTED but enacted nothing — for
-		// a reason that is NOT the legitimate out-of-band v2 record-only case — is
-		// a workflow-wiring mismatch (e.g. a story gate run on a task), not
+		// LOUD FAIL (sty_7f8f2e11): a gate that ACCEPTED but the client enacted
+		// nothing — and it was NOT a legitimate out-of-band run (a v2 state's
+		// non-lifecycle gate) — is a workflow-wiring mismatch (e.g. a story gate
+		// run on a task, or a gate that governs no edge from this status), not
 		// success. Fail with a named diagnostic; never warn-and-succeed (the
 		// earlier silent warn let a story gate "pass" against a task — the
-		// 2026-06-22 VIRE log). An out-of-band v2 verdict-only run (enactV2 false)
-		// is expected and stays a clean "unchanged".
-		if err := enactMismatch(gateOut.Decision, edges.IsV2, enactV2, gateSkill, governing, story.Status); err != nil {
+		// 2026-06-22 VIRE log).
+		if err := enactMismatch(gateOut.Decision, clientEnacted, edges.IsV2 && !enactV2, gateSkill, governing, story.Status); err != nil {
 			return err
 		}
 		fmt.Fprintf(opts.Stdout, "status: %s (unchanged)\n", story.Status)

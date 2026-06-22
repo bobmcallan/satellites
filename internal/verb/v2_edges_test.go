@@ -93,36 +93,36 @@ func TestEdgesCaptureReviewerSkill_AndGateMatches(t *testing.T) {
 	}
 }
 
-// TestRecoveryEdgeFrom pins the operator-stop exception (sty_0c98760e): an
-// unconditional reviewer_skill edge out of an operator state (blocked) is the
-// sanctioned recovery path, but ONLY for the gate the edge names. v2StoryBody's
-// blocked has no such edge; a body carrying the recovery edge does — and only
-// the matching skill unlocks it.
-func TestRecoveryEdgeFrom(t *testing.T) {
-	// blocked with no recovery edge → never recoverable, for any gate.
-	if to, ok := RecoveryEdgeFrom(v2StoryBody, "blocked", "satellites-loop-recovery-review"); ok {
-		t.Fatalf("blocked without a recovery edge must not be recoverable; got to=%q", to)
+// TestGoverningGatedEdge pins v1 client-enact edge resolution (epic:enactment-
+// convergence): an unconditional reviewer_skill edge (no on:/trigger) is the
+// client-enacted edge for the gate it NAMES — matched by gate, resolved from the
+// governing workflow (here the embedded-body fallback, since no source set covers
+// the category). This replaces the retired RecoveryEdgeFrom: the operator-stop
+// recovery edge (sty_0c98760e) is just one such v1 edge, now resolved uniformly.
+func TestGoverningGatedEdge(t *testing.T) {
+	// blocked with no unconditional gated edge → not resolvable, for any gate.
+	if to, ok := GoverningGatedEdge("", v2StoryBody, "blocked", "", "satellites-loop-recovery-review", nil); ok {
+		t.Fatalf("blocked without a gated edge must not resolve; got to=%q", to)
 	}
 
 	withRecovery := v2StoryBody[:len(v2StoryBody)-len("```\n")] +
 		"  - {from: blocked, to: in_progress, reviewer_skill: \"satellites-loop-recovery-review\"}\n```\n"
 
-	to, ok := RecoveryEdgeFrom(withRecovery, "blocked", "satellites-loop-recovery-review")
+	to, ok := GoverningGatedEdge("", withRecovery, "blocked", "", "satellites-loop-recovery-review", nil)
 	if !ok || to != "in_progress" {
-		t.Fatalf("recovery edge should unlock blocked → in_progress for the named gate; got to=%q ok=%v", to, ok)
+		t.Fatalf("gated edge should resolve blocked → in_progress for the named gate; got to=%q ok=%v", to, ok)
 	}
-	// A different gate is NOT authorized by this edge — still stops.
-	if _, ok := RecoveryEdgeFrom(withRecovery, "blocked", "satellites-story-done-review"); ok {
-		t.Fatal("a non-matching gate must not be unlocked by the recovery edge")
+	// A different gate does not name this edge — not resolved (it stops).
+	if _, ok := GoverningGatedEdge("", withRecovery, "blocked", "", "satellites-story-done-review", nil); ok {
+		t.Fatal("a non-matching gate must not resolve the gated edge")
 	}
 	// Empty skill never matches.
-	if _, ok := RecoveryEdgeFrom(withRecovery, "blocked", ""); ok {
+	if _, ok := GoverningGatedEdge("", withRecovery, "blocked", "", "", nil); ok {
 		t.Fatal("empty skill must not match any edge")
 	}
-	// A pass/fail edge is conditional, not a recovery edge: done-review's fail
-	// edge carries no reviewer_skill match for an arbitrary gate.
-	if _, ok := RecoveryEdgeFrom(withRecovery, "done-review", "satellites-loop-recovery-review"); ok {
-		t.Fatal("a conditional on:fail edge is not an unconditional recovery edge")
+	// A pass/fail edge is conditional, not an unconditional gated edge.
+	if _, ok := GoverningGatedEdge("", withRecovery, "done-review", "", "satellites-loop-recovery-review", nil); ok {
+		t.Fatal("a conditional on:fail edge is not an unconditional gated edge")
 	}
 }
 

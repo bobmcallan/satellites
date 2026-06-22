@@ -59,13 +59,13 @@ func TestExplainTransition(t *testing.T) {
 		t.Errorf("v2 verdict unexpected: %q", r.Verdict)
 	}
 
-	// Legacy gated edge: backlog → ready, gate "plan" (no on:).
+	// v1 gated edge: backlog → ready, gate "plan" (no on:) — client-enacted.
 	r = ExplainTransition("", productWFBody, "backlog", cat, "plan", sources())
-	if r.Edges[0].Model != "legacy-self-enact" {
-		t.Errorf("backlog edge model = %q, want legacy-self-enact", r.Edges[0].Model)
+	if r.Edges[0].Model != "v1-client-enact" {
+		t.Errorf("backlog edge model = %q, want v1-client-enact", r.Edges[0].Model)
 	}
-	if !strings.Contains(r.Verdict, "LEGACY") || !strings.Contains(r.Verdict, "judge-only gate accepts but never moves") {
-		t.Errorf("legacy verdict unexpected: %q", r.Verdict)
+	if !strings.Contains(r.Verdict, "CLIENT enacts") || !strings.Contains(r.Verdict, "judges only") {
+		t.Errorf("v1 verdict unexpected: %q", r.Verdict)
 	}
 
 	// Gate names no edge from here — the edge's real gate is surfaced.
