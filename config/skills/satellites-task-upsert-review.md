@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: status==ready||status==complete
 tags: [kind:reviewer]
-description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED — its body declares the ACTION (what work), the OUTPUT (the deliverable), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and is a RE-RUNNABLE definition (rejecting a story-shaped/literal body — past-tense narration, Purpose/Approach/AC scaffolding, or an embedded story workflow section) and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
+description: The default TASK entry/definition gate — the "task_reviewer". Judges that a task is WELL-FORMED — its body declares the ACTION (what work), the OUTPUT (the deliverable AND its concrete output location), and the VERIFICATION (how success is judged) — the structural contract that lets the exit gate judge the output — and is a RE-RUNNABLE definition (rejecting a story-shaped/literal body — past-tense narration, Purpose/Approach/AC scaffolding, or an embedded story workflow section) and carries a resolvable governing workflow, and only then opens it for execution by moving it to running (ready → running, or complete → running on a RE-RUN — each open begins a fresh execution episode). A skill:<name> reference is the agent's Claude capability, surfaced as a warning — never resolved or gated. The entry gate of satellites-task-workflow, the sibling of the exit gate satellites-task-report-review. Pure judgment, no functional check. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this document a **well-formed, executable task**, ready to
@@ -35,8 +35,10 @@ Judge the `story_body`:
   clearly enough for the in-repo agent to act on:
   - **ACTION** — WHAT work to perform (e.g. "scan the tracked files for committed
     secrets and produce a findings report");
-  - **OUTPUT** — the deliverable the run produces (a report section, a file, a
-    document);
+  - **OUTPUT** — the deliverable the run produces AND its concrete LOCATION: a
+    definite path/dir the run writes to (e.g. `docs/reports/<name>-<date>.md`), not
+    merely "a report". A declared output location keeps the executor from guessing
+    where to write and makes two runs of the same task agree on where output lands;
   - **VERIFICATION** — how success is judged (a stated verdict, a check, a
     measurable signal). This is what the exit gate later judges the output
     against, so it MUST be present.
@@ -47,8 +49,9 @@ Judge the `story_body`:
   `reviewer_skill == satellites-task-upsert-review`). The task is genuinely ready
   to be executed by the agent.
 - **reject** — the body is empty, a stub, or does not describe executable work; or
-  it is missing any of ACTION / OUTPUT / VERIFICATION (name which); or the goal is
-  too vague for the agent to act on; or it is STORY-SHAPED rather than a re-runnable
+  it is missing any of ACTION / OUTPUT / VERIFICATION (name which) — including an
+  OUTPUT that names no concrete output location (path/dir) the run writes to; or the
+  goal is too vague for the agent to act on; or it is STORY-SHAPED rather than a re-runnable
   task definition (see *Structure*); or no governing-workflow transition matches
   this gate from the current status. Name exactly what is missing.
 
@@ -97,7 +100,7 @@ rows below — no `document_upsert`, no git/file mutation.
 ```yaml
 guardrails:
   always:
-    - Judge whether the task's body declares ACTION + OUTPUT + VERIFICATION with a resolvable governing workflow; reject naming any missing element.
+    - Judge whether the task's body declares ACTION + OUTPUT (with a concrete output LOCATION — a path/dir the run writes to) + VERIFICATION with a resolvable governing workflow; reject naming any missing element.
     - Reject a STORY-SHAPED body — past-tense/one-off narration, Purpose/Approach/AC story scaffolding, or an embedded story workflow section (backlog→in_progress→done). A task is a re-runnable ACTION/OUTPUT/VERIFICATION definition, not a story typed as a task; tell the author to re-author it.
     - A skill:<name> reference is the agent's Claude capability — note it as a warning in the accept notes; NEVER resolve it or reject on it.
     - Resolve to_status from the GOVERNING workflow (the task's workflow: selector, else the category default) — the transition whose from == story_status AND reviewer_skill == satellites-task-upsert-review; the embedded ## Workflow, if present, is display only.
