@@ -361,44 +361,10 @@ transitions:
 	}
 }
 
-// TestIsCommitStep covers sty_e925ff09: a state is the commit-push step iff it
-// has an outgoing transition whose work_skill is `commit-push`. Derived purely
-// from the workflow shape, so the commit door binds to the ship step without a
-// hard-coded status name.
-func TestIsCommitStep(t *testing.T) {
-	input := `---
-name: x
-applies_to: [feature]
----
-
-` + "```yaml" + `
-states: [backlog, in_progress, shipping, done]
-transitions:
-  - {from: backlog, to: in_progress, reviewer_skill: "start-review"}
-  - {from: in_progress, to: shipping, reviewer_skill: "plan-review"}
-  - {from: shipping, to: done, work_skill: commit-push, reviewer_skill: "satellites-commit-push-review"}
-` + "```" + `
-`
-	wf, err := Parse([]byte(input))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if !wf.IsCommitStep("shipping") {
-		t.Error("shipping has an outgoing work_skill: commit-push edge — want IsCommitStep true")
-	}
-	if wf.IsCommitStep("in_progress") {
-		t.Error("in_progress is an editable working phase, not the commit-push step — want IsCommitStep false")
-	}
-	if wf.IsCommitStep("backlog") {
-		t.Error("backlog (entry) is not the commit-push step")
-	}
-	if wf.IsCommitStep("done") {
-		t.Error("done (terminal, no outgoing edges) is not the commit-push step")
-	}
-	if wf.IsCommitStep("unknown") {
-		t.Error("an undeclared state must not be reported as the commit-push step")
-	}
-}
+// sty_028c3f92 removed IsCommitStep (the `work_skill == "commit-push"` literal
+// that bound git push to a ship step). The `work_skill` FIELD still parses
+// generically (see the work_skill round-trip test above); only the value-keyed
+// predicate is gone — the binary no longer asserts which step may push.
 
 // TestParse_V2Sketch parses the graduated-workflow target model (the epic
 // anchor's sketch, verbatim) and asserts the v2 surface: state actors,

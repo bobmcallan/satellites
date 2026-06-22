@@ -68,9 +68,9 @@ func TestRunHookCommitGate_DenyWithoutEngagement(t *testing.T) {
 	}
 }
 
-// TestRunHookCommitGate_AllowWhenCommitReady pins the allow path (sty_e925ff09):
-// a lease-fresh engagement AT its commit-push step (CommitReady) lets `git push`
-// through (no output).
+// TestRunHookCommitGate_AllowWhenCommitReady pins that a lease-fresh editable
+// engagement allows `git push` (no output). Post-sty_028c3f92, commit-readiness
+// is no longer required or special; an editable engagement is sufficient.
 func TestRunHookCommitGate_AllowWhenCommitReady(t *testing.T) {
 	repo := writeRepo(t, true, "")
 	seedEngagementCommit(t, repo, "sess1", "sty_live", "shipping", true, true, time.Now().UTC().Add(time.Hour))
@@ -84,11 +84,13 @@ func TestRunHookCommitGate_AllowWhenCommitReady(t *testing.T) {
 	}
 }
 
-// TestRunHookCommitGate_DenyWhenEditableButNotCommitReady pins the core
-// sty_e925ff09 binding: an engagement that is editable but NOT at its commit-push
-// step (e.g. in_progress) denies `git push` — committing is authorised only AT
-// the ship step, not at any editable phase.
-func TestRunHookCommitGate_DenyWhenEditableButNotCommitReady(t *testing.T) {
+// TestRunHookCommitGate_AllowWhenEditableEngagement pins the sty_028c3f92
+// contract: a lease-fresh editable engagement is SUFFICIENT to `git push` — the
+// gate no longer requires the engaged story to be at a `work_skill: commit-push`
+// ship step (that ship-step bake, sty_e925ff09, was a constitution violation:
+// behaviour the binary should not hold). An ordinary editable phase (in_progress,
+// NOT commit-ready) now allows push (no output).
+func TestRunHookCommitGate_AllowWhenEditableEngagement(t *testing.T) {
 	repo := writeRepo(t, true, "")
 	seedEngagementCommit(t, repo, "sess1", "sty_live", "in_progress", true, false, time.Now().UTC().Add(time.Hour))
 	in := bytes.NewBufferString(`{"tool_name":"Bash","cwd":"` + repo + `","session_id":"sess1","tool_input":{"command":"git push"}}`)
@@ -96,15 +98,8 @@ func TestRunHookCommitGate_DenyWhenEditableButNotCommitReady(t *testing.T) {
 	if err := runHookCommitGate(in, &out); err != nil {
 		t.Fatalf("runHookCommitGate: %v", err)
 	}
-	var dec gateDecisionJSON
-	if err := json.Unmarshal(out.Bytes(), &dec); err != nil {
-		t.Fatalf("editable-but-not-commit-ready push should deny with decision JSON: %v\n%s", err, out.String())
-	}
-	if dec.HookSpecificOutput.PermissionDecision != "deny" {
-		t.Errorf("decision = %+v, want deny", dec.HookSpecificOutput)
-	}
-	if !strings.Contains(dec.HookSpecificOutput.PermissionDecisionReason, "commit-push step") {
-		t.Errorf("reason should steer to the commit-push step: %q", dec.HookSpecificOutput.PermissionDecisionReason)
+	if strings.TrimSpace(out.String()) != "" {
+		t.Errorf("an editable engagement must allow push regardless of commit-step, got deny: %q", out.String())
 	}
 }
 

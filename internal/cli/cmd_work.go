@@ -270,11 +270,13 @@ func refreshEngagementPhase(store *workstate.Store, session, storyID, phase stri
 }
 
 // engageGuards are the engage-time guards derived once from a story's embedded
-// `## Workflow` for its current status: whether the phase permits edits, whether
-// it IS the commit-push step, the state's actor, and the resolved status.
+// `## Workflow` for its current status: whether the phase permits edits, the
+// state's actor, and the resolved status. (commitReady is retained for the
+// workstate projection but no longer gates — sty_028c3f92 removed the commit-push
+// ship-step bake; it is always false.)
 type engageGuards struct {
 	editable    bool
-	commitReady bool
+	commitReady bool // retained, always false; no longer gates (sty_028c3f92)
 	actor       string
 	status      string
 }
@@ -289,11 +291,10 @@ func resolveEditable(ctx context.Context, configPath, storyID, status string) bo
 }
 
 // resolveEngageGuards fetches the story once and derives the engage-time guards
-// from its embedded `## Workflow`: editability, commit-readiness (is this the
-// commit-push step), and the current state's actor. Best-effort: any failure
-// yields editable=true (so offline work is never over-blocked) and
-// commitReady=false (the commit door fails closed — committing needs the
-// resolved ship step, never an unresolved guess).
+// from its embedded `## Workflow`: editability and the current state's actor.
+// Best-effort: any failure yields editable=true (so offline work is never
+// over-blocked). commitReady is no longer used for gating (sty_028c3f92 removed
+// the commit-push ship-step bake); the field is retained, always false.
 func resolveEngageGuards(ctx context.Context, configPath, storyID, status string) engageGuards {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
 	if err != nil {
@@ -319,10 +320,9 @@ func resolveEngageGuards(ctx context.Context, configPath, storyID, status string
 		return engageGuards{editable: true, status: status}
 	}
 	return engageGuards{
-		editable:    wf.IsEditable(status),
-		commitReady: wf.IsCommitStep(status),
-		actor:       wf.ActorOf(status),
-		status:      status,
+		editable: wf.IsEditable(status),
+		actor:    wf.ActorOf(status),
+		status:   status,
 	}
 }
 

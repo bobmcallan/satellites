@@ -133,21 +133,17 @@ func runHookCommitGate(in io.Reader, out io.Writer) error {
 		return nil // read-only git / non-git Bash / ungated commit → allow
 	}
 
-	allow, _, eng := gateOutcomeEng(start, session, "", now)
+	allow, _, _ := gateOutcomeEng(start, session, "", now)
 	if !allow {
 		return emitGateDeny(out, commitGateReason(action))
 	}
-	// The session holds a lease-fresh editable engagement — but committing/pushing
-	// is authorised only AT the engaged story's commit-push step, not at any
-	// editable phase (sty_e925ff09). CommitReady is set where the workflow is
-	// resolved (engage/phase-refresh) when the status IS the workflow's
-	// `work_skill: commit-push` state. If it is not set, the agent is mid-work:
-	// steer it to checkpoint to the ship step first, so one story ↔ one commit ↔
-	// one release holds. Fail-closed: a legacy/unresolved engagement (CommitReady
-	// false) gates the commit rather than allowing it.
-	if !eng.CommitReady {
-		return emitGateDeny(out, commitNotReadyReason(action))
-	}
+	// A lease-fresh editable engagement is sufficient to commit/push — the
+	// workflow-agnostic mechanism (a mutation/share requires an engagement). The
+	// binary does NOT bind the share to a particular workflow step: which step may
+	// push, and any one-story ↔ one-commit ↔ one-release rule, is process a repo's
+	// workflow or a reviewer owns, not a literal the binary keys off (sty_028c3f92
+	// reverts the sty_e925ff09 ship-step bake — constitution: mechanism in the
+	// binary, behaviour in the substrate).
 	return nil
 }
 
@@ -494,20 +490,4 @@ func commitGateReason(action gitGateAction) string {
 	return fmt.Sprintf("satellites: `git %s` is gated — this session has no lease-fresh engagement in an editable phase. "+
 		"Work shared by %s belongs to a gated story, not an ungated %s. Engage a story and advance it to an editable phase "+
 		"(`satellites work init <story>`, then its plan/start gates) before %sing.", verb, verb, verb, verb)
-}
-
-// commitNotReadyReason is the deny message when the session DOES hold a
-// lease-fresh editable engagement, but the engaged story is not AT its
-// commit-push step. It steers the agent to checkpoint to the ship step (the
-// workflow's `work_skill: commit-push` state) before committing/pushing — the
-// one-story ↔ one-commit ↔ one-release binding (sty_e925ff09).
-func commitNotReadyReason(action gitGateAction) string {
-	verb := "push"
-	if action == gitGateCommit {
-		verb = "commit"
-	}
-	return fmt.Sprintf("satellites: `git %s` is gated — this session's engaged story is not at its commit-push step. "+
-		"Editing is allowed mid-work, but committing/pushing is authorised only AT the workflow's commit-push step "+
-		"(the state whose outgoing transition declares `work_skill: commit-push`). Checkpoint the story to that ship step "+
-		"(`satellites story status_transition --skill <commit-push gate>`) before %sing, so one story ↔ one commit ↔ one release holds.", verb, verb)
 }
