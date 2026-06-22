@@ -285,7 +285,15 @@ func runExplain(opts reviewOpts, story reviewStory, body string) error {
 //   - checkpoint state + --skill      → error: the state has no gate; use --checkpoint.
 //   - other state     + --checkpoint → error: nothing to checkpoint here.
 //   - other state     + --skill      → no checkpoint; proceed to the gate path.
-func checkpointDecision(wantCheckpoint, isCheckpointState bool, status, cpTo, gateSkill, edgesHint string) (enact bool, err error) {
+func checkpointDecision(wantCheckpoint, isCheckpointState, gateMatchesEdge bool, status, cpTo, gateSkill, edgesHint string) (enact bool, err error) {
+	// A state may carry BOTH an executor checkpoint edge and a gated edge — e.g.
+	// in_progress → shipping [checkpoint] AND in_progress → cancelled [gate]
+	// (sty_d25f5577). When --skill names a gate that matches a real unconditional
+	// edge from here, this is NOT a pure-checkpoint request: take the gate path
+	// rather than erroring "use --checkpoint" (sty_57adfd04).
+	if isCheckpointState && !wantCheckpoint && gateMatchesEdge {
+		return false, nil
+	}
 	switch {
 	case isCheckpointState && wantCheckpoint:
 		return true, nil
@@ -448,8 +456,12 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// naming --skill at a pure-checkpoint state errors rather than transitions.
 	cpTo, cpOK := verb.GoverningCheckpoint(selector, body, story.Status, story.Category, wfSources)
 	isCheckpointState := cpOK && !edges.IsV2 && edges.Actor != "operator"
+	// A --skill that names a gate matching a real unconditional edge from this
+	// state takes the gate path even when the state also has a checkpoint edge
+	// (sty_57adfd04). Empty gateSkill (a --checkpoint request) never matches.
+	_, gateMatchesEdge := verb.GoverningGatedEdge(selector, body, story.Status, story.Category, gateSkill, wfSources)
 	edgeHint := verb.GoverningEdgesHint(selector, body, story.Status, story.Category, wfSources)
-	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, story.Status, cpTo, gateSkill, edgeHint)
+	enactCheckpoint, cpErr := checkpointDecision(opts.Checkpoint, isCheckpointState, gateMatchesEdge, story.Status, cpTo, gateSkill, edgeHint)
 	if cpErr != nil {
 		return cpErr
 	}

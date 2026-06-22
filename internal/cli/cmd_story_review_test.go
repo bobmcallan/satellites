@@ -68,11 +68,12 @@ func TestRunReviewSkillAndCheckpointConflict(t *testing.T) {
 // a non-checkpoint state errors; and a gate request elsewhere proceeds normally.
 func TestCheckpointDecision(t *testing.T) {
 	// checkpoint state + --checkpoint → enact.
-	if enact, err := checkpointDecision(true, true, "in_progress", "shipping", "", ""); err != nil || !enact {
+	if enact, err := checkpointDecision(true, true, false, "in_progress", "shipping", "", ""); err != nil || !enact {
 		t.Fatalf("checkpoint+checkpoint-state: enact=%v err=%v, want enact=true err=nil", enact, err)
 	}
-	// checkpoint state + --skill → error, NO enact (the silent-shadow bug).
-	enact, err := checkpointDecision(false, true, "in_progress", "shipping", "satellites-intent-plan-review", "")
+	// checkpoint state + --skill with NO matching gated edge → error, NO enact
+	// (the silent-shadow bug; e.g. re-running the entry gate on in_progress).
+	enact, err := checkpointDecision(false, true, false, "in_progress", "shipping", "satellites-intent-plan-review", "")
 	if err == nil || enact {
 		t.Fatalf("skill-at-checkpoint-state: enact=%v err=%v, want enact=false err!=nil", enact, err)
 	}
@@ -81,7 +82,7 @@ func TestCheckpointDecision(t *testing.T) {
 	}
 	// non-checkpoint state + --checkpoint → error; the edges-hint clause is appended
 	// so a stuck agent is pointed at the real gate (sty_4300e117), never left to guess.
-	enact2, err2 := checkpointDecision(true, false, "running", "", "", " — from \"running\" the governing workflow's transitions are: → complete (--skill satellites-task-report-review)")
+	enact2, err2 := checkpointDecision(true, false, false, "running", "", "", " — from \"running\" the governing workflow's transitions are: → complete (--skill satellites-task-report-review)")
 	if err2 == nil || enact2 {
 		t.Fatalf("checkpoint-at-non-checkpoint: enact=%v err=%v, want enact=false err!=nil", enact2, err2)
 	}
@@ -89,8 +90,14 @@ func TestCheckpointDecision(t *testing.T) {
 		t.Fatalf("checkpoint-at-non-checkpoint error = %q, want it to name the available gate from the edges hint", err2)
 	}
 	// non-checkpoint state + --skill → no checkpoint, proceed to gate path.
-	if enact, err := checkpointDecision(false, false, "shipping", "", "satellites-commit-push-review", ""); err != nil || enact {
+	if enact, err := checkpointDecision(false, false, false, "shipping", "", "satellites-commit-push-review", ""); err != nil || enact {
 		t.Fatalf("gate-elsewhere: enact=%v err=%v, want enact=false err=nil", enact, err)
+	}
+	// checkpoint state + --skill that MATCHES a gated edge from here
+	// (gateMatchesEdge=true) → proceed to the gate path, NOT the "use --checkpoint"
+	// error. This is the in_progress → cancelled case (sty_57adfd04).
+	if enact, err := checkpointDecision(false, true, true, "in_progress", "shipping", "satellites-story-cancel-review", ""); err != nil || enact {
+		t.Fatalf("skill-matching-gated-edge-at-checkpoint-state: enact=%v err=%v, want enact=false err=nil (gate path)", enact, err)
 	}
 }
 
