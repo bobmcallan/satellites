@@ -117,6 +117,39 @@ func verifyReviewAttestation(req DocumentUpsertRequest) error {
 	return nil
 }
 
+// behaviourBodyUnchanged reports whether a key-addressed behaviour-kind upsert
+// leaves the body byte-identical to the stored version — a TAG/metadata-only patch
+// (e.g. `context curate` toggling principles:always, which re-sends the RAW body).
+// The review barrier gates CONTENT; an unchanged body has nothing new to review, so
+// such a patch is exempt (sty_dc44e359 — the barrier otherwise refused curate,
+// breaking it). Fails closed: any resolution error, no stored version, or a body
+// mismatch → not unchanged → review is still required.
+func behaviourBodyUnchanged(ctx context.Context, req DocumentUpsertRequest) bool {
+	if documentStore == nil || strings.TrimSpace(req.Name) == "" {
+		return false
+	}
+	scope, err := parseScope(req.Scope)
+	if err != nil {
+		return false
+	}
+	key := document.Key{Scope: scope, WorkspaceID: req.WorkspaceID, ProjectID: req.ProjectID, Name: req.Name}
+	switch scope {
+	case document.ScopeUser:
+		key.UserID = callerUserID(ctx)
+	case document.ScopeProject:
+		if strings.TrimSpace(key.WorkspaceID) == "" && projectStore != nil && strings.TrimSpace(key.ProjectID) != "" {
+			if p, perr := projectStore.GetByID(ctx, key.ProjectID); perr == nil {
+				key.WorkspaceID = p.WorkspaceID
+			}
+		}
+	}
+	res, err := documentStore.Get(ctx, key, document.GetOptions{})
+	if err != nil || len(res.Versions) == 0 {
+		return false
+	}
+	return res.Versions[0].Body == req.Body
+}
+
 var documentStore *document.Store
 
 // SetDocumentStore wires the server's document.Store into the verb
@@ -984,8 +1017,9 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	// content-bound review attestation the CLI `upload` mints AFTER the per-type
 	// reviewer accepts (sty_e6226180). This refuses the silent exec/raw bypass —
 	// a behaviour write that skips review. Stories, tasks, free-form documents,
-	// and id-addressed patches are exempt.
-	if req.ID == "" && reviewRequiredKind(req) {
+	// id-addressed patches, and tag/metadata-only patches whose body is unchanged
+	// (sty_dc44e359 — the barrier gates CONTENT, not tags) are exempt.
+	if req.ID == "" && reviewRequiredKind(req) && !behaviourBodyUnchanged(ctx, req) {
 		if err := verifyReviewAttestation(req); err != nil {
 			return nil, err
 		}
