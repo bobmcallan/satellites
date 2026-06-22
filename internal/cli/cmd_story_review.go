@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,7 @@ func newStoryReviewCmd(configArg, userArg *string) *cobra.Command {
 		worktreeRoot string
 		skill        string
 		checkpoint   bool
+		explain      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "status_transition --skill <gate> <story-id>",
@@ -102,6 +104,7 @@ checkpoint is never a silent side-effect of a gate request (sty_21d2c535): run
 				WorktreeRoot: worktreeRoot,
 				Skill:        strings.TrimSpace(skill),
 				Checkpoint:   checkpoint,
+				Explain:      explain,
 				Stdout:       cmd.OutOrStdout(),
 				Stderr:       cmd.ErrOrStderr(),
 			})
@@ -111,6 +114,7 @@ checkpoint is never a silent side-effect of a gate request (sty_21d2c535): run
 	cmd.Flags().StringVar(&worktreeRoot, "worktree", "", "Worktree root the gate runs against (default: current directory).")
 	cmd.Flags().StringVar(&skill, "skill", "", "Name the gate skill to run against the story (required unless --checkpoint). The gate reads the story's `## Workflow` to derive its own target status and enact the transition.")
 	cmd.Flags().BoolVar(&checkpoint, "checkpoint", false, "Advance the current state's ungated `trigger: checkpoint` edge — a deliberate executor move that runs no gate. Mutually exclusive with --skill.")
+	cmd.Flags().BoolVar(&explain, "explain", false, "Dry-run: resolve the governing workflow exactly as enactment would and report the outgoing edges + whether --skill <gate> can enact one — runs no gate and mutates nothing.")
 	return cmd
 }
 
@@ -129,8 +133,12 @@ type reviewOpts struct {
 	// state's ungated `trigger: checkpoint` edge — no gate runs. Mutually
 	// exclusive with Skill (sty_21d2c535).
 	Checkpoint bool
-	Stdout     io.Writer
-	Stderr     io.Writer
+	// Explain requests a read-only dry-run: resolve the governing workflow and
+	// report the edges + the named gate's enactability, run no gate, mutate
+	// nothing (sty_550e9595).
+	Explain bool
+	Stdout  io.Writer
+	Stderr  io.Writer
 }
 
 // reviewStory is the minimal projection the reviewer needs from a
@@ -164,8 +172,102 @@ func enactMismatch(decision string, isV2, enactV2 bool, gate, workflow, status s
 	if wf == "" {
 		wf = "(category default)"
 	}
-	return fmt.Errorf("status_transition: gate %q accepted but workflow %q has no transition from status=%q — this gate does not govern this artifact (e.g. a story gate run on a task); nothing was enacted",
-		gate, wf, status)
+	return fmt.Errorf("status_transition: gate %q accepted but no edge from status=%q enacted in workflow %q — the gate JUDGED but moved nothing. Either the workflow has no edge from %q, or the edge there is gated by a different reviewer, or it is a legacy edge whose gate must self-enact. Run `satellites story status_transition <story> --skill %s --explain` to see which gate governs which edge",
+		gate, status, wf, status, gate)
+}
+
+// syncStampVersionRe pulls the version out of a `<!-- satellites-sync:begin
+// {... "version": N ...} satellites-sync:end -->` stamp on a materialised /
+// embedded workflow source. Local hand-authored files carry no stamp.
+var syncStampVersionRe = regexp.MustCompile(`satellites-sync:begin[\s\S]*?"version"\s*:\s*(\d+)`)
+
+// syncStampVersion returns `vN` when body carries a sync stamp, else "-".
+func syncStampVersion(body string) string {
+	if m := syncStampVersionRe.FindStringSubmatch(body); m != nil {
+		return "v" + m[1]
+	}
+	return "-"
+}
+
+// workflowSourceProvenance reports which tier (local / skill / embed) the named
+// governing workflow resolved from and its stamp version — the local-vs-
+// materialised provenance an agent needs when a transition surprises it
+// (sty_550e9595). Mirrors the precedence of governingWorkflowSources.
+func workflowSourceProvenance(name, configPath string) (tier, version string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "-", "-"
+	}
+	find := func(srcs []verb.WorkflowSource) (string, bool) {
+		for _, s := range srcs {
+			if strings.EqualFold(strings.TrimSpace(s.Name), name) {
+				return s.Body, true
+			}
+		}
+		return "", false
+	}
+	if b, ok := find(clientWorkflowSources(configPath)); ok {
+		return "local", syncStampVersion(b)
+	}
+	if b, ok := find(materialisedWorkflowSources()); ok {
+		return "skill", syncStampVersion(b)
+	}
+	if b, ok := find(embeddedWorkflowSources()); ok {
+		return "embed", syncStampVersion(b)
+	}
+	return "unknown", "-"
+}
+
+// runExplain renders the `--explain` dry-run: the governing workflow as
+// enactment resolves it (name + source tier + version), the outgoing edges from
+// the current status with how each enacts, and the named gate's enactability
+// verdict. Pure read — no claim, no gate, no mutation (sty_550e9595).
+func runExplain(opts reviewOpts, story reviewStory, body string) error {
+	sources := governingWorkflowSources(opts.ConfigPath)
+	selector := verb.WorkflowSelector(story.Tags)
+	res := verb.ExplainTransition(selector, body, story.Status, story.Category, opts.Skill, sources)
+
+	out := opts.Stdout
+	tier, ver := workflowSourceProvenance(res.Governing, opts.ConfigPath)
+	gov := res.Governing
+	if gov == "" {
+		gov = "(none resolved)"
+	}
+	fmt.Fprintf(out, "explain %s\n", story.ID)
+	fmt.Fprintf(out, "  workflow:  %s   source: %s   version: %s\n", gov, tier, ver)
+	if res.Drift != "" {
+		fmt.Fprintf(out, "  drift:     %s\n", res.Drift)
+	}
+	actor := res.Actor
+	if actor == "" {
+		actor = "-"
+	}
+	fmt.Fprintf(out, "  status:    %s  (actor: %s)\n", res.Status, actor)
+	if len(res.Edges) == 0 {
+		fmt.Fprintln(out, "  edges:     (none — terminal)")
+	} else {
+		fmt.Fprintf(out, "  edges from %s:\n", res.Status)
+		for _, e := range res.Edges {
+			drive := "ungated"
+			switch {
+			case e.Gate != "":
+				drive = "--skill " + e.Gate
+			case e.Trigger == "checkpoint":
+				drive = "--checkpoint"
+			}
+			on := ""
+			if e.On != "" {
+				on = "  on:" + e.On
+			}
+			fmt.Fprintf(out, "    → %-12s %-44s [%s]%s\n", e.To, drive, e.Model, on)
+		}
+	}
+	if res.Gate != "" {
+		fmt.Fprintf(out, "  gate %s:\n    %s\n", res.Gate, res.Verdict)
+	} else {
+		fmt.Fprintf(out, "  %s\n", res.Verdict)
+	}
+	return nil
 }
 
 // checkpointDecision is the single rule behind --checkpoint (sty_21d2c535): the
@@ -203,18 +305,30 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// --checkpoint advances an ungated `trigger: checkpoint` edge (the executor's
 	// deliberate move). Exactly one applies (sty_21d2c535): a checkpoint must
 	// never be a silent side-effect of naming a gate.
+	// --explain is a read-only dry-run, so neither --skill nor --checkpoint is
+	// required (a bare `--explain` shows the edges from the current status). The
+	// action-naming contract below applies only to a real transition.
 	gateSkill := strings.TrimSpace(opts.Skill)
-	switch {
-	case opts.Checkpoint && gateSkill != "":
-		return fmt.Errorf("--checkpoint advances the ungated checkpoint edge and runs no gate — pass --checkpoint OR --skill, not both")
-	case !opts.Checkpoint && gateSkill == "":
-		return fmt.Errorf("--skill is required: name the gate skill to run (or pass --checkpoint to advance an ungated checkpoint edge)")
+	if !opts.Explain {
+		switch {
+		case opts.Checkpoint && gateSkill != "":
+			return fmt.Errorf("--checkpoint advances the ungated checkpoint edge and runs no gate — pass --checkpoint OR --skill, not both")
+		case !opts.Checkpoint && gateSkill == "":
+			return fmt.Errorf("--skill is required: name the gate skill to run (or pass --checkpoint to advance an ungated checkpoint edge)")
+		}
 	}
 
 	// 1. Resolve the story (substrate read — server).
 	story, body, err := reviewGetStory(ctx, opts)
 	if err != nil {
 		return err
+	}
+
+	// --explain: a read-only dry-run. Resolve the governing workflow exactly as
+	// enactment does and report the edges + the named gate's enactability, then
+	// return — no claim, no gate, no mutation, no drift self-heal (sty_550e9595).
+	if opts.Explain {
+		return runExplain(opts, story, body)
 	}
 
 	// 1a. v2 edge resolution (epic:graduated-workflow). On a state whose

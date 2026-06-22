@@ -197,6 +197,138 @@ func GoverningEdgesHint(selector, storyBody, status, category string, sources []
 	return fmt.Sprintf(" — from %q the governing workflow's transitions are: %s", strings.TrimSpace(status), strings.Join(parts, " · "))
 }
 
+// ExplainEdge is one outgoing transition from a status, flattened for the
+// `status_transition --explain` dry-run (sty_550e9595).
+type ExplainEdge struct {
+	To      string // target status
+	On      string // "pass" | "fail" | "" (unconditional)
+	Trigger string // "checkpoint" | ""
+	Gate    string // reviewer_skill driving the edge; "" when ungated
+	// Model is how the edge ENACTS, the distinction that decides whether a gate
+	// accept actually moves the story:
+	//   v2-client-enact   — an on:pass/fail edge; the CLIENT enacts when the
+	//                        invoked gate matches the edge's reviewer_skill.
+	//   legacy-self-enact — a gated edge with no on:; the GATE itself must write
+	//                        the status_transition. A judge-only gate accepts but
+	//                        never moves it (the sty_0d183153 stall).
+	//   checkpoint        — the executor's --checkpoint move (no gate).
+	//   ungated           — e.g. a cancel edge.
+	Model string
+}
+
+// ExplainResult is the read-only resolution of a status_transition for
+// `--explain`: the governing workflow as ENACTMENT would resolve it (selector
+// first, else category default, else the embedded copy), the outgoing edges
+// from the current status, and a plain verdict on whether the named gate can
+// enact one. It mutates nothing (sty_550e9595).
+type ExplainResult struct {
+	Governing string // resolved workflow name ("" = none / embedded-only)
+	Drift     string // selector fail-closed or embedded-vs-governing divergence
+	Status    string
+	Actor     string
+	Edges     []ExplainEdge
+	Gate      string // the gate the caller named (may be empty)
+	Verdict   string // plain-language enactability verdict for Gate from Status
+}
+
+// ExplainTransition resolves a status_transition without running a gate or
+// mutating anything — the engine behind `--explain`. It mirrors the enactment
+// path's resolution (governingWorkflowSources + selector) so what it reports is
+// exactly what enactment would act on.
+func ExplainTransition(selector, storyBody, status, category, gateSkill string, sources []WorkflowSource) ExplainResult {
+	status = strings.TrimSpace(status)
+	res := ExplainResult{Status: status, Gate: strings.TrimSpace(gateSkill)}
+
+	var auth *workflow.Workflow
+	switch {
+	case selector != "":
+		wf, covers, ok := ResolveByName(selector, category, sources)
+		if !ok {
+			res.Drift = fmt.Sprintf("workflow selector %q names no workflow in the source set — enactment fails closed", selector)
+			return res
+		}
+		if !covers {
+			res.Governing = selector
+			res.Drift = fmt.Sprintf("workflow selector %q does not cover category %q — enactment fails closed", selector, category)
+			return res
+		}
+		auth, res.Governing = wf, selector
+	default:
+		if w, name, ok := ResolveGoverningWorkflow(category, sources); ok {
+			auth, res.Governing = w, name
+			if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil && !w.Equivalent(embedded) {
+				res.Drift = fmt.Sprintf("story's embedded ## Workflow diverges from governing workflow %q — the governing definition is enacted, the embedded copy is not", name)
+			}
+		} else if embedded, err := workflow.ParseBody([]byte(storyBody)); err == nil && embedded != nil {
+			auth = embedded
+		}
+	}
+	if auth == nil {
+		res.Verdict = "no governing workflow resolves for this story — nothing to enact"
+		return res
+	}
+	if st, ok := auth.StateOf(status); ok {
+		res.Actor = st.Actor
+	}
+
+	var matched *ExplainEdge
+	var otherGate string
+	for _, t := range auth.TransitionsFrom(status) {
+		e := ExplainEdge{To: t.To, On: strings.TrimSpace(t.On), Trigger: strings.TrimSpace(t.Trigger), Gate: strings.TrimSpace(t.ReviewerSkill)}
+		switch {
+		case e.On == "pass" || e.On == "fail":
+			e.Model = "v2-client-enact"
+		case e.Gate != "":
+			e.Model = "legacy-self-enact"
+		case e.Trigger == "checkpoint":
+			e.Model = "checkpoint"
+		default:
+			e.Model = "ungated"
+		}
+		res.Edges = append(res.Edges, e)
+		if e.Gate != "" && res.Gate != "" {
+			if strings.EqualFold(e.Gate, res.Gate) {
+				ec := e
+				matched = &ec
+			} else if otherGate == "" {
+				otherGate = e.Gate
+			}
+		}
+	}
+	res.Verdict = explainVerdict(res, matched, otherGate)
+	return res
+}
+
+// explainVerdict renders the human enactability sentence for ExplainTransition.
+func explainVerdict(res ExplainResult, matched *ExplainEdge, otherGate string) string {
+	if len(res.Edges) == 0 {
+		return fmt.Sprintf("status %q has no outgoing transition — it is terminal; nothing to enact", res.Status)
+	}
+	if res.Gate == "" {
+		return "no --skill named — pass a gate to see whether it enacts an edge from here"
+	}
+	if matched != nil {
+		switch matched.Model {
+		case "v2-client-enact":
+			return fmt.Sprintf("gate %q governs %s → %s as a v2 pass/fail edge — on accept the CLIENT enacts the move", res.Gate, res.Status, matched.To)
+		case "legacy-self-enact":
+			return fmt.Sprintf("gate %q governs %s → %s as a LEGACY edge — the GATE must write the status_transition itself; a judge-only gate accepts but never moves the story", res.Gate, res.Status, matched.To)
+		}
+	}
+	if res.Actor == "operator" {
+		return fmt.Sprintf("status %q is an operator state — not the executor's turn; this gate will not enact here", res.Status)
+	}
+	for _, e := range res.Edges {
+		if e.Model == "checkpoint" {
+			return fmt.Sprintf("status %q advances by the executor's --checkpoint (→ %s), not a reviewer gate — %q enacts nothing here", res.Status, e.To, res.Gate)
+		}
+	}
+	if otherGate != "" {
+		return fmt.Sprintf("gate %q governs no edge from %q — that edge's gate is %q; running %q here judges only, nothing enacts", res.Gate, res.Status, otherGate, res.Gate)
+	}
+	return fmt.Sprintf("gate %q governs no edge from %q — nothing would enact", res.Gate, res.Status)
+}
+
 // GoverningCheckpoint resolves the single ungated `trigger: checkpoint` edge
 // out of `status` in the AUTHORITATIVE governing workflow (mirrors
 // CheckpointEdge but over the resolved definition, not the embedded copy).

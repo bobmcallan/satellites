@@ -1,6 +1,9 @@
 package verb
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A minimal product-style workflow source (applies_to ["*"]) and a skills-repo
 // style one (applies_to ["skill"]) — the two-workflow corpus order-5 resolves.
@@ -35,6 +38,58 @@ func TestResolveGoverningWorkflow(t *testing.T) {
 	only := []WorkflowSource{{Name: "skills-wf", Body: skillsWFBody}}
 	if _, _, ok := ResolveGoverningWorkflow("feature", only); ok {
 		t.Fatal("category=feature with only a skill-scoped workflow should be ungoverned")
+	}
+}
+
+func TestExplainTransition(t *testing.T) {
+	cat := "feature" // covered by prod-wf's wildcard applies_to
+
+	// v2 edge, gate matches: done-review → done on pass, gate "done".
+	r := ExplainTransition("", productWFBody, "done-review", cat, "done", sources())
+	if r.Governing != "prod-wf" {
+		t.Fatalf("governing=%q, want prod-wf", r.Governing)
+	}
+	if len(r.Edges) != 2 {
+		t.Fatalf("done-review edges = %d, want 2 (pass+fail)", len(r.Edges))
+	}
+	if r.Edges[0].Model != "v2-client-enact" {
+		t.Errorf("pass edge model = %q, want v2-client-enact", r.Edges[0].Model)
+	}
+	if !strings.Contains(r.Verdict, "v2 pass/fail") || !strings.Contains(r.Verdict, "CLIENT enacts") {
+		t.Errorf("v2 verdict unexpected: %q", r.Verdict)
+	}
+
+	// Legacy gated edge: backlog → ready, gate "plan" (no on:).
+	r = ExplainTransition("", productWFBody, "backlog", cat, "plan", sources())
+	if r.Edges[0].Model != "legacy-self-enact" {
+		t.Errorf("backlog edge model = %q, want legacy-self-enact", r.Edges[0].Model)
+	}
+	if !strings.Contains(r.Verdict, "LEGACY") || !strings.Contains(r.Verdict, "judge-only gate accepts but never moves") {
+		t.Errorf("legacy verdict unexpected: %q", r.Verdict)
+	}
+
+	// Gate names no edge from here — the edge's real gate is surfaced.
+	r = ExplainTransition("", productWFBody, "done-review", cat, "wrong-gate", sources())
+	if !strings.Contains(r.Verdict, "governs no edge") || !strings.Contains(r.Verdict, "\"done\"") {
+		t.Errorf("mismatch verdict should name the real gate: %q", r.Verdict)
+	}
+
+	// Checkpoint state: in_progress advances by --checkpoint, a gate enacts nothing.
+	r = ExplainTransition("", productWFBody, "in_progress", cat, "done", sources())
+	if !strings.Contains(r.Verdict, "--checkpoint") {
+		t.Errorf("checkpoint verdict should steer to --checkpoint: %q", r.Verdict)
+	}
+
+	// Terminal state: no outgoing edge.
+	r = ExplainTransition("", productWFBody, "done", cat, "done", sources())
+	if len(r.Edges) != 0 || !strings.Contains(r.Verdict, "terminal") {
+		t.Errorf("terminal state verdict unexpected: edges=%d verdict=%q", len(r.Edges), r.Verdict)
+	}
+
+	// Dangling selector fails closed with drift, no edges.
+	r = ExplainTransition("no-such-wf", productWFBody, "backlog", cat, "plan", sources())
+	if r.Drift == "" || len(r.Edges) != 0 {
+		t.Errorf("dangling selector should fail closed: drift=%q edges=%d", r.Drift, len(r.Edges))
 	}
 }
 
