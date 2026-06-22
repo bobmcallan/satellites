@@ -652,8 +652,8 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	// status (sty_2c232fa4). No-op when this session has no live engagement for
 	// the story; best-effort (a refresh failure must not fail the review).
 	if observed != "" && observed != story.Status {
-		editable := resolveEditable(ctx, opts.ConfigPath, story.ID, observed)
-		if _, rErr := refreshEngagementPhase(store, resolveSession(""), story.ID, observed, editable, time.Now()); rErr != nil {
+		guards := resolveEngageGuards(ctx, opts.ConfigPath, story.ID, observed)
+		if _, rErr := refreshEngagementPhase(store, resolveSession(""), story.ID, observed, guards.editable, guards.commitReady, time.Now()); rErr != nil {
 			fmt.Fprintf(opts.Stderr, "warn: refresh engagement after transition: %v\n", rErr)
 		}
 		// Real-time activity (epic:dynamic-workflow-status, order:1): flush the

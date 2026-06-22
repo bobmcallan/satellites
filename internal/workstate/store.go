@@ -36,25 +36,27 @@ const KindClose = "close"
 // engagement; Kind is the ledger-style discriminator; Tags travel with the row
 // ("log list with tags"); LeaseUntil is optional freshness the door reads.
 type Event struct {
-	Session    string
-	Story      string
-	Phase      string
-	Kind       string
-	Tags       []string
-	LeaseUntil time.Time // zero ⇒ no lease recorded on this event
-	Editable   bool      // whether edits are permitted in this phase (workflow-derived at engage; the door reads it)
-	TS         time.Time // zero ⇒ stamped by Append's caller-supplied now
+	Session     string
+	Story       string
+	Phase       string
+	Kind        string
+	Tags        []string
+	LeaseUntil  time.Time // zero ⇒ no lease recorded on this event
+	Editable    bool      // whether edits are permitted in this phase (workflow-derived at engage; the door reads it)
+	CommitReady bool      // whether this phase IS the workflow's commit-push step (the commit door reads it)
+	TS          time.Time // zero ⇒ stamped by Append's caller-supplied now
 }
 
 // Engagement is one row of the `current` projection: the latest state for a
 // (session, story) pair. It is the single indexed read the access/edit hooks do.
 type Engagement struct {
-	Session    string
-	Story      string
-	Phase      string
-	LeaseUntil time.Time // zero ⇒ no lease
-	Editable   bool      // edits permitted in this phase (the door requires it)
-	UpdatedAt  time.Time
+	Session     string
+	Story       string
+	Phase       string
+	LeaseUntil  time.Time // zero ⇒ no lease
+	Editable    bool      // edits permitted in this phase (the door requires it)
+	CommitReady bool      // this phase IS the workflow's commit-push step (the commit door requires it)
+	UpdatedAt   time.Time
 }
 
 // Store is the engagement event store. Safe for concurrent use (database/sql
@@ -127,6 +129,7 @@ CREATE TABLE IF NOT EXISTS current (
     phase       TEXT NOT NULL DEFAULT '',
     lease_until TEXT NOT NULL DEFAULT '',
     editable    INTEGER NOT NULL DEFAULT 1,
+    commit_ready INTEGER NOT NULL DEFAULT 0,
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (session, story)
 );
@@ -191,6 +194,10 @@ CREATE TABLE IF NOT EXISTS context_budget (
 	// Backfill the editable column on stores created before sty_2b6cd041. A
 	// duplicate-column error means it's already present — ignore it (idempotent).
 	_, _ = s.db.Exec(`ALTER TABLE current ADD COLUMN editable INTEGER NOT NULL DEFAULT 1`)
+	// Backfill commit_ready on stores created before sty_e925ff09 (additive,
+	// same idempotent pattern). Legacy rows default to NOT commit-ready (0) — the
+	// commit door fails closed, so an un-refreshed legacy engagement gates commit.
+	_, _ = s.db.Exec(`ALTER TABLE current ADD COLUMN commit_ready INTEGER NOT NULL DEFAULT 0`)
 	return nil
 }
 
@@ -239,14 +246,15 @@ func (s *Store) Append(ev Event) (int64, error) {
 		}
 	} else {
 		if _, err := tx.Exec(
-			`INSERT INTO current (session, story, phase, lease_until, editable, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO current (session, story, phase, lease_until, editable, commit_ready, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(session, story) DO UPDATE SET
 			     phase = excluded.phase,
 			     lease_until = excluded.lease_until,
 			     editable = excluded.editable,
+			     commit_ready = excluded.commit_ready,
 			     updated_at = excluded.updated_at`,
-			ev.Session, ev.Story, ev.Phase, lease, boolToInt(ev.Editable), ts.UTC().Format(time.RFC3339),
+			ev.Session, ev.Story, ev.Phase, lease, boolToInt(ev.Editable), boolToInt(ev.CommitReady), ts.UTC().Format(time.RFC3339),
 		); err != nil {
 			return 0, fmt.Errorf("workstate: upsert projection: %w", err)
 		}
@@ -261,7 +269,7 @@ func (s *Store) Append(ev Event) (int64, error) {
 // the single indexed read the hooks rely on. ok is false when none is open.
 func (s *Store) Current(session, story string) (Engagement, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT session, story, phase, lease_until, editable, updated_at FROM current WHERE session = ? AND story = ?`,
+		`SELECT session, story, phase, lease_until, editable, commit_ready, updated_at FROM current WHERE session = ? AND story = ?`,
 		session, story,
 	)
 	e, err := scanEngagement(row)
@@ -277,7 +285,7 @@ func (s *Store) Current(session, story string) (Engagement, bool, error) {
 // ListCurrent returns every open engagement, newest-updated first — the basis
 // for `satellites work status` and the cross-agent view.
 func (s *Store) ListCurrent() ([]Engagement, error) {
-	return s.queryCurrent(`SELECT session, story, phase, lease_until, editable, updated_at FROM current ORDER BY updated_at DESC`)
+	return s.queryCurrent(`SELECT session, story, phase, lease_until, editable, commit_ready, updated_at FROM current ORDER BY updated_at DESC`)
 }
 
 // LiveEngagement returns the open engagements for one session, newest first.
@@ -286,7 +294,7 @@ func (s *Store) ListCurrent() ([]Engagement, error) {
 // door (sty_2b6cd041), not in the store.
 func (s *Store) LiveEngagement(session string) ([]Engagement, error) {
 	return s.queryCurrent(
-		`SELECT session, story, phase, lease_until, editable, updated_at FROM current WHERE session = ? ORDER BY updated_at DESC`,
+		`SELECT session, story, phase, lease_until, editable, commit_ready, updated_at FROM current WHERE session = ? ORDER BY updated_at DESC`,
 		session,
 	)
 }
@@ -385,17 +393,18 @@ type scanner interface {
 
 func scanEngagement(sc scanner) (Engagement, error) {
 	var session, story, phase, lease, updated string
-	var editable int
-	if err := sc.Scan(&session, &story, &phase, &lease, &editable, &updated); err != nil {
+	var editable, commitReady int
+	if err := sc.Scan(&session, &story, &phase, &lease, &editable, &commitReady, &updated); err != nil {
 		return Engagement{}, err
 	}
 	return Engagement{
-		Session:    session,
-		Story:      story,
-		Phase:      phase,
-		LeaseUntil: parseRFC3339(lease),
-		Editable:   editable != 0,
-		UpdatedAt:  parseRFC3339(updated),
+		Session:     session,
+		Story:       story,
+		Phase:       phase,
+		LeaseUntil:  parseRFC3339(lease),
+		Editable:    editable != 0,
+		CommitReady: commitReady != 0,
+		UpdatedAt:   parseRFC3339(updated),
 	}, nil
 }
 

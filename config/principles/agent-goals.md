@@ -24,4 +24,8 @@ A step the workflow declares is authorised BY the workflow; it is never a
 gap that PREVENTS following the workflow — the cases above — not a normal step on
 its path.
 
+**One story at a time.** Drive a single engaged story through to done: one story
+↔ one commit ↔ one release. `git commit`/`git push` are authorised only AT the
+workflow's commit-push step, never mid-work — the commitgate enforces it.
+
 See [[reviewer-only-model]].

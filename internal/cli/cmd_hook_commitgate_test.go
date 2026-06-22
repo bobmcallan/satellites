@@ -68,18 +68,75 @@ func TestRunHookCommitGate_DenyWithoutEngagement(t *testing.T) {
 	}
 }
 
-// TestRunHookCommitGate_AllowWithEngagement pins the allow path: a lease-fresh
-// editable engagement for the session lets `git push` through (no output).
-func TestRunHookCommitGate_AllowWithEngagement(t *testing.T) {
+// TestRunHookCommitGate_AllowWhenCommitReady pins the allow path (sty_e925ff09):
+// a lease-fresh engagement AT its commit-push step (CommitReady) lets `git push`
+// through (no output).
+func TestRunHookCommitGate_AllowWhenCommitReady(t *testing.T) {
 	repo := writeRepo(t, true, "")
-	seedEngagement(t, repo, "sess1", "sty_live", "in_progress", true, time.Now().UTC().Add(time.Hour))
+	seedEngagementCommit(t, repo, "sess1", "sty_live", "shipping", true, true, time.Now().UTC().Add(time.Hour))
 	in := bytes.NewBufferString(`{"tool_name":"Bash","cwd":"` + repo + `","session_id":"sess1","tool_input":{"command":"git push"}}`)
 	var out bytes.Buffer
 	if err := runHookCommitGate(in, &out); err != nil {
 		t.Fatalf("runHookCommitGate: %v", err)
 	}
 	if strings.TrimSpace(out.String()) != "" {
-		t.Errorf("editable engagement should allow push (no output), got %q", out.String())
+		t.Errorf("commit-ready engagement should allow push (no output), got %q", out.String())
+	}
+}
+
+// TestRunHookCommitGate_DenyWhenEditableButNotCommitReady pins the core
+// sty_e925ff09 binding: an engagement that is editable but NOT at its commit-push
+// step (e.g. in_progress) denies `git push` — committing is authorised only AT
+// the ship step, not at any editable phase.
+func TestRunHookCommitGate_DenyWhenEditableButNotCommitReady(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	seedEngagementCommit(t, repo, "sess1", "sty_live", "in_progress", true, false, time.Now().UTC().Add(time.Hour))
+	in := bytes.NewBufferString(`{"tool_name":"Bash","cwd":"` + repo + `","session_id":"sess1","tool_input":{"command":"git push"}}`)
+	var out bytes.Buffer
+	if err := runHookCommitGate(in, &out); err != nil {
+		t.Fatalf("runHookCommitGate: %v", err)
+	}
+	var dec gateDecisionJSON
+	if err := json.Unmarshal(out.Bytes(), &dec); err != nil {
+		t.Fatalf("editable-but-not-commit-ready push should deny with decision JSON: %v\n%s", err, out.String())
+	}
+	if dec.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Errorf("decision = %+v, want deny", dec.HookSpecificOutput)
+	}
+	if !strings.Contains(dec.HookSpecificOutput.PermissionDecisionReason, "commit-push step") {
+		t.Errorf("reason should steer to the commit-push step: %q", dec.HookSpecificOutput.PermissionDecisionReason)
+	}
+}
+
+// TestRunHookCommitGate_EditBashAllowedAtInProgress pins that the stricter
+// commit rule does NOT tighten file-mutation gating: an obvious in-repo edit via
+// Bash (output redirection) is still allowed at an editable in_progress phase,
+// even though that phase is NOT commit-ready.
+func TestRunHookCommitGate_EditBashAllowedAtInProgress(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	seedEngagementCommit(t, repo, "sess1", "sty_live", "in_progress", true, false, time.Now().UTC().Add(time.Hour))
+	in := bashCommitGateEvent(t, repo, "sess1", "echo hi > note.txt")
+	var out bytes.Buffer
+	if err := runHookCommitGate(in, &out); err != nil {
+		t.Fatalf("runHookCommitGate: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "" {
+		t.Errorf("a file edit at an editable phase must stay allowed regardless of commit-readiness, got deny: %q", out.String())
+	}
+}
+
+// TestRunHookCommitGate_ReadOnlyGitAllowsNotCommitReady pins that read-only git
+// is never gated even when the engagement is editable-but-not-commit-ready.
+func TestRunHookCommitGate_ReadOnlyGitAllowsNotCommitReady(t *testing.T) {
+	repo := writeRepo(t, true, "")
+	seedEngagementCommit(t, repo, "sess1", "sty_live", "in_progress", true, false, time.Now().UTC().Add(time.Hour))
+	in := bashCommitGateEvent(t, repo, "sess1", "git status && git log --oneline -5")
+	var out bytes.Buffer
+	if err := runHookCommitGate(in, &out); err != nil {
+		t.Fatalf("runHookCommitGate: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "" {
+		t.Errorf("read-only git must not be gated, got %q", out.String())
 	}
 }
 

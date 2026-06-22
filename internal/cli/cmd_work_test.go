@@ -26,7 +26,7 @@ func TestRunWorkInit_EngagesAndFlipsGate(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runWorkInit(&out, repo, workDir, stateDB, "sty_xyz", "in_progress", "sess1", true, now); err != nil {
+	if err := runWorkInit(&out, repo, workDir, stateDB, "sty_xyz", "in_progress", "sess1", true, false, now); err != nil {
 		t.Fatalf("runWorkInit: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestRunWorkInit_RequiresStory(t *testing.T) {
 	repo := t.TempDir()
 	workDir := filepath.Join(repo, ".satellites", "work")
 	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "   ", "", "sess1", true, time.Now().UTC()); err == nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "   ", "", "sess1", true, false, time.Now().UTC()); err == nil {
 		t.Errorf("empty story id should error")
 	}
 }
@@ -68,22 +68,22 @@ func TestRunWorkInit_SingleOpenPerSession(t *testing.T) {
 	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_aaa", "in_progress", "sess1", true, now); err != nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_aaa", "in_progress", "sess1", true, false, now); err != nil {
 		t.Fatalf("first engage: %v", err)
 	}
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_aaa", "in_progress", "sess1", true, now.Add(time.Minute)); err != nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_aaa", "in_progress", "sess1", true, false, now.Add(time.Minute)); err != nil {
 		t.Fatalf("re-engage same story should be allowed: %v", err)
 	}
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess1", true, now.Add(2*time.Minute)); err == nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess1", true, false, now.Add(2*time.Minute)); err == nil {
 		t.Fatalf("second different open story should be refused")
 	}
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess2", true, now); err != nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess2", true, false, now); err != nil {
 		t.Fatalf("different session should be allowed: %v", err)
 	}
 	if err := runWorkClose(io.Discard, repo, workDir, stateDB, "sty_aaa", "sess1", false, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess1", true, now.Add(4*time.Minute)); err != nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_bbb", "in_progress", "sess1", true, false, now.Add(4*time.Minute)); err != nil {
 		t.Fatalf("after close, engaging a new story should be allowed: %v", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestRunWorkClose_ClearsLegacyFile(t *testing.T) {
 	stateDB := cliconfig.Config{}.ResolveStateDB(repo)
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
-	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_ccc", "in_progress", "sess1", true, now); err != nil {
+	if err := runWorkInit(io.Discard, repo, workDir, stateDB, "sty_ccc", "in_progress", "sess1", true, false, now); err != nil {
 		t.Fatalf("engage: %v", err)
 	}
 	if _, ok := readEngagement(workDir); !ok {

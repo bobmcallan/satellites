@@ -68,8 +68,8 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot, workDir := resolveWorkContext(configArg)
-			editable, actor, resolvedStatus := resolveEngageGuards(cmd.Context(), configArg, args[0], status)
-			if err := refuseNonExecutorActor("work init", args[0], resolvedStatus, actor); err != nil {
+			guards := resolveEngageGuards(cmd.Context(), configArg, args[0], status)
+			if err := refuseNonExecutorActor("work init", args[0], guards.status, guards.actor); err != nil {
 				return err
 			}
 			// Drive-time gate (sty_fc39ca77): the reviewer runs BEFORE you start
@@ -87,7 +87,7 @@ under a fresh lease and points at ` + "`satellites work close`" + `.`,
 				return err
 			}
 			if err := runWorkInit(cmd.OutOrStdout(), repoRoot, workDir, resolveStateDB(configArg),
-				args[0], status, resolveSession(sessionArg), editable, time.Now().UTC()); err != nil {
+				args[0], status, resolveSession(sessionArg), guards.editable, guards.commitReady, time.Now().UTC()); err != nil {
 				return err
 			}
 			// Real-time activity (epic:dynamic-workflow-status, order:1): push the
@@ -253,7 +253,7 @@ func resolveSession(flag string) string {
 // pair — it never fabricates one. The event carries a FRESH lease because the
 // projection upserts lease_until from the event (a zero would clear it).
 // Best-effort: any failure is returned for the caller to warn on, never fatal.
-func refreshEngagementPhase(store *workstate.Store, session, storyID, phase string, editable bool, now time.Time) (bool, error) {
+func refreshEngagementPhase(store *workstate.Store, session, storyID, phase string, editable, commitReady bool, now time.Time) (bool, error) {
 	if store == nil || strings.TrimSpace(session) == "" || strings.TrimSpace(storyID) == "" {
 		return false, nil
 	}
@@ -262,11 +262,21 @@ func refreshEngagementPhase(store *workstate.Store, session, storyID, phase stri
 	}
 	if _, err := store.Append(workstate.Event{
 		Session: session, Story: storyID, Phase: strings.TrimSpace(phase),
-		Kind: "phase", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, TS: now,
+		Kind: "phase", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, CommitReady: commitReady, TS: now,
 	}); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// engageGuards are the engage-time guards derived once from a story's embedded
+// `## Workflow` for its current status: whether the phase permits edits, whether
+// it IS the commit-push step, the state's actor, and the resolved status.
+type engageGuards struct {
+	editable    bool
+	commitReady bool
+	actor       string
+	status      string
 }
 
 // resolveEditable best-effort decides whether the engaged story's current phase
@@ -275,26 +285,27 @@ func refreshEngagementPhase(store *workstate.Store, session, storyID, phase stri
 // workflow block, unknown status) returns true so the lease remains the hard
 // gate. The door reads the stored result; this resolves it once at engage.
 func resolveEditable(ctx context.Context, configPath, storyID, status string) bool {
-	editable, _, _ := resolveEngageGuards(ctx, configPath, storyID, status)
-	return editable
+	return resolveEngageGuards(ctx, configPath, storyID, status).editable
 }
 
-// resolveEngageGuards fetches the story once and derives the two engage-time
-// guards from its embedded `## Workflow`: editability and the current state's
-// actor. Best-effort like resolveEditable: any failure yields (true, "") so
-// offline work is never over-blocked.
-func resolveEngageGuards(ctx context.Context, configPath, storyID, status string) (bool, string, string) {
+// resolveEngageGuards fetches the story once and derives the engage-time guards
+// from its embedded `## Workflow`: editability, commit-readiness (is this the
+// commit-push step), and the current state's actor. Best-effort: any failure
+// yields editable=true (so offline work is never over-blocked) and
+// commitReady=false (the commit door fails closed — committing needs the
+// resolved ship step, never an unresolved guess).
+func resolveEngageGuards(ctx context.Context, configPath, storyID, status string) engageGuards {
 	req, err := json.Marshal(verb.DocumentGetRequest{ID: strings.TrimSpace(storyID)})
 	if err != nil {
-		return true, "", status
+		return engageGuards{editable: true, status: status}
 	}
 	raw, err := dispatchVerb(ctx, "document_get", req, configPath, "")
 	if err != nil {
-		return true, "", status // offline / not resolvable → don't over-block
+		return engageGuards{editable: true, status: status} // offline / not resolvable → don't over-block
 	}
 	var resp verb.DocumentGetResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return true, "", status
+		return engageGuards{editable: true, status: status}
 	}
 	body := resp.RawBody
 	if body == "" && len(resp.Versions) > 0 {
@@ -305,9 +316,14 @@ func resolveEngageGuards(ctx context.Context, configPath, storyID, status string
 	}
 	wf, err := workflow.ParseBody([]byte(body))
 	if err != nil || strings.TrimSpace(status) == "" || !wf.HasState(status) {
-		return true, "", status
+		return engageGuards{editable: true, status: status}
 	}
-	return wf.IsEditable(status), wf.ActorOf(status), status
+	return engageGuards{
+		editable:    wf.IsEditable(status),
+		commitReady: wf.IsCommitStep(status),
+		actor:       wf.ActorOf(status),
+		status:      status,
+	}
 }
 
 // resolveStoryParent returns a story's parent_id (its epic anchor) via
@@ -478,7 +494,7 @@ func refuseNonExecutorActor(action, storyID, status, actor string) error {
 // keyed by session) and writes engagement.json for the legacy door. It enforces
 // single-open: a session may not open a second DIFFERENT story under a fresh
 // lease. Testable core: callers pass the resolved paths, session, and a fixed now.
-func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, session string, editable bool, now time.Time) error {
+func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, session string, editable, commitReady bool, now time.Time) error {
 	storyID = strings.TrimSpace(storyID)
 	if storyID == "" {
 		return fmt.Errorf("work init: story id required")
@@ -508,7 +524,7 @@ func runWorkInit(out io.Writer, repoRoot, workDir, stateDB, storyID, status, ses
 
 	if _, err := store.Append(workstate.Event{
 		Session: session, Story: storyID, Phase: strings.TrimSpace(status),
-		Kind: "engage", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, TS: now,
+		Kind: "engage", LeaseUntil: now.Add(engageLeaseTTL), Editable: editable, CommitReady: commitReady, TS: now,
 	}); err != nil {
 		return fmt.Errorf("work init: record engagement: %w", err)
 	}

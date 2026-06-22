@@ -35,7 +35,7 @@ func TestRefreshEngagementPhase(t *testing.T) {
 
 	// Reviewer advanced backlog→in_progress; refresh to the new editable status.
 	later := now.Add(time.Minute)
-	refreshed, err := refreshEngagementPhase(store, session, story, "in_progress", true, later)
+	refreshed, err := refreshEngagementPhase(store, session, story, "in_progress", true, false, later)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRefreshEngagementPhase(t *testing.T) {
 	}
 
 	// No engagement for the pair → no-op, no fabricated engagement.
-	refreshed, err = refreshEngagementPhase(store, "other-sess", story, "in_progress", true, later)
+	refreshed, err = refreshEngagementPhase(store, "other-sess", story, "in_progress", true, false, later)
 	if err != nil {
 		t.Fatalf("refresh no-op: %v", err)
 	}

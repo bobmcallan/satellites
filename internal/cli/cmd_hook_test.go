@@ -45,6 +45,14 @@ func writeRepo(t *testing.T, withToml bool, engagementStory string) string {
 // authority the door reads.
 func seedEngagement(t *testing.T, repo, session, story, phase string, editable bool, leaseUntil time.Time) {
 	t.Helper()
+	seedEngagementCommit(t, repo, session, story, phase, editable, false, leaseUntil)
+}
+
+// seedEngagementCommit is seedEngagement plus the commit-ready flag — used by the
+// commit-gate tests (sty_e925ff09) where the engaged story sits AT its
+// commit-push step.
+func seedEngagementCommit(t *testing.T, repo, session, story, phase string, editable, commitReady bool, leaseUntil time.Time) {
+	t.Helper()
 	s, err := workstate.Open(stateDBForRoot(repo))
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +60,7 @@ func seedEngagement(t *testing.T, repo, session, story, phase string, editable b
 	defer s.Close()
 	if _, err := s.Append(workstate.Event{
 		Session: session, Story: story, Phase: phase, Kind: "engage",
-		LeaseUntil: leaseUntil, Editable: editable, TS: time.Now().UTC(),
+		LeaseUntil: leaseUntil, Editable: editable, CommitReady: commitReady, TS: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -440,6 +440,21 @@ func (w *Workflow) IsEditable(state string) bool {
 	return s != w.InitialState() && !w.IsTerminal(s)
 }
 
+// IsCommitStep reports whether `state` is the workflow's commit-push step: a
+// state with an outgoing transition whose work_skill is `commit-push`. The
+// harness binds `git commit`/`git push` to this step so one story ↔ one commit ↔
+// one release holds — committing is authorised only AT the ship step, not at any
+// editable phase. Derived purely from the workflow shape (the work_skill field),
+// so a re-authored workflow needs no code change. An unknown state is false.
+func (w *Workflow) IsCommitStep(state string) bool {
+	for _, t := range w.TransitionsFrom(strings.TrimSpace(state)) {
+		if strings.TrimSpace(t.WorkSkill) == "commit-push" {
+			return true
+		}
+	}
+	return false
+}
+
 // EditableStates returns every state for which IsEditable is true.
 func (w *Workflow) EditableStates() []string {
 	var out []string

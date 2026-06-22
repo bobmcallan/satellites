@@ -57,7 +57,7 @@ func tickEngagement(stateDB, session string, now time.Time) (bool, error) {
 		}
 		if _, err := store.Append(workstate.Event{
 			Session: e.Session, Story: e.Story, Phase: e.Phase,
-			Kind: "tick", LeaseUntil: now.Add(engageLeaseTTL), Editable: e.Editable, TS: now,
+			Kind: "tick", LeaseUntil: now.Add(engageLeaseTTL), Editable: e.Editable, CommitReady: e.CommitReady, TS: now,
 		}); err != nil {
 			return ticked, err
 		}
