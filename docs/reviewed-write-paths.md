@@ -87,3 +87,8 @@ a gate it could not find.
 | --- | --- | --- |
 | workspace-objective write (`cmd_workspace.go`) | no — a free-form `type:document`, `scope:workspace` row (no behaviour kind, no `principles:` tag) | **exempt by design** — `reviewRequiredKind`=false; not a gated artifact |
 | `setPrincipleAlways` (`cmd_context_curate.go`) | yes — a `principles:`-tagged write | **REGRESSION** — `context curate --drop/--restore` toggles `principles:always` (a TAG/metadata-only patch, body unchanged) but the barrier (`reviewRequiredKind`=true on the `principles:` tag) refuses it without an attestation. Its unit test mocks dispatch, so CI never caught it. Fix tracked separately: exempt a body-unchanged metadata patch from the CONTENT barrier. |
+
+## See also
+
+- `sty_dc44e359` — the `context curate` barrier-regression fix.
+- `sty_4300e117` — discoverable gates (the at-use mitigation for the status-enact channel).
