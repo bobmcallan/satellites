@@ -5,19 +5,6 @@ import (
 	"testing"
 )
 
-// TestRequireParent: the operator override only applies to category:parent.
-func TestRequireParent(t *testing.T) {
-	if err := requireParent("parent", "sty_x"); err != nil {
-		t.Errorf("parent should pass: %v", err)
-	}
-	if err := requireParent("fix", "sty_x"); err == nil {
-		t.Errorf("a non-parent story must be refused")
-	}
-	if err := requireParent("", "sty_x"); err == nil {
-		t.Errorf("an empty category must be refused")
-	}
-}
-
 // TestSetStatusLedgerRequest: the override records a status_transition ledger row
 // carrying to_status — the same projection path the gate uses.
 func TestSetStatusLedgerRequest(t *testing.T) {

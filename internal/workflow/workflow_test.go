@@ -32,7 +32,7 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// The parent (epic/anchor) workflow is now a GOVERNANCE SOURCE in the
 		// config/workflows embed, no longer scaffolded into .satellites/workflows
 		// (sty_a69e8c61) — parse it from the embed source.
-		{filepath.Join("..", "..", "config", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 2},
+		{filepath.Join("..", "..", "config", "workflows", "satellites-parent-workflow.md"), "satellites-parent-workflow", 4},
 	}
 	for _, c := range cases {
 		raw, err := os.ReadFile(c.path)
@@ -67,6 +67,46 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestIsTerminal_ReopenExcluded (sty_781c96aa): a state whose only outgoing edge
+// is a trigger:reopen operator escape-hatch is still TERMINAL (and non-editable),
+// the entry state is detected despite the reopen's incoming edge, and the reopen
+// edge stays visible to TransitionsFrom for the ungated set-status path.
+func TestIsTerminal_ReopenExcluded(t *testing.T) {
+	input := `---
+name: anc
+applies_to: [parent]
+---
+
+` + "```yaml" + `
+states: [backlog, done, cancelled]
+transitions:
+  - {from: backlog, to: done, reviewer_skill: "close"}
+  - {from: backlog, to: cancelled, reviewer_skill: "cancel"}
+  - {from: done, to: backlog, trigger: reopen}
+  - {from: cancelled, to: backlog, trigger: reopen}
+` + "```" + `
+`
+	wf, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !wf.IsTerminal("done") || !wf.IsTerminal("cancelled") {
+		t.Error("a state with only a trigger:reopen outgoing edge must be terminal")
+	}
+	if wf.IsEditable("done") {
+		t.Error("a terminal (reopen-only) state must not be editable")
+	}
+	if got := wf.TerminalStates(); len(got) != 2 {
+		t.Errorf("TerminalStates = %v, want [done cancelled]", got)
+	}
+	if wf.InitialState() != "backlog" {
+		t.Errorf("InitialState = %q, want backlog (reopen edges must not disqualify it)", wf.InitialState())
+	}
+	if len(wf.TransitionsFrom("done")) != 1 {
+		t.Error("TransitionsFrom(done) must still expose the reopen edge for set-status")
 	}
 }
 

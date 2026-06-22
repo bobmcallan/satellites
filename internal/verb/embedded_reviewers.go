@@ -53,6 +53,33 @@ func ConfigSkillBody(name string) (string, bool) {
 	return string(raw), true
 }
 
+// SystemWorkflowSources returns the system-default workflows shipped in the
+// config/ embed (the parent / baseline / task lifecycles) as WorkflowSource
+// values, so server- and verb-side code can resolve a story's GOVERNING workflow
+// and derive terminal/initial states from the engine — the same resolution the
+// CLI does from materialised .claude/skills, but for the embed defaults the
+// server keeps no document-store copy of (sty_781c96aa). The server binary
+// embeds config/ too, so this works with no round-trip. A caller that also holds
+// project/workspace overrides prepends them (local-wins) before resolving.
+func SystemWorkflowSources() []WorkflowSource {
+	entries, err := fs.ReadDir(substrate.FS, "workflows")
+	if err != nil {
+		return nil
+	}
+	var out []WorkflowSource
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		raw, rErr := fs.ReadFile(substrate.FS, "workflows/"+e.Name())
+		if rErr != nil {
+			continue
+		}
+		out = append(out, WorkflowSource{Name: strings.TrimSuffix(e.Name(), ".md"), Body: string(raw)})
+	}
+	return out
+}
+
 // ConfigSkillNames lists every embedded config/skills reviewer (sorted), so
 // `satellites skill list` can include the binary-embedded system gates that the
 // server-backed document_list never returns.

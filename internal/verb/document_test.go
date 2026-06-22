@@ -38,7 +38,7 @@ func TestEpicReparentRefusal(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			reason := epicReparentRefusal(c.status, c.currentParent, c.newParent)
+			reason := epicReparentRefusal(c.status, "fix", c.currentParent, c.newParent)
 			if c.wantRefused && reason == "" {
 				t.Errorf("expected refusal, got allowed")
 			}
@@ -96,7 +96,7 @@ func TestEpicChildRefusal(t *testing.T) {
 		{"cancelled", false, false},
 	}
 	for _, c := range cases {
-		reason := epicChildRefusal(c.status, c.found)
+		reason := epicChildRefusal(c.status, "parent", c.found)
 		if c.wantRefused && reason == "" {
 			t.Errorf("status=%q found=%v: expected refusal, got allowed", c.status, c.found)
 		}

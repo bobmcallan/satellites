@@ -66,9 +66,8 @@ func runStorySetStatus(ctx context.Context, out io.Writer, configPath, userArg, 
 		body = resp.Versions[len(resp.Versions)-1].Body
 	}
 
-	parent := d.Category == "parent"
 	if !setStatusAllowed(verb.WorkflowSelector(d.Tags), d.Category, d.Status, status, body, governingWorkflowSources(configPath)) {
-		return fmt.Errorf("set-status: %s (category=%q, status=%q) has no ungated %s→%s edge — a gated move goes through the reviewer gate (satellites story status_transition --skill <gate>); set-status is for a parent reopen or a gateless-workflow advance", storyID, d.Category, d.Status, d.Status, status)
+		return fmt.Errorf("set-status: %s (category=%q, status=%q) has no ungated %s→%s edge — a gated move goes through the reviewer gate (satellites story status_transition --skill <gate>); set-status is for a workflow's ungated edge (e.g. an operator reopen)", storyID, d.Category, d.Status, d.Status, status)
 	}
 
 	req, err := json.Marshal(setStatusLedgerRequest(storyID, status))
@@ -78,31 +77,20 @@ func runStorySetStatus(ctx context.Context, out io.Writer, configPath, userArg, 
 	if _, err := dispatchVerb(ctx, "ledger_append", req, configPath, userArg); err != nil {
 		return fmt.Errorf("set-status: %w", err)
 	}
-	how := "gateless advance"
-	if parent {
-		how = "parent operator override"
-	}
-	fmt.Fprintf(out, "set %s → %s (%s)\n", storyID, status, how)
+	fmt.Fprintf(out, "set %s → %s (ungated advance)\n", storyID, status)
 	return nil
 }
 
 // setStatusAllowed decides whether a direct (un-gated) set-status move is
-// sanctioned: a parent reopen (the operator override) OR a gateless-baseline
-// advance along an ungated edge of the governing workflow. A move across a gated
-// edge — or one the workflow does not declare — is refused. Pure for tests.
+// sanctioned: it is allowed IFF the governing workflow declares an UNGATED edge
+// from status to target — a `trigger: checkpoint`/`reopen` or otherwise gateless
+// advance (e.g. a parent's operator reopen done→backlog). A move across a gated
+// edge, or one the workflow does not declare, is refused. The AUTHORITY is the
+// workflow, not the category — sty_781c96aa removed the `category=="parent"`
+// literal so a parent reopen flows from the parent workflow's `trigger: reopen`
+// edge like any other ungated edge. Pure for tests.
 func setStatusAllowed(selector, category, status, target, body string, sources []verb.WorkflowSource) bool {
-	if category == "parent" {
-		return true
-	}
 	return verb.GoverningUngatedAdvance(selector, body, status, category, target, sources)
-}
-
-// requireParent rejects a non-parent story — pure for tests.
-func requireParent(category, storyID string) error {
-	if category != "parent" {
-		return fmt.Errorf("set-status: %s is category=%q; this operator override is for category:parent (epics) only — regular stories move through the reviewer gate", storyID, category)
-	}
-	return nil
 }
 
 // setStatusLedgerRequest builds the status_transition ledger row that projects

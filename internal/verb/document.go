@@ -1293,7 +1293,7 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 	// while the story is still backlog/ready (sty_409c0af8). This keeps the epic
 	// objective the re-anchor propagates (sty_a8a6afc7) from being swapped out
 	// from under in-flight work. Every other field stays freely patchable.
-	if reason := epicReparentRefusal(d.Status, d.ParentID, req.ParentID); reason != "" {
+	if reason := epicReparentRefusal(d.Status, d.Category, d.ParentID, req.ParentID); reason != "" {
 		return nil, fmt.Errorf("document_upsert: %w: %s", ErrBadRequest, reason)
 	}
 	// ...and never re-parent INTO a terminal epic — even a backlog/ready story the
@@ -1357,16 +1357,14 @@ func upsertByID(ctx context.Context, req DocumentUpsertRequest) (json.RawMessage
 // that omits parent_id (newParent == nil) or sets it to the current value is not
 // a membership change and is always allowed; clearing parent_id to "" on a
 // started story IS a change and is refused.
-func epicReparentRefusal(currentStatus, currentParent string, newParent *string) string {
+func epicReparentRefusal(currentStatus, currentCategory, currentParent string, newParent *string) string {
 	if newParent == nil || *newParent == currentParent {
 		return "" // not changing epic membership
 	}
-	switch currentStatus {
-	case "backlog", "ready":
+	if IsInitialForCategory(currentStatus, currentCategory) {
 		return "" // not started — free to re-parent
-	default:
-		return fmt.Sprintf("epic membership is frozen once a story has started (status=%s) — reopen it to backlog/ready before re-parenting", currentStatus)
 	}
+	return fmt.Sprintf("epic membership is frozen once a story has started (status=%s) — reopen it to its initial state before re-parenting", currentStatus)
 }
 
 // epicChildRefusal reports whether a story may be attached to a parent epic with
@@ -1388,16 +1386,14 @@ func workspaceSkillRefused(typ, scope string) string {
 	return ""
 }
 
-func epicChildRefusal(parentStatus string, parentFound bool) string {
+func epicChildRefusal(parentStatus, parentCategory string, parentFound bool) string {
 	if !parentFound {
 		return ""
 	}
-	switch parentStatus {
-	case "done", "cancelled":
+	if IsTerminalForCategory(parentStatus, parentCategory) {
 		return fmt.Sprintf("cannot attach a story to a %s epic — reopen it (e.g. satellites story set-status <epic> backlog) before adding children", parentStatus)
-	default:
-		return ""
 	}
+	return ""
 }
 
 // refuseTerminalEpicParent loads parentID and applies epicChildRefusal. An empty
@@ -1411,7 +1407,7 @@ func refuseTerminalEpicParent(ctx context.Context, parentID string) string {
 	if err != nil {
 		return ""
 	}
-	return epicChildRefusal(p.Status, true)
+	return epicChildRefusal(p.Status, p.Category, true)
 }
 
 func strDeref(p *string) string {

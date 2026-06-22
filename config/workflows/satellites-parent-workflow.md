@@ -25,7 +25,11 @@ authored in `config/skills`, embedded in the client binary, resolved from embed:
    to the body, then `satellites story status_transition <story-id> --skill
    satellites-parent-cancel-review`.
 
-Only the reviewer advances status — never hand-patch it.
+A reviewer advances status on the close/cancel edges — never hand-patch those.
+The one exception is the operator REOPEN escape-hatch (`done`/`cancelled →
+backlog`, `trigger: reopen`): an ungated operator move via `satellites story
+set-status` that re-opens a closed anchor (e.g. to add a child). A reopen is
+out-of-lifecycle — it does NOT make `done`/`cancelled` non-terminal.
 
 ## Workflow
 
@@ -37,6 +41,8 @@ states:
 transitions:
   - {from: backlog, to: done, reviewer_skill: "satellites-parent-close-review"}
   - {from: backlog, to: cancelled, reviewer_skill: "satellites-parent-cancel-review"}
+  - {from: done, to: backlog, trigger: reopen}
+  - {from: cancelled, to: backlog, trigger: reopen}
 ```
 
 ## Environment

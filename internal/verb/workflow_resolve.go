@@ -397,6 +397,41 @@ func GoverningGatedEdge(selector, storyBody, status, category, gateSkill string,
 	return gatedEdgeFrom(auth, status, gateSkill)
 }
 
+// IsTerminalForCategory reports whether `status` is a terminal state of the
+// system-default workflow governing `category` (resolved from the config/ embed
+// via SystemWorkflowSources). Falls back to the canonical terminal set
+// {done, cancelled} when no governing workflow resolves or it does not declare
+// the status — so a renamed-state workflow is honoured while an unresolved/legacy
+// story keeps today's behaviour (sty_781c96aa). Server/verb code uses this instead
+// of a hardcoded status list (no-gate-as-code).
+func IsTerminalForCategory(status, category string) bool {
+	return isTerminalForCategoryIn(status, category, SystemWorkflowSources())
+}
+
+func isTerminalForCategoryIn(status, category string, sources []WorkflowSource) bool {
+	s := strings.TrimSpace(status)
+	if wf, _, ok := ResolveGoverningWorkflow(category, sources); ok && wf != nil && wf.HasState(s) {
+		return wf.IsTerminal(s)
+	}
+	return s == "done" || s == "cancelled"
+}
+
+// IsInitialForCategory reports whether `status` is the entry (not-yet-started)
+// state of the system-default workflow governing `category`. Falls back to the
+// canonical not-started set {backlog, ready} when no governing workflow resolves
+// or it does not declare the status (sty_781c96aa).
+func IsInitialForCategory(status, category string) bool {
+	return isInitialForCategoryIn(status, category, SystemWorkflowSources())
+}
+
+func isInitialForCategoryIn(status, category string, sources []WorkflowSource) bool {
+	s := strings.TrimSpace(status)
+	if wf, _, ok := ResolveGoverningWorkflow(category, sources); ok && wf != nil && wf.HasState(s) {
+		return wf.InitialState() == s
+	}
+	return s == "backlog" || s == "ready"
+}
+
 // EntryReviewer resolves the reviewer that gates a governing workflow's FORWARD
 // entry edge — the gate the read-only `validate` pre-flight runs against a freshly
 // created artifact. It is the reviewer_skill on the transition out of the

@@ -244,8 +244,8 @@ func (w *Workflow) validate() error {
 			return fmt.Errorf("workflow: yaml block: transitions[%d].on %q is not pass or fail", i, t.On)
 		}
 		trigger := strings.TrimSpace(t.Trigger)
-		if trigger != "" && trigger != "checkpoint" {
-			return fmt.Errorf("workflow: yaml block: transitions[%d].trigger %q is not checkpoint", i, t.Trigger)
+		if trigger != "" && trigger != "checkpoint" && trigger != "reopen" {
+			return fmt.Errorf("workflow: yaml block: transitions[%d].trigger %q is not checkpoint or reopen", i, t.Trigger)
 		}
 		onExhausted := strings.TrimSpace(t.OnExhausted)
 		if t.MaxIterations < 0 {
@@ -374,6 +374,12 @@ func (w *Workflow) TransitionsFrom(state string) []Transition {
 func (w *Workflow) InitialState() string {
 	hasIncoming := make(map[string]bool, len(w.Transitions))
 	for _, t := range w.Transitions {
+		// A `trigger: reopen` escape-hatch (e.g. done→backlog) is an
+		// out-of-lifecycle operator move, not a real forward entry — it must not
+		// give the entry state a spurious incoming edge (sty_781c96aa).
+		if strings.TrimSpace(t.Trigger) == "reopen" {
+			continue
+		}
 		hasIncoming[t.To] = true
 		// An exhaustion target is entered by the client's enactment — a
 		// real incoming transition; an escalation state is never the entry.
@@ -410,10 +416,20 @@ func (w *Workflow) StateOf(state string) (State, bool) {
 	return State{}, false
 }
 
-// IsTerminal reports whether a declared state has no outgoing transition (a
-// finished state). An undeclared state is treated as terminal (no edges).
+// IsTerminal reports whether a declared state is a finished state: it has no
+// outgoing transition OTHER THAN an operator `trigger: reopen` escape-hatch. A
+// reopen edge (e.g. done→backlog) is an out-of-lifecycle operator move, never a
+// forward step, so a state whose only outgoing edges are reopens is still
+// terminal — the Stop-hook goalkeeper, IsEditable and TerminalStates treat it as
+// finished, while GoverningUngatedAdvance still honours the reopen edge
+// (sty_781c96aa). An undeclared state is treated as terminal (no edges).
 func (w *Workflow) IsTerminal(state string) bool {
-	return len(w.TransitionsFrom(state)) == 0
+	for _, t := range w.TransitionsFrom(state) {
+		if strings.TrimSpace(t.Trigger) != "reopen" {
+			return false
+		}
+	}
+	return true
 }
 
 // TerminalStates returns every declared state with no outgoing transition.

@@ -172,14 +172,22 @@ transitions:
 ` + "```" + `
 `
 
-// TestSetStatusAllowed: a parent reopen is always allowed; a gateless-baseline
-// advance along an ungated edge is allowed; a gated edge or an undeclared edge
-// is refused (gated work goes through the reviewer gate).
+// TestSetStatusAllowed: a parent reopen flows from the parent workflow's
+// trigger:reopen edge (NOT a category literal — sty_781c96aa); a gateless-baseline
+// advance along an ungated edge is allowed; a gated edge or an undeclared edge is
+// refused (gated work goes through the reviewer gate).
 func TestSetStatusAllowed(t *testing.T) {
 	baseline := []verb.WorkflowSource{{Name: "satellites-baseline-workflow", Body: baselineWorkflowDoc}}
+	parentSrc := verb.SystemWorkflowSources()
 
-	if !setStatusAllowed("", "parent", "done", "backlog", "", nil) {
-		t.Errorf("parent reopen must be allowed")
+	if !setStatusAllowed("", "parent", "done", "backlog", "", parentSrc) {
+		t.Errorf("parent reopen done→backlog must be allowed via the parent workflow's trigger:reopen edge")
+	}
+	if !setStatusAllowed("", "parent", "cancelled", "backlog", "", parentSrc) {
+		t.Errorf("parent reopen cancelled→backlog must be allowed")
+	}
+	if setStatusAllowed("", "parent", "backlog", "done", "", parentSrc) {
+		t.Errorf("parent backlog→done is GATED (parent-close-review) — set-status must refuse it")
 	}
 	if setStatusAllowed("", "fix", "backlog", "in_progress", "", baseline) {
 		t.Errorf("the baseline entry is now gated by the intent-gate — set-status must refuse it")

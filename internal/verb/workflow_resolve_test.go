@@ -17,6 +17,47 @@ func sources() []WorkflowSource {
 	return []WorkflowSource{{Name: "prod-wf", Body: productWFBody}, {Name: "skills-wf", Body: skillsWFBody}}
 }
 
+// TestTerminalInitialForCategory_RenamedStates (sty_781c96aa): terminal/initial
+// classification is DERIVED from the resolved workflow, so a workflow with
+// non-canonical state names is honoured — not the {done,cancelled}/{backlog,ready}
+// literals — while an undeclared status falls back to the canonical set.
+func TestTerminalInitialForCategory_RenamedStates(t *testing.T) {
+	renamed := WorkflowSource{Name: "renamed", Body: "---\nname: renamed\nkind: workflow\napplies_to: [\"widget\"]\n---\n# R\n\n```yaml\nstates:\n  - intake\n  - {name: doing, actor: executor}\n  - shipped\ntransitions:\n  - {from: intake, to: doing, reviewer_skill: \"g1\"}\n  - {from: doing, to: shipped, reviewer_skill: \"g2\"}\n```\n"}
+	srcs := []WorkflowSource{renamed}
+	if !isTerminalForCategoryIn("shipped", "widget", srcs) {
+		t.Error("shipped (no outgoing) is the renamed terminal — want terminal")
+	}
+	if isTerminalForCategoryIn("doing", "widget", srcs) {
+		t.Error("doing is a working state — not terminal")
+	}
+	if !isInitialForCategoryIn("intake", "widget", srcs) {
+		t.Error("intake (no incoming) is the renamed initial — want initial")
+	}
+	if isInitialForCategoryIn("doing", "widget", srcs) {
+		t.Error("doing is not the initial state")
+	}
+	if !isTerminalForCategoryIn("done", "widget", srcs) {
+		t.Error("an undeclared 'done' must fall back to the canonical terminal set")
+	}
+}
+
+// TestSystemWorkflowSources (sty_781c96aa): the config/ embed workflows are
+// returned and resolve the system defaults — the server-side resolution path that
+// unblocks deriving terminal/initial states server-side.
+func TestSystemWorkflowSources(t *testing.T) {
+	srcs := SystemWorkflowSources()
+	if len(srcs) == 0 {
+		t.Fatal("SystemWorkflowSources returned nothing — config/workflows embed missing?")
+	}
+	wf, _, ok := ResolveGoverningWorkflow("parent", srcs)
+	if !ok || wf == nil {
+		t.Fatal("parent workflow must resolve from the embed sources for category=parent")
+	}
+	if !wf.IsTerminal("done") {
+		t.Error("parent done must be terminal despite the trigger:reopen edge (Primitive A+B)")
+	}
+}
+
 // TestEntryReviewer (sty_8e9d409b) pins that the validate pre-flight's entry
 // reviewer is read FROM the governing workflow's forward entry edge — not a
 // hardcoded kind→name switch. The cancel edge (to a terminal state) is skipped,
