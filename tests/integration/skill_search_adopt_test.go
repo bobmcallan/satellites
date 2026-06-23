@@ -32,6 +32,7 @@ import (
 // accepts the adopted file through the normal review path as an ordinary
 // project skill.
 func TestSkillSearchAdopt(t *testing.T) {
+	skipInCI(t, "upload subtest needs the claude reviewer, absent on GH runner")
 	env := testbootstrap.SetUpWithServer(t)
 	ctx := context.Background()
 	now := time.Now()
