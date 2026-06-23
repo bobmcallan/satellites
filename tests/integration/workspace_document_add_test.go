@@ -81,13 +81,13 @@ func TestWorkspaceDocumentAdd(t *testing.T) {
 		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
 		chromedp.Navigate(env.ServerURL+"/workspaces/"+ws.ID),
 		chromedp.WaitVisible(`[data-field="doc-upload"]`, chromedp.ByQuery),
-		chromedp.Evaluate(`document.querySelectorAll('[data-field="workspace-doc-row"]').length`, &docCountBefore),
+		chromedp.Evaluate(`document.querySelectorAll('[data-field="document-row"]').length`, &docCountBefore),
 		// Drive the browse path: set the file input, then fire change as the
 		// picker would, so the inline upload script runs and reloads on success.
 		chromedp.SetUploadFiles(`[data-field="doc-file-input"]`, []string{mdPath}, chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-field="doc-file-input"]').dispatchEvent(new Event('change',{bubbles:true}))`, nil),
-		chromedp.WaitVisible(`[data-field="workspace-doc-row"]`, chromedp.ByQuery),
-		chromedp.Evaluate(`document.querySelectorAll('[data-field="workspace-doc-row"]').length`, &docCountAfter),
+		chromedp.WaitVisible(`[data-field="document-row"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('[data-field="document-row"]').length`, &docCountAfter),
 	); err != nil {
 		t.Fatalf("browse upload flow: %v", err)
 	}

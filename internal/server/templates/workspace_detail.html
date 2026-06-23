@@ -66,21 +66,71 @@
     {{end}}
   </section>
 
+  {{/* Workspace documents panel (epic:phases-task-outputs) — the same
+       filterable/expandable panel the project page uses, scoped to the workspace
+       corpus (type:document rows). */}}
   <section class="panel" data-section="documents">
+    <div class="panel-documents" data-field="panel-documents-body"
+         data-workspace-id="{{.Workspace.ID}}" data-docs-query="{{.DocQuery}}"
+         x-data="{ openId:'', q: $el.dataset.docsQuery || '',
+                   toggle(id){ this.openId = this.openId === id ? '' : id },
+                   filterBy(v){ this.q = v; this.search() },
+                   search(){ const u = new URL(window.location); const v = this.q.trim();
+                             if (v) u.searchParams.set('docs_q', v); else u.searchParams.delete('docs_q');
+                             window.location = u.toString() } }">
     <div class="panel-header">
       <h2>documents</h2>
+      <span class="stories-count-indicator" data-field="documents-count-indicator"
+            title="matching the active filter / corpus total">{{.DocFiltered}} / {{.DocTotal}}</span>
     </div>
-
-    {{if .Documents}}
-    <dl class="metadata" data-field="workspace-docs">
-      {{range .Documents}}
-      <dt><span data-field="workspace-doc-row" data-doc-name="{{.Name}}">{{.Name}}</span></dt>
-      <dd>{{.UpdatedAt.Format "2006-01-02 15:04 MST"}}</dd>
-      {{end}}
-    </dl>
-    {{else}}
-    <p class="empty" data-field="workspace-docs-empty">No documents yet — add one to the workspace corpus below.</p>
-    {{end}}
+    <input type="text"
+           class="panel-search"
+           placeholder="search then press Enter (free text + chips: phase:discovery tags:foo)"
+           x-model="q"
+           @keydown.enter.prevent="search()"
+           data-field="panel-documents-search">
+    <table class="panel-table panel-table-documents" data-field="documents-table">
+      <thead>
+        <tr>
+          <th class="col-id">id</th>
+          <th class="col-title">name</th>
+          <th class="col-updated">updated</th>
+        </tr>
+      </thead>
+      <tbody data-field="documents-tbody">
+        {{range .Documents}}
+        <tr class="document-row" data-id="{{.ID}}" data-field="document-row" data-doc-name="{{.Name}}"
+            :class="{ 'is-expanded': openId === '{{.ID}}' }"
+            {{if .Expandable}}@click="toggle('{{.ID}}')" style="cursor:pointer"{{end}}>
+          <td class="col-id"><code>{{.ID}}</code></td>
+          <td class="col-title">
+            <div class="document-row-title" data-field="document-row-title">{{.Name}}</div>
+            <div class="document-row-tags" data-field="document-row-tags">
+              {{if .PhaseTag}}<button type="button" class="phase-chip is-clickable" @click.stop="filterBy('phase:{{.PhaseTag}}')" title="Filter by this phase">phase:{{.PhaseTag}}</button>{{end}}
+              {{range .OtherTags}}<button type="button" class="tag-chip is-clickable" @click.stop="filterBy('tags:{{.}}')" title="Filter by this tag">{{.}}</button>{{end}}
+            </div>
+          </td>
+          <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
+        </tr>
+        {{if .Expandable}}
+        <tr class="document-detail" data-detail-for="{{.ID}}" x-show="openId === '{{.ID}}'" x-cloak data-field="document-detail">
+          <td colspan="3">
+            <div class="story-detail-flat">
+              <section class="story-detail-block" data-field="document-content">
+                <h4>content</h4>
+                {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+              </section>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+        {{else}}
+        <tr class="panel-empty-row" data-field="workspace-docs-empty">
+          <td colspan="3" class="empty">{{if .DocTotal}}No documents match the active filter.{{else}}No documents yet — add one to the workspace corpus below.{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
 
     <div class="dropzone" data-field="doc-upload" data-workspace-id="{{.Workspace.ID}}" role="button" tabindex="0">
       <span data-field="doc-dropzone-label">Drop a PDF or text/markdown file here, or</span>
@@ -88,6 +138,7 @@
       <input type="file" data-field="doc-file-input" accept=".pdf,.txt,.md,.markdown,.csv,.log,text/*,application/pdf" hidden>
     </div>
     <p class="empty" data-field="doc-upload-error" hidden></p>
+    </div>
   </section>
 
   <section class="panel" data-section="workspace-projects">

@@ -55,14 +55,14 @@ func otherTags(tags []string) []string {
 	return out
 }
 
-// dispatchDocRows lists a project's documents as lightweight rows — enough to
-// filter + count without fetching each body. The inline-preview payload
-// (BodyHTML) is added later for the visible rows only. The list is constrained to
-// the KV `type:document` classification (not merely the row type), so principle /
-// reference / contract / skill rows — which are document-rows carrying other KV
-// tags — never appear: a "project document" is specifically a `type:document` row.
-func dispatchDocRows(ctx context.Context, projectID string) ([]docRow, error) {
-	body, _ := json.Marshal(verb.DocumentListRequest{Type: "document", ProjectID: projectID, Tags: []string{"type:document"}, Limit: 200})
+// dispatchDocRows lists documents matching a filter as lightweight rows — enough
+// to filter + count without fetching each body. The inline-preview payload
+// (BodyHTML) is added later for the visible rows only. Callers constrain the
+// filter to the KV `type:document` classification (not merely the row type), so
+// principle / reference / contract / skill rows — document-rows carrying other KV
+// tags — never appear: a "document" here is specifically a `type:document` row.
+func dispatchDocRows(ctx context.Context, listReq verb.DocumentListRequest) ([]docRow, error) {
+	body, _ := json.Marshal(listReq)
 	raw, err := verb.Dispatch(ctx, "document_list", body)
 	if err != nil {
 		return nil, err
@@ -84,6 +84,17 @@ func dispatchDocRows(ctx context.Context, projectID string) ([]docRow, error) {
 		})
 	}
 	return out, nil
+}
+
+// projectDocListReq / workspaceDocListReq are the two `type:document`-constrained
+// filters the panels list from — a project's attached documents, and a
+// workspace's corpus documents.
+func projectDocListReq(projectID string) verb.DocumentListRequest {
+	return verb.DocumentListRequest{Type: "document", ProjectID: projectID, Tags: []string{"type:document"}, Limit: 200}
+}
+
+func workspaceDocListReq(workspaceID string) verb.DocumentListRequest {
+	return verb.DocumentListRequest{Scope: "workspace", WorkspaceID: workspaceID, Type: "document", Tags: []string{"type:document"}, Limit: 200}
 }
 
 // matchDoc adapts the shared panel predicate (matchFields) to a document row:
@@ -136,7 +147,21 @@ func docExpandable(name, kvType string) bool {
 // open/terminal lifecycle), then renders the inline body for the visible,
 // expandable rows. Returns (rows, filteredCount, total). Read-only.
 func gatherDocPanel(ctx context.Context, projectID string, q url.Values) ([]docRow, int, int, error) {
-	all, err := dispatchDocRows(ctx, projectID)
+	return gatherDocPanelFrom(ctx, projectDocListReq(projectID), q)
+}
+
+// gatherWorkspaceDocPanel is the workspace-corpus peer of gatherDocPanel — the
+// same filterable/expandable panel, scoped to a workspace's `type:document` rows.
+func gatherWorkspaceDocPanel(ctx context.Context, workspaceID string, q url.Values) ([]docRow, int, int, error) {
+	return gatherDocPanelFrom(ctx, workspaceDocListReq(workspaceID), q)
+}
+
+// gatherDocPanelFrom is the scope-agnostic core shared by the project and
+// workspace documents panels: list the `type:document` rows the filter selects,
+// apply the chip filter (docs_q), then render the inline body for the visible,
+// expandable rows. Returns (rows, filteredCount, total). Read-only.
+func gatherDocPanelFrom(ctx context.Context, listReq verb.DocumentListRequest, q url.Values) ([]docRow, int, int, error) {
+	all, err := dispatchDocRows(ctx, listReq)
 	if err != nil {
 		return nil, 0, 0, err
 	}

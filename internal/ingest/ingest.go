@@ -95,6 +95,13 @@ func StoreBlobAndExtract(ctx context.Context, blobStore *blob.Store, docStore *d
 		arbor.WarnCtx(ctx, "ingest: create extracted document", "blob_id", b.ID, "err", derr)
 		return ref, nil
 	}
+	// Classify the extracted document as type:document (the KV classification the
+	// documents panels filter on) so an uploaded doc is a first-class project /
+	// workspace document and appears in the panel — agent-authored docs already
+	// carry this tag (epic:phases-task-outputs). Best-effort, like the doc create.
+	if _, terr := docStore.SetDocumentTags(ctx, doc.ID, []string{"type:document"}, time.Now().UTC()); terr != nil {
+		arbor.WarnCtx(ctx, "ingest: tag extracted document", "doc_id", doc.ID, "err", terr)
+	}
 	ref.DocumentID = doc.ID
 	ref.Extracted = true
 	return ref, nil

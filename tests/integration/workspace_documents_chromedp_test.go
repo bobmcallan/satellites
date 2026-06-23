@@ -76,14 +76,20 @@ func TestWorkspaceDocuments_Chromedp(t *testing.T) {
 	}
 	attachmentName := "attachment-" + ref.ID
 
-	// Seed a second workspace document directly (store bypasses write authz).
-	if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+	// Seed a second workspace document directly (store bypasses write authz),
+	// tagged type:document so it shows in the type:document-filtered panel
+	// (epic:phases-task-outputs).
+	relDoc, _, err := docStore.Upsert(ctx, document.UpsertInput{
 		Key:       document.Key{Scope: document.ScopeWorkspace, WorkspaceID: ws.ID, Name: "release-plan"},
 		Type:      document.TypeDocument,
 		Body:      "# Release Plan\n\nPhase one.",
 		CreatedBy: "usr_dev_admin",
-	}, now); err != nil {
+	}, now)
+	if err != nil {
 		t.Fatalf("seed workspace doc: %v", err)
+	}
+	if _, err := docStore.SetDocumentTags(ctx, relDoc.ID, []string{"type:document"}, now); err != nil {
+		t.Fatalf("tag workspace doc: %v", err)
 	}
 
 	admin, err := env.Store.GetUserByID(ctx, "usr_dev_admin")
@@ -146,7 +152,8 @@ func TestWorkspaceDocuments_Chromedp(t *testing.T) {
 		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
 		chromedp.Navigate(env.ServerURL+"/workspaces/"+ws.ID),
 		chromedp.WaitVisible(`[data-section="documents"]`, chromedp.ByQuery),
-		chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-field="workspace-doc-row"]')).map(e => e.dataset.docName)`, &docNames),
+		chromedp.WaitVisible(`[data-field="documents-table"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-field="document-row"]')).map(e => e.dataset.docName)`, &docNames),
 	); err != nil {
 		t.Fatalf("workspace documents page: %v", err)
 	}

@@ -12,7 +12,11 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
-var workspaceDetailTmpl = template.Must(template.ParseFS(assets, "templates/workspace_detail.html", "templates/_user_menu.html"))
+var workspaceDetailTmpl = template.Must(
+	template.New("workspace_detail.html").Funcs(template.FuncMap{
+		"formatTime": formatRowTime,
+	}).ParseFS(assets, "templates/workspace_detail.html", "templates/_user_menu.html"),
+)
 
 type workspaceDetailData struct {
 	Title         string
@@ -25,12 +29,17 @@ type workspaceDetailData struct {
 	ObjectiveBody string
 	Projects      []workspaceProjectRow
 	Mounts        []workspaceMountRow
-	Documents     []workspaceDocRow
-	Members       []workspaceMemberRow
-	DevMode       bool
-	FooterName    string
-	FooterEmail   string
-	Version       string
+	// Documents reuses the shared docRow + documents-panel markup the project page
+	// uses, scoped to the workspace corpus (epic:phases-task-outputs).
+	Documents   []docRow
+	DocFiltered int
+	DocTotal    int
+	DocQuery    string
+	Members     []workspaceMemberRow
+	DevMode     bool
+	FooterName  string
+	FooterEmail string
+	Version     string
 }
 
 // workspaceProjectRow is a home repo of the workspace, annotated with the
@@ -43,14 +52,6 @@ type workspaceProjectRow struct {
 	Phase       string
 	Status      string
 	Role        string
-}
-
-// workspaceDocRow is one workspace-scoped document (the engagement corpus)
-// rendered in the page's documents section.
-type workspaceDocRow struct {
-	ID        string
-	Name      string
-	UpdatedAt time.Time
 }
 
 // workspaceMountRow is one readonly repo mounted into the workspace (home
@@ -165,22 +166,13 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			}
 		}
 
-		// Workspace corpus: the workspace-scoped documents (sty_3c2f02bf).
-		// Best-effort — a list error leaves the section empty rather than
-		// failing the page.
-		var docs []workspaceDocRow
-		dlReq, _ := json.Marshal(verb.DocumentListRequest{
-			Scope: "workspace", WorkspaceID: wsID, Type: "document", Limit: 200,
-		})
-		if dlResp, err := verb.Dispatch(ctx, "document_list", dlReq); err != nil {
-			arbor.WarnCtx(ctx, "workspace_detail: document_list", "id", wsID, "err", err)
-		} else {
-			var dl verb.DocumentListResponse
-			if err := json.Unmarshal(dlResp, &dl); err == nil {
-				for _, d := range dl.Items {
-					docs = append(docs, workspaceDocRow{ID: d.ID, Name: d.Name, UpdatedAt: d.UpdatedAt})
-				}
-			}
+		// Workspace corpus documents panel (epic:phases-task-outputs) — the same
+		// filterable/expandable panel the project page uses, scoped to the
+		// workspace's type:document rows. Best-effort: a list error leaves the
+		// section empty rather than failing the page.
+		docs, docFiltered, docTotal, dErr := gatherWorkspaceDocPanel(ctx, wsID, r.URL.Query())
+		if dErr != nil {
+			arbor.WarnCtx(ctx, "workspace_detail: documents panel", "id", wsID, "err", dErr)
 		}
 
 		// Workspace members (sty_20687710): the roster the page reflects after an
@@ -222,6 +214,9 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 			Projects:      projects,
 			Mounts:        mounts,
 			Documents:     docs,
+			DocFiltered:   docFiltered,
+			DocTotal:      docTotal,
+			DocQuery:      strings.TrimSpace(r.URL.Query().Get("docs_q")),
 			Members:       members,
 			UserEmail:     userEmail,
 			UserName:      userName,
