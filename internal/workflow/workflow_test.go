@@ -20,15 +20,15 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		name        string
 		transitions int
 	}{
-		// The reviewers-only repo workflow: backlog → in_progress → shipping →
-		// done, gated by exactly two reviewers that exist (satellites-intent-plan-review
-		// opens; satellites-commit-push-review judges the push and enacts the v2
-		// shipping pass/fail edges). 4 transitions: 1 gated entry + 1 checkpoint +
-		// the shipping on:pass and on:fail edges. The parent (epic/anchor) workflow
-		// is one close-reviewer edge. Workflows are repo-owned client-dir config
-		// under .satellites/workflows/ (epic:client-dir-separation order-2) — Parse
-		// reads the same shape.
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 8},
+		// The reviewers-only repo workflow: backlog → in_progress → integration →
+		// shipping → summary → done, gated by four reviewers (intent-plan opens;
+		// integration-review brackets the tier; commit-push-review judges the push;
+		// implementation-summary-review judges the story records what changed + why).
+		// 10 transitions: 1 gated entry + 1 checkpoint + integration pass/fail +
+		// shipping pass/fail + summary pass/fail + 2 cancel edges. Workflows are
+		// repo-owned client-dir config under .satellites/workflows/
+		// (epic:client-dir-separation order-2) — Parse reads the same shape.
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 10},
 		// The parent (epic/anchor) workflow is now a GOVERNANCE SOURCE in the
 		// config/workflows embed, no longer scaffolded into .satellites/workflows
 		// (sty_a69e8c61) — parse it from the embed source.
