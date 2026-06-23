@@ -40,14 +40,22 @@ ids:
 ```text
 tags: [phase:discovery]   # KV filter (phase:/type: …), AND containment
 ids:  [doc_abc, doc_def]  # explicit document ids (optional)
+project: proj_xxxx        # optional: a read-only MOUNTED project to read from
 ```
 
-`satellites task inputs <tsk-id>` resolves the set with the project ALWAYS pinned
-to the task's own project, so inputs never cross a project boundary (cross-repo
-inputs are out of scope here). Inputs are the task project's `type:document` rows;
-the executor reads each body via `document_get` (or `task inputs --read`). Like a
-`skill:<name>` reference, declared inputs are executor CONTEXT, not a gated
-dependency.
+`satellites task inputs <tsk-id>` resolves the set pinned to the task's own
+project by default, so inputs never cross a project boundary unless explicitly
+asked. Inputs are the source project's `type:document` rows; the executor reads
+each body via `document_get` (or `task inputs --read`). Like a `skill:<name>`
+reference, declared inputs are executor CONTEXT, not a gated dependency.
+
+**Cross-repo inputs come only through a read-only mount.** When `## Inputs` names a
+`project:`, that project MUST be mounted read-only into the task's workspace
+(`workspace_mount_list`); the resolver pins to it and the verb layer authorises the
+read via the mount grant. A mount grants READ only — a task can never write to a
+mounted project — and the executor still cannot reach the mounted repo's files
+directly (the `claude -p` worktree boundary holds); cross-repo content arrives only
+as mounted DOCUMENTS, never raw filesystem.
 
 **Output — a first-class document.** A task's OUTPUT is more than a path in the
 body: a successful run emits a typed project document with

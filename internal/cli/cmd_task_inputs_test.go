@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/bobmcallan/satellites/internal/verb"
 )
 
 // TestParseTaskInputs covers the `## Inputs` declaration parser (B1 AC1): a
@@ -79,6 +81,45 @@ func TestParseTaskInputs(t *testing.T) {
 			t.Fatalf("want 'neither tags nor ids' error, got %v", err)
 		}
 	})
+}
+
+// TestParseTaskInputsMountedProject pins B3: an `## Inputs` block may name a
+// read-only mounted project as its source via the `project:` key.
+func TestParseTaskInputsMountedProject(t *testing.T) {
+	body := "## Inputs\n```yaml\nproject: proj_mounted\ntags: [phase:discovery]\n```\n"
+	spec, ok, err := parseTaskInputs(body)
+	if err != nil || !ok {
+		t.Fatalf("want ok, got ok=%v err=%v", ok, err)
+	}
+	if spec.Project != "proj_mounted" {
+		t.Fatalf("project = %q, want proj_mounted", spec.Project)
+	}
+	if len(spec.Tags) != 1 || spec.Tags[0] != "phase:discovery" {
+		t.Fatalf("tags = %v", spec.Tags)
+	}
+
+	// project alone (no tags/ids) is still not a resolvable declaration.
+	if _, _, err := parseTaskInputs("## Inputs\n```yaml\nproject: proj_x\n```\n"); err == nil {
+		t.Fatal("project-only block should error (no tags/ids to resolve)")
+	}
+}
+
+// TestMountContains pins B3's pure mount decision: a project is a valid mounted
+// source iff it appears in the workspace's mount set.
+func TestMountContains(t *testing.T) {
+	mounts := []verb.MountView{
+		{ProjectID: "proj_a", Access: "read"},
+		{ProjectID: "proj_b", Access: "read"},
+	}
+	if !mountContains(mounts, "proj_b") {
+		t.Fatal("proj_b is mounted but mountContains said no")
+	}
+	if mountContains(mounts, "proj_other") {
+		t.Fatal("proj_other is not mounted but mountContains said yes")
+	}
+	if mountContains(nil, "proj_a") {
+		t.Fatal("empty mount set must contain nothing")
+	}
 }
 
 // TestSelectInputsProjectPin pins B1 AC3: resolution is project-scoped — a

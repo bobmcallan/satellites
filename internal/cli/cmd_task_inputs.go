@@ -34,9 +34,12 @@ import (
 // taskInputSpec is the parsed `## Inputs` declaration. Both fields are optional
 // individually but a present block must declare at least one of them. `tags` is a
 // KV filter (phase:/type: …, AND containment); `ids` names explicit documents.
+// `project` (B3) optionally names a read-only MOUNTED project to resolve from
+// instead of the task's own — cross-repo inputs come only through a mount.
 type taskInputSpec struct {
-	Tags []string `yaml:"tags"`
-	IDs  []string `yaml:"ids"`
+	Tags    []string `yaml:"tags"`
+	IDs     []string `yaml:"ids"`
+	Project string   `yaml:"project"`
 }
 
 // parseTaskInputs extracts the `## Inputs` declaration from a task body.
@@ -55,6 +58,7 @@ func parseTaskInputs(body string) (taskInputSpec, bool, error) {
 	}
 	spec.Tags = trimNonEmpty(spec.Tags)
 	spec.IDs = trimNonEmpty(spec.IDs)
+	spec.Project = strings.TrimSpace(spec.Project)
 	if len(spec.Tags) == 0 && len(spec.IDs) == 0 {
 		return taskInputSpec{}, false, fmt.Errorf("## Inputs: declares neither tags nor ids")
 	}
@@ -188,6 +192,7 @@ func runTaskInputs(ctx context.Context, out io.Writer, configPath, userArg, task
 	if strings.TrimSpace(projectID) == "" {
 		return fmt.Errorf("task inputs: task %s has no project_id", taskID)
 	}
+	workspaceID := taskResp.Document.WorkspaceID
 	body := taskResp.RawBody
 	if body == "" && len(taskResp.Versions) > 0 {
 		body = taskResp.Versions[len(taskResp.Versions)-1].Body
@@ -202,7 +207,25 @@ func runTaskInputs(ctx context.Context, out io.Writer, configPath, userArg, task
 		return nil
 	}
 
-	resolved, err := resolveTaskInputs(ctx, configPath, userArg, projectID, spec)
+	// B3: an `## Inputs` may name a read-only MOUNTED project as its source. The
+	// source defaults to the task's own project; when a different project is named
+	// it must be mounted into the task's workspace (cross-repo inputs come only
+	// through a mount). The verb layer's read-auth (CallerHasMountAccess) is the
+	// actual gate; this check makes "via mounts" explicit with a clear error.
+	sourceProject := projectID
+	if spec.Project != "" && spec.Project != projectID {
+		mounted, mErr := mountedReadable(ctx, configPath, userArg, workspaceID, spec.Project)
+		if mErr != nil {
+			return fmt.Errorf("task inputs: verify mount: %w", mErr)
+		}
+		if !mounted {
+			return fmt.Errorf("task inputs: project %s is not mounted into this task's workspace — cross-repo inputs must come through a read-only mount", spec.Project)
+		}
+		sourceProject = spec.Project
+		fmt.Fprintf(out, "# inputs from mounted project %s (read-only)\n", sourceProject)
+	}
+
+	resolved, err := resolveTaskInputs(ctx, configPath, userArg, sourceProject, spec)
 	if err != nil {
 		return err
 	}
@@ -282,6 +305,37 @@ func resolveTaskInputs(ctx context.Context, configPath, userArg, projectID strin
 	// Project-pin + dedup happen in one pure step (selectInputs): a tag-listed or
 	// explicitly-named document from another project is dropped here.
 	return selectInputs(projectID, cands), nil
+}
+
+// mountContains is the pure decision: does the workspace's mount set include
+// projectID? Mounts are read-only by construction (AddMount refuses anything but
+// read), so a present mount IS a read grant — no access check needed here.
+func mountContains(mounts []verb.MountView, projectID string) bool {
+	for _, m := range mounts {
+		if m.ProjectID == projectID {
+			return true
+		}
+	}
+	return false
+}
+
+// mountedReadable reports whether projectID is mounted read-only into workspaceID,
+// via workspace_mount_list. An empty workspaceID can never satisfy a mount, so it
+// returns false (the named project is not reachable as a mount).
+func mountedReadable(ctx context.Context, configPath, userArg, workspaceID, projectID string) (bool, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return false, nil
+	}
+	req, _ := json.Marshal(verb.WorkspaceMountListRequest{WorkspaceID: workspaceID})
+	raw, err := dispatchVerb(ctx, "workspace_mount_list", req, configPath, userArg)
+	if err != nil {
+		return false, err
+	}
+	var resp verb.WorkspaceMountListResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return false, err
+	}
+	return mountContains(resp.Mounts, projectID), nil
 }
 
 func fetchBody(ctx context.Context, configPath, userArg, id string) (string, error) {
