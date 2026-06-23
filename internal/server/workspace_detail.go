@@ -40,6 +40,7 @@ type workspaceProjectRow struct {
 	Name        string
 	Description string
 	Type        string
+	Phase       string
 	Status      string
 	Role        string
 }
@@ -134,7 +135,7 @@ func workspaceDetailHandler(cfg Config) http.HandlerFunc {
 		for _, p := range pl.Projects {
 			projects = append(projects, workspaceProjectRow{
 				ID: p.ID, Name: p.Name, Description: p.Description, Type: p.Type,
-				Status: p.Status, Role: pl.Roles[p.ID],
+				Phase: p.Phase, Status: p.Status, Role: pl.Roles[p.ID],
 			})
 		}
 
