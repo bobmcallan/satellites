@@ -67,6 +67,19 @@ func Set(tags []string, key, value string) []string {
 	return append(out, key+":"+value)
 }
 
+// Remove returns tags with every `key:*` tag for the given key dropped,
+// preserving the order of the rest. The input slice is not mutated.
+func Remove(tags []string, key string) []string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if k, _, ok := split(t); ok && k == key {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
 // Normalize collapses every SingleValued key to its last occurrence, dropping
 // earlier duplicates so a stored document holds at most one `type:` and one
 // `phase:` (last-wins). Multi-valued keys and non-KV tags pass through

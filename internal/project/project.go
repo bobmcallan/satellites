@@ -28,18 +28,24 @@ const (
 // SeedUpdatedAt is nil until the first `satellites seed push` lands;
 // SeedMD is "" by default.
 type Project struct {
-	ID              string     `json:"id"`
-	WorkspaceID     string     `json:"workspace_id"`
-	Name            string     `json:"name"`
-	Description     string     `json:"description,omitempty"`
-	Type            string     `json:"type,omitempty"`
-	GitURLCanonical string     `json:"git_url_canonical,omitempty"`
-	OwnerUserID     string     `json:"owner_user_id,omitempty"`
-	Status          string     `json:"status"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	SeedMD          string     `json:"seed_md,omitempty"`
-	SeedUpdatedAt   *time.Time `json:"seed_updated_at,omitempty"`
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	Type            string `json:"type,omitempty"`
+	GitURLCanonical string `json:"git_url_canonical,omitempty"`
+	// Tags is the project's free-form []string tag set, mirroring documents.
+	// Classification (type:) and phase (phase:) are single-valued KV tags read
+	// via internal/kvtag; Type and Phase are DERIVED from these on read.
+	Tags []string `json:"tags,omitempty"`
+	// Phase is DERIVED from the phase: tag (discovery|build|…), "" when unset.
+	Phase         string     `json:"phase,omitempty"`
+	OwnerUserID   string     `json:"owner_user_id,omitempty"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	SeedMD        string     `json:"seed_md,omitempty"`
+	SeedUpdatedAt *time.Time `json:"seed_updated_at,omitempty"`
 	// NonRepo is DERIVED, never stored (operator decision, sty_88a76023): a
 	// project with no bound git remote IS a document-collection project. Set on
 	// create and on every read so consumers (agents, portal, tooling) get an

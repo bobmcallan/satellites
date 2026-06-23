@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/bobmcallan/satellites/internal/kvtag"
+	"github.com/lib/pq"
 )
 
 // ErrNotFound is returned when a project lookup misses.
@@ -28,6 +31,8 @@ type CreateInput struct {
 	Description string
 	GitURL      string
 	OwnerUserID string
+	// Tags is the initial KV tag set (type:, phase:, …); normalized on write.
+	Tags []string
 }
 
 // Create inserts a new project. Returns the persisted row including
@@ -49,12 +54,16 @@ func (s *Store) Create(ctx context.Context, in CreateInput, now time.Time) (Proj
 	if in.OwnerUserID != "" {
 		owner = sql.NullString{String: in.OwnerUserID, Valid: true}
 	}
+	tags := kvtag.Normalize(in.Tags)
+	if tags == nil {
+		tags = []string{}
+	}
 	if _, err := s.DB.ExecContext(ctx, `
         INSERT INTO projects
             (id, workspace_id, name, description, git_url_canonical,
-             owner_user_id, status, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-    `, id, in.WorkspaceID, in.Name, in.Description, canon, owner, StatusActive, now); err != nil {
+             owner_user_id, status, created_at, updated_at, tags)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
+    `, id, in.WorkspaceID, in.Name, in.Description, canon, owner, StatusActive, now, pq.Array(tags)); err != nil {
 		return Project{}, fmt.Errorf("project: insert: %w", err)
 	}
 	return Project{
@@ -67,6 +76,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput, now time.Time) (Proj
 		Status:          StatusActive,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		Tags:            tags,
+		Type:            kvtag.Value(tags, "type"),
+		Phase:           kvtag.Value(tags, "phase"),
 		NonRepo:         DeriveNonRepo(canon),
 	}, nil
 }
@@ -130,6 +142,10 @@ type UpdateInput struct {
 	Description *string
 	Type        *string
 	GitURL      *string
+	// Tags replaces the whole KV tag set when non-nil (normalized on write).
+	// Type, when non-nil, is folded into a type: tag for back-compat — a caller
+	// may pass either; Tags wins when both touch the type: key.
+	Tags *[]string
 }
 
 // Update mutates the project row at id. Returns the updated row.
@@ -148,10 +164,26 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 	if in.Description != nil {
 		p.Description = *in.Description
 	}
-	if in.Type != nil {
-		// Opaque freeform — any string accepted; explicit "" clears it.
-		p.Type = *in.Type
+	// Tags is the source of truth for classification + phase. Replace the whole
+	// set first, then fold a legacy Type patch into the type: tag so a caller
+	// passing either still works.
+	if in.Tags != nil {
+		p.Tags = append([]string(nil), (*in.Tags)...)
 	}
+	if in.Type != nil {
+		if *in.Type == "" {
+			p.Tags = kvtag.Remove(p.Tags, "type")
+		} else {
+			p.Tags = kvtag.Set(p.Tags, "type", *in.Type)
+		}
+	}
+	p.Tags = kvtag.Normalize(p.Tags)
+	if p.Tags == nil {
+		p.Tags = []string{}
+	}
+	// Re-derive the convenience fields from the (now authoritative) tags.
+	p.Type = kvtag.Value(p.Tags, "type")
+	p.Phase = kvtag.Value(p.Tags, "phase")
 	if in.GitURL != nil {
 		canon, err := CanonicaliseGitRemote(*in.GitURL)
 		if err != nil {
@@ -160,11 +192,13 @@ func (s *Store) Update(ctx context.Context, id string, in UpdateInput, now time.
 		p.GitURLCanonical = canon
 	}
 	p.UpdatedAt = now
+	// Write tags (the source) and mirror the derived classification into the
+	// legacy type column so it stays consistent for rollback.
 	if _, err := s.DB.ExecContext(ctx, `
         UPDATE projects
-        SET name = $1, description = $2, type = $3, git_url_canonical = $4, updated_at = $5
-        WHERE id = $6
-    `, p.Name, p.Description, p.Type, p.GitURLCanonical, now, id); err != nil {
+        SET name = $1, description = $2, type = $3, git_url_canonical = $4, updated_at = $5, tags = $6
+        WHERE id = $7
+    `, p.Name, p.Description, p.Type, p.GitURLCanonical, now, pq.Array(p.Tags), id); err != nil {
 		return Project{}, fmt.Errorf("project: update: %w", err)
 	}
 	// git_url may have changed above; recompute the derived non_repo signal.
@@ -202,7 +236,7 @@ func (s *Store) SetWorkspace(ctx context.Context, id, newWorkspaceID string, now
 
 const selectColumns = `SELECT id, workspace_id, name, description, type,
     git_url_canonical, owner_user_id, status, created_at, updated_at,
-    seed_md, seed_updated_at`
+    seed_md, seed_updated_at, tags`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -216,7 +250,7 @@ func scanCommon(s rowScanner) (Project, error) {
 	)
 	if err := s.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description, &p.Type,
 		&p.GitURLCanonical, &owner, &p.Status, &p.CreatedAt, &p.UpdatedAt,
-		&p.SeedMD, &seedAtRow); err != nil {
+		&p.SeedMD, &seedAtRow, pq.Array(&p.Tags)); err != nil {
 		return Project{}, err
 	}
 	if owner.Valid {
@@ -226,6 +260,13 @@ func scanCommon(s rowScanner) (Project, error) {
 		t := seedAtRow.Time
 		p.SeedUpdatedAt = &t
 	}
+	// Classification and phase are DERIVED from the KV tags (the source of
+	// truth post-0045). Prefer the type: tag; fall back to the legacy `type`
+	// column only when no tag is present (defensive during the backfill window).
+	if tv := kvtag.Value(p.Tags, "type"); tv != "" {
+		p.Type = tv
+	}
+	p.Phase = kvtag.Value(p.Tags, "phase")
 	// Derived, not stored: a project with no bound git remote is non-repo.
 	p.NonRepo = DeriveNonRepo(p.GitURLCanonical)
 	return p, nil

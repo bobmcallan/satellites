@@ -80,6 +80,18 @@ func TestSetDoesNotMutateInput(t *testing.T) {
 	}
 }
 
+func TestRemove(t *testing.T) {
+	got := Remove([]string{"type:doc", "phase:discovery", "area:cli"}, "type")
+	want := []string{"phase:discovery", "area:cli"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Remove = %v, want %v", got, want)
+	}
+	// Removing an absent key is a no-op copy.
+	if got := Remove([]string{"phase:discovery"}, "type"); !reflect.DeepEqual(got, []string{"phase:discovery"}) {
+		t.Errorf("Remove absent = %v", got)
+	}
+}
+
 func TestNormalizeCollapsesSingleValuedLastWins(t *testing.T) {
 	got := Normalize([]string{"type:a", "phase:discovery", "type:b", "phase:build"})
 	want := []string{"type:b", "phase:build"}

@@ -93,3 +93,39 @@ func TestProjectMatch_RequiresGitURL(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterProjectsByTags pins the AND-semantics, exact-element tag filter
+// project_list applies (sty_87379afa) — the in-memory mirror of document_list's
+// `tags @> …`. A KV tag like phase:discovery must not match phase:discovery-notes.
+func TestFilterProjectsByTags(t *testing.T) {
+	ps := []project.Project{
+		{ID: "a", Tags: []string{"type:document", "phase:discovery"}},
+		{ID: "b", Tags: []string{"type:diagram", "phase:discovery-notes"}},
+		{ID: "c", Tags: []string{"phase:build"}},
+		{ID: "d", Tags: nil},
+	}
+	cases := []struct {
+		name string
+		want []string
+		ids  []string
+	}{
+		{"phase discovery exact", []string{"phase:discovery"}, []string{"a"}},
+		{"classification", []string{"type:document"}, []string{"a"}},
+		{"phase build", []string{"phase:build"}, []string{"c"}},
+		{"AND of two tags", []string{"type:document", "phase:discovery"}, []string{"a"}},
+		{"AND misses when one absent", []string{"type:document", "phase:build"}, nil},
+		{"no false prefix match", []string{"phase:discovery"}, []string{"a"}}, // not b
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterProjectsByTags(ps, tc.want)
+			var ids []string
+			for _, p := range got {
+				ids = append(ids, p.ID)
+			}
+			if strings.Join(ids, ",") != strings.Join(tc.ids, ",") {
+				t.Errorf("filter %v = %v, want %v", tc.want, ids, tc.ids)
+			}
+		})
+	}
+}

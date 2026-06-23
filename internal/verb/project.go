@@ -27,14 +27,19 @@ var projectStore *project.Store
 func SetProjectStore(s *project.Store) { projectStore = s }
 
 type ProjectCreateRequest struct {
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	GitURL      string `json:"git_url,omitempty"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	GitURL      string   `json:"git_url,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
 }
 
 type ProjectListRequest struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Tags narrows the list to projects whose tag set contains every listed tag
+	// (exact element match, mirroring document_list). Use KV tags to filter by
+	// classification or phase, e.g. ["phase:discovery"].
+	Tags []string `json:"tags,omitempty"`
 }
 
 type ProjectListResponse struct {
@@ -59,6 +64,9 @@ type ProjectUpdateRequest struct {
 	Description *string `json:"description,omitempty"`
 	Type        *string `json:"type,omitempty"`
 	GitURL      *string `json:"git_url,omitempty"`
+	// Tags, when non-nil, replaces the whole KV tag set (classification, phase,
+	// …). Type above remains accepted and is folded into a type: tag.
+	Tags *[]string `json:"tags,omitempty"`
 	// WorkspaceID, when supplied and different from the project's current home,
 	// re-homes the project's single writable workspace (sty_896cebb1). This is
 	// the patch-convention expression of a home move — it carries a stricter,
@@ -158,6 +166,7 @@ func invokeProjectCreate(ctx context.Context, raw json.RawMessage) (json.RawMess
 		Description: req.Description,
 		GitURL:      req.GitURL,
 		OwnerUserID: callerUserID(ctx),
+		Tags:        req.Tags,
 	}, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, project.ErrInvalidGitRemote) {
@@ -188,6 +197,12 @@ func invokeProjectList(ctx context.Context, raw json.RawMessage) (json.RawMessag
 	}
 	if ps == nil {
 		ps = []project.Project{}
+	}
+	// Tag filter: keep only projects whose tag set contains EVERY requested tag
+	// (exact element match, mirroring document_list's `tags @> ...`). Use KV
+	// tags to filter by classification or phase, e.g. ["phase:discovery"].
+	if len(req.Tags) > 0 {
+		ps = filterProjectsByTags(ps, req.Tags)
 	}
 	// Workspace is identified when the caller filtered by it; deliver
 	// workspace principles. Project principles wait for a specific
@@ -280,6 +295,7 @@ func invokeProjectUpdate(ctx context.Context, raw json.RawMessage) (json.RawMess
 		Description: req.Description,
 		Type:        req.Type,
 		GitURL:      req.GitURL,
+		Tags:        req.Tags,
 	}, now)
 	if err != nil {
 		if errors.Is(err, project.ErrInvalidGitRemote) {
@@ -360,4 +376,32 @@ func invokeProjectMatch(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		MatchedURL:  p.GitURLCanonical,
 		Principles:  principles,
 	})
+}
+
+// filterProjectsByTags keeps projects whose tag set contains EVERY tag in want
+// (exact element match — AND semantics, mirroring document_list's `tags @> …`).
+func filterProjectsByTags(ps []project.Project, want []string) []project.Project {
+	out := make([]project.Project, 0, len(ps))
+	for _, p := range ps {
+		if projectHasAllTags(p.Tags, want) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func projectHasAllTags(have, want []string) bool {
+	for _, w := range want {
+		found := false
+		for _, h := range have {
+			if h == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
