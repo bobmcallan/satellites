@@ -208,7 +208,8 @@ func projectDocumentUploadHandler(cfg Config) http.HandlerFunc {
 			http.Error(w, "project id required", http.StatusBadRequest)
 			return
 		}
-		if !callerCanAccessProject(ctx, projectID) {
+		workspaceID, ok := callerProjectWorkspace(ctx, projectID)
+		if !ok {
 			http.Error(w, "you are not a member of this project", http.StatusForbidden)
 			return
 		}
@@ -242,7 +243,8 @@ func projectDocumentUploadHandler(cfg Config) http.HandlerFunc {
 		}
 
 		ref, err := cfg.StoreBlob(ctx, BlobUpload{
-			ProjectID:   projectID, // project-scoped document (vs the workspace corpus)
+			WorkspaceID: workspaceID, // the blob store requires it; an empty one 500s (this fix)
+			ProjectID:   projectID,   // project-scoped document (vs the workspace corpus)
 			Filename:    header.Filename,
 			ContentType: contentType,
 			CreatedBy:   userID,
@@ -260,12 +262,24 @@ func projectDocumentUploadHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// callerCanAccessProject reports whether the session caller may access the
-// project — mirrors callerCanAccessWorkspace: project_get enforces project-scope
-// read membership at the verb layer, so a clean read means the caller is a
-// member (or global admin). Fail-closed on any error.
-func callerCanAccessProject(ctx context.Context, projectID string) bool {
+// callerProjectWorkspace resolves the project's workspace id AND enforces access in
+// one project_get: the verb authorises project-scope read membership (a clean read
+// means the caller is a member or global admin), and its response carries the
+// project's workspace_id. The blob store REQUIRES that workspace_id — an upload that
+// omits it is rejected and the handler 500s (the project-upload bug this fixes). The
+// project_get response embeds project.Project, so workspace_id is a top-level field.
+// Fail-closed: any error (forbidden, not-found, malformed) returns ("", false).
+func callerProjectWorkspace(ctx context.Context, projectID string) (string, bool) {
 	req, _ := json.Marshal(verb.ProjectGetRequest{ID: projectID})
-	_, err := verb.Dispatch(ctx, "project_get", req)
-	return err == nil
+	raw, err := verb.Dispatch(ctx, "project_get", req)
+	if err != nil {
+		return "", false
+	}
+	var resp struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil || resp.WorkspaceID == "" {
+		return "", false
+	}
+	return resp.WorkspaceID, true
 }
