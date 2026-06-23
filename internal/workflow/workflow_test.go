@@ -28,7 +28,7 @@ func TestParse_LiveWorkflowSkills(t *testing.T) {
 		// is one close-reviewer edge. Workflows are repo-owned client-dir config
 		// under .satellites/workflows/ (epic:client-dir-separation order-2) — Parse
 		// reads the same shape.
-		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 6},
+		{filepath.Join("..", "..", ".satellites", "workflows", "satellites-workflow.md"), "satellites-workflow", 8},
 		// The parent (epic/anchor) workflow is now a GOVERNANCE SOURCE in the
 		// config/workflows embed, no longer scaffolded into .satellites/workflows
 		// (sty_a69e8c61) — parse it from the embed source.
