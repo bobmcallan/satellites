@@ -80,6 +80,7 @@ after large changes), then ` + "`code search`" + ` / ` + "`code symbol`" + ` to 
 	code.AddCommand(symbolCmd)
 
 	code.AddCommand(newCodeMapCmd())
+	code.AddCommand(newCodeGraphCmd())
 
 	register(code)
 }
