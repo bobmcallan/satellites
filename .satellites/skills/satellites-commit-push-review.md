@@ -5,7 +5,7 @@ kind: reviewer
 when: status==shipping
 check: "echo '===HEAD==='; git log -1 --format='commit %H%nsubject: %s%nbody: %b'; echo '===TREE (porcelain; empty = clean)==='; git status --porcelain; echo '===UPSTREAM==='; git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>&1; echo unpushed=$(git rev-list --count '@{u}'..HEAD 2>/dev/null); echo '===CI (workflowName/status/conclusion for HEAD)==='; gh run list --commit $(git rev-parse HEAD) --json workflowName,status,conclusion 2>&1; echo '===.version/.build touched in HEAD==='; git show --stat HEAD | grep -Ei 'version|build' || echo none"
 tags: [kind:reviewer]
-description: The commit-push-review gate — judges that the EXECUTOR's commit-push (the satellites-commit-push capability run at the shipping state) actually LANDED before a story closes. Its functional check gathers HEAD's commit + trailer, working-tree cleanliness, the pushed/unpushed count, the test/release/deploy CI conclusions, and any .version bump; the gate accepts only when the push is on the remote, the tree is clean, all three CI workflows concluded green, and (when a binary path changed) the matching .version was bumped. The reviewer half of the two-execution commit-push step. Emits {decision, notes} JSON.
+description: The commit-push-review gate — judges that the EXECUTOR's commit-push (the satellites-commit-push capability run at the shipping state) actually LANDED before a story closes. Its functional check gathers HEAD's commit + trailer, working-tree cleanliness, the pushed/unpushed count, the test/release/deploy CI conclusions, and any .version bump; the gate accepts only when the push is on the remote, the tree is clean, all three CI workflows concluded green, and (when a binary path changed) the matching .version was bumped. On accept it advances shipping → summary (the implementation-summary gate then closes the story). The reviewer half of the two-execution commit-push step. Emits {decision, notes} JSON.
 ---
 
 You are the `commit-push-review` gate. The EXECUTOR has just run the
@@ -13,7 +13,8 @@ You are the `commit-push-review` gate. The EXECUTOR has just run the
 (folding the incremental `in_progress` commits), a single `.version` bump when a
 binary path changed, a push, and a CI watch. You are the SECOND of the step's two
 `claude -p` executions: the capability PUSHES, you JUDGE that the push landed, and
-your verdict drives `shipping → done`. You are a reviewer — you observe and write
+your verdict drives `shipping → summary` (the implementation-summary gate then
+closes the story `summary → done`). You are a reviewer — you observe and write
 only the verdict; you run no git/file mutation and you never push yourself.
 
 ## Input
