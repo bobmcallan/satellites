@@ -32,12 +32,18 @@ type projectDetailData struct {
 	Stories    []storyRow
 	// Tasks (type:task) for the read-only tasks panel, peer to the stories list
 	// (epic:workflow-steps order-6). Read-only — surfaces existing data only.
-	Tasks         []taskRow
-	TaskFiltered  int // tasks matching the active filter (indicator numerator, sty_80447ada)
-	TaskTotal     int // project-wide task total (indicator denominator)
-	StoryShown    int // rows rendered on this page = len(Stories)
-	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
-	StoryTotal    int // project-wide all-status total (indicator denominator)
+	Tasks        []taskRow
+	TaskFiltered int // tasks matching the active filter (indicator numerator, sty_80447ada)
+	TaskTotal    int // project-wide task total (indicator denominator)
+	// Documents (type:document) for the project Documents panel — peer to the
+	// stories/tasks lists (epic:phases-task-outputs). Filterable + inline preview.
+	Documents     []docRow
+	DocFiltered   int    // documents matching the active filter (indicator numerator)
+	DocTotal      int    // project-wide document total (indicator denominator)
+	DocQuery      string // the active docs_q (rehydrates the search box on reload)
+	StoryShown    int    // rows rendered on this page = len(Stories)
+	StoryFiltered int    // stories matching the active filter across all pages (indicator numerator)
+	StoryTotal    int    // project-wide all-status total (indicator denominator)
 	Paginator     paginatorData
 	// Engagement-age thresholds (seconds) for the processing dot — rendered
 	// as container data attributes; the client computes colors (sty_25e2e8ac).
@@ -153,6 +159,13 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			arbor.WarnCtx(ctx, "project_detail: list tasks", "id", projectID, "err", tErr)
 		}
 
+		// Documents panel (epic:phases-task-outputs) — best-effort, peer to tasks:
+		// a documents-list error must not blank the whole project page.
+		docs, docFiltered, docTotal, dErr := gatherDocPanel(ctx, projectID, r.URL.Query())
+		if dErr != nil {
+			arbor.WarnCtx(ctx, "project_detail: list documents", "id", projectID, "err", dErr)
+		}
+
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -176,6 +189,10 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			Tasks:         tasks,
 			TaskFiltered:  taskFiltered,
 			TaskTotal:     taskTotal,
+			Documents:     docs,
+			DocFiltered:   docFiltered,
+			DocTotal:      docTotal,
+			DocQuery:      strings.TrimSpace(r.URL.Query().Get("docs_q")),
 			StoryShown:    len(stories),
 			StoryFiltered: paginator.Filtered,
 			StoryTotal:    paginator.Total,

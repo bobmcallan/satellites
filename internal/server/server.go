@@ -139,6 +139,13 @@ func Build(cfg Config) http.Handler {
 	if cfg.GetBlob != nil {
 		mux.Handle("GET /projects/{id}/blobs/{blob}", correlationMiddleware(cfg.Store.Middleware(http.HandlerFunc(blobDownloadHandler(cfg)))))
 	}
+	// Portal add-document control (epic:phases-task-outputs): session-authenticated
+	// upload into a project (project-scoped document), reusing the same ingestion
+	// path as the workspace docs route with the project pinned. More specific than
+	// "/projects/" so it wins under Go 1.22 precedence; only when the blob store is wired.
+	if cfg.StoreBlob != nil {
+		mux.HandleFunc("POST /projects/{id}/documents", projectDocumentUploadHandler(cfg))
+	}
 	mux.HandleFunc("/projects/", projectDetailHandler(cfg))
 	// Workspace surface (sty_67a66574): the list of the caller's workspaces and
 	// a per-workspace page (home projects + access role + objective placeholder).
