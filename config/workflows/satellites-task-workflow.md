@@ -22,12 +22,31 @@ lists them oldest-first. The body holds the latest run's context; the ledger hol
 them all.
 
 **Driving a task** (the `running` executor's loop): open it through the entry
-gate (`satellites-task-upsert-review`); do the work the body describes — if the
-task carries a `skill:<name>` tag, run that work skill, otherwise inline — and
-record a `## Report` (body or ledger); then close it through the exit gate
+gate (`satellites-task-upsert-review`); if the body declares document inputs (an
+optional `## Inputs` block — see below) resolve them first with
+`satellites task inputs <tsk-id>` and read each; do the work the body describes —
+if the task carries a `skill:<name>` tag, run that work skill, otherwise inline —
+and record a `## Report` (body or ledger); then close it through the exit gate
 (`satellites-task-report-review`). The executor does the work and writes the
 report; only a reviewer's accept moves status. The how-to lives in each gate's
 rubric and the task's work skill — not in this workflow.
+
+**`## Inputs` — declared document inputs (optional).** A task MAY assess its
+project's documents (wiki, notes, prior artifacts) as declared inputs. Add an
+`## Inputs` section with a fenced yaml block naming a KV filter and/or explicit
+ids:
+
+```text
+tags: [phase:discovery]   # KV filter (phase:/type: …), AND containment
+ids:  [doc_abc, doc_def]  # explicit document ids (optional)
+```
+
+`satellites task inputs <tsk-id>` resolves the set with the project ALWAYS pinned
+to the task's own project, so inputs never cross a project boundary (cross-repo
+inputs are out of scope here). Inputs are the task project's `type:document` rows;
+the executor reads each body via `document_get` (or `task inputs --read`). Like a
+`skill:<name>` reference, declared inputs are executor CONTEXT, not a gated
+dependency.
 
 **Authoring a task** — the task body IS the work definition (see
 [[work-artifact-selection]]): state the ACTION, the OUTPUT, and how success is

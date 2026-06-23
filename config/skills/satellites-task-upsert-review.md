@@ -80,6 +80,17 @@ story workflow section) and tell the author to RE-AUTHOR the body as a re-runnab
 ACTION / OUTPUT / VERIFICATION definition — converting a story to a task is a
 re-authoring, not a type-swap.
 
+## An `## Inputs` block is legitimate optional structure
+
+A task MAY declare document inputs in an optional `## Inputs` section — a fenced
+yaml block naming a KV `tags:` filter and/or explicit `ids:` (the documents the
+run assesses, resolved project-pinned by `satellites task inputs`). This is
+expected task structure, NOT story scaffolding — do NOT reject a task for carrying
+it. The block is executor context (like a `skill:<name>` reference), not part of
+the ACTION/OUTPUT/VERIFICATION contract you judge: a task with inputs still needs
+its own ACTION, OUTPUT, and VERIFICATION. When present, you MAY note it in the
+accept notes; never resolve it or gate on it.
+
 ## A referenced skill is a warning, not a gate
 
 A task MAY name a skill for the agent to use (a `skill:<name>` tag). That skill is
