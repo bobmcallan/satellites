@@ -103,11 +103,16 @@ func TestProjectDetailPanel_Chromedp(t *testing.T) {
 	// Grant clipboard write so the col-id copy's navigator.clipboard.writeText
 	// resolves under headless (no permission prompt). The copy is still driven
 	// by a real CDP click below, which supplies the user activation the
-	// clipboard API requires — sty_b7ba18b3.
-	if err := chromedp.Run(bctx, browser.GrantPermissions(
-		[]browser.PermissionType{browser.PermissionTypeClipboardSanitizedWrite, browser.PermissionTypeClipboardReadWrite},
-	)); err != nil {
-		t.Fatalf("grant clipboard permission: %v", err)
+	// clipboard API requires — sty_b7ba18b3. cdproto dropped the bulk
+	// Browser.grantPermissions in favour of per-permission SetPermission
+	// (sty_947f1691, chromedp v0.15 upgrade); an omitted origin applies to all.
+	for _, perm := range []*browser.PermissionDescriptor{
+		{Name: "clipboard-write", AllowWithoutSanitization: true},
+		{Name: "clipboard-read"},
+	} {
+		if err := chromedp.Run(bctx, browser.SetPermission(perm, browser.PermissionSettingGranted)); err != nil {
+			t.Fatalf("grant clipboard permission %q: %v", perm.Name, err)
+		}
 	}
 
 	// Login + navigate to the project detail page.

@@ -8,7 +8,7 @@
 # Local development uses scripts/Dockerfile.dev (Postgres via
 # scripts/docker-compose.dev.yml + satellites-server in --dev mode).
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
