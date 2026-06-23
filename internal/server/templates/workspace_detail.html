@@ -104,6 +104,7 @@
           <span class="project-card-status">{{.Status}}</span>
         </header>
         {{if .Type}}<a href="/projects?type={{.Type}}" class="type-chip" data-field="project-type">{{.Type}}</a>{{end}}
+        {{if .Phase}}<span class="phase-chip" data-field="project-phase">{{.Phase}}</span>{{end}}
         {{if .Description}}<p class="project-card-desc">{{.Description}}</p>{{end}}
         <dl class="project-card-meta">
           <dt>ID</dt><dd>{{.ID}}</dd>
