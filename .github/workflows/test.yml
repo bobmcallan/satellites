@@ -1,15 +1,18 @@
 name: test
 
-# CI gates on BOTH the fast UNIT path (`vet-test`) AND the INTEGRATION tier
-# (`integration` — testcontainers Postgres + chromedp against headless Chrome).
-# release.yml and deploy.yml gate on THIS workflow via `workflow_run` +
-# `conclusion == 'success'`, so a red in EITHER job blocks the GitHub release
-# and the Fly rollout. The integration tier was previously a LOCAL-only gate;
-# a portal render regression (sty_1ec60215) reached production because nothing
-# in CI ran it, so it is now a CI gate again (sty_353310ce, reversing
-# sty_ae474ca3's local-only optimisation — the runner-minute cost buys the
-# enforcement). Any test still flaky on a GH runner is quarantined with a NAMED
-# skip referencing a follow-up, never a blanket disable.
+# CI runs the fast, deterministic UNIT path only — `vet-test` (go vet + go
+# test ./...). release.yml and deploy.yml gate on THIS workflow via
+# `workflow_run` + `conclusion == 'success'`, so a unit/vet red blocks the
+# GitHub release and the Fly rollout.
+#
+# The INTEGRATION tier (go test -tags integration — testcontainers Postgres +
+# chromedp) is NOT run here. It is enforced LOCALLY by the
+# `satellites-integration-review` reviewer, which runs the tier at the
+# `integration` state of satellites-workflow, BEFORE the commit-push step — so a
+# red tier blocks the ship on the operator's machine, before anything is pushed.
+# Running it again in a GH runner would only duplicate that, cost runner minutes,
+# and re-hit the chromedp/claude CI-incompatibilities the local gate skips with
+# CI=1.
 
 on:
   push:
@@ -36,18 +39,3 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
-
-  integration:
-    # testcontainers Postgres + chromedp portal renders — the tier that catches
-    # render/page regressions the unit path can't (sty_353310ce). ubuntu-latest
-    # ships Docker (testcontainers) and google-chrome-stable (chromedp).
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26'
-      - name: chrome version (chromedp target)
-        run: google-chrome --version || google-chrome-stable --version
-      - name: integration tier
-        run: go test -tags integration ./tests/integration/...
