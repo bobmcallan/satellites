@@ -28,6 +28,16 @@ You read the body, and you MAY read the task's ledger for the report
 (`.satellites/satellites exec ledger_list --json '{"story_id":"<story_id>"}'`) —
 the report may live there rather than in the body.
 
+A task's OUTPUT may be a first-class **output document** rather than only an
+in-body report: the run emits it with `satellites task output`, which attaches a
+typed document to the project, tags it `task:<story_id>`, and records a
+`log:task_output` ledger row. When the task's OUTPUT is such a document, that
+document IS the deliverable you judge against the VERIFICATION — confirm it exists
+(a `log:task_output` row in the ledger, or
+`document_list {project_id:"<project_id>", tags:["task:<story_id>"]}`) and that its
+content meets the declared verification. An in-body `## Report` and an output
+document are both valid evidence; judge whichever the task's OUTPUT calls for.
+
 ## Decision rule
 
 Judge whether the task is genuinely done:

@@ -43,6 +43,7 @@ func init() {
 	task.AddCommand(newTaskGetCmd(&configArg, &userArg))
 	task.AddCommand(newTaskListCmd(&configArg, &userArg))
 	task.AddCommand(newTaskInputsCmd(&configArg, &userArg))
+	task.AddCommand(newTaskOutputCmd(&configArg, &userArg))
 	task.AddCommand(newTaskReviewCmd(&configArg, &userArg))
 	task.AddCommand(newTaskExecutionsCmd(&configArg, &userArg))
 	task.AddCommand(newTaskValidateCmd(&configArg, &userArg))

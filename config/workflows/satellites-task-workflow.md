@@ -26,10 +26,11 @@ gate (`satellites-task-upsert-review`); if the body declares document inputs (an
 optional `## Inputs` block — see below) resolve them first with
 `satellites task inputs <tsk-id>` and read each; do the work the body describes —
 if the task carries a `skill:<name>` tag, run that work skill, otherwise inline —
-and record a `## Report` (body or ledger); then close it through the exit gate
-(`satellites-task-report-review`). The executor does the work and writes the
-report; only a reviewer's accept moves status. The how-to lives in each gate's
-rubric and the task's work skill — not in this workflow.
+emit the declared OUTPUT (a first-class document — see below) with
+`satellites task output <tsk-id>` and record a `## Report` (body or ledger); then
+close it through the exit gate (`satellites-task-report-review`). The executor does
+the work and writes the report; only a reviewer's accept moves status. The how-to
+lives in each gate's rubric and the task's work skill — not in this workflow.
 
 **`## Inputs` — declared document inputs (optional).** A task MAY assess its
 project's documents (wiki, notes, prior artifacts) as declared inputs. Add an
@@ -47,6 +48,17 @@ inputs are out of scope here). Inputs are the task project's `type:document` row
 the executor reads each body via `document_get` (or `task inputs --read`). Like a
 `skill:<name>` reference, declared inputs are executor CONTEXT, not a gated
 dependency.
+
+**Output — a first-class document.** A task's OUTPUT is more than a path in the
+body: a successful run emits a typed project document with
+`satellites task output <tsk-id> --name <name> [--kind document|diagram]
+[--phase <phase>] (--body <md> | --body-file <path>)`. The output is attached to
+the task's own project and linked back to the run two ways — a `task:<tsk-id>` KV
+tag on the document (so `document_list {project_id, tags:[task:<tsk-id>]}`
+enumerates a task's outputs) and a `log:task_output` ledger row in the run's
+episode. The exit gate may treat that output document as the deliverable that
+satisfies the task's VERIFICATION. Outputs land in the task's own project
+(cross-repo output is out of scope).
 
 **Authoring a task** — the task body IS the work definition (see
 [[work-artifact-selection]]): state the ACTION, the OUTPUT, and how success is
