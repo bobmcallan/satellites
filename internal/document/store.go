@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/kvtag"
 	"github.com/lib/pq"
 )
 
@@ -383,6 +384,10 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	if tags == nil {
 		tags = []string{}
 	}
+	// Normalize single-valued KV keys (type:, phase:) to last-wins so a stored
+	// document holds at most one classification and one phase, even if a caller
+	// sends duplicates. Multi-valued keys (area:, epic:) pass through unchanged.
+	tags = kvtag.Normalize(tags)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Document{}, fmt.Errorf("document: begin tx: %w", err)
