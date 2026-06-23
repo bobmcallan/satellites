@@ -56,16 +56,22 @@ func isWorkflowUpsert(req DocumentUpsertRequest) bool {
 }
 
 // reviewRequiredKind reports whether a non-id upsert targets a BEHAVIOUR-kind
-// row whose content the per-type reviewer governs (sty_e6226180): a skill
-// (kind:workflow stores AS a type:skill row, so type=skill covers both) or a
-// principle (a principles:* tag on a type:document row). Stories, tasks, and
-// free-form documents are NOT behaviour kinds.
+// row whose content the per-type reviewer governs (sty_e6226180): a skill (a
+// workflow normally stores AS a type:skill row, so type=skill covers it), a
+// workflow identified by its kind:workflow tag/frontmatter REGARDLESS of the
+// declared type, or a principle (a principles:* tag). Identifying workflow/principle
+// by tag — not type — closes the bypass where a behaviour write is smuggled in as a
+// type:document row (now that type:document is writable over MCP, sty_06b8e38b).
+// Stories, tasks, and free-form documents are NOT behaviour kinds.
 func reviewRequiredKind(req DocumentUpsertRequest) bool {
 	switch strings.TrimSpace(strings.ToLower(req.Type)) {
 	case string(document.TypeSkill):
 		return true
 	case string(document.TypeStory), string(document.TypeTask):
 		return false
+	}
+	if isWorkflowUpsert(req) {
+		return true
 	}
 	if req.Tags != nil {
 		for _, t := range *req.Tags {
@@ -897,11 +903,14 @@ func authorizeListScope(ctx context.Context, scope document.Scope, wsID, pjID st
 }
 
 // mcpForbidsType reports whether a (non-id) document_upsert of reqType arriving
-// over transport t must be refused — operational content writes
-// (document/skill/principle) are kept off the MCP surface (sty_f302bd8b) so the
-// local agent's review skill can't be bypassed. Story and task writes, and any
-// non-MCP transport, pass. An id-addressed patch is handled by the caller
-// (req.ID != "") before this is consulted.
+// over transport t must be refused. The MCP write surface is exactly
+// {document, story}: a plain type:document has no reviewer to bypass (the
+// review-attestation barrier is behaviour-kind only), so corpus + story content is
+// writable over MCP (still bounded by authorizeWrite scope), while skill / principle
+// / workflow (real reviewer) and changelog (server lane) stay CLI/server-only. Task
+// create is CLI-only too (sty_06b8e38b narrowed it off the surface). Any non-MCP
+// transport passes; an id-addressed patch is handled by the caller (req.ID != "")
+// before this is consulted.
 // systemChangelogWriteAllowed reports whether this is the single system-scope
 // write the verb layer authorizes: a type:changelog (release-notes) write by a
 // global admin arriving OFF the MCP tool surface. The changelog collapsed out
@@ -922,7 +931,7 @@ func mcpForbidsType(t auth.Transport, reqType string) bool {
 		return false
 	}
 	switch strings.TrimSpace(strings.ToLower(reqType)) {
-	case string(document.TypeStory), string(document.TypeTask):
+	case string(document.TypeStory), string(document.TypeDocument):
 		return false
 	default:
 		return true
@@ -991,18 +1000,18 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		}
 	}
 
-	// MCP keeps operational content writes off its surface (sty_f302bd8b): a
-	// document/skill/principle content upsert must run through the CLI upload
-	// path, which invokes the local agent's content-review skill — a
-	// server-side MCP write would bypass it. Story/task writes and id-addressed
-	// patches pass; the CLI exec path and in-process callers leave the
-	// transport unset and pass.
+	// The MCP write surface is {document, story} (sty_06b8e38b): corpus + story
+	// content is writable over MCP (bounded by authorizeWrite scope). Behaviour
+	// kinds (skill/principle/workflow) carry a reviewer + attestation and so must
+	// run through the CLI upload path; task create is CLI-only; changelog is the
+	// server lane. Id-addressed patches and non-MCP transports (CLI exec /
+	// in-process) leave the transport unset and pass.
 	if req.ID == "" && mcpForbidsType(auth.TransportFromContext(ctx), req.Type) {
 		typ := strings.TrimSpace(req.Type)
 		if typ == "" {
 			typ = "document"
 		}
-		return nil, fmt.Errorf("document_upsert: %w: %q content is uploaded with the CLI (`satellites document|skill|principle upload`), not over MCP — MCP is read + setup/init", ErrForbidden, typ)
+		return nil, fmt.Errorf("document_upsert: %w: %q is not writable over MCP — the MCP write surface is type document and story. Behaviour kinds (skill/principle/workflow) upload via the CLI (`satellites <kind> upload`); tasks are created with `satellites task`; changelog is server-managed", ErrForbidden, typ)
 	}
 
 	// Workspace is not a valid sharing scope for skills — the "shared across a

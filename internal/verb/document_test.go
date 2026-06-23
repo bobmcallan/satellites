@@ -109,19 +109,19 @@ func TestEpicChildRefusal(t *testing.T) {
 	}
 }
 
-// TestDocumentUpsert_MCPRefusesContentWrites pins sty_f302bd8b AC3: an
-// operational document/skill content upsert arriving over the MCP transport is
-// refused (ErrForbidden) with a CLI pointer, before any store write — so the
-// per-type review skill can't be bypassed. The guard fires only for the
-// MCP transport; the CLI exec path and in-process callers leave it unset and
-// are exercised by the existing (non-transport) upsert tests.
+// TestDocumentUpsert_MCPRefusesContentWrites pins sty_06b8e38b: types OFF the MCP
+// write surface — task, skill, principle, workflow, changelog — arriving over the
+// MCP transport are refused (ErrForbidden) with a CLI pointer, before any store
+// write. (document and story are ON the surface and exercised elsewhere.) The guard
+// fires only for the MCP transport; the CLI exec path and in-process callers leave
+// it unset and are exercised by the existing (non-transport) upsert tests.
 func TestDocumentUpsert_MCPRefusesContentWrites(t *testing.T) {
 	prev := documentStore
 	documentStore = &document.Store{} // non-nil; guard returns before any store op
 	defer func() { documentStore = prev }()
 
 	mcp := auth.WithTransport(context.Background(), auth.TransportMCP)
-	for _, typ := range []string{"document", "skill"} {
+	for _, typ := range []string{"task", "skill", "principle", "workflow", "changelog"} {
 		body := json.RawMessage(`{"type":"` + typ + `","scope":"project","name":"x","project_id":"p","workspace_id":"w","body":"hi"}`)
 		_, err := Get("document_upsert").Invoke(mcp, body)
 		if err == nil || !errors.Is(err, ErrForbidden) {
@@ -168,26 +168,57 @@ func TestSystemChangelogWriteAllowed(t *testing.T) {
 	}
 }
 
-// TestMCPForbidsType pins the guard predicate (sty_f302bd8b AC3/AC6): over the
-// MCP transport, document/skill/principle content writes are refused while
-// story and task writes pass; no MCP transport always passes (CLI exec /
-// in-process).
+// TestMCPForbidsType pins the guard predicate (sty_06b8e38b): the MCP write
+// surface is exactly {document, story}. Over the MCP transport document and story
+// writes pass; task, skill, principle, workflow, changelog are refused. Any non-MCP
+// transport (CLI exec / in-process) always passes.
 func TestMCPForbidsType(t *testing.T) {
 	cases := []struct {
 		transport auth.Transport
 		typ       string
 		want      bool
 	}{
-		{auth.TransportMCP, "document", true},
+		{auth.TransportMCP, "document", false}, // corpus content now writable over MCP
+		{auth.TransportMCP, "story", false},    // story create over MCP still works
+		{auth.TransportMCP, "task", true},      // task create is CLI-only (narrowed off the surface)
 		{auth.TransportMCP, "skill", true},
-		{auth.TransportMCP, "story", false}, // story create over MCP still works
-		{auth.TransportMCP, "task", false},
+		{auth.TransportMCP, "principle", true},
+		{auth.TransportMCP, "workflow", true},
+		{auth.TransportMCP, "changelog", true},
+		{"", "task", false},     // CLI exec / in-process — never forbidden
+		{"", "skill", false},    // CLI exec / in-process — never forbidden
 		{"", "document", false}, // CLI exec / in-process — never forbidden
-		{"", "skill", false},
 	}
 	for _, c := range cases {
 		if got := mcpForbidsType(c.transport, c.typ); got != c.want {
 			t.Errorf("mcpForbidsType(%q, %q) = %v, want %v", c.transport, c.typ, got, c.want)
+		}
+	}
+}
+
+// TestReviewRequiredKind_CatchesBehaviourByTag pins the bypass-closure (sty_06b8e38b):
+// now that type:document is writable over MCP, a behaviour write must NOT be smuggled
+// in as a type:document row — a kind:workflow tag or a principles:* tag triggers the
+// review-attestation barrier regardless of the declared type. Plain documents,
+// stories, and tasks do not.
+func TestReviewRequiredKind_CatchesBehaviourByTag(t *testing.T) {
+	tags := func(ts ...string) *[]string { return &ts }
+	cases := []struct {
+		name string
+		req  DocumentUpsertRequest
+		want bool
+	}{
+		{"plain document", DocumentUpsertRequest{Type: "document", Tags: tags("area:x")}, false},
+		{"document no tags", DocumentUpsertRequest{Type: "document"}, false},
+		{"document + kind:workflow", DocumentUpsertRequest{Type: "document", Tags: tags("kind:workflow")}, true},
+		{"document + principles:*", DocumentUpsertRequest{Type: "document", Tags: tags("principles:always")}, true},
+		{"skill", DocumentUpsertRequest{Type: "skill"}, true},
+		{"story", DocumentUpsertRequest{Type: "story", Tags: tags("kind:workflow")}, false},
+		{"task", DocumentUpsertRequest{Type: "task"}, false},
+	}
+	for _, c := range cases {
+		if got := reviewRequiredKind(c.req); got != c.want {
+			t.Errorf("%s: reviewRequiredKind = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

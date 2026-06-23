@@ -197,11 +197,29 @@ func TestMCPWriteSurface_EndToEnd(t *testing.T) {
 		assertTagsEqual(t, resp.Document.Tags, []string{"keep:me"})
 	})
 
-	// ---- content document/skill upsert is REFUSED over MCP (sty_f302bd8b) ----
-	// MCP is read + setup/init; operational content writes go through the CLI
-	// upload path so the local agent's review skill runs. The story create /
-	// update sub-tests above prove story writes over MCP are unaffected.
-	for _, typ := range []string{"document", "skill"} {
+	// ---- type:document content upsert SUCCEEDS over MCP (sty_06b8e38b) ----
+	// The MCP write surface is {document, story}: a plain corpus document is
+	// writable (still scope-bounded by membership). The story sub-tests above cover
+	// story writes; a plain document has no reviewer to bypass.
+	t.Run("mcp_allows_document_content_upsert", func(t *testing.T) {
+		req := mcp.CallToolRequest{}
+		req.Params.Name = "document_upsert"
+		req.Params.Arguments = map[string]any{
+			"type": "document", "name": "corpus-note", "scope": "project",
+			"workspace_id": ws.ID, "project_id": pj.ID, "body": "# Note\n\nbody",
+		}
+		res, err := cli.CallTool(ctx, req)
+		if err != nil {
+			t.Fatalf("CallTool: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("MCP document content upsert must succeed; got error %+v", res.Content)
+		}
+	})
+
+	// ---- types OFF the MCP write surface are REFUSED (sty_06b8e38b) ----
+	// task is CLI-only; skill/principle/workflow carry a reviewer + attestation.
+	for _, typ := range []string{"task", "skill", "principle", "workflow"} {
 		typ := typ
 		t.Run("mcp_refuses_"+typ+"_content_upsert", func(t *testing.T) {
 			req := mcp.CallToolRequest{}
@@ -216,6 +234,33 @@ func TestMCPWriteSurface_EndToEnd(t *testing.T) {
 			}
 			if !res.IsError {
 				t.Errorf("MCP %s content upsert must be refused; got %+v", typ, res.Content)
+			}
+		})
+	}
+
+	// ---- a behaviour write smuggled as type:document is REFUSED (sty_06b8e38b) ----
+	// A kind:workflow / principles:* tag triggers the review-attestation barrier even
+	// on a type:document row, so opening type:document opens no side door for
+	// review-gated substrate.
+	for _, tc := range []struct{ name, tag string }{
+		{"workflow_by_tag", "kind:workflow"},
+		{"principle_by_tag", "principles:always"},
+	} {
+		tc := tc
+		t.Run("mcp_refuses_document_with_"+tc.name, func(t *testing.T) {
+			req := mcp.CallToolRequest{}
+			req.Params.Name = "document_upsert"
+			req.Params.Arguments = map[string]any{
+				"type": "document", "name": "smuggle-" + tc.name, "scope": "project",
+				"workspace_id": ws.ID, "project_id": pj.ID, "body": "x",
+				"tags": []string{tc.tag},
+			}
+			res, err := cli.CallTool(ctx, req)
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if !res.IsError {
+				t.Errorf("MCP document+%s must be refused (attestation barrier); got %+v", tc.tag, res.Content)
 			}
 		})
 	}
