@@ -28,21 +28,41 @@ import (
 // body preview (text documents only) and BodyHTML carries the rendered body for
 // the visible, expandable rows.
 type docRow struct {
-	ID         string
-	Name       string
-	TypeTag    string
-	PhaseTag   string
-	Tags       []string
+	ID       string
+	Name     string
+	TypeTag  string
+	PhaseTag string
+	Tags     []string
+	// OtherTags is Tags with the type:/phase: KV tags removed, so the panel
+	// renders the phase chip plus any remaining tags ONCE (no duplicate chips).
+	OtherTags  []string
 	UpdatedAt  time.Time
 	Expandable bool
 	BodyHTML   template.HTML
 }
 
-// dispatchDocRows lists a project's documents (document_list type:document) as
-// lightweight rows — enough to filter + count without fetching each body. The
-// inline-preview payload (BodyHTML) is added later for the visible rows only.
+// otherTags returns tags with the type:/phase: KV pairs removed — the phase is
+// rendered as its own chip and the type is constant (type:document), so neither
+// should re-appear in the generic tag list.
+func otherTags(tags []string) []string {
+	var out []string
+	for _, t := range tags {
+		if strings.HasPrefix(t, "type:") || strings.HasPrefix(t, "phase:") {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// dispatchDocRows lists a project's documents as lightweight rows — enough to
+// filter + count without fetching each body. The inline-preview payload
+// (BodyHTML) is added later for the visible rows only. The list is constrained to
+// the KV `type:document` classification (not merely the row type), so principle /
+// reference / contract / skill rows — which are document-rows carrying other KV
+// tags — never appear: a "project document" is specifically a `type:document` row.
 func dispatchDocRows(ctx context.Context, projectID string) ([]docRow, error) {
-	body, _ := json.Marshal(verb.DocumentListRequest{Type: "document", ProjectID: projectID, Limit: 200})
+	body, _ := json.Marshal(verb.DocumentListRequest{Type: "document", ProjectID: projectID, Tags: []string{"type:document"}, Limit: 200})
 	raw, err := verb.Dispatch(ctx, "document_list", body)
 	if err != nil {
 		return nil, err
@@ -59,6 +79,7 @@ func dispatchDocRows(ctx context.Context, projectID string) ([]docRow, error) {
 			TypeTag:   kvtag.Value(d.Tags, "type"),
 			PhaseTag:  kvtag.Value(d.Tags, "phase"),
 			Tags:      d.Tags,
+			OtherTags: otherTags(d.Tags),
 			UpdatedAt: d.UpdatedAt,
 		})
 	}

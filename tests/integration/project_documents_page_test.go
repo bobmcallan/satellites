@@ -73,6 +73,19 @@ func TestProjectDocumentsPanel_Chromedp(t *testing.T) {
 	seedDoc("discovery-note", "discovery", "# Discovery note\n\nThe discovery body marker.")
 	seedDoc("build-note", "build", "# Build note\n\nThe build body marker.")
 
+	// A principle-tagged document-row (no type:document classification) — it must
+	// NOT appear in the panel, which lists only type:document rows.
+	if doc, _, err := docStore.Upsert(ctx, document.UpsertInput{
+		Key:       document.Key{Scope: document.ScopeProject, WorkspaceID: ws.ID, ProjectID: pj.ID, Name: "a-principle"},
+		Type:      document.TypeDocument,
+		Body:      "# A principle\n\nNot a project document.",
+		CreatedBy: "system:test",
+	}, now); err != nil {
+		t.Fatalf("seed principle: %v", err)
+	} else if _, err := docStore.SetDocumentTags(ctx, doc.ID, []string{"principles:project"}, now); err != nil {
+		t.Fatalf("tag principle: %v", err)
+	}
+
 	// 60s deadline — the project page renders three panels (stories/tasks/docs),
 	// more than the landing-sized newBrowserCtx budget (mirrors
 	// project_detail_chromedp_test.go).
@@ -103,12 +116,17 @@ func TestProjectDocumentsPanel_Chromedp(t *testing.T) {
 		return n
 	}
 
-	// AC1: both project documents list in the panel.
+	// AC1: only the two type:document rows list — the principle is excluded.
 	if got := count(`[data-field="document-row"]`); got != 2 {
-		t.Fatalf("document rows = %d, want 2 (both project docs listed)", got)
+		t.Fatalf("document rows = %d, want 2 (only type:document rows; principle excluded)", got)
 	}
 
-	// AC4: the upload control is present.
+	// No chevron/caret renders in document names (row click toggles instead).
+	if got := count(`[data-field="document-row-title"] .episode-caret`); got != 0 {
+		t.Fatalf("document name carets = %d, want 0 (chevron removed)", got)
+	}
+
+	// The upload control is present.
 	if got := count(`[data-field="project-doc-upload"]`); got != 1 {
 		t.Fatalf("upload dropzone count = %d, want 1", got)
 	}

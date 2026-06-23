@@ -39,6 +39,19 @@ func TestFilterDocs(t *testing.T) {
 	}
 }
 
+// TestOtherTags pins the no-duplicate-chips fix: type:/phase: KV tags are removed
+// so the panel renders the phase chip + remaining tags once.
+func TestOtherTags(t *testing.T) {
+	got := otherTags([]string{"type:document", "phase:discovery", "task:tsk_1", "area:portal"})
+	want := []string{"task:tsk_1", "area:portal"}
+	if !equalStrs(got, want) {
+		t.Fatalf("otherTags = %v, want %v", got, want)
+	}
+	if len(otherTags([]string{"type:document", "phase:discovery"})) != 0 {
+		t.Fatalf("a type+phase-only tag set should yield no other tags")
+	}
+}
+
 // TestDocExpandable pins AC3: known text documents expand inline; clearly-binary
 // rows (by KV type or filename extension) do not.
 func TestDocExpandable(t *testing.T) {

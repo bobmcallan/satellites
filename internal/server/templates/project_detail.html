@@ -215,7 +215,7 @@
     </div>
     <input type="text"
            class="panel-search"
-           placeholder="search then press Enter (free text + chips: type:document phase:discovery tags:foo)"
+           placeholder="search then press Enter (free text + chips: phase:discovery tags:foo)"
            x-model="q"
            @keydown.enter.prevent="search()"
            data-field="panel-documents-search">
@@ -234,13 +234,10 @@
             {{if .Expandable}}@click="toggle('{{.ID}}')" style="cursor:pointer"{{end}}>
           <td class="col-id"><code>{{.ID}}</code></td>
           <td class="col-title">
-            <div class="document-row-title" data-field="document-row-title">
-              {{if .Expandable}}<span class="episode-caret" x-text="openId === '{{.ID}}' ? '▾' : '▸'">▸</span> {{end}}{{.Name}}
-            </div>
+            <div class="document-row-title" data-field="document-row-title">{{.Name}}</div>
             <div class="document-row-tags" data-field="document-row-tags">
-              {{if .TypeTag}}<button type="button" class="type-chip is-clickable" @click.stop="filterBy('type:{{.TypeTag}}')" title="Filter by this type">type:{{.TypeTag}}</button>{{end}}
               {{if .PhaseTag}}<button type="button" class="phase-chip is-clickable" @click.stop="filterBy('phase:{{.PhaseTag}}')" title="Filter by this phase">phase:{{.PhaseTag}}</button>{{end}}
-              {{range .Tags}}<button type="button" class="tag-chip is-clickable" @click.stop="filterBy('tags:{{.}}')" title="Filter by this tag">{{.}}</button>{{end}}
+              {{range .OtherTags}}<button type="button" class="tag-chip is-clickable" @click.stop="filterBy('tags:{{.}}')" title="Filter by this tag">{{.}}</button>{{end}}
             </div>
           </td>
           <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
