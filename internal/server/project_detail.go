@@ -41,6 +41,11 @@ type projectDetailData struct {
 	DocFiltered   int    // documents matching the active filter (indicator numerator)
 	DocTotal      int    // project-wide document total (indicator denominator)
 	DocQuery      string // the active docs_q (rehydrates the search box on reload)
+	// CodegraphHTML is the newest published type:codegraph document rendered as safe
+	// markdown (epic:codegraph-usability B2). Empty when the project has none — the
+	// template then renders no codegraph card (graceful absence). codegraph-init.js
+	// turns the embedded language-codegraph block into an interactive graph.
+	CodegraphHTML template.HTML
 	StoryShown    int    // rows rendered on this page = len(Stories)
 	StoryFiltered int    // stories matching the active filter across all pages (indicator numerator)
 	StoryTotal    int    // project-wide all-status total (indicator denominator)
@@ -166,6 +171,11 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			arbor.WarnCtx(ctx, "project_detail: list documents", "id", projectID, "err", dErr)
 		}
 
+		// Codegraph card (epic:codegraph-usability B2) — best-effort, peer to the
+		// documents panel: surfaces the project's published type:codegraph document so
+		// codegraph-init.js can render it interactively. Absent → no card.
+		codegraphHTML, _ := gatherCodegraph(ctx, projectID)
+
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
 			if u, err := cfg.Store.GetUserByID(ctx, userID); err == nil && u != nil {
@@ -193,6 +203,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 			DocFiltered:   docFiltered,
 			DocTotal:      docTotal,
 			DocQuery:      strings.TrimSpace(r.URL.Query().Get("docs_q")),
+			CodegraphHTML: codegraphHTML,
 			StoryShown:    len(stories),
 			StoryFiltered: paginator.Filtered,
 			StoryTotal:    paginator.Total,

@@ -17,6 +17,9 @@
 <script defer src="/static/task_panel.js"></script>
 <script defer src="/static/alpine.min.js"></script>
 <script defer src="/static/mermaid-init.js"></script>
+<!-- codegraph-init.js: lazy interactive codegraph viewer; loads cytoscape only when
+     a language-codegraph block is on the page (epic:codegraph-usability B2). -->
+<script defer src="/static/codegraph-init.js"></script>
 </head>
 <body>
 
@@ -195,6 +198,18 @@
     </table>
     </div>
   </section>
+
+  {{/* Codegraph card (epic:codegraph-usability B2) — renders the project's published
+       type:codegraph document; codegraph-init.js turns the embedded
+       language-codegraph JSON block into an interactive graph. Rendered ONLY when a
+       codegraph document exists, so a project without one shows no card (graceful
+       absence). */}}
+  {{if .CodegraphHTML}}
+  <section class="panel" data-section="project-codegraph">
+    <h2>codegraph</h2>
+    <div class="changelog-content" data-field="codegraph-body">{{.CodegraphHTML}}</div>
+  </section>
+  {{end}}
 
   {{/* Documents panel (epic:phases-task-outputs) — peer to stories/tasks. Lists
        the project's type:document rows with chip search/filter (docs_q, applied

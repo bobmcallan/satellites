@@ -1446,3 +1446,34 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 @keyframes activity-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Codegraph viewer (epic:codegraph-usability B2). codegraph-init.js replaces the
+   raw `language-codegraph` <pre> with a `.codegraph` card holding a toolbar + an
+   interactive cytoscape canvas. The raw <pre> is hidden so the large JSON never
+   flashes before JS runs; no-JS users still get the mermaid fallback the body carries. */
+pre:has(> code.language-codegraph) { display: none; }
+.codegraph {
+  border: 1px solid var(--border, #2a3346);
+  border-radius: 6px;
+  margin: 0.75rem 0;
+  background: var(--panel-bg, #131826);
+  overflow: hidden;
+}
+.codegraph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border, #2a3346);
+}
+.codegraph-filter {
+  flex: 0 1 260px;
+  padding: 0.3rem 0.5rem;
+  background: var(--input-bg, #0d1119);
+  color: var(--text, #cdd6e4);
+  border: 1px solid var(--border, #2a3346);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.codegraph-meta { color: var(--muted, #7b89a3); font-size: 0.8rem; }
+.codegraph-canvas { width: 100%; height: 520px; }
