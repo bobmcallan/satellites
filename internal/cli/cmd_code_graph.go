@@ -24,11 +24,12 @@ import (
 // codeGraphQuery captures the at-most-one focused query selected by flags. An empty
 // value means "no query" — the full-graph dump (today's behaviour, unchanged).
 type codeGraphQuery struct {
-	asJSON bool
-	pkg    string // --package: direct in/out edges
-	deps   string // --deps: forward transitive closure
-	rdeps  string // --rdeps: reverse transitive closure (blast radius)
-	cycles bool    // --cycles: import-cycle detection
+	asJSON       bool
+	includeTests bool   // --include-tests: keep test-support packages
+	pkg          string // --package: direct in/out edges
+	deps         string // --deps: forward transitive closure
+	rdeps        string // --rdeps: reverse transitive closure (blast radius)
+	cycles       bool   // --cycles: import-cycle detection
 }
 
 func newCodeGraphCmd() *cobra.Command {
@@ -70,6 +71,7 @@ For --cycles:  { "cycles": [ [pkg,…], … ] }`,
 	cmd.Flags().StringVar(&q.deps, "deps", "", "Forward transitive closure — everything the package pulls in.")
 	cmd.Flags().StringVar(&q.rdeps, "rdeps", "", "Reverse transitive closure (blast radius) — who imports the package, transitively.")
 	cmd.Flags().BoolVar(&q.cycles, "cycles", false, "Detect intra-module import cycles.")
+	cmd.Flags().BoolVar(&q.includeTests, "include-tests", false, "Keep test-support packages (under tests/, or imported only from _test.go) that are excluded by default.")
 	return cmd
 }
 
@@ -86,10 +88,11 @@ func runCodeGraph(out io.Writer, repoRoot string, q codeGraphQuery) error {
 		return fmt.Errorf("code graph: choose at most one of --package, --deps, --rdeps, --cycles")
 	}
 
-	g, err := codegraph.Build(repoRoot)
+	g, err := codegraph.BuildWith(repoRoot, codegraph.Options{IncludeTests: q.includeTests})
 	if err != nil {
 		return fmt.Errorf("code graph: %w", err)
 	}
+	g.Stamp(repoRoot) // provenance on the full-graph snapshot
 
 	switch {
 	case q.cycles:

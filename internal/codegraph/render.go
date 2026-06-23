@@ -19,8 +19,16 @@ func (g *Graph) RenderJSON(w io.Writer) error {
 // Render writes the human-readable summary: the module, a node count, and each
 // package with its public surface and its intra-module dependencies (fan-out).
 func (g *Graph) Render(w io.Writer) {
-	fmt.Fprintf(w, "code graph — module %s: %d package(s), %d intra-module edge(s)\n\n",
+	fmt.Fprintf(w, "code graph — module %s: %d package(s), %d intra-module edge(s)\n",
 		g.Module, len(g.Nodes), len(g.Edges))
+	if g.GeneratedAt != "" || g.Revision != "" {
+		rev := g.Revision
+		if rev == "" {
+			rev = "(unknown rev)"
+		}
+		fmt.Fprintf(w, "generated %s @ %s\n", g.GeneratedAt, rev)
+	}
+	fmt.Fprintln(w)
 
 	deps := map[string][]string{}
 	for _, e := range g.Edges {

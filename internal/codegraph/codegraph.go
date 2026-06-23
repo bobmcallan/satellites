@@ -21,9 +21,11 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // skipDirs are directories never walked — VCS metadata, the satellites working
@@ -55,12 +57,48 @@ type Edge struct {
 	To   string `json:"to"`
 }
 
-// Graph is the full package-level result for one module.
+// Graph is the full package-level result for one module. GeneratedAt and Revision
+// are provenance stamped at render time (Stamp); they are omitempty so a pure Build
+// result and the query subsets stay byte-stable.
 type Graph struct {
-	Module   string `json:"module"`
-	RepoRoot string `json:"repo_root"`
-	Nodes    []Node `json:"nodes"`
-	Edges    []Edge `json:"edges"`
+	Module      string `json:"module"`
+	RepoRoot    string `json:"repo_root"`
+	GeneratedAt string `json:"generated_at,omitempty"` // RFC3339 UTC, set by Stamp
+	Revision    string `json:"revision,omitempty"`     // short git rev, best-effort
+	Nodes       []Node `json:"nodes"`
+	Edges       []Edge `json:"edges"`
+}
+
+// Options tunes a Build. IncludeTests keeps test-support packages (those under a
+// tests/ dir, or imported only from _test.go files and never from production code)
+// that Build drops by default, so the graph is the production dependency structure.
+type Options struct {
+	IncludeTests bool
+}
+
+// Stamp records provenance on the graph: the generation time (RFC3339 UTC) and the
+// repo's short git revision (best-effort — left empty when repoRoot is not a git repo
+// or git is unavailable). Called at render time so Build itself stays deterministic.
+func (g *Graph) Stamp(repoRoot string) {
+	g.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	g.Revision = gitShortRev(repoRoot)
+}
+
+// gitShortRev returns the abbreviated HEAD commit of the repo at root, or "" when it
+// cannot be resolved (not a repo, no git, detached/empty). Best-effort provenance —
+// never fatal.
+func gitShortRev(root string) string {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// underTests reports whether a repo-relative (forward-slashed) package dir is test
+// scaffolding by location — the top-level tests/ tree.
+func underTests(dir string) bool {
+	return dir == "tests" || strings.HasPrefix(dir, "tests/")
 }
 
 // pkgAgg accumulates one package directory's facts across its files.
@@ -73,17 +111,28 @@ type pkgAgg struct {
 	external map[string]bool // imported non-module paths
 }
 
-// Build walks the Go module rooted at root and returns its package-level graph.
+// Build walks the Go module rooted at root and returns its package-level graph with
+// test scaffolding excluded (the default). Equivalent to BuildWith(root, Options{}).
+func Build(root string) (*Graph, error) { return BuildWith(root, Options{}) }
+
+// BuildWith walks the Go module rooted at root and returns its package-level graph.
 // The module path is read from go.mod; an import is an intra-module edge when it
 // carries the module prefix. Unparseable files are skipped (non-fatal) so one bad
 // file never sinks the whole graph.
-func Build(root string) (*Graph, error) {
+//
+// Production structure comes from non-`_test.go` files only (nodes, edges, counts).
+// `_test.go` files contribute no nodes/edges; their intra-module imports are tracked
+// separately so test-support packages can be identified. Unless opts.IncludeTests,
+// test-support packages (under tests/, or imported only from tests and never from
+// production code) and any edge touching them are dropped from the result.
+func BuildWith(root string, opts Options) (*Graph, error) {
 	module, err := modulePath(root)
 	if err != nil {
 		return nil, err
 	}
 
-	aggs := map[string]*pkgAgg{} // keyed by repo-relative dir
+	aggs := map[string]*pkgAgg{}     // production packages, keyed by repo-relative dir
+	testImported := map[string]bool{} // intra-module paths imported from _test.go files
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -95,7 +144,7 @@ func Build(root string) (*Graph, error) {
 			return nil
 		}
 		name := d.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if !strings.HasSuffix(name, ".go") {
 			return nil
 		}
 		src, readErr := os.ReadFile(path)
@@ -105,6 +154,16 @@ func Build(root string) (*Graph, error) {
 		pkg, imports, public, perr := parseGoFile(src)
 		if perr != nil {
 			return nil // unparseable — skip, non-fatal
+		}
+		if strings.HasSuffix(name, "_test.go") {
+			// Test files build no nodes/edges; record only their intra-module
+			// imports so a package reached solely from tests can be classified.
+			for _, imp := range imports {
+				if imp == module || strings.HasPrefix(imp, module+"/") {
+					testImported[imp] = true
+				}
+			}
+			return nil
 		}
 		dir := filepath.ToSlash(relDir(root, path))
 		a := aggs[dir]
@@ -159,6 +218,10 @@ func Build(root string) (*Graph, error) {
 		}
 	}
 
+	if !opts.IncludeTests {
+		filterTestSupport(g, testImported)
+	}
+
 	sort.Slice(g.Nodes, func(i, j int) bool { return g.Nodes[i].ImportPath < g.Nodes[j].ImportPath })
 	sort.Slice(g.Edges, func(i, j int) bool {
 		if g.Edges[i].From != g.Edges[j].From {
@@ -167,6 +230,35 @@ func Build(root string) (*Graph, error) {
 		return g.Edges[i].To < g.Edges[j].To
 	})
 	return g, nil
+}
+
+// filterTestSupport drops test-scaffolding packages (and edges touching them) in
+// place. A node is test-support when its dir is under tests/, OR it is imported from
+// a _test.go file (testImported) but never from production code (no production edge
+// points to it). Production entry points imported by nobody are NOT test-support.
+func filterTestSupport(g *Graph, testImported map[string]bool) {
+	prodImported := map[string]bool{}
+	for _, e := range g.Edges {
+		prodImported[e.To] = true
+	}
+	drop := map[string]bool{}
+	kept := g.Nodes[:0]
+	for _, n := range g.Nodes {
+		if underTests(n.Dir) || (testImported[n.ImportPath] && !prodImported[n.ImportPath]) {
+			drop[n.ImportPath] = true
+			continue
+		}
+		kept = append(kept, n)
+	}
+	g.Nodes = kept
+	keptEdges := g.Edges[:0]
+	for _, e := range g.Edges {
+		if drop[e.From] || drop[e.To] {
+			continue
+		}
+		keptEdges = append(keptEdges, e)
+	}
+	g.Edges = keptEdges
 }
 
 // parseGoFile returns a file's package name, its import paths, and its count of
