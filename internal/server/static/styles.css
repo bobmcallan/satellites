@@ -684,12 +684,17 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
   color: #fff;
 }
 .story-row-tags,
-.task-row-tags {
+.task-row-tags,
+.document-row-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
   margin-top: 0.3rem;
 }
+/* In a documents row the phase chip can be the FIRST chip; its project-card
+   margin-left would indent the whole row off the name. The flex gap above
+   handles spacing, so zero it here to keep chips flush-left under the name. */
+.document-row-tags .phase-chip { margin-left: 0; }
 button.tag-chip.is-clickable {
   background: rgba(106, 159, 181, 0.2);
   color: #8ab4c9;
