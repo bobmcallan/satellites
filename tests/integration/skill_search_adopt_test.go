@@ -79,11 +79,11 @@ func TestSkillSearchAdopt(t *testing.T) {
 
 	publish := func(publisher, headline, body string) {
 		t.Helper()
-		req, _ := json.Marshal(map[string]any{
+		req, _ := json.Marshal(withSkillReview(map[string]any{
 			"type": "skill", "scope": "library",
 			"project_id": publisher, "name": "sec-scan",
 			"body": body,
-		})
+		}))
 		if _, err := verb.Dispatch(adminCtx, "document_upsert", req); err != nil {
 			t.Fatalf("publish %s: %v", publisher, err)
 		}

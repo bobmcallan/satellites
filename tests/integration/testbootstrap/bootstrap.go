@@ -16,6 +16,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/invitation"
 	"github.com/bobmcallan/satellites/internal/server"
 	"github.com/bobmcallan/satellites/internal/workspace"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -147,16 +148,36 @@ func SetUp(t *testing.T) *Env {
 // subtest keeps those fixtures. schema_migrations is never truncated.
 func resetAll(t *testing.T, env *Env) {
 	t.Helper()
-	if _, err := env.DB.Exec(`
-        TRUNCATE api_keys, blobs,
-                 documents, document_versions, evidence,
-                 invitations, oauth_clients, oauth_codes,
-                 oauth_refresh_tokens, oauth_sessions, oauth_states,
-                 project_members, projects, reviews,
-                 server_settings, system_seeds, tools,
-                 users, variables, workspace_members, workspaces
-        RESTART IDENTITY CASCADE
-    `); err != nil {
+	// Truncate every application table dynamically so the reset can't drift as
+	// migrations add tables (sty_50ae9b96): a hardcoded list silently misses a
+	// new top-level table and leaks its rows across the shared container.
+	// schema_migrations (golang-migrate bookkeeping) is preserved; RESTART
+	// IDENTITY CASCADE clears FK-dependents in one statement, so the order of
+	// the table list is irrelevant.
+	rows, err := env.DB.Query(`
+        SELECT tablename FROM pg_tables
+        WHERE schemaname = 'public' AND tablename <> 'schema_migrations'
+    `)
+	if err != nil {
+		t.Fatalf("reset: list tables: %v", err)
+	}
+	var quoted []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			t.Fatalf("reset: scan table: %v", err)
+		}
+		quoted = append(quoted, pq.QuoteIdentifier(name))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reset: iterate tables: %v", err)
+	}
+	if len(quoted) == 0 {
+		return
+	}
+	if _, err := env.DB.Exec("TRUNCATE " + strings.Join(quoted, ", ") + " RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("reset all tables: %v", err)
 	}
 }

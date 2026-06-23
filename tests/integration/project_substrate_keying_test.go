@@ -94,8 +94,13 @@ func TestProjectSubstrateKeying(t *testing.T) {
 		return out
 	}
 
-	// Seed a project skill + a project document under home workspace A.
-	if err := upsert(`{"type":"skill","scope":"project","project_id":"` + pj.ID + `","workspace_id":"` + wsA.ID + `","name":"proj-skill","body":"# proj skill"}`); err != nil {
+	// Seed a project skill + a project document under home workspace A. The
+	// skill is a behaviour kind, so it carries a review attestation (sty_50ae9b96).
+	skillReq, _ := json.Marshal(withSkillReview(map[string]any{
+		"type": "skill", "scope": "project", "project_id": pj.ID,
+		"workspace_id": wsA.ID, "name": "proj-skill", "body": "# proj skill",
+	}))
+	if err := upsert(string(skillReq)); err != nil {
 		t.Fatalf("upload skill: %v", err)
 	}
 	if err := upsert(`{"type":"document","scope":"project","project_id":"` + pj.ID + `","workspace_id":"` + wsA.ID + `","name":"proj-doc","body":"# proj doc"}`); err != nil {
@@ -127,8 +132,14 @@ func TestProjectSubstrateKeying(t *testing.T) {
 		}
 	}
 
-	// AC2 — a workspace-scoped skill upsert is refused.
-	err = upsert(`{"type":"skill","scope":"workspace","workspace_id":"` + wsB.ID + `","name":"ws-skill","body":"# nope"}`)
+	// AC2 — a workspace-scoped skill upsert is refused. Carry a valid review
+	// attestation so the refusal is the SCOPE check (ErrBadRequest), not the
+	// behaviour-review barrier (sty_50ae9b96).
+	wsSkillReq, _ := json.Marshal(withSkillReview(map[string]any{
+		"type": "skill", "scope": "workspace", "workspace_id": wsB.ID,
+		"name": "ws-skill", "body": "# nope",
+	}))
+	err = upsert(string(wsSkillReq))
 	if err == nil || !errors.Is(err, verb.ErrBadRequest) {
 		t.Errorf("workspace-scoped skill upsert should be ErrBadRequest, got %v", err)
 	}

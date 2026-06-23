@@ -110,10 +110,10 @@ func TestLibraryPublishReadAcrossProjects(t *testing.T) {
 
 	upsertLibrary := func(t *testing.T, ctx context.Context, projectID, body string) (json.RawMessage, error) {
 		t.Helper()
-		req, _ := json.Marshal(map[string]any{
+		req, _ := json.Marshal(withSkillReview(map[string]any{
 			"type": "skill", "scope": "library",
 			"project_id": projectID, "name": "deploy-checks", "body": body,
-		})
+		}))
 		return verb.Dispatch(ctx, "document_upsert", json.RawMessage(req))
 	}
 
@@ -298,10 +298,10 @@ func TestLibraryCrossNamespaceWriteRefused(t *testing.T) {
 	}
 
 	attempt := func(projectID string) error {
-		req, _ := json.Marshal(map[string]any{
+		req, _ := json.Marshal(withSkillReview(map[string]any{
 			"type": "skill", "scope": "library",
 			"project_id": projectID, "name": "deploy-checks", "body": "# intruder\n",
-		})
+		}))
 		_, err := verb.Dispatch(ctxUser, "document_upsert", json.RawMessage(req))
 		return err
 	}

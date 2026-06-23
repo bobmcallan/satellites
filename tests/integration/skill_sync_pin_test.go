@@ -82,7 +82,7 @@ func TestSkillSyncGlobalPublishers(t *testing.T) {
 		if scope == "project" {
 			req["workspace_id"] = ws.ID
 		}
-		raw, _ := json.Marshal(req)
+		raw, _ := json.Marshal(withSkillReview(req))
 		if _, err := verb.Dispatch(adminCtx, "document_upsert", raw); err != nil {
 			t.Fatalf("upsert %s/%s: %v", scope, name, err)
 		}

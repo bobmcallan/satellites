@@ -65,7 +65,7 @@ func TestDocumentsUploadEndToEnd(t *testing.T) {
 	body := "# commit-push after each story\n\nrun /commit-push at the end of every story.\n"
 	upsert := func(label string) []byte {
 		t.Helper()
-		req, err := json.Marshal(map[string]any{
+		req, err := json.Marshal(withSkillReview(map[string]any{
 			"type":         "document",
 			"scope":        "project",
 			"workspace_id": ws.ID,
@@ -76,7 +76,7 @@ func TestDocumentsUploadEndToEnd(t *testing.T) {
 			// the read-verb sidecar; the scope tag alone is on-demand only
 			// (sty_05794178).
 			"tags": []string{"principles:project", "principles:always"},
-		})
+		}))
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
