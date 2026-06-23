@@ -1,20 +1,15 @@
 name: test
 
-# CI runs the fast, deterministic UNIT path only — `vet-test` (go vet + go
-# test ./...). release.yml and deploy.yml gate on THIS workflow via
-# `workflow_run` + `conclusion == 'success'`, so a unit/vet red blocks the
-# GitHub release and the Fly rollout.
-#
-# The INTEGRATION tier (go test -tags integration — testcontainers Postgres +
-# chromedp against headless Chrome) is NOT run here. It is a LOCAL pre-push
-# gate: the workflow's `techdebt-review` state runs `satellites techdebt
-# review` (build + unit + integration) against the working tree before any
-# commit/push, and a red there returns the story to in_progress with nothing
-# shipped (sty_2ce777c4). Headless Chrome in a GH runner flakes on the
-# websocket handshake (TestAdminPeoplePortal websocket-timeout) and costs
-# runner minutes; locally chromedp is stable, so integration is enforced where
-# it is reliable. This supersedes the CI deploy-path integration gate that
-# sty_ae474ca3 added — integration is a gate again, just a local one.
+# CI gates on BOTH the fast UNIT path (`vet-test`) AND the INTEGRATION tier
+# (`integration` — testcontainers Postgres + chromedp against headless Chrome).
+# release.yml and deploy.yml gate on THIS workflow via `workflow_run` +
+# `conclusion == 'success'`, so a red in EITHER job blocks the GitHub release
+# and the Fly rollout. The integration tier was previously a LOCAL-only gate;
+# a portal render regression (sty_1ec60215) reached production because nothing
+# in CI ran it, so it is now a CI gate again (sty_353310ce, reversing
+# sty_ae474ca3's local-only optimisation — the runner-minute cost buys the
+# enforcement). Any test still flaky on a GH runner is quarantined with a NAMED
+# skip referencing a follow-up, never a blanket disable.
 
 on:
   push:
@@ -41,3 +36,18 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
+
+  integration:
+    # testcontainers Postgres + chromedp portal renders — the tier that catches
+    # render/page regressions the unit path can't (sty_353310ce). ubuntu-latest
+    # ships Docker (testcontainers) and google-chrome-stable (chromedp).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: chrome version (chromedp target)
+        run: google-chrome --version || google-chrome-stable --version
+      - name: integration tier
+        run: go test -tags integration ./tests/integration/...
