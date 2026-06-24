@@ -206,12 +206,23 @@
        JSON pre is CSS-hidden), and CodegraphTable is the package table derived
        server-side from the same block (the no-JS-readable peer). Rendered ONLY when a
        codegraph document exists (graceful absence). */}}
-  {{if .CodegraphHTML}}
+  {{if .CodegraphFound}}
   <section class="panel" data-section="project-codegraph">
     <h2>codegraph</h2>
+    {{if .CodegraphAcceptable}}
     <div class="changelog-content" data-field="codegraph-body">{{.CodegraphHTML}}</div>
     {{if .CodegraphTable}}
     <div class="codegraph-packages-wrap" data-field="codegraph-packages-wrap">{{.CodegraphTable}}</div>
+    {{end}}
+    {{else}}
+    {{/* The document declares a format the UI does not render (or none). It is NOT an
+         error — the codegraph document is still available to Claude/agents over MCP; the
+         portal just renders the formats it recognizes (today: JGF). */}}
+    <p class="codegraph-unsupported" data-field="codegraph-unsupported">
+      This codegraph is published in {{if .CodegraphFormat}}format <code>{{.CodegraphFormat}}</code>{{else}}an undeclared format{{end}},
+      which this portal doesn’t render. The document is still available to agents over MCP
+      (<code>document_list {tags:["type:codegraph"]}</code> → <code>document_get</code>).
+    </p>
     {{end}}
   </section>
   {{end}}

@@ -1,20 +1,10 @@
 package codegraph
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 )
-
-// RenderJSON writes the graph as stable, indented JSON — the machine form the C2
-// codegraph skill consumes.
-func (g *Graph) RenderJSON(w io.Writer) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(g)
-}
 
 // Render writes the human-readable summary: the module, a node count, and each
 // package with its public surface and its intra-module dependencies (fan-out).

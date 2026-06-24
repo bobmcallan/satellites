@@ -22,7 +22,7 @@ const codegraphPage = `<!doctype html><html lang="en"><head>
 </head><body>
 <section data-section="project-codegraph"><h2>codegraph</h2>
 <div class="changelog-content">
-<pre><code class="language-codegraph">{"module":"example.com/m","nodes":[{"import_path":"example.com/m/cli","package":"cli"},{"import_path":"example.com/m/index","package":"index"}],"edges":[{"from":"example.com/m/cli","to":"example.com/m/index"}]}</code></pre>
+<pre><code class="language-codegraph">{"graph":{"directed":true,"label":"example.com/m","nodes":{"example.com/m/cli":{"label":"cli","metadata":{"package":"cli"}},"example.com/m/index":{"label":"index","metadata":{"package":"index"}}},"edges":[{"source":"example.com/m/cli","target":"example.com/m/index","relation":"depends-on"}]}}</code></pre>
 </div></section>
 </body></html>`
 

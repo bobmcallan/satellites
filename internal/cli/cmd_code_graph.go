@@ -105,7 +105,10 @@ func runCodeGraph(out io.Writer, repoRoot string, q codeGraphQuery) error {
 		return renderClosure(out, g, q.rdeps, "rdeps", q.asJSON)
 	default:
 		if q.asJSON {
-			return g.RenderJSON(out)
+			// The published full graph is the canonical JGF (JSON Graph Format) — a common,
+			// interoperable format (epic:codegraph-portable). The focused query outputs above
+			// keep their own result shapes.
+			return g.RenderJGF(out)
 		}
 		g.Render(out)
 		return nil

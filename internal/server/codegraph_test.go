@@ -25,12 +25,14 @@ func renderProjectDetail(t *testing.T, data projectDetailData) string {
 // it has none, the card is absent (graceful absence) — and either way the page wires
 // in codegraph-init.js so the lazy viewer is available.
 func TestProjectDetailCodegraphCardRenders(t *testing.T) {
-	cgBody := renderMarkdown("```codegraph\n{\"module\":\"m\",\"nodes\":[],\"edges\":[]}\n```")
+	cgBody := renderMarkdown("```codegraph\n{\"graph\":{\"nodes\":{},\"edges\":[]}}\n```")
 
-	// AC1: with a codegraph, the card + the language-codegraph block render.
+	// AC1: with an acceptable-format codegraph, the card + the language-codegraph block render.
 	withCard := renderProjectDetail(t, projectDetailData{
-		Project:       projectRow{ID: "proj_x", Name: "x"},
-		CodegraphHTML: cgBody,
+		Project:             projectRow{ID: "proj_x", Name: "x"},
+		CodegraphFound:      true,
+		CodegraphAcceptable: true,
+		CodegraphHTML:       cgBody,
 	})
 	if !strings.Contains(withCard, `data-section="project-codegraph"`) {
 		t.Errorf("AC1: project page missing the codegraph card when a codegraph exists")
@@ -44,8 +46,7 @@ func TestProjectDetailCodegraphCardRenders(t *testing.T) {
 
 	// AC2: with no codegraph, the card is absent — but the page still renders (graceful).
 	noCard := renderProjectDetail(t, projectDetailData{
-		Project:       projectRow{ID: "proj_y", Name: "y"},
-		CodegraphHTML: template.HTML(""),
+		Project: projectRow{ID: "proj_y", Name: "y"},
 	})
 	if strings.Contains(noCard, `data-section="project-codegraph"`) {
 		t.Errorf("AC2: codegraph card rendered for a project with no codegraph document")
@@ -55,16 +56,50 @@ func TestProjectDetailCodegraphCardRenders(t *testing.T) {
 	}
 }
 
+// TestCodegraphFormatGate covers the portal's format-acceptability gate
+// (epic:codegraph-portable): an acceptable format renders the diagram source; an
+// unknown/undeclared format renders a graceful "not rendered here" notice (the document is
+// still agent-readable over MCP) and NOT the diagram block. Also pins codegraphFormatTag.
+func TestCodegraphFormatGate(t *testing.T) {
+	// Unacceptable (unknown) format → notice, no diagram block.
+	unsupported := renderProjectDetail(t, projectDetailData{
+		Project:         projectRow{ID: "proj_u", Name: "u"},
+		CodegraphFound:  true,
+		CodegraphFormat: "dot-v1",
+		// CodegraphAcceptable false
+	})
+	if !strings.Contains(unsupported, `data-section="project-codegraph"`) {
+		t.Errorf("a found-but-unsupported codegraph should still render the card")
+	}
+	if !strings.Contains(unsupported, `data-field="codegraph-unsupported"`) {
+		t.Errorf("unsupported format should render the graceful notice")
+	}
+	if !strings.Contains(unsupported, "dot-v1") {
+		t.Errorf("unsupported notice should name the declared format")
+	}
+	if strings.Contains(unsupported, "language-codegraph") {
+		t.Errorf("unsupported format must NOT render the diagram source block")
+	}
+
+	// codegraphFormatTag extracts the format:<id> tag, else "".
+	if got := codegraphFormatTag([]string{"type:codegraph", "format:jgf-v1", "lang:go"}); got != "jgf-v1" {
+		t.Errorf("codegraphFormatTag = %q, want jgf-v1", got)
+	}
+	if got := codegraphFormatTag([]string{"type:codegraph"}); got != "" {
+		t.Errorf("codegraphFormatTag with no format tag = %q, want empty", got)
+	}
+}
+
 // TestCodegraphPackageTable verifies the package table is derived server-side from the
 // canonical `codegraph` JSON block (epic:codegraph-portable, story 3) — the single source
 // the interactive diagram also reads. Short import paths, the per-node columns, and HTML
 // escaping are all asserted; a body with no/!parseable block yields no table.
 func TestCodegraphPackageTable(t *testing.T) {
 	body := "# Codegraph — m\n\n## Graph data\n\n```codegraph\n" +
-		`{"module":"m","nodes":[` +
-		`{"import_path":"m","package":"main","files":2,"public_symbols":3,"external_deps":1},` +
-		`{"import_path":"m/internal/cli","package":"cli","files":5,"public_symbols":7,"external_deps":4}` +
-		`],"edges":[{"from":"m/internal/cli","to":"m"}]}` +
+		`{"graph":{"label":"m","nodes":{` +
+		`"m":{"label":".","metadata":{"package":"main","files":2,"publicSymbols":3,"externalDeps":1}},` +
+		`"m/internal/cli":{"label":"internal/cli","metadata":{"package":"cli","files":5,"publicSymbols":7,"externalDeps":4}}` +
+		`},"edges":[{"source":"m/internal/cli","target":"m"}]}}` +
 		"\n```\n"
 	tbl, ok := codegraphPackageTable(body)
 	if !ok {
@@ -73,9 +108,9 @@ func TestCodegraphPackageTable(t *testing.T) {
 	html := string(tbl)
 	for _, want := range []string{
 		`class="codegraph-packages"`,
-		`<td><code>.</code></td>`,            // module root short-name
-		`<td><code>internal/cli</code></td>`, // module prefix trimmed
-		`<td class="num">7</td>`,             // public_symbols of the cli node
+		`<td><code>.</code></td>`,            // module root short label
+		`<td><code>internal/cli</code></td>`, // node label
+		`<td class="num">7</td>`,             // publicSymbols of the cli node
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("table missing %q:\n%s", want, html)
@@ -96,9 +131,11 @@ func TestCodegraphPackageTable(t *testing.T) {
 // peer to the client-side diagram (story 3).
 func TestProjectDetailCodegraphTableRenders(t *testing.T) {
 	withTable := renderProjectDetail(t, projectDetailData{
-		Project:        projectRow{ID: "proj_x", Name: "x"},
-		CodegraphHTML:  renderMarkdown("```codegraph\n{\"module\":\"m\",\"nodes\":[],\"edges\":[]}\n```"),
-		CodegraphTable: template.HTML(`<table class="codegraph-packages"><tbody></tbody></table>`),
+		Project:             projectRow{ID: "proj_x", Name: "x"},
+		CodegraphFound:      true,
+		CodegraphAcceptable: true,
+		CodegraphHTML:       renderMarkdown("```codegraph\n{\"graph\":{\"nodes\":{},\"edges\":[]}}\n```"),
+		CodegraphTable:      template.HTML(`<table class="codegraph-packages"><tbody></tbody></table>`),
 	})
 	if !strings.Contains(withTable, `data-field="codegraph-packages-wrap"`) {
 		t.Errorf("codegraph card missing the derived package-table wrap when CodegraphTable is set")

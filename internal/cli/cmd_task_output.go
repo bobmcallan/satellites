@@ -34,13 +34,17 @@ import (
 const taskOutputLedgerKind = "log:task_output"
 
 // buildOutputTags assembles the KV tag set for an output document: the `type:`
-// classification (kind), an optional `phase:`, and a `task:<id>` back-reference.
-// kvtag.Normalize collapses any duplicate single-valued key (type/phase) to a
-// single last-wins value; the `task:` reference is preserved.
-func buildOutputTags(kind, phase, taskID string) []string {
+// classification (kind), an optional `phase:`, an optional `format:<id>` declaration
+// (the format a consumer like the portal gates rendering on — epic:codegraph-portable),
+// and a `task:<id>` back-reference. kvtag.Normalize collapses any duplicate single-valued
+// key (type/phase/format) to a single last-wins value; the `task:` reference is preserved.
+func buildOutputTags(kind, phase, format, taskID string) []string {
 	tags := kvtag.Set(nil, "type", kind)
 	if strings.TrimSpace(phase) != "" {
 		tags = kvtag.Set(tags, "phase", phase)
+	}
+	if strings.TrimSpace(format) != "" {
+		tags = kvtag.Set(tags, "format", format)
 	}
 	tags = append(tags, "task:"+taskID)
 	return kvtag.Normalize(tags)
@@ -54,7 +58,7 @@ type taskOutputLedgerPayload struct {
 }
 
 func newTaskOutputCmd(configArg, userArg *string) *cobra.Command {
-	var name, kind, phase, body, bodyFile string
+	var name, kind, phase, format, body, bodyFile string
 	cmd := &cobra.Command{
 		Use:   "output <task-id> --name <name> (--body <md> | --body-file <path>)",
 		Short: "Emit a task's output as a typed, run-linked project document",
@@ -65,12 +69,13 @@ func newTaskOutputCmd(configArg, userArg *string) *cobra.Command {
 				ctx = context.Background()
 			}
 			return runTaskOutput(ctx, cmd.OutOrStdout(), *configArg, *userArg, strings.TrimSpace(args[0]),
-				taskOutputOpts{Name: name, Kind: kind, Phase: phase, Body: body, BodyFile: bodyFile})
+				taskOutputOpts{Name: name, Kind: kind, Phase: phase, Format: format, Body: body, BodyFile: bodyFile})
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Name of the output document (required)")
 	cmd.Flags().StringVar(&kind, "kind", "document", "Output classification — the KV type: tag (e.g. document, diagram)")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase tag for the output (e.g. discovery)")
+	cmd.Flags().StringVar(&format, "format", "", "Declared content format — the KV format: tag a consumer gates on (e.g. jgf-v1 for a codegraph)")
 	cmd.Flags().StringVar(&body, "body", "", "Inline output body (markdown)")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Path to a file whose contents become the output body")
 	return cmd
@@ -80,6 +85,7 @@ type taskOutputOpts struct {
 	Name     string
 	Kind     string
 	Phase    string
+	Format   string
 	Body     string
 	BodyFile string
 }
@@ -126,7 +132,7 @@ func runTaskOutput(ctx context.Context, out io.Writer, configPath, userArg, task
 
 	// Create the output document, attached to the task's project and tagged for
 	// traceability.
-	tags := buildOutputTags(kind, o.Phase, taskID)
+	tags := buildOutputTags(kind, o.Phase, o.Format, taskID)
 	upReq, _ := json.Marshal(verb.DocumentUpsertRequest{
 		Type:        "document",
 		Scope:       "project",

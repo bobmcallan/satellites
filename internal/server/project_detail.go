@@ -47,14 +47,22 @@ type projectDetailData struct {
 	// turns the embedded language-codegraph block into an interactive graph.
 	CodegraphHTML template.HTML
 	// CodegraphTable is the package table derived server-side from the same canonical
-	// codegraph JSON block (epic:codegraph-portable, story 3) — the no-JS-readable view
-	// peer to the client-side interactive diagram. Empty when the body carries no
-	// parseable block.
+	// codegraph JSON block — the no-JS-readable view peer to the client-side interactive
+	// diagram. Empty when the body carries no parseable block.
 	CodegraphTable template.HTML
-	StoryShown     int // rows rendered on this page = len(Stories)
-	StoryFiltered  int // stories matching the active filter across all pages (indicator numerator)
-	StoryTotal     int // project-wide all-status total (indicator denominator)
-	Paginator      paginatorData
+	// Codegraph format gate (epic:codegraph-portable): a published type:codegraph document
+	// declares its format via a format:<id> tag, and the portal renders the diagram + table
+	// ONLY when that format is acceptable. CodegraphFound = a document exists;
+	// CodegraphAcceptable = its format is one the UI can render; CodegraphFormat = the
+	// declared id (shown in the graceful "not rendered here" notice for other formats —
+	// the document is still agent-readable over MCP).
+	CodegraphFound      bool
+	CodegraphAcceptable bool
+	CodegraphFormat     string
+	StoryShown          int // rows rendered on this page = len(Stories)
+	StoryFiltered       int // stories matching the active filter across all pages (indicator numerator)
+	StoryTotal          int // project-wide all-status total (indicator denominator)
+	Paginator           paginatorData
 	// Engagement-age thresholds (seconds) for the processing dot — rendered
 	// as container data attributes; the client computes colors (sty_25e2e8ac).
 	EngOrangeSecs int
@@ -179,7 +187,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 		// Codegraph card (epic:codegraph-usability B2) — best-effort, peer to the
 		// documents panel: surfaces the project's published type:codegraph document so
 		// codegraph-init.js can render it interactively. Absent → no card.
-		codegraphHTML, codegraphTable, _ := gatherCodegraph(ctx, projectID)
+		cg := gatherCodegraph(ctx, projectID)
 
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
@@ -196,30 +204,33 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 				ID: pj.ID, Name: pj.Name, Description: pj.Description, Type: pj.Type,
 				GitURL: pj.GitURLCanonical, Status: pj.Status, CreatedAt: pj.CreatedAt,
 			},
-			UserEmail:      userEmail,
-			UserName:       userName,
-			UserAvatar:     userAvatar,
-			ActiveNav:      "projects",
-			Stories:        stories,
-			Tasks:          tasks,
-			TaskFiltered:   taskFiltered,
-			TaskTotal:      taskTotal,
-			Documents:      docs,
-			DocFiltered:    docFiltered,
-			DocTotal:       docTotal,
-			DocQuery:       strings.TrimSpace(r.URL.Query().Get("docs_q")),
-			CodegraphHTML:  codegraphHTML,
-			CodegraphTable: codegraphTable,
-			StoryShown:     len(stories),
-			StoryFiltered:  paginator.Filtered,
-			StoryTotal:     paginator.Total,
-			Paginator:      paginator,
-			EngOrangeSecs:  readEngagementThreshold(ctx, "engagement.orange_after_secs", engOrangeSecsFallback),
-			EngRedSecs:     readEngagementThreshold(ctx, "engagement.red_after_secs", engRedSecsFallback),
-			DevMode:        cfg.DevMode,
-			FooterName:     footerName,
-			FooterEmail:    footerEmail,
-			Version:        versionString(),
+			UserEmail:           userEmail,
+			UserName:            userName,
+			UserAvatar:          userAvatar,
+			ActiveNav:           "projects",
+			Stories:             stories,
+			Tasks:               tasks,
+			TaskFiltered:        taskFiltered,
+			TaskTotal:           taskTotal,
+			Documents:           docs,
+			DocFiltered:         docFiltered,
+			DocTotal:            docTotal,
+			DocQuery:            strings.TrimSpace(r.URL.Query().Get("docs_q")),
+			CodegraphHTML:       cg.Body,
+			CodegraphTable:      cg.Table,
+			CodegraphFound:      cg.Found,
+			CodegraphFormat:     cg.Format,
+			CodegraphAcceptable: cg.Acceptable,
+			StoryShown:          len(stories),
+			StoryFiltered:       paginator.Filtered,
+			StoryTotal:          paginator.Total,
+			Paginator:           paginator,
+			EngOrangeSecs:       readEngagementThreshold(ctx, "engagement.orange_after_secs", engOrangeSecsFallback),
+			EngRedSecs:          readEngagementThreshold(ctx, "engagement.red_after_secs", engRedSecsFallback),
+			DevMode:             cfg.DevMode,
+			FooterName:          footerName,
+			FooterEmail:         footerEmail,
+			Version:             versionString(),
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
