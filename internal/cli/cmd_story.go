@@ -23,6 +23,7 @@ func init() {
 	story.PersistentFlags().StringVar(&configArg, "config", "", "Path to satellites.toml (overrides $SATELLITES_CONFIG / .satellites/satellites.toml walk-up).")
 	story.PersistentFlags().StringVar(&userArg, "user", "", "Caller user id (overrides $SATELLITES_USER_ID). Stamped onto verbs when dispatching in-process.")
 
+	story.AddCommand(newStoryCreateCmd(&configArg, &userArg))
 	story.AddCommand(newStoryReviewCmd(&configArg, &userArg))
 	story.AddCommand(newStorySetStatusCmd(&configArg, &userArg))
 	story.AddCommand(newStoryGetCmd(&configArg, &userArg))
