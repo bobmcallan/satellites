@@ -48,6 +48,35 @@ func TestHelpHandler_RendersWorkflowMonitor(t *testing.T) {
 	}
 }
 
+func TestHelpHandler_RendersTasksAndCodegraph(t *testing.T) {
+	// The Tasks + Codegraph sections document the task primitive and the codegraph
+	// feature (epic:codegraph-usability). Assert their distinctive content so the page
+	// can't silently lose either.
+	cfg := newTestConfig(false)
+
+	rec := httptest.NewRecorder()
+	helpHandler(cfg)(rec, httptest.NewRequest(http.MethodGet, "/help", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		// Tasks section: re-runnable runner vs one-off story.
+		`data-section="tasks"`,
+		"re-runnable runner",
+		// Codegraph section: generate/query, maintain, view, local-vs-MCP.
+		`data-section="codegraph"`,
+		"satellites code graph",
+		"--rdeps",
+		"Codegraph task",
+		"type:codegraph",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("help page missing tasks/codegraph content %q", want)
+		}
+	}
+}
+
 func TestHelpHandler_NotFoundOnExtraPath(t *testing.T) {
 	// Same bare-pattern guard as changelogHandler: registered against
 	// "/help", must 404 any deeper URL.

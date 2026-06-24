@@ -87,6 +87,34 @@
     <h2 class="changelog-service" data-field="monitor-name">Loop audit</h2>
     <p><code>satellites evidence audit [story]</code> walks the captured ledger trail and flags loop anomalies — an ungated deploy, a ship with no gate, status drift, unengaged work, a spurious enact-failure reject, or a rejection with no follow-up. With a story id it audits that one story; with none it sweeps the whole project. Findings surface to the operator only — never the executor's turn.</p>
   </section>
+
+  <section class="changelog-intro" data-section="tasks-intro">
+    <h2 class="section-heading">Tasks</h2>
+    <p class="changelog-lede">Not all work is a story. A <strong>task</strong> is a governed, re-runnable runner — a repeatable job, run on demand or on a schedule, that records each run. A story is one-off work driven to <code>done</code> once; a task is work that recurs, or whose output is dated or versioned per run.</p>
+  </section>
+
+  <section class="panel" data-section="tasks">
+    <ul>
+      <li>A task's body states the action, the output, and how success is verified — that <em>is</em> the work, judged by the same reviewer model that gates a story.</li>
+      <li>Re-run it whenever its inputs change; each run is recorded and the task's <code>## Report</code> captures the outcome, so the history is reconstructable.</li>
+      <li>A task MAY name a reusable <strong>skill</strong> it invokes — but that skill is a capability in the executing agent's environment, not substrate the server resolves.</li>
+      <li>Choose a task (not a story) when the work recurs or its output is per-run/dated; choose a story for a single deliverable. Picking the primitive is the agent's job, from the shape of the work.</li>
+    </ul>
+  </section>
+
+  <section class="changelog-intro" data-section="codegraph-intro">
+    <h2 class="section-heading">Codegraph</h2>
+    <p class="changelog-lede">The codegraph is the high-level structure of a codebase — one node per package, one edge per intra-module import (&ldquo;not function contents&rdquo;). The binary emits the facts; the substrate renders them, and the project page shows them as an interactive graph.</p>
+  </section>
+
+  <section class="panel" data-section="codegraph">
+    <ul>
+      <li><strong>Generate &amp; query (local CLI).</strong> <code>satellites code graph</code> walks the working tree fresh each run — no stored index. Query it instead of eyeballing the dump: <code>--package &lt;p&gt;</code> (direct dependencies and dependents), <code>--rdeps &lt;p&gt;</code> (blast radius — who imports <code>&lt;p&gt;</code>, transitively), <code>--deps &lt;p&gt;</code> (what it pulls in), <code>--cycles</code>; each composes with <code>--json</code>. Test scaffolding is excluded by default (<code>--include-tests</code> to restore).</li>
+      <li><strong>Maintain.</strong> The project's standing <strong>Codegraph task</strong> re-renders the graph and publishes a <code>type:codegraph</code> document — re-run it whenever the structure changes (it overwrites the current-state snapshot; git holds history). The published body carries the graph as a machine-readable <code>codegraph</code> JSON block plus a mermaid diagram and package table, stamped with a <code>generated_at</code> time and short git revision so staleness is visible.</li>
+      <li><strong>View.</strong> The project page renders the published codegraph as an interactive pan / zoom / filter graph — click a package to focus its neighbourhood. A project with no codegraph renders cleanly.</li>
+      <li><strong>Local vs MCP.</strong> Generation and query are local-only (the remote MCP server has no working tree, so there is no MCP code-search/generate verb). The MCP-reachable surface is the published <code>type:codegraph</code> document — <code>document_list {tags:["type:codegraph"]}</code> then <code>document_get</code>, or <code>semantic_search</code>.</li>
+    </ul>
+  </section>
 </main>
 
 <footer class="site-footer">
