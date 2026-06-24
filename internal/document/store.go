@@ -81,8 +81,16 @@ func (s *Store) Upsert(ctx context.Context, in UpsertInput, now time.Time) (Docu
 	if docType == "" {
 		docType = TypeDocument
 	}
-	if docType != TypeDocument && docType != TypeSkill && docType != TypeChangelog {
-		return Document{}, Version{}, fmt.Errorf("document: upsert: unsupported type %q (allowed: document, skill, changelog)", docType)
+	// A library-scope task is the PUBLISHED-TEMPLATE copy (epic:global-tasks):
+	// `task publish` routes it here (routesToCreateTask is false for scope:library),
+	// and it is stored as a plain versioned row (body + tags) that `task sync`
+	// materialises back into a real project task via createTask. Project tasks
+	// still mint through createTask; only the library copy uses this generic path,
+	// so accept type:task ONLY at scope:library (sty_40baf67d — the publish store
+	// path was missing, so `task publish` failed with "unsupported type task").
+	libraryTask := docType == TypeTask && in.Key.Scope == ScopeLibrary
+	if docType != TypeDocument && docType != TypeSkill && docType != TypeChangelog && !libraryTask {
+		return Document{}, Version{}, fmt.Errorf("document: upsert: unsupported type %q (allowed: document, skill, changelog; task only at scope:library)", docType)
 	}
 	now = now.UTC()
 
@@ -398,8 +406,13 @@ func (s *Store) SetDocumentTags(ctx context.Context, id string, tags []string, n
 	if err != nil {
 		return Document{}, err
 	}
-	if !tagsSettableForType(doc.Type) {
-		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document or skill", id, doc.Type)
+	// A library-scope task (a published-template copy, epic:global-tasks) carries
+	// tags (e.g. workflow:…, forked-from:…) like any published artifact, so allow
+	// tagging it even though project tasks (id-addressed, createTask) do not use
+	// this path (sty_40baf67d).
+	libraryTask := doc.Type == string(TypeTask) && doc.Scope == ScopeLibrary
+	if !tagsSettableForType(doc.Type) && !libraryTask {
+		return Document{}, fmt.Errorf("document: SetDocumentTags: id=%s is type=%s, expected document or skill (or task at scope:library)", id, doc.Type)
 	}
 	// Tag-equality short-circuit. Re-applying the same tag set is a
 	// no-op (no UPDATE, no updated_at bump) — keeps `satellites
@@ -1130,7 +1143,7 @@ func lockDocumentByKey(ctx context.Context, tx *sql.Tx, key Key) (Document, erro
           AND project_id   IS NOT DISTINCT FROM $3
           AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
-          AND type IN ('document','skill','changelog')
+          AND (type IN ('document','skill','changelog') OR (type = 'task' AND scope = 'library'))
         FOR UPDATE
     `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
@@ -1153,7 +1166,7 @@ func (s *Store) lookupDocument(ctx context.Context, key Key) (Document, error) {
           AND project_id   IS NOT DISTINCT FROM $3
           AND user_id      IS NOT DISTINCT FROM $5
           AND name = $4
-          AND type IN ('document','skill','changelog')
+          AND (type IN ('document','skill','changelog') OR (type = 'task' AND scope = 'library'))
     `, string(key.Scope), wsArg, pjArg, key.Name, userArg)
 	return scanDocumentFull(row)
 }

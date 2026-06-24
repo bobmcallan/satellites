@@ -27,6 +27,12 @@ verb, because the remote MCP server has no working tree. The MCP-reachable surfa
 PUBLISHED artifact: the `type:codegraph` document the Codegraph task emits — reach it with
 `document_list {tags:["type:codegraph"]}` → `document_get`, or `semantic_search`.
 
+**The Codegraph task — consume it, don't hand-author it.** The Codegraph task (the re-runnable
+job that renders `code graph --json` into the published `type:codegraph` document) is published
+ONCE to the task library, so a fresh repo does NOT author its own: add the codegraph publisher to
+`global_publishers` in `.satellites/satellites.toml`, run `satellites task sync` to materialise it
+as a project task, then run it. Re-run the task whenever the codebase structure changes.
+
 **Three independent subsystems.** `codeindex` (symbol search, backed by `index.db`) ·
 `codemap` (entry-point reachability) · `codegraph` (package import graph; does NOT use
 `index.db`). They answer different questions — pick by what you need.
