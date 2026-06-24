@@ -59,3 +59,61 @@ func TestRunStoryOutput_Refusals(t *testing.T) {
 		t.Fatalf("empty body must be refused, got %v", err)
 	}
 }
+
+// TestLooksDated pins the per-run heuristic (sty_23e31b56): a name carrying a
+// YYYY-MM-DD stamp is "dated" (a per-run artifact); a plain name is not.
+func TestLooksDated(t *testing.T) {
+	dated := []string{
+		"Discovery scan 2026-06-25",
+		"2026-01-01 portfolio review",
+		"meridian-2026-12-31-report",
+	}
+	for _, n := range dated {
+		if !looksDated(n) {
+			t.Errorf("want dated, got not-dated for %q", n)
+		}
+	}
+	plain := []string{
+		"Implementation summary",
+		"codegraph",
+		"v1.2.3 release notes", // version, not a date
+		"2026-6-5 short fields", // not zero-padded → not YYYY-MM-DD
+	}
+	for _, n := range plain {
+		if looksDated(n) {
+			t.Errorf("want not-dated, got dated for %q", n)
+		}
+	}
+}
+
+// TestDatedOutputTaskSteer pins the steer surface (sty_23e31b56): it fires only
+// for a dated, non-summary output; it names the config gap when no task workflow
+// resolves, and steers toward a story-created task when one does.
+func TestDatedOutputTaskSteer(t *testing.T) {
+	t.Run("plain name is silent", func(t *testing.T) {
+		if w := datedOutputTaskSteer("Implementation summary", "document", true); w != "" {
+			t.Fatalf("plain name must not steer, got %q", w)
+		}
+	})
+	t.Run("dated summary is silent", func(t *testing.T) {
+		// kind:summary is the one-shot gate artifact, never steered.
+		if w := datedOutputTaskSteer("2026-06-25 summary", "summary", true); w != "" {
+			t.Fatalf("dated summary must not steer, got %q", w)
+		}
+	})
+	t.Run("dated non-summary with task workflow steers to task", func(t *testing.T) {
+		w := datedOutputTaskSteer("Discovery scan 2026-06-25", "document", true)
+		if w == "" || !strings.Contains(w, "re-runnable TASK") || !strings.Contains(w, "CREATE a governed task") {
+			t.Fatalf("want task steer, got %q", w)
+		}
+		if strings.Contains(w, "CONFIG GAP") {
+			t.Fatalf("must not name a config gap when a task workflow resolves: %q", w)
+		}
+	})
+	t.Run("dated non-summary without task workflow names the gap", func(t *testing.T) {
+		w := datedOutputTaskSteer("Discovery scan 2026-06-25", "document", false)
+		if w == "" || !strings.Contains(w, "CONFIG GAP") || !strings.Contains(w, "satellites-task-workflow") {
+			t.Fatalf("want config-gap steer, got %q", w)
+		}
+	})
+}

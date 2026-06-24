@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/kvtag"
@@ -175,5 +176,58 @@ func runStoryOutput(ctx context.Context, out io.Writer, configPath, userArg, sto
 	}
 
 	fmt.Fprintf(out, "%s  %s  [%s]\n", outputID, o.Name, strings.Join(tags, ", "))
+
+	// Steer at the authoring moment: a dated/per-run output (a name carrying a
+	// YYYY-MM-DD stamp) that is NOT the one-shot story summary is a recurring
+	// artifact — by work-artifact-selection it belongs to a governed, re-runnable
+	// TASK that the story CREATES, not to a fresh story-output document per run
+	// (sty_23e31b56). The output already landed; this only nudges the next run
+	// toward the right primitive. When no task workflow resolves, that is a config
+	// gap to surface — name it, don't silently steer into a one-shot path.
+	if w := datedOutputTaskSteer(o.Name, kind, projectHasTaskWorkflow(configPath)); w != "" {
+		fmt.Fprintln(out, w)
+	}
 	return nil
+}
+
+// datedReStamp matches a YYYY-MM-DD date embedded anywhere in an output name —
+// the signal that an output is produced per run rather than once.
+var datedReStamp = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}\b`)
+
+// looksDated reports whether an output name carries a YYYY-MM-DD date stamp, the
+// heuristic for "this is a per-run artifact, not a one-off deliverable".
+func looksDated(name string) bool {
+	return datedReStamp.MatchString(name)
+}
+
+// datedOutputTaskSteer returns guidance when a story output is shaped like a
+// recurring per-run artifact (dated name) but is not the one-shot summary the
+// implementation-summary gate reads. Such work is a governed re-runnable TASK by
+// work-artifact-selection; the story should CREATE that task rather than mint a
+// dated document each run. Returns "" when there is nothing to steer. When no
+// task workflow resolves, the message names the config gap instead of steering
+// into a one-shot path.
+func datedOutputTaskSteer(name, kind string, hasTaskWorkflow bool) string {
+	if !looksDated(name) || strings.EqualFold(strings.TrimSpace(kind), "summary") {
+		return ""
+	}
+	if !hasTaskWorkflow {
+		return fmt.Sprintf("warning: output %q is dated/per-run but kind is %q — a recurring or dated output is a re-runnable TASK, "+
+			"not a per-run story document (work-artifact-selection). CONFIG GAP: no task workflow resolves for category \"task\" in this project, "+
+			"so there is no governed runner to create — surface the missing satellites-task-workflow rather than minting a dated document each run.",
+			name, kind)
+	}
+	return fmt.Sprintf("warning: output %q is dated/per-run but kind is %q — a recurring or dated output is a re-runnable TASK, "+
+		"not a per-run story document (work-artifact-selection). Have this story CREATE a governed task (category \"task\", resolved by "+
+		"satellites-task-workflow) whose run records each dated output, instead of attaching a fresh story-output document per run.",
+		name, kind)
+}
+
+// projectHasTaskWorkflow reports whether a workflow resolves for category "task"
+// in this project — i.e. whether a governed re-runnable task has an enactable
+// path. It reuses the same source set and resolver the governing-workflow path
+// uses, so what it reports matches what `workflow embed` would resolve.
+func projectHasTaskWorkflow(configPath string) bool {
+	_, _, ok := verb.ResolveGoverningWorkflow("task", governingWorkflowSources(configPath))
+	return ok
 }
