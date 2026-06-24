@@ -28,6 +28,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 	"github.com/bobmcallan/satellites/internal/document"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
+	"github.com/bobmcallan/satellites/internal/kvtag"
 	"github.com/bobmcallan/satellites/internal/project"
 	"github.com/bobmcallan/satellites/internal/variable"
 	"github.com/bobmcallan/satellites/internal/workspace"
@@ -1120,11 +1121,33 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	if err != nil {
 		return nil, mapStoreError(err, "document_upsert")
 	}
-	// Tags are document-level metadata (not versioned with the body).
-	// Apply only when the request carries them — nil means "leave alone",
-	// which matches the patch semantics elsewhere in this surface.
+	// Tags are document-level metadata (not versioned with the body). A nil
+	// req.Tags normally means "leave alone" (patch semantics). But the
+	// project/workspace documents panels filter on the type:document TAG
+	// (tags @> [type:document]), NOT the type column — so a type:document row
+	// whose tags omit that key is created here yet invisible in the panel
+	// (sty_5ceec3f1). For a document we therefore mirror the column into the
+	// tag set on every write, deriving type:document even when the caller sent
+	// no tags, so column and tag never diverge. SetDocumentTags is a no-op when
+	// the resulting set is unchanged, so a body-only patch that already carries
+	// the tag writes nothing.
+	applyTags := req.Tags != nil
+	tagSet := doc.Tags
 	if req.Tags != nil {
-		doc2, err := documentStore.SetDocumentTags(ctx, doc.ID, *req.Tags, time.Now().UTC())
+		tagSet = *req.Tags
+	}
+	// Derive type:document only for a PLAIN document — one not already classified
+	// (type:*) and not substrate (principles:*, kind:*). This mirrors the
+	// 0046/0047 backfill predicate exactly, so principles and references (also
+	// type=document rows) are NOT stamped type:document and never surface in the
+	// documents panel; an explicit type:* classification (e.g. a task output's
+	// type:diagram) is likewise respected.
+	if doc.Type == string(document.TypeDocument) && !hasClassificationTag(tagSet) {
+		tagSet = kvtag.Set(tagSet, "type", string(document.TypeDocument))
+		applyTags = true
+	}
+	if applyTags {
+		doc2, err := documentStore.SetDocumentTags(ctx, doc.ID, tagSet, time.Now().UTC())
 		if err != nil {
 			return nil, mapStoreError(err, "document_upsert")
 		}
@@ -1140,6 +1163,20 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 		doc = doc2
 	}
 	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
+}
+
+// hasClassificationTag reports whether tags already carry a classification or
+// substrate marker — a type:*, principles:*, or kind:* tag. It mirrors the
+// 0046/0047 backfill predicate: such rows are already classified or are
+// substrate (principles, references), so the upsert path must NOT stamp
+// type:document onto them (sty_5ceec3f1).
+func hasClassificationTag(tags []string) bool {
+	for _, t := range tags {
+		if strings.HasPrefix(t, "type:") || strings.HasPrefix(t, "principles:") || strings.HasPrefix(t, "kind:") {
+			return true
+		}
+	}
+	return false
 }
 
 // createStory is the document_upsert path for {type:"story"} with no id.
