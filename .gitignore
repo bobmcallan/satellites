@@ -46,6 +46,13 @@ go.work.sum
 /scripts/satellites-server.toml
 /satellites.toml
 
+# SQLite write-ahead-log sidecars are transient runtime artifacts (a tracked
+# fixture db — e.g. tests/integration/.satellites/state.db — leaves these next
+# to it when opened by a test run). The root .satellites/* rule above does not
+# reach nested .satellites dirs, so ignore the sidecars wherever they appear.
+*.db-shm
+*.db-wal
+
 !.satellites/documents/
 !.satellites/principles/
 !.satellites/skills/
