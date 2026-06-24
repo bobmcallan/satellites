@@ -255,7 +255,6 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
    the type-chip. Amber, to read as clearly distinct from the teal type-chip. */
 .phase-chip {
   display: inline-block;
-  margin-left: 0.35rem;
   background: rgba(216, 166, 87, 0.18);
   color: #d8a657;
   border: 0;
@@ -265,6 +264,15 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
   line-height: 1.3;
   letter-spacing: 0.05em;
   white-space: nowrap;
+}
+/* Project-card chip row — the type + phase chips, left-aligned with the card
+   content. The gap (not a per-chip margin) spaces them, so a card with only a
+   phase chip sits flush at the left edge, not indented (sty_0370a2cb). */
+.project-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
 }
 .type-filter {
   display: flex;
@@ -694,7 +702,6 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
 /* In a documents row the phase chip can be the FIRST chip; its project-card
    margin-left would indent the whole row off the name. The flex gap above
    handles spacing, so zero it here to keep chips flush-left under the name. */
-.document-row-tags .phase-chip { margin-left: 0; }
 button.tag-chip.is-clickable {
   background: rgba(106, 159, 181, 0.2);
   color: #8ab4c9;
