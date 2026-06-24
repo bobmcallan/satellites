@@ -38,6 +38,11 @@ const taskOutputLedgerKind = "log:task_output"
 // (the format a consumer like the portal gates rendering on — epic:codegraph-portable),
 // and a `task:<id>` back-reference. kvtag.Normalize collapses any duplicate single-valued
 // key (type/phase/format) to a single last-wins value; the `task:` reference is preserved.
+//
+// taskID == "" is the producer-agnostic path (a `document upload <file>`, no task):
+// the `task:` provenance tag is omitted, so the SAME tag set — `type:<kind>` + optional
+// `format:<id>` — is produced whether a task or a 3rd-party file authored the document
+// (sty_b97800b6). task output always passes a real id, so its behaviour is unchanged.
 func buildOutputTags(kind, phase, format, taskID string) []string {
 	tags := kvtag.Set(nil, "type", kind)
 	if strings.TrimSpace(phase) != "" {
@@ -46,7 +51,9 @@ func buildOutputTags(kind, phase, format, taskID string) []string {
 	if strings.TrimSpace(format) != "" {
 		tags = kvtag.Set(tags, "format", format)
 	}
-	tags = append(tags, "task:"+taskID)
+	if strings.TrimSpace(taskID) != "" {
+		tags = append(tags, "task:"+taskID)
+	}
 	return kvtag.Normalize(tags)
 }
 

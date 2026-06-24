@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -61,6 +63,38 @@ func TestBuildOutputTags(t *testing.T) {
 			t.Fatalf("no format given but format tag present: %v", none)
 		}
 	})
+
+	// sty_b97800b6: the producer-agnostic path (empty task id) drops the task:
+	// tag, so a 3rd-party `document upload` and `task output` mint the SAME
+	// type:<kind>+format set — only the provenance differs.
+	t.Run("empty task id omits task tag (producer-agnostic)", func(t *testing.T) {
+		got := buildOutputTags("codegraph", "", "jgf-v1", "")
+		assertHasTag(t, got, "type:codegraph")
+		assertHasTag(t, got, "format:jgf-v1")
+		if countPrefix(got, "task:") != 0 {
+			t.Fatalf("empty task id must not produce a task: tag: %v", got)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want exactly [type:codegraph format:jgf-v1], got %v", got)
+		}
+	})
+}
+
+func TestIsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "codegraph.md")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isRegularFile(f) {
+		t.Errorf("a real file should be detected as regular: %s", f)
+	}
+	if isRegularFile(dir) {
+		t.Errorf("a directory must not count as a regular file: %s", dir)
+	}
+	if isRegularFile("codegraph") {
+		t.Errorf("a non-existent bare name must not count as a file (→ folder-selector mode)")
+	}
 }
 
 func outTagsContain(tags []string, want string) bool {

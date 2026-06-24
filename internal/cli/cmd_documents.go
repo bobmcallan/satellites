@@ -197,6 +197,7 @@ func init() {
 		Kind:      "documents",
 		ConfigArg: &configArg,
 		UserArg:   &userArg,
+		AllowFile: true, // `document upload <file> --kind codegraph --format jgf-v1`
 	}))
 	docs.AddCommand(newDocumentIndexCmd(&configArg, &userArg))
 	register(docs)
@@ -207,6 +208,7 @@ type uploadConfig struct {
 	Kind      string  // "documents" | "skills" | "principles" — the kind dir this command uploads
 	ConfigArg *string // shared --config flag
 	UserArg   *string // shared --user flag
+	AllowFile bool    // when set, a positional that resolves to a real file path is a single-file upsert (`document upload <file> --kind --format`)
 }
 
 // newUploadCmd builds an `upload` cobra command bound to a kind dir.
@@ -215,10 +217,23 @@ type uploadConfig struct {
 // they walk under .satellites/.
 func newUploadCmd(cfg uploadConfig) *cobra.Command {
 	var (
-		dryRun bool
+		dryRun           bool
+		fileKind, format string
+		fileName         string
 	)
+	longExtra := ""
+	if cfg.AllowFile {
+		longExtra = `
+
+A producer-agnostic single-document path (sty_b97800b6): when the positional
+resolves to a real FILE path, that one file is upserted as a project document
+with --kind (the type:<kind> tag) and an optional --format (the format:<id> tag),
+no task required — e.g. ` + "`document upload ./codegraph.md --kind codegraph --format jgf-v1`" + `.
+A bare ` + "`document upload`" + ` (or a non-path [name]) keeps the folder-walk behaviour.
+This shares the single document_upsert write that ` + "`task output`" + ` wraps with a task: tag.`
+	}
 	cmd := &cobra.Command{
-		Use:   "upload [name]",
+		Use:   "upload [name|file]",
 		Short: fmt.Sprintf("Upsert %s via document_upsert (review-routed by type); an optional [name] uploads just that one artifact", cfg.Kind),
 		Long: fmt.Sprintf(`upload walks the top-level %s/ folder and upserts each file via
 document_upsert, ROUTING each through its per-type reviewer when one is
@@ -226,13 +241,21 @@ configured (config-over-code: a kind is gated IFF satellites-<kind>-review
 resolves) — a plain document with no reviewer passes through.
 
 Pass an optional [name] to upload just THAT artifact (its review-and-write is
-decoupled from a sibling's reject — the per-artifact path, sty_7b667ae7).`, cfg.Kind),
+decoupled from a sibling's reject — the per-artifact path, sty_7b667ae7).%s`, cfg.Kind, longExtra),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
+			}
+
+			// Producer-agnostic single-file path (sty_b97800b6): when the positional
+			// resolves to a real file, upsert it as one project document with the
+			// declared kind/format — the disambiguator is "does it name a file".
+			if cfg.AllowFile && len(args) == 1 && isRegularFile(args[0]) {
+				return runDocumentFileUpload(ctx, out, *cfg.ConfigArg, *cfg.UserArg,
+					args[0], fileName, fileKind, format)
 			}
 
 			// project_id is the repo's identity (sty_afc0769c): every upload is
@@ -269,7 +292,67 @@ decoupled from a sibling's reject — the per-artifact path, sty_7b667ae7).`, cf
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the planned dispatches (type, name) without calling the verbs")
+	if cfg.AllowFile {
+		cmd.Flags().StringVar(&fileKind, "kind", "document", "Single-file mode: the type:<kind> tag to stamp (e.g. codegraph)")
+		cmd.Flags().StringVar(&format, "format", "", "Single-file mode: the format:<id> tag a consumer gates on (e.g. jgf-v1)")
+		cmd.Flags().StringVar(&fileName, "name", "", "Single-file mode: the document name (default: the file's base name without extension)")
+	}
 	return cmd
+}
+
+// isRegularFile reports whether path names an existing regular file — the
+// disambiguator that routes `document upload <file>` to the single-document path
+// rather than the folder-artifact selector.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// runDocumentFileUpload upserts a single file as one project document
+// (sty_b97800b6) — the producer-agnostic publish door. It stamps the same
+// `type:<kind>` (+ optional `format:<id>`) tags `task output` builds, minus the
+// `task:` provenance tag, sharing the one document_upsert write. No task id, no
+// documents/-folder convention: a 3rd-party tool publishes a codegraph (or any
+// typed doc) exactly as the internal task does, and the portal renders it the
+// same (identify is format-based, not producer-based).
+func runDocumentFileUpload(ctx context.Context, out io.Writer, configArg, userArg, path, name, kind, format string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("document upload: read %s: %w", path, err)
+	}
+	body := string(b)
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("document upload: %s is empty", path)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	if strings.TrimSpace(kind) == "" {
+		kind = "document"
+	}
+	projectID, err := projectIDFromConfig(configArg)
+	if err != nil {
+		return err
+	}
+	tags := buildOutputTags(kind, "", format, "") // taskID="" → no task: tag (producer-agnostic)
+	req, _ := json.Marshal(verb.DocumentUpsertRequest{
+		Type:      "document",
+		Scope:     "project",
+		ProjectID: projectID,
+		Name:      name,
+		Body:      body,
+		Tags:      &tags,
+	})
+	resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
+	if err != nil {
+		return fmt.Errorf("document upload: %w", err)
+	}
+	var upResp verb.DocumentUpsertResponse
+	if err := json.Unmarshal(resp, &upResp); err != nil {
+		return fmt.Errorf("document upload: decode response: %w", err)
+	}
+	fmt.Fprintf(out, "%s  %s  [%s]\n", upResp.Document.ID, name, strings.Join(tags, ", "))
+	return nil
 }
 
 // projectIDFromConfig resolves the repo's project_id from satellites.toml
