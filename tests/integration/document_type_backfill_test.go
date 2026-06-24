@@ -66,9 +66,9 @@ func TestDocumentTypeBackfill(t *testing.T) {
 		return doc.ID
 	}
 
-	plain := seed("uploaded-doc", nil)                          // → gains type:document
-	principle := seed("a-principle", []string{"principles:project"}) // untouched
-	reference := seed("a-reference", []string{"kind:reference"})      // untouched
+	plain := seed("uploaded-doc", nil)                                            // → gains type:document
+	principle := seed("a-principle", []string{"principles:project"})              // untouched
+	reference := seed("a-reference", []string{"kind:reference"})                  // untouched
 	already := seed("agent-output", []string{"type:document", "phase:discovery"}) // unchanged, no dup
 
 	if _, err := env.DB.ExecContext(ctx, backfillUpdateSQL); err != nil {

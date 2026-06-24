@@ -37,18 +37,18 @@ type projectDetailData struct {
 	TaskTotal    int // project-wide task total (indicator denominator)
 	// Documents (type:document) for the project Documents panel — peer to the
 	// stories/tasks lists (epic:phases-task-outputs). Filterable + inline preview.
-	Documents     []docRow
-	DocFiltered   int    // documents matching the active filter (indicator numerator)
-	DocTotal      int    // project-wide document total (indicator denominator)
-	DocQuery      string // the active docs_q (rehydrates the search box on reload)
+	Documents   []docRow
+	DocFiltered int    // documents matching the active filter (indicator numerator)
+	DocTotal    int    // project-wide document total (indicator denominator)
+	DocQuery    string // the active docs_q (rehydrates the search box on reload)
 	// CodegraphHTML is the newest published type:codegraph document rendered as safe
 	// markdown (epic:codegraph-usability B2). Empty when the project has none — the
 	// template then renders no codegraph card (graceful absence). codegraph-init.js
 	// turns the embedded language-codegraph block into an interactive graph.
 	CodegraphHTML template.HTML
-	StoryShown    int    // rows rendered on this page = len(Stories)
-	StoryFiltered int    // stories matching the active filter across all pages (indicator numerator)
-	StoryTotal    int    // project-wide all-status total (indicator denominator)
+	StoryShown    int // rows rendered on this page = len(Stories)
+	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
+	StoryTotal    int // project-wide all-status total (indicator denominator)
 	Paginator     paginatorData
 	// Engagement-age thresholds (seconds) for the processing dot — rendered
 	// as container data attributes; the client computes colors (sty_25e2e8ac).

@@ -131,7 +131,7 @@ func BuildWith(root string, opts Options) (*Graph, error) {
 		return nil, err
 	}
 
-	aggs := map[string]*pkgAgg{}     // production packages, keyed by repo-relative dir
+	aggs := map[string]*pkgAgg{}      // production packages, keyed by repo-relative dir
 	testImported := map[string]bool{} // intra-module paths imported from _test.go files
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

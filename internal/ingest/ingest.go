@@ -12,7 +12,10 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
@@ -76,12 +79,21 @@ func StoreBlobAndExtract(ctx context.Context, blobStore *blob.Store, docStore *d
 	// Workspace-corpus blob (no project) → workspace-scoped document; repo
 	// attachment → project-scoped document. The origin pointer matches the
 	// download route the blob is reachable through.
-	key := document.Key{Scope: document.ScopeProject, WorkspaceID: up.WorkspaceID, ProjectID: up.ProjectID, Name: "attachment-" + b.ID}
+	key := document.Key{Scope: document.ScopeProject, WorkspaceID: up.WorkspaceID, ProjectID: up.ProjectID, Name: docName(b.Filename, b.ID)}
 	origin := fmt.Sprintf("GET /projects/%s/blobs/%s", b.ProjectID, b.ID)
 	if up.ProjectID == "" {
 		key.Scope = document.ScopeWorkspace
 		origin = fmt.Sprintf("GET /workspaces/%s/blobs/%s", b.WorkspaceID, b.ID)
 	}
+	// Disambiguate against an existing document at the derived name so an upload
+	// never appends a version to — and silently supersedes — an unrelated
+	// document that happens to share the filename stem (sty_c62e9b63 AC4).
+	resolved, kerr := uniqueKey(ctx, docStore, key)
+	if kerr != nil {
+		arbor.WarnCtx(ctx, "ingest: resolve unique document name", "blob_id", b.ID, "err", kerr)
+		return ref, nil
+	}
+	key = resolved
 	body := fmt.Sprintf("# %s\n\n> Extracted from attachment `%s` (%s, %d bytes). Original: %s\n\n%s",
 		b.Filename, b.ID, b.ContentType, b.SizeBytes, origin, text)
 	doc, _, derr := docStore.Upsert(ctx, document.UpsertInput{
@@ -98,11 +110,50 @@ func StoreBlobAndExtract(ctx context.Context, blobStore *blob.Store, docStore *d
 	// Classify the extracted document as type:document (the KV classification the
 	// documents panels filter on) so an uploaded doc is a first-class project /
 	// workspace document and appears in the panel — agent-authored docs already
-	// carry this tag (epic:phases-task-outputs). Best-effort, like the doc create.
-	if _, terr := docStore.SetDocumentTags(ctx, doc.ID, []string{"type:document"}, time.Now().UTC()); terr != nil {
+	// carry this tag (epic:phases-task-outputs). The source:upload tag records
+	// portal-upload provenance so an upload is distinguishable from an
+	// agent-authored doc (sty_c62e9b63). Best-effort, like the doc create.
+	if _, terr := docStore.SetDocumentTags(ctx, doc.ID, []string{"type:document", "source:upload"}, time.Now().UTC()); terr != nil {
 		arbor.WarnCtx(ctx, "ingest: tag extracted document", "doc_id", doc.ID, "err", terr)
 	}
 	ref.DocumentID = doc.ID
 	ref.Extracted = true
 	return ref, nil
+}
+
+// docName derives a document name from the upload filename: the basename with
+// its extension stripped (architecture-as-built-2014.md →
+// architecture-as-built-2014), matching the manifest naming convention. Falls
+// back to the blob-id name when the filename yields nothing usable (empty,
+// extension-only such as a dotfile, or a bare separator).
+func docName(filename, blobID string) string {
+	base := strings.TrimSpace(filepath.Base(filename))
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return "attachment-" + blobID
+	}
+	return base
+}
+
+// uniqueKey returns key unchanged when no document exists at its name, else key
+// with a numeric suffix (-2, -3, …) pointing at the first free slot. Documents
+// are key-addressed per (scope, workspace, project, name); without this an
+// upload whose filename stem collides with an existing document would append a
+// version to that document and supersede it (sty_c62e9b63 AC4). A soft-deleted
+// name is treated as free — reusing a tombstoned name is intended.
+func uniqueKey(ctx context.Context, docStore *document.Store, key document.Key) (document.Key, error) {
+	base := key.Name
+	for i := 1; i <= 1000; i++ {
+		if i > 1 {
+			key.Name = fmt.Sprintf("%s-%d", base, i)
+		}
+		_, err := docStore.Get(ctx, key, document.GetOptions{})
+		if errors.Is(err, document.ErrNotFound) {
+			return key, nil
+		}
+		if err != nil {
+			return document.Key{}, err
+		}
+	}
+	return document.Key{}, fmt.Errorf("ingest: no free document name for %q after 1000 tries", base)
 }

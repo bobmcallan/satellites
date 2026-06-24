@@ -43,11 +43,11 @@ func TestResolvePackage(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		{"example.com/m/b", p("b"), true},   // exact import path
-		{"b", p("b"), true},                 // repo-relative dir
-		{"/b/", p("b"), true},               // trimmed slashes
+		{"example.com/m/b", p("b"), true},    // exact import path
+		{"b", p("b"), true},                  // repo-relative dir
+		{"/b/", p("b"), true},                // trimmed slashes
 		{"example.com/m/missing", "", false}, // absent
-		{"", "", false},                     // empty
+		{"", "", false},                      // empty
 	}
 	for _, c := range cases {
 		got, ok := ResolvePackage(g, c.ref)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +75,9 @@ func TestWorkspaceDocuments_Chromedp(t *testing.T) {
 	if !ref.Extracted || ref.DocumentID == "" {
 		t.Fatalf("expected extraction to produce a document, got %+v", ref)
 	}
-	attachmentName := "attachment-" + ref.ID
+	// The uploaded document is named from the filename stem (notes.md → notes),
+	// not the synthetic attachment-<blobID> (sty_c62e9b63).
+	attachmentName := "notes"
 
 	// Seed a second workspace document directly (store bypasses write authz),
 	// tagged type:document so it shows in the type:document-filtered panel
@@ -116,6 +119,17 @@ func TestWorkspaceDocuments_Chromedp(t *testing.T) {
 	}
 	if !strings.Contains(got.RawBody, "sustainable growth") {
 		t.Errorf("extracted document body missing source text; got %q", got.RawBody)
+	}
+	// sty_c62e9b63: the upload is named from the filename and carries
+	// source:upload provenance alongside type:document.
+	if got.Document.Name != attachmentName {
+		t.Errorf("uploaded doc name = %q, want %q (filename stem)", got.Document.Name, attachmentName)
+	}
+	if !slices.Contains(got.Document.Tags, "source:upload") {
+		t.Errorf("uploaded doc missing source:upload tag; got %v", got.Document.Tags)
+	}
+	if !slices.Contains(got.Document.Tags, "type:document") {
+		t.Errorf("uploaded doc missing type:document tag; got %v", got.Document.Tags)
 	}
 
 	// AC3: global admin may list any workspace's documents (bypass);
