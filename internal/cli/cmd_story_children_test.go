@@ -121,3 +121,56 @@ func TestStoryChildren_NoProjectFailsLoud(t *testing.T) {
 		t.Fatalf("expected no-project error, got %v", err)
 	}
 }
+
+// anchorMiscategorizationWarning steers only when a story has children AND is
+// not category "parent" — and the message must carry the in-place recipe, never
+// suggest `story create` (which duplicates).
+func TestAnchorMiscategorizationWarning(t *testing.T) {
+	// No children → no warning, whatever the category.
+	if w := anchorMiscategorizationWarning("sty_x", "feature", false); w != "" {
+		t.Fatalf("no-children should not warn, got: %s", w)
+	}
+	// Already an anchor → no warning.
+	if w := anchorMiscategorizationWarning("sty_x", "parent", true); w != "" {
+		t.Fatalf("parent category should not warn, got: %s", w)
+	}
+	if w := anchorMiscategorizationWarning("sty_x", "PARENT", true); w != "" {
+		t.Fatalf("parent category match must be case-insensitive, got: %s", w)
+	}
+	// Children + non-parent → warn, and the message carries the recipe.
+	w := anchorMiscategorizationWarning("sty_x", "feature", true)
+	if w == "" {
+		t.Fatal("expected a steer for a feature story with children")
+	}
+	for _, want := range []string{"sty_x", `"parent"`, "document_upsert", "workflow:satellites-parent-workflow", "workflow embed sty_x"} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("warning missing %q:\n%s", want, w)
+		}
+	}
+	if strings.Contains(w, "story create ") && !strings.Contains(w, "do NOT `story create`") {
+		t.Fatalf("warning must steer AWAY from `story create`, got:\n%s", w)
+	}
+}
+
+func TestStoryHasChildren(t *testing.T) {
+	kids := []childRow{{ID: "sty_c1", Parent: "sty_anchor"}}
+	dHas := func(_ context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		var lr docListRequest
+		_ = json.Unmarshal(req, &lr)
+		if lr.ProjectID != "A" {
+			t.Fatalf("expected project A, got %q", lr.ProjectID)
+		}
+		return json.Marshal(struct {
+			Items []childRow `json:"items"`
+		}{Items: kids})
+	}
+	has, err := storyHasChildren(context.Background(), dHas, "A", "sty_anchor")
+	if err != nil || !has {
+		t.Fatalf("expected has-children, got has=%v err=%v", has, err)
+	}
+	// A different anchor in the same set → no children.
+	has, err = storyHasChildren(context.Background(), dHas, "A", "sty_other")
+	if err != nil || has {
+		t.Fatalf("expected no children for sty_other, got has=%v err=%v", has, err)
+	}
+}

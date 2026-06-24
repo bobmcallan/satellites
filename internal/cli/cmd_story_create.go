@@ -44,7 +44,15 @@ story-create verb the MCP surface uses — there is no second write path, and th
 story's entry reviewer still gates its body on the first gated transition.
 
 --name is required. --project defaults to project_id in satellites.toml, so an
-agent working inside its repo can omit it. The rest map to the story's metadata.`,
+agent working inside its repo can omit it. The rest map to the story's metadata.
+
+An anchor/epic (a story that groups children and carries no executable work of
+its own) must be category "parent" — that resolves satellites-parent-workflow,
+whose backlog→done edge is the parent-close gate. Authored as any other category
+it has no enactable close path. Creating a child with --parent pointed at a
+non-parent anchor warns and prints the in-place fix; to re-categorize an existing
+anchor use document_upsert (id + category + the workflow:satellites-parent-workflow
+selector tag) + workflow embed — NOT a second story create, which mints a duplicate.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runStoryCreate(cmd.Context(), cmd.OutOrStdout(), *configArg, *userArg, o)
@@ -120,5 +128,36 @@ func runStoryCreate(ctx context.Context, out io.Writer, configPath, userArg stri
 		return fmt.Errorf("story create: decode response: %w", err)
 	}
 	fmt.Fprintf(out, "created %s  %s\n", resp.Document.ID, resp.Document.Name)
+
+	// Steer at the earliest authoring moment: parenting a child to an anchor that
+	// is NOT category "parent" is the first time the anchor "gains children", so
+	// it is where mis-categorization is cheapest to catch (sty_b83fae1d).
+	// Best-effort — a resolve failure must not fail the (already successful)
+	// create.
+	if parent := strings.TrimSpace(o.Parent); parent != "" {
+		if w := parentAnchorWarning(ctx, configPath, userArg, parent); w != "" {
+			fmt.Fprintln(out, w)
+		}
+	}
 	return nil
+}
+
+// parentAnchorWarning resolves a child's parent and, when that parent is shaped
+// like an anchor but is not category "parent", returns the steer toward
+// re-categorizing it. Empty on any resolve failure (best-effort).
+func parentAnchorWarning(ctx context.Context, configPath, userArg, parentID string) string {
+	req, err := json.Marshal(verb.DocumentGetRequest{ID: parentID})
+	if err != nil {
+		return ""
+	}
+	raw, err := dispatchVerb(ctx, "document_get", req, configPath, userArg)
+	if err != nil {
+		return ""
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return ""
+	}
+	// The parent now has at least this child, so hasChildren is true.
+	return anchorMiscategorizationWarning(parentID, resp.Document.Category, true)
 }

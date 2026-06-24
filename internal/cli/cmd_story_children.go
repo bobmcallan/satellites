@@ -127,3 +127,48 @@ func runStoryChildren(ctx context.Context, out io.Writer, dispatch verbDispatch,
 	fmt.Fprintln(out, "every child is terminal — the anchor may close")
 	return nil
 }
+
+// storyHasChildren reports whether any story in projectID is parented to
+// anchorID. It reuses document_list (project-scoped to the anchor's own project,
+// per sty_e383c48b) — the same enumeration runStoryChildren uses.
+func storyHasChildren(ctx context.Context, dispatch verbDispatch, projectID, anchorID string) (bool, error) {
+	listReq, err := json.Marshal(docListRequest{Type: "story", ProjectID: projectID, Limit: 500})
+	if err != nil {
+		return false, err
+	}
+	raw, err := dispatch(ctx, "document_list", listReq)
+	if err != nil {
+		return false, err
+	}
+	var listed struct {
+		Items []childRow `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return false, err
+	}
+	for _, it := range listed.Items {
+		if it.Parent == anchorID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// anchorMiscategorizationWarning steers toward category "parent" when a story is
+// shaped like an anchor (it has children) but is authored as some other category
+// — the mis-authoring that leaves an anchor with NO enactable close path until a
+// close is attempted, after all child work is done (sty_b83fae1d). Returns ""
+// when there is nothing to warn about. The message carries the IN-PLACE
+// re-categorize recipe; `story create` is explicitly NOT the fix (it mints a
+// duplicate anchor id).
+func anchorMiscategorizationWarning(storyID, category string, hasChildren bool) string {
+	if !hasChildren || strings.EqualFold(strings.TrimSpace(category), "parent") {
+		return ""
+	}
+	return fmt.Sprintf("warning: story %s has children but category is %q, not \"parent\" — an anchor/epic should be category \"parent\" so satellites-parent-workflow governs it "+
+		"(its backlog→done edge is the parent-close gate; a non-parent category has no enactable close path). "+
+		"Re-categorize IN PLACE (do NOT `story create`, which mints a duplicate anchor):\n"+
+		"  satellites exec document_upsert --json '{\"id\":\"%s\",\"category\":\"parent\",\"tags\":[<existing>,\"workflow:satellites-parent-workflow\"]}'\n"+
+		"  satellites workflow embed %s",
+		storyID, category, storyID, storyID)
+}

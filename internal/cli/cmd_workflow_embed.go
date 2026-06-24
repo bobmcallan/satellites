@@ -110,6 +110,22 @@ func runWorkflowEmbed(ctx context.Context, out io.Writer, configPath, userArg, s
 		body = newBody
 	}
 
+	// Steer a mis-categorized anchor toward category "parent" (sty_b83fae1d): a
+	// story that already has children but resolved to a non-parent workflow has no
+	// enactable close path — surface it here, at embed (story start), not at the
+	// close attempt after all child work is done. Best-effort: a list failure must
+	// not block the embed.
+	if !asJSON && !strings.EqualFold(strings.TrimSpace(story.Category), "parent") {
+		dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+			return dispatchVerb(ctx, name, req, configPath, userArg)
+		}
+		if has, hErr := storyHasChildren(ctx, dispatch, story.ProjectID, storyID); hErr == nil && has {
+			if w := anchorMiscategorizationWarning(storyID, story.Category, true); w != "" {
+				fmt.Fprintln(out, w)
+			}
+		}
+	}
+
 	// Next move out of the story's current status. Prefer a forward move: an
 	// ungated checkpoint trigger, else a gated edge into a non-terminal state
 	// (so a cancellation edge — into a terminal state — is not surfaced as "the
