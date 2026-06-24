@@ -115,7 +115,29 @@ type pkgAgg struct {
 // test scaffolding excluded (the default). Equivalent to BuildWith(root, Options{}).
 func Build(root string) (*Graph, error) { return BuildWith(root, Options{}) }
 
-// BuildWith walks the Go module rooted at root and returns its package-level graph.
+// BuildWith builds the package-level graph for the project rooted at root, dispatching
+// by repo kind so the graph is language-agnostic (epic:codegraph-portable). A Go module
+// (go.mod) yields the import graph; a .NET solution/projects (.sln/.csproj) yields the
+// project-reference graph. Both emit the SAME canonical Graph schema, so the viewer, the
+// query layer (deps/rdeps/cycles), and MCP consumers are language-neutral. An
+// unrecognised tree is a clear error rather than a Go-only failure.
+func BuildWith(root string, opts Options) (*Graph, error) {
+	if fileExists(filepath.Join(root, "go.mod")) {
+		return buildGo(root, opts)
+	}
+	if hasCSharpProjects(root) {
+		return buildCSharp(root)
+	}
+	return nil, fmt.Errorf("codegraph: no recognised project at %s (need a go.mod, or a .sln/.csproj)", root)
+}
+
+// fileExists reports whether path names an existing regular file.
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+// buildGo walks the Go module rooted at root and returns its package-level graph.
 // The module path is read from go.mod; an import is an intra-module edge when it
 // carries the module prefix. Unparseable files are skipped (non-fatal) so one bad
 // file never sinks the whole graph.
@@ -125,7 +147,7 @@ func Build(root string) (*Graph, error) { return BuildWith(root, Options{}) }
 // separately so test-support packages can be identified. Unless opts.IncludeTests,
 // test-support packages (under tests/, or imported only from tests and never from
 // production code) and any edge touching them are dropped from the result.
-func BuildWith(root string, opts Options) (*Graph, error) {
+func buildGo(root string, opts Options) (*Graph, error) {
 	module, err := modulePath(root)
 	if err != nil {
 		return nil, err
