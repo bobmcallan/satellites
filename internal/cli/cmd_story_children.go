@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
@@ -46,23 +47,49 @@ contract ("every child is terminal"). Exit 0 when all children are terminal
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			return runStoryChildren(ctx, cmd.OutOrStdout(), args[0], *configArg, *userArg)
+			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+				return dispatchVerb(ctx, name, req, *configArg, *userArg)
+			}
+			return runStoryChildren(ctx, cmd.OutOrStdout(), dispatch, args[0])
 		},
 	}
 	return cmd
 }
 
 // runStoryChildren lists the anchor's children and prints the close summary.
-func runStoryChildren(ctx context.Context, out io.Writer, anchorID, configArg, userArg string) error {
-	projectID, err := projectIDFromConfig(configArg)
+//
+// Children are enumerated in the ANCHOR's own project — resolved from the anchor
+// id, not the caller's config project (sty_e383c48b). Run from a repo bound to a
+// different project, scoping to the config project returned an empty set and a
+// false "every child is terminal — the anchor may close"; the parent-close gate
+// reads this check, so a gate run from the wrong worktree could vacuously accept
+// a close. Resolving the anchor's project (and failing loudly when the id does
+// not resolve to a story) makes the close contract independent of cwd.
+func runStoryChildren(ctx context.Context, out io.Writer, dispatch verbDispatch, anchorID string) error {
+	getReq, err := json.Marshal(verb.DocumentGetRequest{ID: anchorID})
 	if err != nil {
 		return err
+	}
+	graw, err := dispatch(ctx, "document_get", getReq)
+	if err != nil {
+		return fmt.Errorf("story children: resolve anchor %s: %w", anchorID, err)
+	}
+	var anchorResp verb.DocumentGetResponse
+	if err := json.Unmarshal(graw, &anchorResp); err != nil {
+		return fmt.Errorf("story children: decode anchor %s: %w", anchorID, err)
+	}
+	if anchorResp.Document.Type != "story" {
+		return fmt.Errorf("story children: anchor %s is type=%q, not a story", anchorID, anchorResp.Document.Type)
+	}
+	projectID := anchorResp.Document.ProjectID
+	if strings.TrimSpace(projectID) == "" {
+		return fmt.Errorf("story children: anchor %s has no project — cannot enumerate children", anchorID)
 	}
 	listReq, err := json.Marshal(docListRequest{Type: "story", ProjectID: projectID, Limit: 500})
 	if err != nil {
 		return err
 	}
-	raw, err := dispatchVerb(ctx, "document_list", listReq, configArg, userArg)
+	raw, err := dispatch(ctx, "document_list", listReq)
 	if err != nil {
 		return fmt.Errorf("story children: list: %w", err)
 	}
