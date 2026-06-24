@@ -187,6 +187,19 @@ CREATE TABLE IF NOT EXISTS context_budget (
     tokens      INTEGER NOT NULL,
     is_baseline INTEGER NOT NULL DEFAULT 0,
     components  TEXT NOT NULL DEFAULT ''
+);
+
+-- In-flight reviewer gate / work-step marker per story (sty_8eb57090). A gate
+-- run (status_transition) sets a row before its slow claude -p dispatch and
+-- clears it on return, so a SEPARATE process — the stopcheck Stop hook, or
+-- the work status view — can tell "a prescribed gate is running for this story"
+-- from "engaged but idle", instead of misreading a slow gate as an abandoned
+-- goal. One row per story (latest gate wins); freshness is judged by the reader
+-- against started_at, so a crashed gate's stale marker cannot trap.
+CREATE TABLE IF NOT EXISTS active_gate (
+    story      TEXT PRIMARY KEY,
+    gate       TEXT NOT NULL,
+    started_at TEXT NOT NULL
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("workstate: migrate: %w", err)
@@ -203,6 +216,62 @@ CREATE TABLE IF NOT EXISTS context_budget (
 
 // Close releases the underlying database handle.
 func (s *Store) Close() error { return s.db.Close() }
+
+// ActiveGate is the in-flight reviewer gate / work-step for one story: which
+// gate is running and when it started. The reader judges freshness against
+// StartedAt (a crashed gate leaves a stale marker, never a permanent one).
+type ActiveGate struct {
+	Story     string
+	Gate      string
+	StartedAt time.Time
+}
+
+// SetActiveGate records that a gate/work-step is running for a story (latest
+// gate wins). Called by status_transition just before its slow dispatch; the
+// matching ClearActiveGate runs on return. Cross-process visible: each write is
+// its own committed transaction, so the stopcheck in another process sees it.
+func (s *Store) SetActiveGate(story, gate string, now time.Time) error {
+	if strings.TrimSpace(story) == "" {
+		return fmt.Errorf("workstate: active gate needs a story")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO active_gate(story, gate, started_at) VALUES(?,?,?)
+		 ON CONFLICT(story) DO UPDATE SET gate=excluded.gate, started_at=excluded.started_at`,
+		story, gate, now.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("workstate: set active gate: %w", err)
+	}
+	return nil
+}
+
+// ClearActiveGate removes a story's in-flight gate marker. Idempotent — a clear
+// with no row is a no-op (a crashed gate that never cleared is handled by the
+// reader's freshness check, not here).
+func (s *Store) ClearActiveGate(story string) error {
+	if _, err := s.db.Exec(`DELETE FROM active_gate WHERE story=?`, story); err != nil {
+		return fmt.Errorf("workstate: clear active gate: %w", err)
+	}
+	return nil
+}
+
+// GetActiveGate returns the in-flight gate marker for a story, if any. The
+// caller decides whether StartedAt is recent enough to trust (a stale marker
+// from a crashed gate must not be read as a live gate).
+func (s *Store) GetActiveGate(story string) (ActiveGate, bool, error) {
+	var gate, started string
+	err := s.db.QueryRow(`SELECT gate, started_at FROM active_gate WHERE story=?`, story).Scan(&gate, &started)
+	if err == sql.ErrNoRows {
+		return ActiveGate{}, false, nil
+	}
+	if err != nil {
+		return ActiveGate{}, false, fmt.Errorf("workstate: get active gate: %w", err)
+	}
+	ts, _ := time.Parse(time.RFC3339Nano, started)
+	return ActiveGate{Story: story, Gate: gate, StartedAt: ts}, true, nil
+}
 
 // Append writes one event and updates the `current` projection: a KindClose
 // event removes the (session, story) row; any other kind upserts it (advancing

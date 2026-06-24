@@ -66,6 +66,21 @@ func seedEngagementCommit(t *testing.T, repo, session, story, phase string, edit
 	}
 }
 
+// seedActiveGate writes an in-flight gate marker for a story at the repo's
+// resolved state.db (sty_8eb57090) — what the stopcheck reads to tell a
+// legitimately-busy gate run from an abandoned goal.
+func seedActiveGate(t *testing.T, repo, story, gate string, since time.Time) {
+	t.Helper()
+	s, err := workstate.Open(stateDBForRoot(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SetActiveGate(story, gate, since); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestGateOutcome covers the store-based door (sty_2b6cd041 AC1–AC5): allow only
 // under a lease-fresh, editable engagement for the editing session.
 func TestGateOutcome(t *testing.T) {

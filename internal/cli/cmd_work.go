@@ -200,8 +200,16 @@ func runWorkStatus(out io.Writer, stateDB string) error {
 				lease = "EXPIRED@" + e.LeaseUntil.Format(time.RFC3339)
 			}
 		}
-		fmt.Fprintf(out, "%s  story=%s  phase=%s  lease=%s  session=%s\n",
-			e.UpdatedAt.Format(time.RFC3339), e.Story, e.Phase, lease, e.Session)
+		// Compact in-flight-gate annotation (sty_8eb57090): if a prescribed gate
+		// is running for this story (a fresh active_gate marker), append a short
+		// "gate=<name> running" so the agent can tell a legitimately busy
+		// engagement from an idle one. A few tokens — no body/ledger dump.
+		gateNote := ""
+		if ag, ok, _ := s.GetActiveGate(e.Story); ok && now.Sub(ag.StartedAt) < activeGateStaleAfter {
+			gateNote = fmt.Sprintf("  gate=%s(running %s)", ag.Gate, now.Sub(ag.StartedAt).Round(time.Second))
+		}
+		fmt.Fprintf(out, "%s  story=%s  phase=%s  lease=%s  session=%s%s\n",
+			e.UpdatedAt.Format(time.RFC3339), e.Story, e.Phase, lease, e.Session, gateNote)
 	}
 	return nil
 }

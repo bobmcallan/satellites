@@ -57,3 +57,36 @@ func TestRunHookStopCheck(t *testing.T) {
 		t.Errorf("no engagement must not block")
 	}
 }
+
+// TestRunHookStopCheck_ActiveGate (sty_8eb57090): a non-terminal engagement
+// whose story has a FRESH in-flight gate marker is a legitimately-busy wait, not
+// an abandoned goal — the hook releases (no block) with a "waiting on the gate"
+// note instead of GOAL NOT MET. A STALE marker (a crashed gate) is discounted,
+// so the goal-keeper resumes and blocks as usual (a dangling marker never traps).
+func TestRunHookStopCheck_ActiveGate(t *testing.T) {
+	fresh := time.Now().UTC().Add(time.Hour)
+
+	// Fresh active gate → release with the waiting note, no GOAL NOT MET.
+	repo := writeRepo(t, true, "")
+	seedEngagement(t, repo, "sessG", "sty_g", "in_progress", true, fresh)
+	seedActiveGate(t, repo, "sty_g", "satellites-integration-review", time.Now().UTC())
+	var out bytes.Buffer
+	if block := runHookStopCheck(strings.NewReader(`{"session_id":"sessG","cwd":"`+repo+`"}`), &out); block {
+		t.Errorf("a fresh in-flight gate must NOT block, got block=true")
+	}
+	if s := out.String(); !strings.Contains(s, "in progress") || strings.Contains(s, "GOAL NOT MET") {
+		t.Errorf("want a waiting note, not GOAL NOT MET; got %q", s)
+	}
+
+	// Stale active gate (older than the trust window) → discounted → blocks.
+	repo2 := writeRepo(t, true, "")
+	seedEngagement(t, repo2, "sessH", "sty_h", "in_progress", true, fresh)
+	seedActiveGate(t, repo2, "sty_h", "satellites-integration-review", time.Now().UTC().Add(-2*activeGateStaleAfter))
+	var out2 bytes.Buffer
+	if block := runHookStopCheck(strings.NewReader(`{"session_id":"sessH","cwd":"`+repo2+`"}`), &out2); !block {
+		t.Errorf("a stale gate marker must be discounted and block as usual")
+	}
+	if !strings.Contains(out2.String(), "GOAL NOT MET") {
+		t.Errorf("stale gate should fall through to GOAL NOT MET, got %q", out2.String())
+	}
+}

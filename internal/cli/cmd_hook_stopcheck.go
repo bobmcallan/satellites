@@ -103,6 +103,16 @@ func runHookStopCheck(in io.Reader, out io.Writer) (block bool) {
 		if e.Phase == phaseCandidate || !e.IsLeaseFresh(now) || term {
 			continue
 		}
+		// A prescribed reviewer gate running in another process (status_transition's
+		// claude -p, which a done-review uses to build + test) is NOT an abandoned
+		// goal (sty_8eb57090). Release with a "waiting" note so the agent isn't
+		// nagged to retry — the gate's completion re-invokes it. A STALE marker
+		// (a crashed gate, older than the dispatch cap) is discounted, falling
+		// through to the normal goal-keeper so a dangling marker can't trap.
+		if ag, ok, _ := store.GetActiveGate(e.Story); ok && now.Sub(ag.StartedAt) < activeGateStaleAfter {
+			fmt.Fprintln(out, activeGateWaitMessage(e.Story, ag.Gate, ag.StartedAt, now))
+			continue
+		}
 		b, msg := stopGoalDecision(e.Story, e.Phase, commitsSince(root, e.UpdatedAt), governed)
 		fmt.Fprintln(out, msg)
 		if b {
@@ -110,6 +120,21 @@ func runHookStopCheck(in io.Reader, out io.Writer) (block bool) {
 		}
 	}
 	return block
+}
+
+// activeGateStaleAfter bounds how long an active-gate marker is trusted as a
+// live gate. It must exceed the gate dispatch cap (gateDispatchTimeout, 15m)
+// plus the summariser, so a legitimately slow done-review still reads as
+// "running"; beyond it, a marker is a crashed gate's leftover and is ignored so
+// the goal-keeper resumes (never a permanent trap).
+const activeGateStaleAfter = gateDispatchTimeout + summariserTimeout + 5*time.Minute
+
+// activeGateWaitMessage is the compact, agent-visible signal that a prescribed
+// gate is in flight (pure, for tests). One line, a few tokens — gate name +
+// since — never a body/ledger/diff dump (sty_8eb57090 keeps agent context lean).
+func activeGateWaitMessage(story, gate string, since, now time.Time) string {
+	return fmt.Sprintf("satellites: story %s — reviewer gate %q in progress (%s elapsed). A prescribed gate is running; its completion re-invokes you. Waiting on the gate is correct — not abandoned, not blocking.",
+		story, gate, now.Sub(since).Round(time.Second))
 }
 
 // stopGoalDecision decides, for one live non-terminal engagement, whether to

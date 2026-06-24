@@ -554,6 +554,21 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 	//     done-review that actually builds + runs tests; the work-claim lease
 	//     (claimLeaseTTL, above) is derived from it so the lease outlives the
 	//     run and a second reviewer cannot reclaim mid-build.
+	// Mark this gate/work-step in flight for the whole judgment (sty_8eb57090):
+	// a SEPARATE process — the stopcheck Stop hook, or `satellites work status` —
+	// reads it to tell "a prescribed gate is running" from "engaged but idle", so
+	// a slow gate (a done-review builds + tests) is not misread as an abandoned
+	// goal. Cleared on return regardless of decision; a killed run leaves a stale
+	// marker the reader discounts by age.
+	gateLabel := gateSkill
+	if gateLabel == "" {
+		gateLabel = "work-step"
+	}
+	if agErr := store.SetActiveGate(story.ID, gateLabel, time.Now()); agErr != nil {
+		fmt.Fprintf(opts.Stderr, "warn: mark active gate: %v\n", agErr)
+	}
+	defer func() { _ = store.ClearActiveGate(story.ID) }()
+
 	var gateOut verb.GateOutput
 	if edges.Actor == "satellites" {
 		if !edges.IsV2 {
