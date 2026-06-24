@@ -877,6 +877,20 @@ func isWorkflowBody(body string) bool {
 	return strings.EqualFold(strings.TrimSpace(fm.Kind), "workflow")
 }
 
+// isReviewerBody reports whether a SKILL.md body declares kind:reviewer — used to
+// keep reviewers out of GLOBAL (cross-project publisher) consumption alongside
+// workflows (epic:global-tasks, sty_cee940e2). A reviewer is project/user-owned;
+// the global publisher surface is tasks (+ ordinary skills) only. This does NOT
+// affect a consumer's own system/project/workspace reviewers, which resolve
+// embed→local→server independently of publisher consumption.
+func isReviewerBody(body string) bool {
+	fm, _, err := frontmatter.Parse(frontmatter.StripSyncStamp([]byte(body)))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(fm.Kind), "reviewer")
+}
+
 // syncEnabled reports whether a substrate skill opts INTO local materialisation
 // via a `sync:true` frontmatter tag. DEFAULT FALSE (epic:minimal-spine,
 // sty_36894714): a skill materialises into .claude/skills only when it declares
@@ -940,12 +954,15 @@ func listGlobalSkills(ctx context.Context, out io.Writer, dispatch verbDispatch,
 			return nil, fmt.Errorf("skill sync: global publisher %q: %w", pub, err)
 		}
 		for i := range skills {
-			// A workflow is repo-owned client-dir config (order-2,
-			// .satellites/workflows), NEVER a consumed global skill — even if a
-			// publisher still hosts kind:workflow rows in the library, a consumer
-			// resolves its workflow locally. Skip them so global consumption can't
-			// re-materialise a workflow the repo customises.
-			if isWorkflowBody(skills[i].Body) {
+			// A workflow OR a reviewer is repo/project-owned, NEVER a consumed
+			// global artifact (epic:global-tasks, sty_cee940e2): the global
+			// publisher surface carries TASKS (the unit an agent composes a local
+			// workflow around) and ordinary agent skills — not workflows or
+			// reviewers. A consumer resolves its workflow and its reviewer gates
+			// locally (embed→local→server), so even if a publisher still hosts
+			// kind:workflow / kind:reviewer rows in the library, global
+			// consumption must not re-materialise them over the repo's own.
+			if isWorkflowBody(skills[i].Body) || isReviewerBody(skills[i].Body) {
 				continue
 			}
 			skills[i].Publisher = pub

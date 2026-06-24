@@ -97,6 +97,69 @@ func TestListGlobalSkills_OptInPublisher(t *testing.T) {
 	}
 }
 
+// multiKindLibraryDispatch serves a publisher whose library holds rows of
+// several kinds, keyed name→body, so a consume test can assert which are pulled.
+func multiKindLibraryDispatch(t *testing.T, publisher string, bodies map[string]string) verbDispatch {
+	t.Helper()
+	return func(_ context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+		switch name {
+		case "document_list":
+			var lr struct {
+				Scope     string `json:"scope"`
+				ProjectID string `json:"project_id"`
+			}
+			_ = json.Unmarshal(req, &lr)
+			if lr.Scope != "library" || lr.ProjectID != publisher {
+				return json.RawMessage(`{"items":[]}`), nil
+			}
+			items := make([]string, 0, len(bodies))
+			for n := range bodies {
+				items = append(items, `{"id":"doc_`+n+`","name":"`+n+`","scope":"library","project_id":"`+publisher+`","latest_version":1}`)
+			}
+			return json.RawMessage(`{"items":[` + strings.Join(items, ",") + `]}`), nil
+		case "document_get":
+			var gr struct {
+				Name string `json:"name"`
+			}
+			_ = json.Unmarshal(req, &gr)
+			b, _ := json.Marshal(bodies[gr.Name])
+			return json.RawMessage(`{"raw_body":` + string(b) + `,"document":{"id":"doc_` + gr.Name + `","latest_version":1}}`), nil
+		}
+		return nil, fmt.Errorf("unexpected verb %q", name)
+	}
+}
+
+// TestListGlobalSkills_ExcludesReviewerAndWorkflow pins sty_cee940e2: the global
+// publisher consume surface is tasks (+ ordinary skills) only — kind:reviewer and
+// kind:workflow rows from a publisher are NOT consumed.
+func TestListGlobalSkills_ExcludesReviewerAndWorkflow(t *testing.T) {
+	cfg := writeToml(t, "server_url=\"x\"\nglobal_publishers = [\"proj_682cfeed\"]\n")
+	bodies := map[string]string{
+		"a-task":     "---\nname: a-task\ntype: task\n---\nbody",
+		"a-skill":    "---\nname: a-skill\ndescription: ordinary\n---\nbody",
+		"a-reviewer": "---\nname: a-reviewer\nkind: reviewer\n---\nbody",
+		"a-workflow": "---\nname: a-workflow\nkind: workflow\n---\nbody",
+	}
+	var out bytes.Buffer
+	got, err := listGlobalSkills(context.Background(), &out, multiKindLibraryDispatch(t, "proj_682cfeed", bodies), cfg)
+	if err != nil {
+		t.Fatalf("listGlobalSkills: %v", err)
+	}
+	consumed := map[string]bool{}
+	for _, s := range got {
+		consumed[s.Name] = true
+	}
+	if !consumed["a-task"] || !consumed["a-skill"] {
+		t.Errorf("task and ordinary skill must be consumed, got %v", consumed)
+	}
+	if consumed["a-reviewer"] {
+		t.Error("a publisher kind:reviewer row must NOT be consumed (sty_cee940e2)")
+	}
+	if consumed["a-workflow"] {
+		t.Error("a publisher kind:workflow row must NOT be consumed")
+	}
+}
+
 // TestListGlobalSkills_DerivesFromLibraryPins pins AC4 back-compat: with no
 // global_publishers but a remaining library_pins, the publisher set is derived
 // and a deprecation note is printed.
