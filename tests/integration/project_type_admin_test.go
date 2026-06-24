@@ -14,7 +14,6 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/bobmcallan/satellites/internal/workspace"
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
-	"github.com/chromedp/chromedp"
 )
 
 // TestProjectTypeAdmin is the DOGFOOD for sty_e5dbde6d (epic:workspace-admin ·
@@ -22,7 +21,10 @@ import (
 // project patch (field-merge), readable via the read path + portal, with
 // explicit-empty clear distinct from not-supplied.
 func TestProjectTypeAdmin(t *testing.T) {
-	skipInCI(t, "project page chromedp session race fails on GH runner")
+	// The project page's server-render of the type ([data-field="project-type"]) is covered
+	// deterministically, browser-free, by internal/server.TestProjectDetailRendersType — the
+	// flaky dev-login→navigate chromedp assertion (a session race, not a render bug) was
+	// removed here per sty_57acbe4e. This test keeps the deterministic verb-level behaviour.
 	env := testbootstrap.SetUpWithServer(t)
 
 	wsStore := workspace.New(env.DB)
@@ -100,30 +102,6 @@ func TestProjectTypeAdmin(t *testing.T) {
 			t.Fatalf("non-admin patch mutated type: %q", got)
 		}
 	})
-
-	// AC5 (chromedp): the project detail page renders the type before it is cleared.
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), chromedpHeadlessOpts()...)
-	t.Cleanup(cancelAlloc)
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	t.Cleanup(cancelBrowser)
-	bctx, cancelRun := context.WithTimeout(browserCtx, 60*time.Second)
-	t.Cleanup(cancelRun)
-
-	var renderedType string
-	if err := chromedp.Run(bctx,
-		chromedp.Navigate(env.ServerURL+"/login"),
-		chromedp.WaitVisible(`form[data-form="login"]`, chromedp.ByQuery),
-		chromedp.Click(`button[data-action="dev-login-admin"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-section="server"]`, chromedp.ByQuery),
-		chromedp.Navigate(env.ServerURL+"/projects/"+pj.ID),
-		chromedp.WaitVisible(`[data-field="project-type"]`, chromedp.ByQuery),
-		chromedp.Text(`[data-field="project-type"]`, &renderedType, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("project page render: %v", err)
-	}
-	if renderedType != "reference-corpus" {
-		t.Fatalf("project page type = %q, want reference-corpus", renderedType)
-	}
 
 	// AC2: explicit empty clears the type (distinct from not-supplied above).
 	if p, err := patch(authWithUser(ctx, wsAdmin), `{"id":"`+pj.ID+`","type":""}`); err != nil || p.Type != "" {
