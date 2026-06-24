@@ -16,6 +16,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -53,18 +54,35 @@ after large changes), then ` + "`code search`" + ` / ` + "`code symbol`" + ` to 
 
 	var searchConfig string
 	var searchLimit int
+	var searchJSON bool
 	searchCmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "List indexed symbols matching a query (name, kind, file:line)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, dbPath := resolveCodeIndex(searchConfig)
-			return runCodeSearch(cmd.OutOrStdout(), dbPath, args[0], searchLimit)
+			return runCodeSearch(cmd.OutOrStdout(), dbPath, args[0], searchLimit, searchJSON)
 		},
 	}
 	searchCmd.Flags().StringVar(&searchConfig, "config", "", "Path to satellites.toml (resolves repo root; defaults to walk-up from CWD).")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 25, "Max results (0 = no limit).")
+	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Emit matching symbols as a JSON array (name, kind, signature, file, start_line, end_line).")
 	code.AddCommand(searchCmd)
+
+	var symbolsConfig string
+	var symbolsJSON bool
+	symbolsCmd := &cobra.Command{
+		Use:   "symbols",
+		Short: "List every indexed symbol (the raw symbol feed; pair with --json for graph construction)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, dbPath := resolveCodeIndex(symbolsConfig)
+			return runCodeSymbols(cmd.OutOrStdout(), dbPath, symbolsJSON)
+		},
+	}
+	symbolsCmd.Flags().StringVar(&symbolsConfig, "config", "", "Path to satellites.toml (resolves repo root; defaults to walk-up from CWD).")
+	symbolsCmd.Flags().BoolVar(&symbolsJSON, "json", false, "Emit every indexed symbol as a JSON array (name, kind, signature, file, start_line, end_line).")
+	code.AddCommand(symbolsCmd)
 
 	var symbolConfig string
 	symbolCmd := &cobra.Command{
@@ -121,7 +139,7 @@ func runCodeIndex(out io.Writer, repoRoot, dbPath string, full bool) error {
 	return nil
 }
 
-func runCodeSearch(out io.Writer, dbPath, query string, limit int) error {
+func runCodeSearch(out io.Writer, dbPath, query string, limit int, asJSON bool) error {
 	store, err := codeindex.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("code search: %w", err)
@@ -131,12 +149,78 @@ func runCodeSearch(out io.Writer, dbPath, query string, limit int) error {
 	if err != nil {
 		return fmt.Errorf("code search: %w", err)
 	}
+	if asJSON {
+		return writeSymbolsJSON(out, syms)
+	}
 	if len(syms) == 0 {
 		fmt.Fprintf(out, "no symbols match %q (have you run `satellites code index`?)\n", query)
 		return nil
 	}
 	for _, s := range syms {
 		fmt.Fprintf(out, "%-8s %s\t%s:%d\n", s.Kind, s.Signature, s.File, s.StartLine)
+	}
+	return nil
+}
+
+// runCodeSymbols lists every indexed symbol. It is the raw symbol feed an agent
+// reads to construct a richer artifact (e.g. a codegraph): with --json it pairs
+// with `code graph --json` (the package spine) as the per-symbol fill, sourced
+// from index.db with no re-parse. A missing/empty index yields an empty list
+// (Open creates an empty db), not an error.
+func runCodeSymbols(out io.Writer, dbPath string, asJSON bool) error {
+	store, err := codeindex.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("code symbols: %w", err)
+	}
+	defer store.Close()
+	syms, err := store.All()
+	if err != nil {
+		return fmt.Errorf("code symbols: %w", err)
+	}
+	if asJSON {
+		return writeSymbolsJSON(out, syms)
+	}
+	if len(syms) == 0 {
+		fmt.Fprintf(out, "no symbols indexed (have you run `satellites code index`?)\n")
+		return nil
+	}
+	for _, s := range syms {
+		fmt.Fprintf(out, "%-8s %s\t%s:%d\n", s.Kind, s.Signature, s.File, s.StartLine)
+	}
+	return nil
+}
+
+// codeSymbolJSON is the stable JSON shape for a symbol — the raw index fields
+// only. No package or visibility field is invented: a consumer derives package
+// from `file` and public-ness from `signature`.
+type codeSymbolJSON struct {
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Signature string `json:"signature"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
+// writeSymbolsJSON emits symbols as an indented JSON array. An empty result
+// marshals as `[]` (never `null`), so a missing/empty index is a clean empty
+// feed rather than an error.
+func writeSymbolsJSON(out io.Writer, syms []codeindex.Symbol) error {
+	rows := make([]codeSymbolJSON, 0, len(syms))
+	for _, s := range syms {
+		rows = append(rows, codeSymbolJSON{
+			Name:      s.Name,
+			Kind:      s.Kind,
+			Signature: s.Signature,
+			File:      s.File,
+			StartLine: s.StartLine,
+			EndLine:   s.EndLine,
+		})
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(rows); err != nil {
+		return fmt.Errorf("code symbols: encode json: %w", err)
 	}
 	return nil
 }

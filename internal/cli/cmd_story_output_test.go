@@ -76,7 +76,7 @@ func TestLooksDated(t *testing.T) {
 	plain := []string{
 		"Implementation summary",
 		"codegraph",
-		"v1.2.3 release notes", // version, not a date
+		"v1.2.3 release notes",  // version, not a date
 		"2026-6-5 short fields", // not zero-padded → not YYYY-MM-DD
 	}
 	for _, n := range plain {

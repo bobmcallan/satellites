@@ -298,6 +298,16 @@ func (s *Store) likeSearch(query string, limit int) ([]Symbol, error) {
 	return s.querySymbols(q, args...)
 }
 
+// All returns every indexed symbol in deterministic order (file, then start
+// position, then name) — the raw feed behind `code symbols --json`. It reads the
+// symbols table verbatim; no interpretation (package attribution, visibility) is
+// added here, leaving those derivable by the consumer from file + signature.
+func (s *Store) All() ([]Symbol, error) {
+	return s.querySymbols(
+		`SELECT name, kind, signature, file, start_line, end_line, start_byte, end_byte
+		 FROM symbols ORDER BY file, start_line, name`)
+}
+
 // ByName returns the symbols whose name matches exactly — the lookup behind
 // `code symbol <name>` (more than one row when a name is overloaded, e.g. a
 // method name shared across receivers).
