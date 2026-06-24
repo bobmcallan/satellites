@@ -74,6 +74,20 @@ func TestLibraryPageRendersTasksAndSkills(t *testing.T) {
 	}
 }
 
+// TestNavbarHasNoLedgerLink pins sty_4020cff6: the navbar no longer carries the
+// Ledger link (the route/handler stay reachable by direct URL), while the other
+// primary-nav items remain. The library page is a representative carrier of the
+// shared nav block.
+func TestNavbarHasNoLedgerLink(t *testing.T) {
+	html := renderLibrary(t, libraryData{ActiveNav: "library"})
+	if strings.Contains(html, `data-nav="ledger"`) || strings.Contains(html, ">LEDGER<") {
+		t.Errorf("navbar still renders a Ledger link:\n%s", html)
+	}
+	if !strings.Contains(html, `data-nav="library"`) {
+		t.Errorf("expected the LIBRARY nav item to remain")
+	}
+}
+
 // TestLibraryPageFilteredEmpty covers the filtered-empty copy (AC3: clears cleanly).
 func TestLibraryPageFilteredEmpty(t *testing.T) {
 	html := renderLibrary(t, libraryData{ActiveNav: "library", ActiveKind: "task"})
