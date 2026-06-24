@@ -914,10 +914,17 @@ func (s *Store) List(ctx context.Context, f ListFilter, opts ListOptions) (ListR
 // drops workspace_id for ScopeProject (a project list is keyed by project_id so
 // it survives a home-workspace move — sty_c6de961e); the embed reconcile worker
 // needs the opposite axis: "every project document this workspace owns" so it
-// can embed repo-bound classified corpus, not only workspace-bound docs. The
-// scope-coherence CHECK guarantees a live project row always has workspace_id
-// set, so the workspace_id equality is exact for present rows. Tombstones are
-// excluded; ordering matches List (bounded set — no cursor here).
+// can embed repo-bound classified corpus, not only workspace-bound docs.
+//
+// Project-scope document rows carry workspace_id = NULL (migration 0041) so a
+// project's docs follow it across a workspace move — so the workspace binding
+// lives on the PROJECT, not the document. Resolve through projects.workspace_id
+// (the project's CURRENT home), NOT documents.workspace_id: a direct
+// `documents.workspace_id = $` filter matches NOTHING for project rows and
+// silently returned zero docs, so Reconcile never embedded any project-scope
+// document and the workspace cross-project semantic read came back empty
+// (sty_95751c71). Tombstones are excluded; ordering matches List (bounded set —
+// no cursor here).
 func (s *Store) ListProjectDocsInWorkspace(ctx context.Context, workspaceID string, limit int) ([]Document, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("document: workspace_id required")
@@ -929,10 +936,11 @@ func (s *Store) ListProjectDocsInWorkspace(ctx context.Context, workspaceID stri
 		limit = listMaxLimit
 	}
 	q := selectDocumentColumns + ` FROM documents
-        WHERE type = $1 AND scope = $2 AND workspace_id = $3 AND status != $4
+        WHERE type = $1 AND scope = $2 AND status != $3
+          AND project_id IN (SELECT id FROM projects WHERE workspace_id = $4)
         ORDER BY created_at DESC, id DESC
         LIMIT $5`
-	rows, err := s.DB.QueryContext(ctx, q, TypeDocument, string(ScopeProject), workspaceID, string(StatusDeleted), limit)
+	rows, err := s.DB.QueryContext(ctx, q, TypeDocument, string(ScopeProject), string(StatusDeleted), workspaceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("document: list project docs: %w", err)
 	}
