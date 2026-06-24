@@ -274,6 +274,37 @@ func TestInvokeDocumentList_ProjectScopeRequiresProjectID(t *testing.T) {
 	}
 }
 
+// TestDropForeignLibraryTasks pins the shared task-list membership rule
+// (sty_9450bdb0): a library-scoped task carries the publisher's project_id, so a
+// project-bound type:task listing sweeps it in — it must be dropped so every
+// document_list consumer (portal panel, CLI `task list`) inherits the same rule.
+// A publisher discovering its own publications via an explicit scope:library
+// query still gets them (AC#5), and a non-task listing is untouched.
+func TestDropForeignLibraryTasks(t *testing.T) {
+	proj := document.Document{ID: "tsk_proj", Type: document.TypeTask, Scope: document.ScopeProject, ProjectID: "proj_fc7d72d8", Category: "task"}
+	lib := document.Document{ID: "doc_lib", Type: document.TypeTask, Scope: document.ScopeLibrary, ProjectID: "proj_fc7d72d8"}
+
+	// Project-bound task listing: the library publication is dropped, the
+	// project-scoped task kept.
+	got := dropForeignLibraryTasks(DocumentListRequest{Type: "task", ProjectID: "proj_fc7d72d8"}, []document.Document{proj, lib})
+	if len(got) != 1 || got[0].ID != "tsk_proj" {
+		t.Fatalf("want only tsk_proj, got %+v", got)
+	}
+
+	// Explicit scope:library — the publisher's own publications survive.
+	got = dropForeignLibraryTasks(DocumentListRequest{Type: "task", Scope: "library"}, []document.Document{lib})
+	if len(got) != 1 || got[0].ID != "doc_lib" {
+		t.Fatalf("explicit scope:library must keep library rows, got %+v", got)
+	}
+
+	// Non-task listing is untouched even if a library row carries the project_id.
+	docLib := document.Document{ID: "doc_x", Type: document.TypeDocument, Scope: document.ScopeLibrary, ProjectID: "proj_fc7d72d8"}
+	got = dropForeignLibraryTasks(DocumentListRequest{Type: "document", ProjectID: "proj_fc7d72d8"}, []document.Document{docLib})
+	if len(got) != 1 {
+		t.Fatalf("non-task listing must be untouched, got %+v", got)
+	}
+}
+
 // TestAuthorizeListScope_Stub pins AC3: with auth wired, a non-system scope
 // requires a bearer; with auth unwired (in-process CLI) the check is skipped.
 func TestAuthorizeListScope_Stub(t *testing.T) {

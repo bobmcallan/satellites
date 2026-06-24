@@ -5,34 +5,7 @@ import (
 	"html/template"
 	"strings"
 	"testing"
-
-	"github.com/bobmcallan/satellites/internal/document"
-	"github.com/bobmcallan/satellites/internal/verb"
 )
-
-// TestTaskRowsFromDocsDropsLibraryPublications pins sty_ef0ccc89: the tasks
-// panel lists only a project's runnable tasks. A library-scoped publication
-// carries the publisher's project_id, so document_list by project_id sweeps it
-// in — but it is a distribution artifact, not a task to run here, and must be
-// dropped. The project-scoped task with the same project_id stays.
-func TestTaskRowsFromDocsDropsLibraryPublications(t *testing.T) {
-	resp := verb.DocumentListResponse{Items: []document.Document{
-		{ID: "tsk_90b45e3a", Name: "Codegraph", Type: "task", Scope: document.ScopeProject, ProjectID: "proj_fc7d72d8", Category: "task", Status: "complete"},
-		{ID: "doc_d674f51f", Name: "Codegraph", Type: "task", Scope: document.ScopeLibrary, ProjectID: "proj_fc7d72d8", Status: "active"},
-	}}
-	rows := taskRowsFromDocs(resp)
-	if len(rows) != 1 {
-		t.Fatalf("want 1 row (library publication dropped), got %d: %+v", len(rows), rows)
-	}
-	if rows[0].ID != "tsk_90b45e3a" {
-		t.Errorf("kept the wrong row: want tsk_90b45e3a (project-scoped), got %q", rows[0].ID)
-	}
-	for _, r := range rows {
-		if r.ID == "doc_d674f51f" {
-			t.Error("library-scoped publication leaked into the tasks panel")
-		}
-	}
-}
 
 // TestProjectDetailTasksPanelRenders pins the inline-expand tasks panel
 // (sty_f46fe4f2 AC#1/#2/#4 + sty_f2f6465d chips): the row headline + status

@@ -119,23 +119,14 @@ func dispatchTaskRows(ctx context.Context, projectID string) ([]taskRow, error) 
 	return taskRowsFromDocs(resp), nil
 }
 
-// scopeLibrary mirrors document.ScopeLibrary as a bare string — the portal
-// transport is barred from importing internal/document (layering guard), so we
-// compare the scope value, not the typed constant.
-const scopeLibrary = "library"
-
-// taskRowsFromDocs maps the listed task documents into panel rows, dropping
-// library-scoped publications. A library row is a published distribution
-// artifact that carries the PUBLISHER's project_id, so the publisher's own
-// project list sweeps it in — but it is not a runnable task here (no category →
-// the workflow selector fail-closes it). The panel is this project's runnable
-// tasks only (sty_ef0ccc89). Pure, so the filter is unit-testable.
+// taskRowsFromDocs maps the listed task documents into panel rows. The task-list
+// membership rule — drop library-scoped publications that merely carry the
+// publisher's project_id — lives once at the document_list verb
+// (dropForeignLibraryTasks, sty_9450bdb0), so this mapper trusts the verb and
+// never re-checks scope.
 func taskRowsFromDocs(resp verb.DocumentListResponse) []taskRow {
 	out := make([]taskRow, 0, len(resp.Items))
 	for _, d := range resp.Items {
-		if string(d.Scope) == scopeLibrary {
-			continue
-		}
 		out = append(out, taskRow{ID: d.ID, Title: d.Name, Status: mapTaskStatus(d.Status), Priority: d.Priority, Category: d.Category, Tags: d.Tags})
 	}
 	return out

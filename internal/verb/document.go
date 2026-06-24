@@ -448,10 +448,33 @@ func invokeDocumentList(ctx context.Context, raw json.RawMessage) (json.RawMessa
 		return nil, err
 	}
 	items := filterMCPReadable(transport, res.Items)
+	items = dropForeignLibraryTasks(req, items)
 	if items == nil {
 		items = []document.Document{}
 	}
 	return json.Marshal(DocumentListResponse{Items: items, NextCursor: res.NextCursor})
+}
+
+// dropForeignLibraryTasks enforces the task-list membership rule in ONE place
+// (sty_9450bdb0). A library-scoped task is a published distribution artifact that
+// carries the PUBLISHER's project_id for provenance, so a project-bound
+// `type:task` listing sweeps it in even though it is not a runnable task in that
+// project. Drop library rows from a task listing UNLESS the caller explicitly
+// asked for library scope (a publisher discovering its own publications — AC#5).
+// Every document_list consumer — the portal tasks panel, the CLI `task list`,
+// any future reader — inherits this without re-implementing the scope check.
+func dropForeignLibraryTasks(req DocumentListRequest, items []document.Document) []document.Document {
+	if req.Type != document.TypeTask || document.Scope(req.Scope) == document.ScopeLibrary {
+		return items
+	}
+	out := items[:0]
+	for _, d := range items {
+		if d.Scope == document.ScopeLibrary {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // effectiveList returns the post-cascade effective set for a caller: the
