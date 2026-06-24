@@ -48,6 +48,8 @@ func init() {
 	task.AddCommand(newTaskExecutionsCmd(&configArg, &userArg))
 	task.AddCommand(newTaskValidateCmd(&configArg, &userArg))
 	task.AddCommand(newTaskEditCmd(&configArg, &userArg))
+	task.AddCommand(newTaskPublishCmd(&configArg, &userArg))
+	task.AddCommand(newTaskSyncCmd(&configArg, &userArg))
 
 	register(task)
 }

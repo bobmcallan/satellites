@@ -688,6 +688,16 @@ func syncSkills(ctx context.Context, out io.Writer, in io.Reader, scope, ws, pj,
 	if err := syncWorkflows(ctx, out, dispatch, ws, pj, clientWorkflowsDir(configArg), dryRun); err != nil {
 		return err
 	}
+	// Consume global TASKS alongside skills (epic:global-tasks). Unlike skills,
+	// a task materialises as a project type:task ROW, not a .claude/skills file —
+	// so it runs through its own reconcile, not the file plan above. With no
+	// publishers or no library tasks this is a silent no-op, so a repo that
+	// consumes none sees no change. Only runs when a project is resolved.
+	if strings.TrimSpace(pj) != "" {
+		if err := syncTasks(ctx, out, configArg, userArg, dryRun); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -918,20 +928,7 @@ func listGlobalSkills(ctx context.Context, out io.Writer, dispatch verbDispatch,
 		}
 		return nil, err
 	}
-	publishers := append([]string(nil), cfg.GlobalPublishers...)
-	if len(publishers) == 0 && len(cfg.LibraryPins) > 0 {
-		seen := map[string]bool{}
-		for _, pin := range cfg.LibraryPins {
-			pub, _, ok := strings.Cut(strings.TrimSpace(pin), "/")
-			if ok && pub != "" && !seen[pub] {
-				seen[pub] = true
-				publishers = append(publishers, pub)
-			}
-		}
-		if out != nil && len(publishers) > 0 {
-			fmt.Fprintf(out, "note: library_pins is deprecated — deriving global_publishers=%v from it. Migrate by replacing the pin list with `global_publishers`.\n", publishers)
-		}
-	}
+	publishers := resolveGlobalPublishers(cfg, out)
 	var out2 []substrateSkill
 	for _, pub := range publishers {
 		pub = strings.TrimSpace(pub)
@@ -956,6 +953,28 @@ func listGlobalSkills(ctx context.Context, out io.Writer, dispatch verbDispatch,
 		}
 	}
 	return out2, nil
+}
+
+// resolveGlobalPublishers returns the opt-in publisher namespaces a consumer
+// pulls from: config.GlobalPublishers, or — back-compat — derived from the
+// deprecated library_pins (with a one-line note). Shared by the skill and task
+// consume paths (epic:global-tasks) so both honour the same opt-in.
+func resolveGlobalPublishers(cfg cliconfig.Config, out io.Writer) []string {
+	publishers := append([]string(nil), cfg.GlobalPublishers...)
+	if len(publishers) == 0 && len(cfg.LibraryPins) > 0 {
+		seen := map[string]bool{}
+		for _, pin := range cfg.LibraryPins {
+			pub, _, ok := strings.Cut(strings.TrimSpace(pin), "/")
+			if ok && pub != "" && !seen[pub] {
+				seen[pub] = true
+				publishers = append(publishers, pub)
+			}
+		}
+		if out != nil && len(publishers) > 0 {
+			fmt.Fprintf(out, "note: library_pins is deprecated — deriving global_publishers=%v from it. Migrate by replacing the pin list with `global_publishers`.\n", publishers)
+		}
+	}
+	return publishers
 }
 
 func listSubstrateSkills(ctx context.Context, dispatch verbDispatch, scope, wsID, pjID string, effective bool) ([]substrateSkill, error) {

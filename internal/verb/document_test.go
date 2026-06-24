@@ -493,3 +493,25 @@ func TestDocumentGetByID_ProjectScopeGate(t *testing.T) {
 		t.Fatalf("uncapped admin must read any project, got: %v", err)
 	}
 }
+
+// TestRoutesToCreateTask pins the epic:global-tasks publish routing guard: an
+// id-less type:task upsert mints a governed PROJECT task EXCEPT at scope:library,
+// where it is an inert distribution artifact taking the generic library path.
+func TestRoutesToCreateTask(t *testing.T) {
+	cases := []struct {
+		name string
+		req  DocumentUpsertRequest
+		want bool
+	}{
+		{"project task → createTask", DocumentUpsertRequest{Type: "task", Scope: "project", ProjectID: "proj_x", Name: "t"}, true},
+		{"task no scope (default project) → createTask", DocumentUpsertRequest{Type: "task", ProjectID: "proj_x", Name: "t"}, true},
+		{"library task → generic path", DocumentUpsertRequest{Type: "task", Scope: "library", ProjectID: "proj_pub", Name: "t"}, false},
+		{"library task (mixed case) → generic path", DocumentUpsertRequest{Type: "task", Scope: "Library", ProjectID: "proj_pub", Name: "t"}, false},
+		{"library skill is never a task route", DocumentUpsertRequest{Type: "skill", Scope: "library", ProjectID: "proj_pub", Name: "t"}, false},
+	}
+	for _, c := range cases {
+		if got := routesToCreateTask(c.req); got != c.want {
+			t.Errorf("%s: routesToCreateTask = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

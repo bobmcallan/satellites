@@ -1049,7 +1049,8 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	// Mode 2b: create a new task. Always id-less; tasks are minted with
 	// a fresh tsk_<id>. parent_id is optional (a top-level project object);
 	// when set it must reference a story (epic:project-tasks).
-	if req.Type == document.TypeTask {
+	//
+	if routesToCreateTask(req) {
 		return createTask(ctx, req)
 	}
 
@@ -1237,6 +1238,21 @@ func createStory(ctx context.Context, req DocumentUpsertRequest) (json.RawMessag
 		Document: d,
 		Version:  document.Version{DocumentID: d.ID, Version: 1, Body: req.Body, Status: document.StatusActive, CreatedAt: d.CreatedAt, CreatedBy: callerUserID(ctx)},
 	})
+}
+
+// routesToCreateTask reports whether an id-less type:task upsert should mint a
+// governed PROJECT task (createTask, which forces scope='project' and a fresh
+// tsk_ row) — or fall through to the generic key-addressed path.
+//
+// A task at scope:library is NOT a governed project object: it is an inert
+// distribution artifact on the shared library surface (epic:global-tasks),
+// exactly like a library skill — published once (provenance-stamped), consumed
+// by reference, never engaged or run in the publisher's project. So a
+// library-scoped task takes the generic library path (keyed (project_id, name)
+// with workspace_id NULL), not createTask. Only a project-scoped task is live.
+func routesToCreateTask(req DocumentUpsertRequest) bool {
+	return req.Type == document.TypeTask &&
+		!strings.EqualFold(strings.TrimSpace(req.Scope), string(document.ScopeLibrary))
 }
 
 // createTask is the document_upsert path for {type:"task"} with no id.

@@ -86,21 +86,21 @@ no-op (exit 0). --dryrun and --skip-review apply across the batch.`,
 			case selectors > 1:
 				return fmt.Errorf("publish: <name>, --all, and --changed-since are mutually exclusive")
 			case len(args) == 1:
-				return publishSkill(ctx, out, args[0], *configArg, *userArg, dryRun, skipReview)
+				return publishSkill(ctx, out, args[0], "skills", *configArg, *userArg, dryRun, skipReview)
 			}
 			var (
 				names []string
 				err   error
 			)
 			if all {
-				names, err = allSkillNames(*configArg)
+				names, err = allPublishableNames("skills", *configArg)
 			} else {
-				names, err = changedSkillNames(changedSince, *configArg)
+				names, err = changedPublishableNames(changedSince, "skills", *configArg)
 			}
 			if err != nil {
 				return err
 			}
-			return publishBatch(ctx, out, names, *configArg, *userArg, dryRun, skipReview)
+			return publishBatch(ctx, out, names, "skills", *configArg, *userArg, dryRun, skipReview)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dryrun", false, "Print the identity, version, and provenance that would be published — dispatch nothing")
@@ -114,31 +114,35 @@ no-op (exit 0). --dryrun and --skip-review apply across the batch.`,
 // reporting per-skill outcomes. A skill's failure is recorded and printed but
 // does not stop the batch; any failure makes the batch exit non-zero. An empty
 // set is a clean no-op (exit 0).
-func publishBatch(ctx context.Context, out io.Writer, names []string, configArg, userArg string, dryRun, skipReview bool) error {
+func publishBatch(ctx context.Context, out io.Writer, names []string, kind, configArg, userArg string, dryRun, skipReview bool) error {
+	_, noun, ok := publishableKind(kind)
+	if !ok {
+		return fmt.Errorf("publish: unknown kind %q — expected skills or tasks", kind)
+	}
 	if len(names) == 0 {
-		fmt.Fprintln(out, "no skills to publish")
+		fmt.Fprintf(out, "no %ss to publish\n", noun)
 		return nil
 	}
 	var failures int
 	for _, name := range names {
-		if err := publishSkill(ctx, out, name, configArg, userArg, dryRun, skipReview); err != nil {
+		if err := publishSkill(ctx, out, name, kind, configArg, userArg, dryRun, skipReview); err != nil {
 			fmt.Fprintf(out, "✗ %s: %v\n", name, err)
 			failures++
 		}
 	}
 	if failures > 0 {
-		return fmt.Errorf("publish: %d of %d skill(s) failed", failures, len(names))
+		return fmt.Errorf("publish: %d of %d %s(s) failed", failures, len(names), noun)
 	}
-	fmt.Fprintf(out, "published %d skill(s)\n", len(names))
+	fmt.Fprintf(out, "published %d %s(s)\n", len(names), noun)
 	return nil
 }
 
-// allSkillNames returns every skill base name under the configured skills
-// authoring root (default .satellites/skills/), sorted.
-func allSkillNames(configArg string) ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(resolveSubstrateRoot("skills", configArg), "skills", "*.md"))
+// allPublishableNames returns every base name under the configured authoring
+// root for a kind (default .satellites/<kind>/), sorted.
+func allPublishableNames(kind, configArg string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(resolveSubstrateRoot(kind, configArg), kind, "*.md"))
 	if err != nil {
-		return nil, fmt.Errorf("publish: scan skills: %w", err)
+		return nil, fmt.Errorf("publish: scan %s: %w", kind, err)
 	}
 	names := make([]string, 0, len(matches))
 	for _, m := range matches {
@@ -148,11 +152,12 @@ func allSkillNames(configArg string) ([]string, error) {
 	return names, nil
 }
 
-// changedSkillNames returns the base names of skill files that differ from ref,
-// keeping only files that still exist (a deletion cannot be published). A git
-// failure (e.g. an unknown ref) is an error, distinct from an empty diff.
-func changedSkillNames(ref, configArg string) ([]string, error) {
-	skillsDir := filepath.Join(resolveSubstrateRoot("skills", configArg), "skills")
+// changedPublishableNames returns the base names of a kind's files that differ
+// from ref, keeping only files that still exist (a deletion cannot be
+// published). A git failure (e.g. an unknown ref) is an error, distinct from an
+// empty diff.
+func changedPublishableNames(ref, kind, configArg string) ([]string, error) {
+	skillsDir := filepath.Join(resolveSubstrateRoot(kind, configArg), kind)
 	outBytes, err := exec.Command("git", "diff", "--name-only", ref, "--", skillsDir).Output()
 	if err != nil {
 		return nil, fmt.Errorf("publish: git diff against %q: %w", ref, err)
@@ -200,40 +205,67 @@ func resolvePublishScope(level, scope string) (string, error) {
 	}
 }
 
+// publishableKind maps a publishable substrate kind ("skills" | "tasks") to the
+// document type it carries and a singular noun for messages. A task republishes
+// the skill register's library machinery (epic:global-tasks) — same scope,
+// provenance stamp, and headless dispatch; only the source dir, the expected
+// type, and (for the review/attestation barrier) the behaviour-kind class differ.
+func publishableKind(kind string) (typ, noun string, ok bool) {
+	switch kind {
+	case "skills":
+		return "skill", "skill", true
+	case "tasks":
+		return "task", "task", true
+	default:
+		return "", "", false
+	}
+}
+
 // publishSkill resolves, reviews, stamps, and dispatches one publish, ROUTED by
 // the artifact's declared level (order-4): a global artifact lands on the shared
 // library surface (publisher-stamped), a project artifact stays project-scoped,
-// system is refused.
-func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg string, dryRun, skipReview bool) error {
+// system is refused. The kind ("skills" | "tasks") selects the source dir and the
+// expected type; tasks reuse the same library/provenance/dispatch path as skills
+// (epic:global-tasks) but are NOT a behaviour kind, so they skip the
+// skill-self-contained critique and the review attestation.
+func publishSkill(ctx context.Context, out io.Writer, name, kind, configArg, userArg string, dryRun, skipReview bool) error {
+	wantType, noun, ok := publishableKind(kind)
+	if !ok {
+		return fmt.Errorf("publish: unknown kind %q — expected skills or tasks", kind)
+	}
 	publisher, err := projectIDFromConfig(configArg)
 	if err != nil {
 		return err
 	}
-	root := resolveSubstrateRoot("skills", configArg)
-	path := filepath.Join(root, "skills", name+".md")
+	root := resolveSubstrateRoot(kind, configArg)
+	path := filepath.Join(root, kind, name+".md")
 	if _, err := os.Stat(path); err != nil {
-		nudgeStaleSubstrateDir(out, "skills", root)
-		return fmt.Errorf("publish: no skill at %s — author it under the configured skills/ folder first", path)
+		nudgeStaleSubstrateDir(out, kind, root)
+		return fmt.Errorf("publish: no %s at %s — author it under the configured %s/ folder first", noun, path, kind)
 	}
-	t := classifyDocumentFile(path, "skills", publisher)
+	t := classifyDocumentFile(path, kind, publisher)
 	if strings.TrimSpace(t.Body) == "" {
 		return fmt.Errorf("publish: %s is empty or unparseable", path)
 	}
-	if t.Type != "skill" {
-		return fmt.Errorf("publish: %s declares type %q — only a skill can be published to the library", path, t.Type)
+	if t.Type != wantType {
+		return fmt.Errorf("publish: %s declares type %q — only a %s can be published from %s/", path, t.Type, noun, kind)
 	}
 	if t.Name != name {
 		return fmt.Errorf("publish: %s declares name %q — rename the file or the frontmatter so they agree", path, t.Name)
 	}
 
 	// The same strict review that gates upload (AC2): a drift-prone
-	// reference blocks before any dispatch.
+	// reference blocks before any dispatch. The skill-self-contained critique
+	// applies only to skills (a behaviour kind materialised as a runnable
+	// SKILL.md); a task is plain prose, so it gets only the shared drift check.
 	if !skipReview && !hasReviewExemptTag(t.Tags) {
 		findings := reviewContent(t.Body)
-		findings = append(findings, reviewSkillSelfContained(t.Body)...)
+		if kind == "skills" {
+			findings = append(findings, reviewSkillSelfContained(t.Body)...)
+		}
 		if len(findings) > 0 {
 			fmt.Fprintf(out, "content-review blocked %s — %d drift-prone reference(s); run skill %q for the maintainability critique, or pass --skip-review:\n",
-				path, len(findings), reviewSkillForKind("skills"))
+				path, len(findings), reviewSkillForKind(kind))
 			for _, f := range findings {
 				fmt.Fprintf(out, "  ✗ %s\n", f.String())
 			}
@@ -270,7 +302,7 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	}
 
 	payload := map[string]any{
-		"type":       "skill",
+		"type":       t.Type,
 		"scope":      "library",
 		"project_id": publisher,
 		"name":       name,
@@ -286,11 +318,15 @@ func publishSkill(ctx context.Context, out io.Writer, name, configArg, userArg s
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
-	// The skill was reviewed at upload; bind a review attestation to the stamped
+	// A skill is a behaviour kind: bind a review attestation to the stamped
 	// library body so the behaviour-kind verb gate (sty_e6226180) accepts the
-	// promotion rather than refusing it as an unreviewed write.
-	if req, err = attestReview(req, reviewSkillForKind("skills"), body); err != nil {
-		return fmt.Errorf("publish: %w", err)
+	// promotion rather than refusing it as an unreviewed write. A task is NOT a
+	// behaviour kind (verb.reviewRequiredKind == false), so the gate does not
+	// demand one — publishing it needs no attestation.
+	if t.Type == "skill" {
+		if req, err = attestReview(req, reviewSkillForKind(kind), body); err != nil {
+			return fmt.Errorf("publish: %w", err)
+		}
 	}
 	resp, err := dispatchVerb(ctx, "document_upsert", req, configArg, userArg)
 	if err != nil {

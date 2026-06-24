@@ -30,12 +30,12 @@ func TestAllSkillNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(".satellites", "skills", "notes.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := allSkillNames("")
+	got, err := allPublishableNames("skills", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"alpha", "beta"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("allSkillNames = %v, want %v", got, want)
+		t.Fatalf("allPublishableNames = %v, want %v", got, want)
 	}
 }
 
@@ -74,17 +74,17 @@ func TestChangedSkillNames(t *testing.T) {
 	mustGit("add", "-A")
 	mustGit("commit", "-q", "-m", "change")
 
-	got, err := changedSkillNames(base, "")
+	got, err := changedPublishableNames(base, "skills", "")
 	if err != nil {
-		t.Fatalf("changedSkillNames: %v", err)
+		t.Fatalf("changedPublishableNames: %v", err)
 	}
 	// fresh (added) + stable (modified); todelete excluded (file gone).
 	if want := []string{"fresh", "stable"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("changedSkillNames = %v, want %v", got, want)
+		t.Fatalf("changedPublishableNames = %v, want %v", got, want)
 	}
 
 	// An unknown ref is an error, not an empty no-op.
-	if _, err := changedSkillNames("no-such-ref-xyz", ""); err == nil {
+	if _, err := changedPublishableNames("no-such-ref-xyz", "skills", ""); err == nil {
 		t.Fatal("expected an error for an unknown git ref")
 	}
 }
@@ -92,7 +92,7 @@ func TestChangedSkillNames(t *testing.T) {
 // TestPublishBatch_EmptyIsNoOp: an empty name set is a clean no-op (exit 0).
 func TestPublishBatch_EmptyIsNoOp(t *testing.T) {
 	var buf bytes.Buffer
-	if err := publishBatch(nil, &buf, nil, "", "", false, false); err != nil {
+	if err := publishBatch(nil, &buf, nil, "skills", "", "", false, false); err != nil {
 		t.Fatalf("empty batch should be a no-op, got %v", err)
 	}
 	if got := buf.String(); got == "" {
