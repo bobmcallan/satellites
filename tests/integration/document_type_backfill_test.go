@@ -13,8 +13,10 @@ import (
 	"github.com/bobmcallan/satellites/tests/integration/testbootstrap"
 )
 
-// backfillUpdateSQL mirrors 0046_backfill_document_type_tag.up.sql — the test runs
-// the identical predicate against seeded rows to lock which documents it tags.
+// backfillUpdateSQL mirrors the live type:document backfill predicate — now
+// 0048_rebackfill_document_type_tag_kind.up.sql (sty_5711ab3e), which supersedes
+// 0046/0047 by dropping the kind:* exclusion. The test runs the identical predicate
+// against seeded rows to lock which documents it tags.
 const backfillUpdateSQL = `
 UPDATE documents
 SET tags = array_append(tags, 'type:document')
@@ -23,12 +25,14 @@ WHERE type = 'document'
   AND status = 'active'
   AND NOT EXISTS (
     SELECT 1 FROM unnest(tags) AS t
-    WHERE t LIKE 'type:%' OR t LIKE 'principles:%' OR t LIKE 'kind:%'
+    WHERE t LIKE 'type:%' OR t LIKE 'principles:%'
   )`
 
-// TestDocumentTypeBackfill pins sty_0ca51ef4: the backfill tags plain/uploaded
-// user documents type:document while leaving substrate (principles:*, kind:*) and
-// already-classified (type:*) rows untouched — and never duplicates the tag.
+// TestDocumentTypeBackfill pins sty_0ca51ef4 + sty_5711ab3e: the backfill tags
+// plain/uploaded user documents type:document — including a row that carries only a
+// descriptive kind:* facet (kind:reference IS a project document) — while leaving
+// principle substrate (principles:*) and already-classified (type:*) rows untouched,
+// and never duplicates the tag.
 func TestDocumentTypeBackfill(t *testing.T) {
 	env := testbootstrap.SetUp(t)
 	ctx := context.Background()
@@ -67,9 +71,10 @@ func TestDocumentTypeBackfill(t *testing.T) {
 	}
 
 	plain := seed("uploaded-doc", nil)                                            // → gains type:document
-	principle := seed("a-principle", []string{"principles:project"})              // untouched
-	reference := seed("a-reference", []string{"kind:reference"})                  // untouched
+	principle := seed("a-principle", []string{"principles:project"})              // untouched (substrate)
+	reference := seed("a-reference", []string{"kind:reference"})                  // → gains type:document (sty_5711ab3e)
 	already := seed("agent-output", []string{"type:document", "phase:discovery"}) // unchanged, no dup
+	diagram := seed("a-diagram", []string{"type:diagram"})                        // untouched (explicit type:*)
 
 	if _, err := env.DB.ExecContext(ctx, backfillUpdateSQL); err != nil {
 		t.Fatalf("run backfill: %v", err)
@@ -90,10 +95,13 @@ func TestDocumentTypeBackfill(t *testing.T) {
 	if !sortedEqual(tagsOf(principle), []string{"principles:project"}) {
 		t.Errorf("principle tags = %v, want unchanged", tagsOf(principle))
 	}
-	if !sortedEqual(tagsOf(reference), []string{"kind:reference"}) {
-		t.Errorf("reference tags = %v, want unchanged", tagsOf(reference))
+	if !sortedEqual(tagsOf(reference), []string{"kind:reference", "type:document"}) {
+		t.Errorf("reference tags = %v, want kind:reference + type:document (sty_5711ab3e)", tagsOf(reference))
 	}
 	if !sortedEqual(tagsOf(already), []string{"type:document", "phase:discovery"}) {
 		t.Errorf("already-typed tags = %v, want unchanged (no duplicate)", tagsOf(already))
+	}
+	if !sortedEqual(tagsOf(diagram), []string{"type:diagram"}) {
+		t.Errorf("diagram tags = %v, want unchanged (explicit type:*)", tagsOf(diagram))
 	}
 }

@@ -79,6 +79,17 @@ func TestDocumentUpsertDerivesTypeTag(t *testing.T) {
 	if !slices.Contains(withOther.Tags, "type:document") || !slices.Contains(withOther.Tags, "area:docs") {
 		t.Errorf("upsert with other tags: want both type:document and area:docs, got %v", withOther.Tags)
 	}
+	// (c) a descriptive kind:* facet must NOT suppress the derive (sty_5711ab3e):
+	// a kind:reference document IS a project document and belongs in the panel.
+	withKind := upsert("kind-reference-doc", map[string]any{"body": "# C", "tags": []string{"discovery", "kind:reference"}})
+	if !slices.Contains(withKind.Tags, "type:document") || !slices.Contains(withKind.Tags, "kind:reference") {
+		t.Errorf("upsert with kind:reference: want both type:document and kind:reference, got %v", withKind.Tags)
+	}
+	// (d) an explicit type:* classification is still respected — no type:document stamp.
+	withType := upsert("typed-diagram-doc", map[string]any{"body": "# D", "tags": []string{"type:diagram"}})
+	if slices.Contains(withType.Tags, "type:document") {
+		t.Errorf("upsert with type:diagram: want type:document NOT derived, got %v", withType.Tags)
+	}
 
 	// The panel's list-filter shape (Tags:["type:document"]) must now return both.
 	listReq, _ := json.Marshal(verb.DocumentListRequest{
@@ -97,11 +108,14 @@ func TestDocumentUpsertDerivesTypeTag(t *testing.T) {
 	for _, d := range list.Items {
 		got[d.Name] = true
 	}
-	if !got["no-tags-doc"] || !got["other-tags-doc"] {
+	if !got["no-tags-doc"] || !got["other-tags-doc"] || !got["kind-reference-doc"] {
 		names := make([]string, 0, len(list.Items))
 		for _, d := range list.Items {
 			names = append(names, d.Name)
 		}
 		t.Fatalf("panel filter Tags:[type:document] missing upsert-created docs; got %v", names)
+	}
+	if got["typed-diagram-doc"] {
+		t.Errorf("panel filter Tags:[type:document] unexpectedly returned the type:diagram doc")
 	}
 }

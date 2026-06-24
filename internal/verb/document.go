@@ -1137,13 +1137,15 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	if req.Tags != nil {
 		tagSet = *req.Tags
 	}
-	// Derive type:document only for a PLAIN document — one not already classified
-	// (type:*) and not substrate (principles:*, kind:*). This mirrors the
-	// 0046/0047 backfill predicate exactly, so principles and references (also
-	// type=document rows) are NOT stamped type:document and never surface in the
-	// documents panel; an explicit type:* classification (e.g. a task output's
-	// type:diagram) is likewise respected.
-	if doc.Type == string(document.TypeDocument) && !hasClassificationTag(tagSet) {
+	// Derive type:document for a plain document — one not already explicitly
+	// classified (type:*) and not principle substrate (principles:*). A type=document
+	// row IS a project document and belongs in the documents panel even when it also
+	// carries a descriptive kind:* tag (e.g. kind:reference): kind:* no longer
+	// suppresses the stamp (sty_5711ab3e — previously it did, silently hiding
+	// naturally-tagged reference documents). Only an explicit type:* reclassification
+	// (e.g. a task output's type:diagram) or principles:* substrate is respected. This
+	// mirrors the 0048 backfill predicate exactly.
+	if doc.Type == string(document.TypeDocument) && !hasExplicitClassification(tagSet) {
 		tagSet = kvtag.Set(tagSet, "type", string(document.TypeDocument))
 		applyTags = true
 	}
@@ -1166,14 +1168,16 @@ func invokeDocumentUpsert(ctx context.Context, raw json.RawMessage) (json.RawMes
 	return json.Marshal(DocumentUpsertResponse{Document: doc, Version: v})
 }
 
-// hasClassificationTag reports whether tags already carry a classification or
-// substrate marker — a type:*, principles:*, or kind:* tag. It mirrors the
-// 0046/0047 backfill predicate: such rows are already classified or are
-// substrate (principles, references), so the upsert path must NOT stamp
-// type:document onto them (sty_5ceec3f1).
-func hasClassificationTag(tags []string) bool {
+// hasExplicitClassification reports whether tags already carry an explicit
+// classification or principle-substrate marker — a type:* or principles:* tag.
+// Such rows are either reclassified (an explicit type:* the author chose) or
+// principle substrate, so the upsert path must NOT stamp type:document onto them.
+// It mirrors the 0048 backfill predicate. Note kind:* is NOT here (sty_5711ab3e):
+// a kind:* tag (e.g. kind:reference) is a descriptive facet on an ordinary
+// document, not a reason to hide it from the documents panel.
+func hasExplicitClassification(tags []string) bool {
 	for _, t := range tags {
-		if strings.HasPrefix(t, "type:") || strings.HasPrefix(t, "principles:") || strings.HasPrefix(t, "kind:") {
+		if strings.HasPrefix(t, "type:") || strings.HasPrefix(t, "principles:") {
 			return true
 		}
 	}
