@@ -46,10 +46,15 @@ type projectDetailData struct {
 	// template then renders no codegraph card (graceful absence). codegraph-init.js
 	// turns the embedded language-codegraph block into an interactive graph.
 	CodegraphHTML template.HTML
-	StoryShown    int // rows rendered on this page = len(Stories)
-	StoryFiltered int // stories matching the active filter across all pages (indicator numerator)
-	StoryTotal    int // project-wide all-status total (indicator denominator)
-	Paginator     paginatorData
+	// CodegraphTable is the package table derived server-side from the same canonical
+	// codegraph JSON block (epic:codegraph-portable, story 3) — the no-JS-readable view
+	// peer to the client-side interactive diagram. Empty when the body carries no
+	// parseable block.
+	CodegraphTable template.HTML
+	StoryShown     int // rows rendered on this page = len(Stories)
+	StoryFiltered  int // stories matching the active filter across all pages (indicator numerator)
+	StoryTotal     int // project-wide all-status total (indicator denominator)
+	Paginator      paginatorData
 	// Engagement-age thresholds (seconds) for the processing dot — rendered
 	// as container data attributes; the client computes colors (sty_25e2e8ac).
 	EngOrangeSecs int
@@ -174,7 +179,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 		// Codegraph card (epic:codegraph-usability B2) — best-effort, peer to the
 		// documents panel: surfaces the project's published type:codegraph document so
 		// codegraph-init.js can render it interactively. Absent → no card.
-		codegraphHTML, _ := gatherCodegraph(ctx, projectID)
+		codegraphHTML, codegraphTable, _ := gatherCodegraph(ctx, projectID)
 
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
@@ -191,29 +196,30 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 				ID: pj.ID, Name: pj.Name, Description: pj.Description, Type: pj.Type,
 				GitURL: pj.GitURLCanonical, Status: pj.Status, CreatedAt: pj.CreatedAt,
 			},
-			UserEmail:     userEmail,
-			UserName:      userName,
-			UserAvatar:    userAvatar,
-			ActiveNav:     "projects",
-			Stories:       stories,
-			Tasks:         tasks,
-			TaskFiltered:  taskFiltered,
-			TaskTotal:     taskTotal,
-			Documents:     docs,
-			DocFiltered:   docFiltered,
-			DocTotal:      docTotal,
-			DocQuery:      strings.TrimSpace(r.URL.Query().Get("docs_q")),
-			CodegraphHTML: codegraphHTML,
-			StoryShown:    len(stories),
-			StoryFiltered: paginator.Filtered,
-			StoryTotal:    paginator.Total,
-			Paginator:     paginator,
-			EngOrangeSecs: readEngagementThreshold(ctx, "engagement.orange_after_secs", engOrangeSecsFallback),
-			EngRedSecs:    readEngagementThreshold(ctx, "engagement.red_after_secs", engRedSecsFallback),
-			DevMode:       cfg.DevMode,
-			FooterName:    footerName,
-			FooterEmail:   footerEmail,
-			Version:       versionString(),
+			UserEmail:      userEmail,
+			UserName:       userName,
+			UserAvatar:     userAvatar,
+			ActiveNav:      "projects",
+			Stories:        stories,
+			Tasks:          tasks,
+			TaskFiltered:   taskFiltered,
+			TaskTotal:      taskTotal,
+			Documents:      docs,
+			DocFiltered:    docFiltered,
+			DocTotal:       docTotal,
+			DocQuery:       strings.TrimSpace(r.URL.Query().Get("docs_q")),
+			CodegraphHTML:  codegraphHTML,
+			CodegraphTable: codegraphTable,
+			StoryShown:     len(stories),
+			StoryFiltered:  paginator.Filtered,
+			StoryTotal:     paginator.Total,
+			Paginator:      paginator,
+			EngOrangeSecs:  readEngagementThreshold(ctx, "engagement.orange_after_secs", engOrangeSecsFallback),
+			EngRedSecs:     readEngagementThreshold(ctx, "engagement.red_after_secs", engRedSecsFallback),
+			DevMode:        cfg.DevMode,
+			FooterName:     footerName,
+			FooterEmail:    footerEmail,
+			Version:        versionString(),
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

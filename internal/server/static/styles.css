@@ -1454,10 +1454,11 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   to { transform: rotate(360deg); }
 }
 
-/* Codegraph viewer (epic:codegraph-usability B2). codegraph-init.js replaces the
-   raw `language-codegraph` <pre> with a `.codegraph` card holding a toolbar + an
-   interactive cytoscape canvas. The raw <pre> is hidden so the large JSON never
-   flashes before JS runs; no-JS users still get the mermaid fallback the body carries. */
+/* Codegraph viewer (epic:codegraph-usability B2, epic:codegraph-portable story 3).
+   codegraph-init.js replaces the raw `language-codegraph` <pre> with a `.codegraph` card
+   holding a toolbar + an interactive cytoscape canvas. The raw <pre> is hidden so the
+   large canonical JSON never flashes before JS runs; no-JS users get the server-rendered
+   package table (.codegraph-packages) derived from that same block. */
 pre:has(> code.language-codegraph) { display: none; }
 .codegraph {
   border: 1px solid var(--border, #2a3346);
@@ -1484,3 +1485,15 @@ pre:has(> code.language-codegraph) { display: none; }
 }
 .codegraph-meta { color: var(--muted, #7b89a3); font-size: 0.8rem; }
 .codegraph-canvas { width: 100%; height: 520px; }
+/* Package table — the server-rendered view derived from the same canonical JSON block,
+   peer to the interactive diagram (story 3). */
+.codegraph-packages-wrap { margin-top: 0.75rem; overflow-x: auto; }
+.codegraph-packages { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.codegraph-packages th, .codegraph-packages td {
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border, #2a3346);
+  text-align: left;
+}
+.codegraph-packages th { color: var(--muted, #7b89a3); font-weight: 600; }
+.codegraph-packages th.num, .codegraph-packages td.num { text-align: right; }
+.codegraph-packages code { font-size: 0.82rem; }

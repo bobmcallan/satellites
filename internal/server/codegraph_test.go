@@ -55,6 +55,59 @@ func TestProjectDetailCodegraphCardRenders(t *testing.T) {
 	}
 }
 
+// TestCodegraphPackageTable verifies the package table is derived server-side from the
+// canonical `codegraph` JSON block (epic:codegraph-portable, story 3) — the single source
+// the interactive diagram also reads. Short import paths, the per-node columns, and HTML
+// escaping are all asserted; a body with no/!parseable block yields no table.
+func TestCodegraphPackageTable(t *testing.T) {
+	body := "# Codegraph — m\n\n## Graph data\n\n```codegraph\n" +
+		`{"module":"m","nodes":[` +
+		`{"import_path":"m","package":"main","files":2,"public_symbols":3,"external_deps":1},` +
+		`{"import_path":"m/internal/cli","package":"cli","files":5,"public_symbols":7,"external_deps":4}` +
+		`],"edges":[{"from":"m/internal/cli","to":"m"}]}` +
+		"\n```\n"
+	tbl, ok := codegraphPackageTable(body)
+	if !ok {
+		t.Fatalf("expected a table from a valid codegraph block")
+	}
+	html := string(tbl)
+	for _, want := range []string{
+		`class="codegraph-packages"`,
+		`<td><code>.</code></td>`,            // module root short-name
+		`<td><code>internal/cli</code></td>`, // module prefix trimmed
+		`<td class="num">7</td>`,             // public_symbols of the cli node
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("table missing %q:\n%s", want, html)
+		}
+	}
+	// A body with no codegraph block yields no table (graceful absence).
+	if _, ok := codegraphPackageTable("# just a heading, no block"); ok {
+		t.Errorf("expected no table when the body carries no codegraph block")
+	}
+	// A block that does not parse as JSON yields no table.
+	if _, ok := codegraphPackageTable("```codegraph\nnot json\n```"); ok {
+		t.Errorf("expected no table when the codegraph block is not valid JSON")
+	}
+}
+
+// TestProjectDetailCodegraphTableRenders asserts the derived package table is rendered in
+// the codegraph card when CodegraphTable is set, and absent otherwise — the no-JS-readable
+// peer to the client-side diagram (story 3).
+func TestProjectDetailCodegraphTableRenders(t *testing.T) {
+	withTable := renderProjectDetail(t, projectDetailData{
+		Project:        projectRow{ID: "proj_x", Name: "x"},
+		CodegraphHTML:  renderMarkdown("```codegraph\n{\"module\":\"m\",\"nodes\":[],\"edges\":[]}\n```"),
+		CodegraphTable: template.HTML(`<table class="codegraph-packages"><tbody></tbody></table>`),
+	})
+	if !strings.Contains(withTable, `data-field="codegraph-packages-wrap"`) {
+		t.Errorf("codegraph card missing the derived package-table wrap when CodegraphTable is set")
+	}
+	if !strings.Contains(withTable, `class="codegraph-packages"`) {
+		t.Errorf("codegraph card did not render the derived package table")
+	}
+}
+
 // TestRenderMarkdownCodegraphFence verifies a ```codegraph fence survives the safe
 // goldmark renderer as a class="language-codegraph" code block — the hook
 // codegraph-init.js keys off to render the interactive graph (sty_a0da6bf9).

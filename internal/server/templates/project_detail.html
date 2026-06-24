@@ -199,15 +199,20 @@
     </div>
   </section>
 
-  {{/* Codegraph card (epic:codegraph-usability B2) — renders the project's published
-       type:codegraph document; codegraph-init.js turns the embedded
-       language-codegraph JSON block into an interactive graph. Rendered ONLY when a
-       codegraph document exists, so a project without one shows no card (graceful
-       absence). */}}
+  {{/* Codegraph card (epic:codegraph-usability B2, epic:codegraph-portable story 3) —
+       renders the project's published type:codegraph document. The document carries ONE
+       canonical representation (the language-codegraph JSON block); both views derive
+       from it: codegraph-init.js renders the interactive diagram client-side (the raw
+       JSON pre is CSS-hidden), and CodegraphTable is the package table derived
+       server-side from the same block (the no-JS-readable peer). Rendered ONLY when a
+       codegraph document exists (graceful absence). */}}
   {{if .CodegraphHTML}}
   <section class="panel" data-section="project-codegraph">
     <h2>codegraph</h2>
     <div class="changelog-content" data-field="codegraph-body">{{.CodegraphHTML}}</div>
+    {{if .CodegraphTable}}
+    <div class="codegraph-packages-wrap" data-field="codegraph-packages-wrap">{{.CodegraphTable}}</div>
+    {{end}}
   </section>
   {{end}}
 
