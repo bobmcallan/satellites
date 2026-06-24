@@ -1,91 +1,197 @@
-// `satellites task publish` — promote one .satellites/tasks/ task into the
+// `satellites task publish` — copy a developed/tested PROJECT task into the
 // shared library under this repo's publisher namespace (epic:global-tasks).
 //
-// A global task reuses the skill register's library machinery verbatim: the same
-// scope:library surface, the same provenance stamp (publisher + repo + commit),
-// and the same headless dispatch (dispatchVerb authenticates with the
-// credential-store API key, nothing prompts) — so a CI step can publish on merge.
-// The only differences from `skill publish` are the source dir (.satellites/tasks/)
-// and that a task is NOT a behaviour kind, so it carries no review attestation.
-// See task-register-design (doc_e191fa7f).
+// The publisher model for tasks is deliberately lighter than for skills: a task
+// is authored and tested as an ordinary project task (a tsk_ row), then this
+// verb copies a provenance-stamped version of that row into scope:library. No
+// separate publisher repo, no .satellites/tasks/ file, no CI secret to stand up —
+// the publisher is simply the project that owns the task. It reuses the library
+// provenance stamp and the scope:library routing guard (routesToCreateTask), and
+// is headless (dispatchVerb), so it still runs from CI or a local shell. A
+// consumer materialises it back via `task sync` (the story-2 consume path).
 
 package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
 
-// newTaskPublishCmd builds the `task publish <name>` command, the task analog of
-// `skill publish`. It shares publishSkill's core with kind="tasks".
+// newTaskPublishCmd builds `task publish <task-id|name>` — copy a project task
+// into the library.
 func newTaskPublishCmd(configArg, userArg *string) *cobra.Command {
-	var (
-		dryRun       bool
-		skipReview   bool
-		all          bool
-		changedSince string
-	)
+	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "publish [name]",
-		Short: "Promote .satellites/tasks/ task(s) into the shared library under this project's publisher namespace",
-		Long: `publish promotes a task (or a batch) into the shared library.
+		Use:   "publish <task-id|name>",
+		Short: "Copy a project task into the shared library under this project's publisher namespace",
+		Long: `publish copies a developed/tested PROJECT task into the shared library.
 
-  publish <name>                 one named task
-  publish --all                  every task under .satellites/tasks/
-  publish --changed-since <ref>  only tasks whose files differ from <ref>
+  publish <tsk_id>     publish the task with that id
+  publish <name>       publish the project task with that exact title
 
-A task reuses the skill register's library/provenance/headless-dispatch path; it
-declares level: global in frontmatter to land on scope:library. A consumer opts
-into the publisher via global_publishers and materialises it as a project task on
-sync. A batch reuses the single-publish path per task, prints a per-task outcome
-line, and exits non-zero if any task fails. --dryrun and --skip-review apply
-across the batch.`,
-		Args: cobra.MaximumNArgs(1),
+The task is resolved in this repo's project (satellites.toml), provenance-stamped
+(publisher + repo + commit), and upserted at scope:library under the publisher
+namespace. Re-publishing the same task updates the library copy (idempotent by
+name). A consumer opts in via global_publishers and materialises it with
+` + "`task sync`" + `.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out := cmd.OutOrStdout()
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			selectors := 0
-			if len(args) == 1 {
-				selectors++
-			}
-			if all {
-				selectors++
-			}
-			if strings.TrimSpace(changedSince) != "" {
-				selectors++
-			}
-			switch {
-			case selectors == 0:
-				return fmt.Errorf("publish: provide a task <name>, --all, or --changed-since <ref>")
-			case selectors > 1:
-				return fmt.Errorf("publish: <name>, --all, and --changed-since are mutually exclusive")
-			case len(args) == 1:
-				return publishSkill(ctx, out, args[0], "tasks", *configArg, *userArg, dryRun, skipReview)
-			}
-			var (
-				names []string
-				err   error
-			)
-			if all {
-				names, err = allPublishableNames("tasks", *configArg)
-			} else {
-				names, err = changedPublishableNames(changedSince, "tasks", *configArg)
-			}
+			publisher, err := projectIDFromConfig(*configArg)
 			if err != nil {
 				return err
 			}
-			return publishBatch(ctx, out, names, "tasks", *configArg, *userArg, dryRun, skipReview)
+			dispatch := func(ctx context.Context, name string, req json.RawMessage) (json.RawMessage, error) {
+				return dispatchVerb(ctx, name, req, *configArg, *userArg)
+			}
+			return publishProjectTask(ctx, cmd.OutOrStdout(), dispatch, args[0], publisher, dryRun)
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dryrun", false, "Print the identity, version, and provenance that would be published — dispatch nothing")
-	cmd.Flags().BoolVar(&skipReview, "skip-review", false, "Skip the strict content review (drift-prone reference check)")
-	cmd.Flags().BoolVar(&all, "all", false, "Publish every task under .satellites/tasks/")
-	cmd.Flags().StringVar(&changedSince, "changed-since", "", "Publish only tasks whose files differ from the given git ref")
+	cmd.Flags().BoolVar(&dryRun, "dryrun", false, "Print the identity and provenance that would be published — dispatch nothing")
 	return cmd
+}
+
+// publishProjectTask resolves a project task by id or name, stamps library
+// provenance into a copy of its body, and upserts it at scope:library under the
+// publisher namespace. The dispatch seam makes the core unit-testable.
+func publishProjectTask(ctx context.Context, out io.Writer, dispatch verbDispatch, ref, publisher string, dryRun bool) error {
+	wantType, noun, _ := publishableKind("tasks")
+	name, body, tags, err := resolveProjectTask(ctx, dispatch, ref, publisher, wantType)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("publish: %s %q has an empty body — nothing to publish", noun, name)
+	}
+
+	prov := libraryProvenance{
+		Publisher: publisher,
+		Repo:      gitOutput("remote", "get-url", "origin"),
+		Commit:    gitOutput("rev-parse", "HEAD"),
+	}
+	stamp, err := renderLibraryStamp(prov)
+	if err != nil {
+		return fmt.Errorf("publish: render provenance: %w", err)
+	}
+	libBody := injectLibraryStamp(body, stamp)
+	// Publishing an ORIGINAL: drop any consumer forked-from stamp so the library
+	// copy is not marked as itself consumed-from-elsewhere.
+	libTags := dropForkedFrom(tags)
+
+	if dryRun {
+		fmt.Fprintf(out, "[dryrun] would publish %s/%s\n", publisher, name)
+		fmt.Fprintf(out, "[dryrun]   provenance: %s\n", stamp)
+		fmt.Fprintln(out, "[dryrun] nothing dispatched")
+		return nil
+	}
+
+	payload := map[string]any{
+		"type":       wantType,
+		"scope":      "library",
+		"project_id": publisher,
+		"name":       name,
+		"body":       libBody,
+	}
+	if len(libTags) > 0 {
+		payload["tags"] = libTags
+	}
+	req, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("publish: %w", err)
+	}
+	resp, err := dispatch(ctx, "document_upsert", req)
+	if err != nil {
+		return fmt.Errorf("publish %s: %w", name, err)
+	}
+	fmt.Fprintf(out, "%s → library/%s/%s (%s)\n", name, publisher, name, summariseUploadResp(resp))
+	return nil
+}
+
+// resolveProjectTask reads a project task by id (tsk_…) or exact name in the
+// publisher project, returning its name, body, and tags. A name that matches no
+// task — or more than one — is an error (publish needs an unambiguous target).
+func resolveProjectTask(ctx context.Context, dispatch verbDispatch, ref, publisher, wantType string) (name, body string, tags []string, err error) {
+	id := strings.TrimSpace(ref)
+	if !strings.HasPrefix(id, "tsk_") {
+		id, err = projectTaskIDByName(ctx, dispatch, ref, publisher)
+		if err != nil {
+			return "", "", nil, err
+		}
+	}
+	getReq, err := json.Marshal(verb.DocumentGetRequest{ID: id})
+	if err != nil {
+		return "", "", nil, err
+	}
+	raw, err := dispatch(ctx, "document_get", getReq)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("publish: resolve %s: %w", id, err)
+	}
+	var resp verb.DocumentGetResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", "", nil, fmt.Errorf("publish: decode %s: %w", id, err)
+	}
+	if resp.Document.Type != wantType {
+		return "", "", nil, fmt.Errorf("publish: %s is type=%q, not a task", id, resp.Document.Type)
+	}
+	body = resp.RawBody
+	if body == "" && len(resp.Versions) > 0 {
+		body = resp.Versions[len(resp.Versions)-1].Body
+	}
+	return resp.Document.Name, body, resp.Document.Tags, nil
+}
+
+// projectTaskIDByName finds the single project task whose title equals ref.
+func projectTaskIDByName(ctx context.Context, dispatch verbDispatch, ref, publisher string) (string, error) {
+	listReq, err := json.Marshal(docListRequest{Type: taskType, ProjectID: publisher, Limit: 500})
+	if err != nil {
+		return "", err
+	}
+	raw, err := dispatch(ctx, "document_list", listReq)
+	if err != nil {
+		return "", fmt.Errorf("publish: list project tasks: %w", err)
+	}
+	var listed struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		return "", fmt.Errorf("publish: decode task list: %w", err)
+	}
+	var matches []string
+	for _, it := range listed.Items {
+		if it.Name == ref {
+			matches = append(matches, it.ID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("publish: no project task titled %q (pass a tsk_ id to disambiguate)", ref)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("publish: %d project tasks are titled %q — pass a tsk_ id instead", len(matches), ref)
+	}
+}
+
+// dropForkedFrom returns tags with any forked-from:<…> stamp removed.
+func dropForkedFrom(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if strings.HasPrefix(strings.TrimSpace(t), forkedFromTagPrefix) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
