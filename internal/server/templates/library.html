@@ -25,9 +25,9 @@
 <main data-page="library">
   <section class="panel" data-section="library">
     <div class="panel-header">
-      <h2>skill library</h2>
+      <h2>library</h2>
     </div>
-    <p class="muted">Global skills published to the <code>library</code> scope and adoptable across workspaces. Browse by kind.</p>
+    <p class="muted">Global skills and tasks published to the <code>library</code> scope and adoptable across workspaces. Browse by kind (e.g. <code>task</code>, <code>skill</code>).</p>
 
     <div class="library-filter" data-field="library-filter">
       <a href="/library" class="btn {{if .ActiveKind}}secondary{{else}}primary{{end}}" data-kind-filter="all">ALL</a>
@@ -58,7 +58,7 @@
       </tbody>
     </table>
     {{else}}
-    <p class="empty" data-field="library-empty">No library skills{{if .ActiveKind}} of kind <code>{{.ActiveKind}}</code>{{end}}. Publish one with <code>satellites skill publish</code>.</p>
+    <p class="empty" data-field="library-empty">No library artifacts{{if .ActiveKind}} of kind <code>{{.ActiveKind}}</code>{{end}}. Publish one with <code>satellites skill publish</code> or <code>satellites task publish</code>.</p>
     {{end}}
   </section>
 </main>
