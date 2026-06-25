@@ -85,20 +85,21 @@ func (d ActualWorkflowDoc) YAML() (string, error) {
 	return string(b), nil
 }
 
-// statusGlyph maps a transition's actual status to a compact label for the
-// mermaid edge.
-func statusGlyph(status string) string {
+// statusWord maps a transition's actual status to a compact ASCII edge label.
+// ASCII-only and glyph-free so mermaid 11.x parses it reliably (sty_6630023e):
+// the earlier glyph labels (✓ → ✗ … ·) tripped "Syntax error in text".
+func statusWord(status string) string {
 	switch status {
 	case StatusAccepted:
-		return "✓ accepted"
+		return "accepted"
 	case StatusFired:
-		return "→ fired"
+		return "fired"
 	case StatusRejected:
-		return "✗ rejected"
+		return "rejected"
 	case StatusPending:
-		return "… pending"
+		return "pending"
 	default:
-		return "· not reached"
+		return "not reached"
 	}
 }
 
@@ -107,17 +108,47 @@ func mermaidNodeID(state string) string {
 	return strings.NewReplacer("-", "_", " ", "_", ":", "_").Replace(state)
 }
 
-// MermaidActualWorkflow renders the traversal as a mermaid flowchart. Each
-// declared edge becomes an arrow labelled with its gate and actual status; a
-// reject loop (a fail edge back to an earlier state that fired) reads as a
-// distinct dotted arrow. The current state is marked. Reject counts are shown
-// when non-zero so a challenged-and-reprocessed story visibly loops.
+// mermaidLabel makes a string safe inside a quoted mermaid node/edge label —
+// strips the double-quote and pipe that would break the `["..."]` / `|"..."|`
+// delimiters, and drops non-ASCII glyphs that the parser rejects.
+func mermaidLabel(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '|':
+			b.WriteByte(' ')
+		case r > 126: // drop non-ASCII (glyphs like ◀ ✓ … ·)
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// MermaidActualWorkflow renders the traversal as a left-to-right mermaid
+// flowchart of the ACTUAL JOURNEY (sty_6630023e). Only edges that were reached —
+// accepted, fired, rejected (the loops), and the single current pending edge —
+// are drawn; "not reached" edges (cancel paths, unentered fail loops) are
+// dropped, so the diagram reads as a clean pipeline and the dense-graph dagre
+// layout error ("could not find a suitable point") does not occur. A reject loop
+// reads as a dotted arrow; the current state is marked; reject counts show when
+// non-zero so a challenged-and-reprocessed story visibly loops.
 func MermaidActualWorkflow(pt ProcessTrace) string {
 	var b strings.Builder
-	b.WriteString("flowchart TD\n")
+	b.WriteString("flowchart LR\n")
 
-	// Collect the states actually present on the declared edges, in a stable
-	// order (first appearance), so the node set matches the rendered edges.
+	// Keep only the edges that are part of the actual journey, in declared order.
+	var edges []TransitionTrace
+	for _, tr := range pt.Transitions {
+		if tr.Status == StatusNotReached {
+			continue
+		}
+		edges = append(edges, tr)
+	}
+
+	// Collect the states on the kept edges (plus the current state), in stable
+	// first-appearance order, so the node set matches the rendered edges.
 	seen := map[string]bool{}
 	var states []string
 	addState := func(s string) {
@@ -126,31 +157,33 @@ func MermaidActualWorkflow(pt ProcessTrace) string {
 			states = append(states, s)
 		}
 	}
-	for _, tr := range pt.Transitions {
+	for _, tr := range edges {
 		addState(tr.From)
 		addState(tr.To)
 	}
+	addState(pt.CurrentStatus)
+
 	for _, s := range states {
 		label := s
 		if s == pt.CurrentStatus {
-			label = s + " ◀ current"
+			label = s + " (current)"
 		}
-		fmt.Fprintf(&b, "  %s[\"%s\"]\n", mermaidNodeID(s), label)
+		fmt.Fprintf(&b, "  %s[\"%s\"]\n", mermaidNodeID(s), mermaidLabel(label))
 	}
 
-	for _, tr := range pt.Transitions {
-		lbl := statusGlyph(tr.Status)
+	for _, tr := range edges {
+		lbl := statusWord(tr.Status)
 		if tr.ReviewerSkill != "" {
-			lbl = shortGate(tr.ReviewerSkill) + " · " + lbl
+			lbl = shortGate(tr.ReviewerSkill) + " " + lbl
 		}
 		if tr.RejectCount > 0 {
-			lbl = fmt.Sprintf("%s ×%d", lbl, tr.RejectCount)
+			lbl = fmt.Sprintf("%s x%d", lbl, tr.RejectCount)
 		}
 		arrow := "-->"
-		if tr.Status == StatusRejected || (tr.Status == StatusNotReached) {
-			arrow = "-.->" // a not-yet/failed edge reads dotted
+		if tr.Status == StatusRejected || tr.Status == StatusPending {
+			arrow = "-.->" // a failed or not-yet-fired edge reads dotted
 		}
-		fmt.Fprintf(&b, "  %s %s|\"%s\"| %s\n", mermaidNodeID(tr.From), arrow, lbl, mermaidNodeID(tr.To))
+		fmt.Fprintf(&b, "  %s %s|\"%s\"| %s\n", mermaidNodeID(tr.From), arrow, mermaidLabel(lbl), mermaidNodeID(tr.To))
 	}
 	return b.String()
 }

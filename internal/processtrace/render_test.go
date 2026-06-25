@@ -46,12 +46,20 @@ func TestActualWorkflow_YAMLAndMermaid(t *testing.T) {
 	}
 
 	m := MermaidActualWorkflow(pt)
-	if !strings.HasPrefix(m, "flowchart TD") {
+	if !strings.HasPrefix(m, "flowchart LR") {
 		t.Fatalf("mermaid prefix:\n%s", m)
 	}
-	for _, want := range []string{`done["done ◀ current"]`, "story-done · ✓ accepted ×1", "backlog"} {
+	// ASCII-safe labels (sty_6630023e): no glyphs, LR, "(current)" marker, "xN"
+	// reject count; the actual journey (accepted edge) is drawn.
+	for _, want := range []string{`done["done (current)"]`, "story-done accepted x1", "backlog"} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("mermaid missing %q:\n%s", want, m)
+		}
+	}
+	// No glyphs or quoted-label-breaking characters survive.
+	for _, banned := range []string{"◀", "✓", "✗", "…", "·", "×"} {
+		if strings.Contains(m, banned) {
+			t.Fatalf("mermaid must be ASCII-safe, found %q:\n%s", banned, m)
 		}
 	}
 }
