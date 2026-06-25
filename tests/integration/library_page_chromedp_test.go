@@ -123,4 +123,31 @@ func TestLibraryPage_Chromedp(t *testing.T) {
 	if count(`[data-kind-filter]`) != 0 {
 		t.Errorf("kind-filter chips still rendered on the tasks-only library page")
 	}
+
+	// sty_def7ecca AC1/AC2: the row leads with its publication id and carries the
+	// publisher as a tag chip (not a column).
+	if count(`[data-field="task-row"] .task-id`) != 1 {
+		t.Errorf("library row missing its ID column")
+	}
+	if count(`[data-field="task-tags"] [data-tag^="publisher:"]`) == 0 {
+		t.Errorf("publisher tag chip not rendered on the row")
+	}
+
+	// sty_def7ecca AC3: the server-side search filters by description free text.
+	if err := chromedp.Run(bctx,
+		chromedp.Navigate(env.ServerURL+"/library?library_q=codegraph"),
+		chromedp.WaitVisible(`[data-field="library-table"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("search by description: %v", err)
+	}
+	if n := count(`[data-field="task-row"]`); n != 1 {
+		t.Errorf("description search expected 1 row, got %d", n)
+	}
+	// A non-matching query yields the empty state, not the table.
+	if err := chromedp.Run(bctx,
+		chromedp.Navigate(env.ServerURL+"/library?library_q=zzzznomatch"),
+		chromedp.WaitVisible(`[data-field="library-empty"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("non-matching search should show the empty state: %v", err)
+	}
 }

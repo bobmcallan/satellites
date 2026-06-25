@@ -28,27 +28,39 @@
     </div>
     <p class="muted">Global <code>task</code>s published to the <code>library</code> scope and adoptable across workspaces. Each is the published copy of a project task; adopt one with <code>satellites task copy</code>.</p>
 
+    {{/* Server-side search (sty_def7ecca), mirroring the stories/docs panels:
+         library_q free text matches the description (and name/id/tags), and
+         tags:<v> tokens filter by tag. Submits on Enter via the GET form. */}}
+    <form method="get" action="/library" class="panel-search" data-field="library-search">
+      <input type="search" name="library_q" value="{{.Query}}" placeholder="search description, or tags:publisher:&lt;id&gt;…"
+             data-field="library-search-input" autocomplete="off">
+    </form>
+
     {{if .Tasks}}
     <table class="panel-table" data-field="library-table">
       <thead>
         <tr>
+          <th>ID</th>
           <th>NAME</th>
           <th>DESCRIPTION</th>
-          <th>PUBLISHER</th>
+          <th>TAGS</th>
         </tr>
       </thead>
       <tbody>
         {{range .Tasks}}
-        <tr data-field="task-row" data-task-name="{{.Name}}">
+        <tr data-field="task-row" data-task-name="{{.Name}}" data-task-id="{{.ID}}">
+          <td class="task-id"><code>{{.ID}}</code></td>
           <td class="task-name"><code>{{.Name}}</code></td>
           <td class="task-desc muted">{{.Description}}</td>
-          <td class="task-publisher"><code>{{.Publisher}}</code></td>
+          <td class="task-tags" data-field="task-tags">
+            {{range .Tags}}<a class="tag-chip" data-tag="{{.}}" href="/library?library_q=tags:{{.}}">{{.}}</a> {{end}}
+          </td>
         </tr>
         {{end}}
       </tbody>
     </table>
     {{else}}
-    <p class="empty" data-field="library-empty">No library tasks yet. Publish one with <code>satellites task publish</code>.</p>
+    <p class="empty" data-field="library-empty">{{if .Query}}No library tasks match <code>{{.Query}}</code>.{{else}}No library tasks yet. Publish one with <code>satellites task publish</code>.{{end}}</p>
     {{end}}
   </section>
 </main>

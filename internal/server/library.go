@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
@@ -23,6 +24,7 @@ type libraryData struct {
 	UserAvatar  string
 	ActiveNav   string
 	Tasks       []libraryTaskRow
+	Query       string // the active library_q (rehydrates the search box on reload)
 	DevMode     bool
 	FooterName  string
 	FooterEmail string
@@ -30,9 +32,13 @@ type libraryData struct {
 }
 
 type libraryTaskRow struct {
+	ID          string
 	Name        string
 	Description string
-	Publisher   string
+	// Tags carries the row's tags PLUS a synthesised publisher:<project_id> tag
+	// (sty_def7ecca): the publisher rides as a default tag rather than a dedicated
+	// column, and the tag chips drive the filter the same way the stories panel does.
+	Tags []string
 }
 
 // libraryHandler renders /library — the global library browse page
@@ -49,12 +55,14 @@ func libraryHandler(cfg Config) http.HandlerFunc {
 		}
 		ctx := withSessionUser(r.Context(), cfg, userID)
 
+		query := strings.TrimSpace(r.URL.Query().Get("library_q"))
 		tasks, err := loadLibraryTasks(ctx)
 		if err != nil {
 			arbor.ErrorCtx(ctx, "library: load tasks", "user_id", userID, "err", err)
 			http.Error(w, "could not list library tasks", http.StatusInternalServerError)
 			return
 		}
+		tasks = filterLibraryTasks(tasks, parseStoryQuery(query))
 
 		var userEmail, userName, userAvatar string
 		if cfg.Store != nil && cfg.Store.DB != nil {
@@ -72,6 +80,7 @@ func libraryHandler(cfg Config) http.HandlerFunc {
 			UserAvatar:  userAvatar,
 			ActiveNav:   "library",
 			Tasks:       tasks,
+			Query:       query,
 			DevMode:     cfg.DevMode,
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
@@ -87,6 +96,7 @@ func libraryHandler(cfg Config) http.HandlerFunc {
 
 // libraryDocItem is one library-scope artifact as document_list returns it.
 type libraryDocItem struct {
+	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	ProjectID string   `json:"project_id"`
 	Tags      []string `json:"tags"`
@@ -135,8 +145,27 @@ func loadLibraryTasks(ctx context.Context) ([]libraryTaskRow, error) {
 				}
 			}
 		}
-		rows = append(rows, libraryTaskRow{Name: it.Name, Description: desc, Publisher: it.ProjectID})
+		// The publisher rides as a default tag (publisher:<project_id>), first so
+		// it leads the chip row, followed by the task's own tags.
+		tags := append([]string{"publisher:" + it.ProjectID}, it.Tags...)
+		rows = append(rows, libraryTaskRow{ID: it.ID, Name: it.Name, Description: desc, Tags: tags})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 	return rows, nil
+}
+
+// filterLibraryTasks returns the subset of rows matching q, order preserved
+// (sty_def7ecca). It reuses the shared panel predicate matchFields: passing
+// name+description as the title field folds the DESCRIPTION into the free-text
+// haystack (id + name + description + tags), and `tags:<v>` tokens filter against
+// the row's tags (including the synthesised publisher: tag). Library tasks carry
+// no status/priority/category, so those pass empty.
+func filterLibraryTasks(rows []libraryTaskRow, q storyQuery) []libraryTaskRow {
+	out := make([]libraryTaskRow, 0, len(rows))
+	for _, r := range rows {
+		if matchFields(r.ID, r.Name+" "+r.Description, "", "", "", r.Tags, q) {
+			out = append(out, r)
+		}
+	}
+	return out
 }

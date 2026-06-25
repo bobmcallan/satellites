@@ -18,47 +18,77 @@ func renderLibrary(t *testing.T, data libraryData) string {
 }
 
 // TestLibraryPageRendersTasksOnly pins the tasks-only library surface
-// (sty_98956dbb): the page lists published library-scope tasks (name +
-// description + publisher) and carries NO kind-filter chips and NO skill/gate/
-// workflow rows — those primitives stay project/user-local and never list here.
+// (sty_98956dbb) plus library-parity (sty_def7ecca): the page lists published
+// tasks with a leading ID column, the publisher as a tag chip (no publisher
+// column), a server-side search box, and no kind chips / skill rows.
 func TestLibraryPageRendersTasksOnly(t *testing.T) {
 	html := renderLibrary(t, libraryData{
 		Title:     "task library",
 		ActiveNav: "library",
+		Query:     "",
 		Tasks: []libraryTaskRow{
-			{Name: "Codegraph", Description: "Re-runnable codegraph job", Publisher: "proj_pub"},
+			{ID: "doc_d674f51f", Name: "Codegraph", Description: "Re-runnable codegraph job",
+				Tags: []string{"publisher:proj_fc7d72d8", "workflow:satellites-task-workflow"}},
 		},
 	})
 
-	// AC1: the published task row appears with its description + publisher.
-	if !strings.Contains(html, `data-task-name="Codegraph"`) {
-		t.Errorf("AC1: published task row missing from library table:\n%s", html)
+	// AC1: a leading ID column shows the publication id.
+	if !strings.Contains(html, "<th>ID</th>") || !strings.Contains(html, `data-task-id="doc_d674f51f"`) || !strings.Contains(html, "doc_d674f51f") {
+		t.Errorf("AC1: id column / id value missing:\n%s", html)
 	}
-	if !strings.Contains(html, "Re-runnable codegraph job") || !strings.Contains(html, "proj_pub") {
-		t.Errorf("AC1: task description/publisher missing from row")
+	// AC2: publisher is a tag chip, not a column.
+	if strings.Contains(html, "PUBLISHER") || strings.Contains(html, "task-publisher") {
+		t.Errorf("AC2: a PUBLISHER column is still rendered")
 	}
-	// AC2: no kind-filter chips of any kind (capability/gate/task/workflow).
-	if strings.Contains(html, "data-kind-filter") || strings.Contains(html, `data-field="library-filter"`) {
-		t.Errorf("AC2: kind-filter chips still rendered:\n%s", html)
+	if !strings.Contains(html, `data-tag="publisher:proj_fc7d72d8"`) {
+		t.Errorf("AC2: publisher not rendered as a tag chip:\n%s", html)
 	}
-	// AC1/AC3: no skill surface — the table has no KIND column and no skill rows.
-	if strings.Contains(html, "data-skill-name") || strings.Contains(html, "data-skill-kind") {
-		t.Errorf("AC1: skill-row markup still present")
+	// AC3: the server-side search box is present.
+	if !strings.Contains(html, `data-field="library-search-input"`) || !strings.Contains(html, `name="library_q"`) {
+		t.Errorf("AC3: server-side search box missing")
 	}
-	// AC3: tasks-only copy — the lede no longer offers 'skills'.
-	if strings.Contains(html, "skills") {
-		t.Errorf("AC3: page copy still mentions skills:\n%s", html)
+	// Still tasks-only: no kind chips, no skill markup.
+	if strings.Contains(html, "data-kind-filter") || strings.Contains(html, "data-skill-name") {
+		t.Errorf("tasks-only invariant broken (kind chips / skill rows present)")
 	}
 }
 
-// TestLibraryPageEmpty covers the tasks-only empty state copy.
-func TestLibraryPageEmpty(t *testing.T) {
-	html := renderLibrary(t, libraryData{ActiveNav: "library"})
-	if !strings.Contains(html, `data-field="library-empty"`) {
-		t.Errorf("empty state not rendered when there are no tasks")
+// TestLibrarySearchRehydrates pins AC3: the active library_q rehydrates the
+// search box, and the empty state names the query that matched nothing.
+func TestLibrarySearchRehydrates(t *testing.T) {
+	html := renderLibrary(t, libraryData{ActiveNav: "library", Query: "tags:publisher:proj_x"})
+	if !strings.Contains(html, `value="tags:publisher:proj_x"`) {
+		t.Errorf("AC3: search box did not rehydrate the active query:\n%s", html)
 	}
-	if !strings.Contains(html, "task publish") {
-		t.Errorf("empty-state copy should point at `task publish`")
+	if !strings.Contains(html, `data-field="library-empty"`) || !strings.Contains(html, "tags:publisher:proj_x") {
+		t.Errorf("AC3: query-aware empty state missing")
+	}
+}
+
+// TestFilterLibraryTasks pins AC3: server-side filtering matches free text
+// against the DESCRIPTION (and name/id/tags) and `tags:<v>` tokens against the
+// row's tags (including the synthesised publisher: tag).
+func TestFilterLibraryTasks(t *testing.T) {
+	rows := []libraryTaskRow{
+		{ID: "doc_a", Name: "Codegraph", Description: "Render the package dependency graph",
+			Tags: []string{"publisher:proj_fc7d72d8", "area:codegraph"}},
+		{ID: "doc_b", Name: "corpus-summarise", Description: "Summarise the workspace corpus",
+			Tags: []string{"publisher:proj_682cfeed"}},
+	}
+
+	// Free text hits the description of exactly one row.
+	got := filterLibraryTasks(rows, parseStoryQuery("dependency"))
+	if len(got) != 1 || got[0].ID != "doc_a" {
+		t.Errorf("free-text description match: got %+v", got)
+	}
+	// A publisher tag token filters to that publisher's tasks.
+	got = filterLibraryTasks(rows, parseStoryQuery("tags:publisher:proj_682cfeed"))
+	if len(got) != 1 || got[0].ID != "doc_b" {
+		t.Errorf("publisher tag filter: got %+v", got)
+	}
+	// An empty query returns everything (library tasks have no terminal status).
+	if got = filterLibraryTasks(rows, parseStoryQuery("")); len(got) != 2 {
+		t.Errorf("empty query should list all: got %d", len(got))
 	}
 }
 
