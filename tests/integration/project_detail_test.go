@@ -144,8 +144,6 @@ func TestProjectDetailPanel(t *testing.T) {
 			`data-field="stories-table"`,
 			`data-field="story-row"`,
 			`data-field="story-detail"`,
-			`data-field="story-status"`,
-			`data-field="story-status-value"`,
 			`data-status-rank=`,
 			`data-field="story-description"`,
 			`data-tab="documents"`,

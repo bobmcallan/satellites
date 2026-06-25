@@ -744,6 +744,27 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
    solid red fail, hollow amber current (the in-progress stage). A looped stage
    keeps its number. */
 .col-reviews { white-space: nowrap; }
+
+/* Stories table: a FIXED layout so expanding a row's wide detail cell never
+   recomputes the column widths and reshapes the table (which shifted the page and
+   lost the operator's scroll position — sty_88e04f84). Column widths are pinned
+   here; the title column takes the remaining space and wraps, and the reviews
+   strip is allowed to wrap rather than overflow a long run of lights. */
+.panel-table-stories { table-layout: fixed; }
+.panel-table-stories th.col-id,
+.panel-table-stories td.col-id { width: 8.5rem; }
+.panel-table-stories th.col-status,
+.panel-table-stories td.col-status { width: 6rem; }
+.panel-table-stories th.col-reviews,
+.panel-table-stories td.col-reviews { width: 10rem; white-space: normal; }
+.panel-table-stories th.col-priority,
+.panel-table-stories td.col-priority { width: 5.5rem; }
+.panel-table-stories th.col-updated,
+.panel-table-stories td.col-updated { width: 8rem; }
+.panel-table-stories td.col-title { overflow-wrap: anywhere; }
+/* The expanded detail cell spans all columns; keep its rich content from forcing
+   any intrinsic width back onto the fixed grid. */
+.panel-table-stories tr.story-detail > td { overflow-wrap: anywhere; }
 .review-light {
   display: inline-flex;
   align-items: center;
@@ -835,12 +856,6 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 }
 .qa-ledger-table td { padding: 0.3rem 0.4rem; vertical-align: top; border-bottom: 1px solid #141414; color: #b8b8b8; }
 .qa-badge-transition code { color: #8ab4c9; }
-
-/* Status is display-only (epic:dynamic-workflow-status order:2): the read-only
-   current status that replaced the editable status panel. */
-.story-status-readonly { display: flex; flex-direction: column; gap: 0.4rem; }
-.status-readonly-row { display: inline-flex; align-items: center; gap: 0.6rem; }
-.status-pill-lg { font-size: 0.85rem; padding: 0.2rem 0.6rem; }
 
 .muted { color: #666; }
 .crumb-link { color: #888; text-decoration: none; }

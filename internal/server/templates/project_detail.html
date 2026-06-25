@@ -514,16 +514,9 @@
                    state lives on the storyPanel component — NOT a per-row x-data —
                    so it survives the liveRefresh tbody swap (sty_0ac9c75a). */}}
               <div class="story-detail-flat">
-                {{/* epic:dynamic-workflow-status order:2: status is DISPLAY-ONLY here.
-                     The editable button grid + portal status-write are removed — status
-                     moves only through reviewer gates. */}}
-                <section class="story-detail-block story-status-readonly" data-story-status="{{.ID}}" data-field="story-status">
-                  <h4>status</h4>
-                  <div class="status-readonly-row">
-                    <code class="status-pill status-pill-lg" data-field="story-status-value">{{.Status}}</code>
-                  </div>
-                </section>
-
+                {{/* The redundant STATUS section was removed (sty_88e04f84): the
+                     collapsed row's status pill already shows it; status is
+                     display-only and moves only through reviewer gates. */}}
                 <nav class="story-tabs" role="tablist" data-field="story-tabs">
                   <button type="button" class="story-tab" role="tab" data-tab="description"
                           :class="detailTab==='description' ? 'is-active' : ''" :aria-selected="detailTab==='description' ? 'true' : 'false'"
