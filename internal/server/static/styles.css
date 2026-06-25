@@ -769,22 +769,13 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 .review-light-pending { background: transparent; border-color: #f1c40f; color: #f1c40f; }
 
 .story-detail-block { min-width: 0; }
-/* Attached-documents list in the inline panel's Documents tab (sty_bf2fc8e1):
-   a native <details> per document — summary carries name + id/type/updated,
-   the body reveals the rendered markdown. */
-.story-doc-list { list-style: none; margin: 0; padding: 0; }
-.story-doc-item { border-bottom: 1px solid #1a1a1a; }
-.story-doc-summary {
-  cursor: pointer;
-  padding: 0.5rem 0.2rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-.story-doc-name { font-weight: 600; }
-.story-doc-meta { font-size: 0.72rem; }
-.story-doc-details[open] > .story-detail-block { padding: 0.3rem 0.2rem 0.7rem; }
+/* Attached-documents list in the inline panel's Documents tab. It now reuses the
+   project documents panel's table styling — .panel-table-documents / .document-row
+   / .document-detail — for column parity (id | name+chips | updated, sty_aacf9c95),
+   so it needs no bespoke list CSS; the row toggle reveals .document-detail (the
+   `hidden` attribute collapses it). */
+.story-doc-detail[hidden] { display: none; }
+.story-doc-detail > td { padding: 0.3rem 0.2rem 0.7rem; }
 .story-detail-block h4 {
   margin: 0 0 0.4rem;
   font-size: 0.7rem;

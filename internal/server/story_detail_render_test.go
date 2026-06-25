@@ -19,31 +19,42 @@ func renderStoryDocsFragment(t *testing.T, data storyDocsData) string {
 	return buf.String()
 }
 
-// TestStoryDocsFragmentLists pins sty_bf2fc8e1 AC2: the attached-documents
-// fragment lists each document's name/id/updated with its rendered markdown body
-// in a native <details> (expand/collapse without Alpine).
+// TestStoryDocsFragmentLists pins the attached-documents fragment columns
+// (sty_aacf9c95): each expandable document is a project-panel-style table row —
+// id | name (+ phase/tag chips) | updated — with its rendered markdown body in a
+// sibling detail row (expand/collapse without Alpine).
 func TestStoryDocsFragmentLists(t *testing.T) {
 	html := renderStoryDocsFragment(t, storyDocsData{
 		Documents: []docRow{{
-			ID:        "doc_abc",
-			Name:      "implementation-summary",
-			TypeTag:   "summary",
-			UpdatedAt: time.Date(2026, 6, 25, 2, 2, 0, 0, time.UTC),
-			BodyHTML:  template.HTML(`<p>what was implemented</p>`),
+			ID:         "doc_abc",
+			Name:       "implementation-summary",
+			TypeTag:    "summary",
+			PhaseTag:   "build",
+			OtherTags:  []string{"area:portal"},
+			UpdatedAt:  time.Date(2026, 6, 25, 2, 2, 0, 0, time.UTC),
+			Expandable: true,
+			BodyHTML:   template.HTML(`<p>what was implemented</p>`),
 		}},
 	})
 
-	if !strings.Contains(html, "<details") {
-		t.Errorf("AC2: documents not rendered as expandable <details>:\n%s", html)
-	}
-	if !strings.Contains(html, `data-field="story-document-row"`) || !strings.Contains(html, "implementation-summary") {
-		t.Errorf("AC2: attached document name missing")
-	}
-	if !strings.Contains(html, "doc_abc") || !strings.Contains(html, "2026-06-25 02:02") {
-		t.Errorf("AC2: attached document id/updated not listed")
-	}
-	if !strings.Contains(html, "what was implemented") {
-		t.Errorf("AC2: attached document body did not render")
+	for _, want := range []string{
+		`data-field="story-documents-table"`,          // project-panel-style table
+		`<th class="col-id">id</th>`,                  // id column header
+		`<th class="col-title">name</th>`,             // name column header
+		`<th class="col-updated">updated</th>`,        // updated column header
+		`data-field="story-document-row"`,             // a document row
+		`data-expandable="true"`,                      // expandable (has a body)
+		"implementation-summary",                      // name
+		"doc_abc",                                     // id
+		"2026-06-25 02:02",                            // updated
+		`<span class="phase-chip">phase:build</span>`, // phase chip (display-only)
+		`<span class="tag-chip">area:portal</span>`,   // tag chip (display-only)
+		`data-detail-for="doc_abc"`,                   // the detail row
+		"what was implemented",                        // body rendered
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("AC2: docs-tab columns missing %q\n%s", want, html)
+		}
 	}
 }
 
@@ -56,29 +67,25 @@ func TestStoryDocsFragmentEmpty(t *testing.T) {
 	}
 }
 
-// TestStoryDocsFragmentSearchParity pins sty_c017a274: the story Documents tab
-// renders the same search box + count badge + tag chips as the project panel,
-// with the active query rehydrated.
-func TestStoryDocsFragmentSearchParity(t *testing.T) {
+// TestStoryDocsFragmentNoSearch pins sty_aacf9c95 AC1: the story Documents tab
+// has NO search/filter box and no chip-as-filter behaviour — chips render as
+// plain (non-clickable) labels, not data-chip filter buttons.
+func TestStoryDocsFragmentNoSearch(t *testing.T) {
 	html := renderStoryDocsFragment(t, storyDocsData{
-		Query: "tags:area:portal", Filtered: 1, Total: 3,
 		Documents: []docRow{{
 			ID: "doc_abc", Name: "summary", TypeTag: "summary",
 			PhaseTag: "build", OtherTags: []string{"area:portal"},
 			UpdatedAt: time.Date(2026, 6, 25, 2, 2, 0, 0, time.UTC),
 		}},
 	})
-	for _, want := range []string{
-		`data-field="story-documents-search"`, // the search input
-		`value="tags:area:portal"`,            // query rehydrated
-		`data-field="story-documents-count"`,  // count badge present
-		`1 / 3`,                               // filtered / total
-		`data-chip="phase:build"`,             // phase chip (clickable filter)
-		`data-chip="tags:area:portal"`,        // tag chip
-		`data-docs-query="tags:area:portal"`,  // panel carries the query for the JS
+	for _, banned := range []string{
+		`data-field="story-documents-search"`, // no search input
+		`data-field="story-documents-count"`,  // no count badge
+		`data-chip=`,                          // no chip-as-filter buttons
+		`panel-search`,                        // no search box styling
 	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("docs-tab parity missing %q\n%s", want, html)
+		if strings.Contains(html, banned) {
+			t.Errorf("AC1: story docs tab must not contain %q\n%s", banned, html)
 		}
 	}
 }

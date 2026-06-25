@@ -218,42 +218,48 @@
 {{end}}
 
 {{/* story-docs: the lazy-loaded attached-documents list for the inline panel's
-     Documents tab (sty_bf2fc8e1). Plain HTML — native <details> drives
-     expand/collapse, so the innerHTML swap needs no Alpine. Each entry lists the
-     document name/id/updated in the summary and its rendered markdown body when
-     expanded; mirrors the project documents panel. */}}
+     Documents tab (sty_bf2fc8e1). Plain HTML (no Alpine in this fragment — it is
+     innerHTML-swapped). It mirrors the COLUMNS of the project documents panel —
+     id | name (+ phase/tag chips) | updated (sty_aacf9c95) — with NO search /
+     filter box: a document expands to its rendered markdown body via a small
+     no-Alpine row toggle wired in story_panel.js (keyed by doc id, so the open
+     state survives the SSE live refresh, sty_e9b55be7, and ```mermaid bodies
+     render, sty_d206e263). */}}
 {{define "story-docs"}}
-  {{/* Story Documents tab — same search/filter/count grammar as the project
-       documents panel (sty_c017a274). Plain HTML (no Alpine): the search box and
-       tag chips are wired in story_panel.js after the innerHTML swap, which
-       re-fetches this fragment with ?docs_q=<query>. */}}
-  <div class="story-docs-panel" data-field="story-docs-panel" data-docs-query="{{.Query}}">
-    <div class="panel-header">
-      <span class="stories-count-indicator" data-field="story-documents-count"
-            title="matching the active filter / story total">{{.Filtered}} / {{.Total}}</span>
-    </div>
-    <input type="text" class="panel-search"
-           placeholder="search then press Enter (free text + chips: phase:discovery tags:foo)"
-           value="{{.Query}}" data-field="story-documents-search">
+  <div class="story-docs-panel" data-field="story-docs-panel">
     {{if .Documents}}
-    <ul class="story-doc-list" data-field="story-doc-list">
-      {{range .Documents}}
-      <li class="story-doc-item" data-field="story-document-row" data-id="{{.ID}}">
-        <details class="story-doc-details">
-          <summary class="story-doc-summary">
-            <span class="story-doc-name" data-field="document-row-title">{{.Name}}</span>
-            <span class="story-doc-meta muted" data-field="document-row-meta"><code>{{.ID}}</code>{{if .TypeTag}} · <code>type:{{.TypeTag}}</code>{{end}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}</span>
-            <span class="document-row-tags" data-field="document-row-tags">{{if .PhaseTag}}<button type="button" class="phase-chip is-clickable" data-chip="phase:{{.PhaseTag}}" title="Filter by this phase">phase:{{.PhaseTag}}</button>{{end}}{{range .OtherTags}}<button type="button" class="tag-chip is-clickable" data-chip="tags:{{.}}" title="Filter by this tag">{{.}}</button>{{end}}</span>
-          </summary>
-          <div class="story-detail-block" data-field="document-content">
-            {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
-          </div>
-        </details>
-      </li>
-      {{end}}
-    </ul>
+    <table class="panel-table panel-table-documents" data-field="story-documents-table">
+      <thead>
+        <tr>
+          <th class="col-id">id</th>
+          <th class="col-title">name</th>
+          <th class="col-updated">updated</th>
+        </tr>
+      </thead>
+      <tbody data-field="story-doc-list">
+        {{range .Documents}}
+        <tr class="document-row story-doc-row" data-field="story-document-row" data-id="{{.ID}}"{{if .Expandable}} data-expandable="true" style="cursor:pointer"{{end}}>
+          <td class="col-id"><code>{{.ID}}</code></td>
+          <td class="col-title">
+            <div class="document-row-title" data-field="document-row-title">{{.Name}}</div>
+            <div class="document-row-tags" data-field="document-row-tags">{{if .PhaseTag}}<span class="phase-chip">phase:{{.PhaseTag}}</span>{{end}}{{range .OtherTags}}<span class="tag-chip">{{.}}</span>{{end}}</div>
+          </td>
+          <td class="col-updated muted">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
+        </tr>
+        {{if .Expandable}}
+        <tr class="document-detail story-doc-detail" data-detail-for="{{.ID}}" data-field="document-detail" hidden>
+          <td colspan="3">
+            <div class="story-detail-block" data-field="document-content">
+              {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+            </div>
+          </td>
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
     {{else}}
-    <p class="empty" data-field="story-documents-empty">{{if .Query}}No documents match the filter.{{else}}No documents attached to this story.{{end}}</p>
+    <p class="empty" data-field="story-documents-empty">No documents attached to this story.</p>
     {{end}}
   </div>
 {{end}}

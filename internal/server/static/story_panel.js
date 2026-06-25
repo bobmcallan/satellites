@@ -63,19 +63,29 @@
             .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
     };
 
+    // cssEsc escapes a doc id for use in a CSS attribute selector.
+    function cssEsc(id) { return (window.CSS && CSS.escape) ? CSS.escape(id) : id; }
+
+    // setStoryDocOpen shows/hides one attached document's detail row (keyed by
+    // doc id) and reflects the state on its row, so the open state is preserved
+    // across the SSE live refresh (sty_e9b55be7 / sty_898e3088).
+    function setStoryDocOpen(el, id, open) {
+        var detail = el.querySelector('.story-doc-detail[data-detail-for="' + cssEsc(id) + '"]');
+        var row = el.querySelector('.story-doc-row[data-id="' + cssEsc(id) + '"]');
+        if (detail) {
+            if (open) { detail.removeAttribute('hidden'); } else { detail.setAttribute('hidden', ''); }
+        }
+        if (row) { row.classList.toggle('is-expanded', !!open); }
+    }
+
     // loadStoryDocsFragment lazy-loads the attached-documents fragment into el on
     // first Documents-tab open (sty_bf2fc8e1), peer to loadStoryFragment. The
-    // fetched markup is plain HTML (native <details>, no Alpine directives), so a
-    // direct innerHTML swap is safe.
-    window.loadStoryDocsFragment = function (storyID, el, query) {
+    // fetched markup is plain HTML (a project-panel-style table, no Alpine
+    // directives, sty_aacf9c95), so a direct innerHTML swap is safe. There is no
+    // search box — every attached document is listed.
+    window.loadStoryDocsFragment = function (storyID, el) {
         if (!el) { return; }
-        // The active search persists on el so the SSE live refresh (which calls
-        // this with no query) keeps the filter (sty_c017a274).
-        if (query === undefined) { query = el.dataset.storyDocsQuery || ''; }
-        query = (query || '').trim();
-        el.dataset.storyDocsQuery = query;
         var url = '/stories/' + encodeURIComponent(storyID) + '/documents.fragment';
-        if (query) { url += '?docs_q=' + encodeURIComponent(query); }
         fetch(url, { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
             .then(function (r) {
                 if (r.status === 401) { bounceToLogin(); return null; }
@@ -83,40 +93,26 @@
             })
             .then(function (html) {
                 // Preserve which documents were expanded across the swap
-                // (sty_e9b55be7): the SSE live refresh re-enters here, and a plain
-                // innerHTML swap would drop the native <details open> state,
-                // collapsing the document the user was reading.
+                // (sty_e9b55be7 / sty_898e3088): the SSE live refresh re-enters
+                // here, and a plain innerHTML swap would otherwise collapse the
+                // document the user was reading. Capture the open doc ids (detail
+                // rows that are not hidden) before the swap, re-open them after.
                 var openIds = [];
-                el.querySelectorAll('.story-doc-item[data-id] > details[open]')
-                  .forEach(function (d) {
-                      var li = d.closest('.story-doc-item');
-                      if (li) { openIds.push(li.getAttribute('data-id')); }
-                  });
+                el.querySelectorAll('.story-doc-detail[data-detail-for]:not([hidden])')
+                  .forEach(function (d) { openIds.push(d.getAttribute('data-detail-for')); });
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
-                openIds.forEach(function (id) {
-                    var sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
-                    var d = el.querySelector('.story-doc-item[data-id="' + sel + '"] > details');
-                    if (d) { d.open = true; }
-                });
-                // Wire the search box + tag chips (no Alpine in this fragment):
-                // each re-fetches the fragment with the new docs_q (sty_c017a274).
-                var input = el.querySelector('[data-field="story-documents-search"]');
-                if (input) {
-                    input.addEventListener('keydown', function (e) {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            window.loadStoryDocsFragment(storyID, el, input.value);
-                        }
-                    });
-                }
-                el.querySelectorAll('[data-chip]').forEach(function (btn) {
-                    btn.addEventListener('click', function (e) {
-                        e.preventDefault();
-                        e.stopPropagation(); // don't toggle the <details> we sit in
-                        window.loadStoryDocsFragment(storyID, el, btn.getAttribute('data-chip'));
-                    });
-                });
+                openIds.forEach(function (id) { setStoryDocOpen(el, id, true); });
+                // Wire the no-Alpine row toggle: clicking an expandable document
+                // row shows/hides its detail row (keyed by doc id).
+                el.querySelectorAll('.story-doc-row[data-expandable][data-id]')
+                  .forEach(function (rowEl) {
+                      rowEl.addEventListener('click', function () {
+                          var id = rowEl.getAttribute('data-id');
+                          var detail = el.querySelector('.story-doc-detail[data-detail-for="' + cssEsc(id) + '"]');
+                          setStoryDocOpen(el, id, detail ? detail.hasAttribute('hidden') : false);
+                      });
+                  });
                 // Render ```mermaid blocks (e.g. a change-doc's actual workflow)
                 // injected by this swap (sty_d206e263); covers the live-refresh
                 // path too, which re-enters here.

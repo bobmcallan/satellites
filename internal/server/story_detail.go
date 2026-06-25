@@ -194,20 +194,21 @@ func buildStoryDetail(ctx context.Context, storyID string, resolveActorFn func(s
 // each body as markdown for inline expand/collapse, newest-first. Read-only and
 // best-effort: a list/body error degrades to fewer rows, never a page error
 // (sty_bf2fc8e1). Mirrors the project documents panel (gatherDocPanelFrom).
-func gatherStoryDocs(ctx context.Context, storyID string, q url.Values) ([]docRow, int, int) {
-	// Reuse the project documents panel's gather (shared filter grammar, counts,
-	// tag chips, body render) scoped to this story's documents — the story
-	// Documents tab gets the same search/filter/count as the project panel
-	// (sty_c017a274). Story outputs carry a `story:<id>` back-reference tag.
+func gatherStoryDocs(ctx context.Context, storyID string) []docRow {
+	// Reuse the project documents panel's gather (shared tag chips + body render)
+	// scoped to this story's documents — the story Documents tab matches the
+	// project panel's COLUMNS (id | name+chips | updated), with no search/filter
+	// box (sty_aacf9c95): pass an empty query so every attached document shows.
+	// Story outputs carry a `story:<id>` back-reference tag.
 	listReq := verb.DocumentListRequest{Type: "document", Tags: []string{"story:" + storyID}, Limit: 200}
-	rows, filtered, total, err := gatherDocPanelFrom(ctx, listReq, q)
+	rows, _, _, err := gatherDocPanelFrom(ctx, listReq, url.Values{})
 	if err != nil {
 		arbor.WarnCtx(ctx, "story_detail: list documents", "id", storyID, "err", err)
-		return nil, 0, 0
+		return nil
 	}
 	// Newest-first, matching the prior story-tab ordering.
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].UpdatedAt.After(rows[j].UpdatedAt) })
-	return rows, filtered, total
+	return rows
 }
 
 // mergedRows maps annotated ledger entries into the merged Ledger/Log view,
@@ -314,14 +315,11 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 	}
 }
 
-// storyDocsData is the view model for the story Documents fragment. Query is the
-// active search (rehydrated into the box); Filtered/Total feed the count badge
-// (sty_c017a274).
+// storyDocsData is the view model for the story Documents fragment. The tab
+// carries no search/filter box (sty_aacf9c95) — it lists every attached document
+// in project-panel columns — so it needs only the document rows.
 type storyDocsData struct {
 	Documents []docRow
-	Query     string
-	Filtered  int
-	Total     int
 }
 
 // storyDocsFragmentHandler renders just the attached-documents list for a story
@@ -341,9 +339,8 @@ func storyDocsFragmentHandler(cfg Config) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		rows, filtered, total := gatherStoryDocs(ctx, storyID, q)
-		data := storyDocsData{Documents: rows, Query: strings.TrimSpace(q.Get("docs_q")), Filtered: filtered, Total: total}
+		rows := gatherStoryDocs(ctx, storyID)
+		data := storyDocsData{Documents: rows}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := storyDetailTmpl.ExecuteTemplate(w, "story-docs", data); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
