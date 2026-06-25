@@ -177,7 +177,7 @@ func projectDetailHandler(cfg Config) http.HandlerFunc {
 		// sty_80447ada) — best-effort: a task-list error must not blank the whole
 		// project page (stories still render). The panel applies the same query
 		// grammar as stories via gatherTaskPanel (tasks_q).
-		tasks, taskFiltered, taskTotal, tErr := gatherTaskPanel(ctx, projectID, r.URL.Query())
+		tasks, taskFiltered, taskTotal, tErr := gatherTaskPanel(ctx, projectID, r.URL.Query(), newActorResolver(ctx, cfg))
 		if tErr != nil {
 			arbor.WarnCtx(ctx, "project_detail: list tasks", "id", projectID, "err", tErr)
 		}

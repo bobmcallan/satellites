@@ -155,7 +155,7 @@ func mapTaskStatus(workflowStatus string) string {
 // the task body rendered as safe markdown + the ledger/log grouped by execution
 // episode + the run summary. Best-effort — a read error leaves a field empty
 // rather than failing the page. Read-only.
-func enrichTaskRow(ctx context.Context, row *taskRow) {
+func enrichTaskRow(ctx context.Context, row *taskRow, resolve func(string) string) {
 	if doc, gErr := dispatchTaskGet(ctx, row.ID); gErr != nil {
 		arbor.WarnCtx(ctx, "task_list: body", "id", row.ID, "err", gErr)
 	} else if strings.TrimSpace(doc.RawBody) != "" {
@@ -169,7 +169,7 @@ func enrichTaskRow(ctx context.Context, row *taskRow) {
 		if len(eps) > 0 {
 			row.LastRun = eps[len(eps)-1].Start.Format("2006-01-02 15:04")
 		}
-		row.Episodes = taskEpisodeViews(entries, eps)
+		row.Episodes = taskEpisodeViews(entries, eps, resolve)
 	}
 }
 
@@ -179,7 +179,7 @@ func enrichTaskRow(ctx context.Context, row *taskRow) {
 // SHARED story-filter predicate, then enriches the MATCHING rows with their
 // inline-expand payload. Returns (rows, filteredCount, total). No pagination
 // (out of scope). Read-only.
-func gatherTaskPanel(ctx context.Context, projectID string, q url.Values) ([]taskRow, int, int, error) {
+func gatherTaskPanel(ctx context.Context, projectID string, q url.Values, resolve func(string) string) ([]taskRow, int, int, error) {
 	all, err := dispatchTaskRows(ctx, projectID)
 	if err != nil {
 		return nil, 0, 0, err
@@ -192,7 +192,7 @@ func gatherTaskPanel(ctx context.Context, projectID string, q url.Values) ([]tas
 	filtered := filterTasks(all, tq)
 	filteredCount := len(filtered)
 	for i := range filtered {
-		enrichTaskRow(ctx, &filtered[i])
+		enrichTaskRow(ctx, &filtered[i], resolve)
 	}
 	return filtered, filteredCount, total, nil
 }
@@ -254,7 +254,7 @@ func taskEpisodeRows(entries []taskLedgerEntry) []taskepisode.Row {
 // model the inline panel renders. Each episode's entries are exactly
 // entries[StartIdx : StartIdx+Rows] (the rows slice is 1:1 with entries), so the
 // shared projection slices a task's ledger per episode with no second walk.
-func taskEpisodeViews(entries []taskLedgerEntry, eps []taskepisode.Episode) []taskEpisodeView {
+func taskEpisodeViews(entries []taskLedgerEntry, eps []taskepisode.Episode, resolve func(string) string) []taskEpisodeView {
 	out := make([]taskEpisodeView, 0, len(eps))
 	for _, ep := range eps {
 		ev := taskEpisodeView{
@@ -271,7 +271,7 @@ func taskEpisodeViews(entries []taskLedgerEntry, eps []taskepisode.Episode) []ta
 			rv := taskLedgerRowView{
 				When:  e.created.Format("2006-01-02 15:04:05Z"),
 				Kind:  e.kind,
-				Actor: e.actor,
+				Actor: resolveActor(resolve, e.actor),
 				Body:  e.body,
 			}
 			if e.kind == "status_transition" && e.to != "" {
@@ -303,7 +303,7 @@ func taskFragmentHandler(cfg Config) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		tasks, filtered, total, err := gatherTaskPanel(ctx, projectID, r.URL.Query())
+		tasks, filtered, total, err := gatherTaskPanel(ctx, projectID, r.URL.Query(), newActorResolver(ctx, cfg))
 		if err != nil {
 			arbor.ErrorCtx(ctx, "task_fragment: gather", "id", projectID, "err", err)
 			http.Error(w, "could not list tasks", http.StatusInternalServerError)
