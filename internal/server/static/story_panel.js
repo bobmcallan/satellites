@@ -83,7 +83,7 @@
     // fetched markup is plain HTML (a project-panel-style table, no Alpine
     // directives, sty_aacf9c95), so a direct innerHTML swap is safe. There is no
     // search box — every attached document is listed.
-    window.loadStoryDocsFragment = function (storyID, el) {
+    window.loadStoryDocsFragment = function (storyID, el, reopenIds) {
         if (!el) { return; }
         var url = '/stories/' + encodeURIComponent(storyID) + '/documents.fragment';
         fetch(url, { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
@@ -96,10 +96,18 @@
                 // (sty_e9b55be7 / sty_898e3088): the SSE live refresh re-enters
                 // here, and a plain innerHTML swap would otherwise collapse the
                 // document the user was reading. Capture the open doc ids (detail
-                // rows that are not hidden) before the swap, re-open them after.
+                // rows that are not hidden) still in `el`, AND merge any ids the
+                // caller captured before it destroyed the panel — on the whole-
+                // panel liveRefresh the tbody swap wipes `el` before we run, so
+                // the in-`el` capture alone finds nothing (sty_898e3088).
                 var openIds = [];
                 el.querySelectorAll('.story-doc-detail[data-detail-for]:not([hidden])')
                   .forEach(function (d) { openIds.push(d.getAttribute('data-detail-for')); });
+                if (reopenIds && reopenIds.length) {
+                    reopenIds.forEach(function (id) {
+                        if (id && openIds.indexOf(id) === -1) { openIds.push(id); }
+                    });
+                }
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
                 openIds.forEach(function (id) { setStoryDocOpen(el, id, true); });
@@ -507,6 +515,19 @@
                 const page = parseInt(resp.headers.get('X-Story-Page') || '', 10);
                 const pageCount = parseInt(resp.headers.get('X-Story-Page-Count') || '', 10);
 
+                // Capture which document(s) are expanded in the open story's
+                // docs panel BEFORE the tbody swap destroys them, so an expanded
+                // document survives the whole-panel live refresh, not just the
+                // docs-fragment re-fetch (sty_898e3088 extends sty_e9b55be7).
+                let openDocIds = [];
+                if (this.expanded && this.detailTab === 'documents') {
+                    const docsPanel = this.docsPanelFor(this.expanded);
+                    if (docsPanel) {
+                        docsPanel.querySelectorAll('.story-doc-detail[data-detail-for]:not([hidden])')
+                            .forEach(d => openDocIds.push(d.getAttribute('data-detail-for')));
+                    }
+                }
+
                 tbody.innerHTML = html;
                 if (window.Alpine && typeof window.Alpine.initTree === 'function') {
                     window.Alpine.initTree(tbody);
@@ -524,7 +545,7 @@
                 if (this.expanded && this.detailTab === 'ledger') {
                     window.loadStoryFragment(this.expanded, this.ledgerPanelFor(this.expanded));
                 } else if (this.expanded && this.detailTab === 'documents') {
-                    window.loadStoryDocsFragment(this.expanded, this.docsPanelFor(this.expanded));
+                    window.loadStoryDocsFragment(this.expanded, this.docsPanelFor(this.expanded), openDocIds);
                 }
 
                 // Re-capture the server order for the freshly-rendered rows,
