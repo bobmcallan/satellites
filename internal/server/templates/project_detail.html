@@ -492,11 +492,12 @@
               {{end}}
             </td>
             <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
-            {{/* Review-history lights (sty_14f07f22, renumbered sty_a844aa55):
-                 one numbered circle per gate STAGE — solid green pass, solid red
-                 fail, hollow amber current; a looped stage keeps its number. */}}
+            {{/* Review-history lights (sty_14f07f22, sty_a844aa55, sty_24609877):
+                 one numbered circle per gate VERDICT — solid green pass, solid red
+                 fail, hollow amber current; a stage's retries repeat its number,
+                 each coloured by that attempt. */}}
             <td class="col-reviews" data-field="story-reviews">
-              {{range .Reviews}}<span class="review-light review-light-{{.State}}" data-review="{{.State}}" data-step="{{.Index}}"{{if .Gate}} title="{{.Index}}. {{.Gate}} — {{.State}}{{if .Loops}} (looped ×{{.Loops}}){{end}}"{{end}}>{{.Index}}</span>{{end}}
+              {{range .Reviews}}<span class="review-light review-light-{{.State}}" data-review="{{.State}}" data-step="{{.Index}}"{{if .Gate}} title="{{.Index}}. {{.Gate}} — {{.State}}"{{end}}>{{.Index}}</span>{{end}}
             </td>
             <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
             <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>

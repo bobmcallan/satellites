@@ -12,16 +12,16 @@ import (
 )
 
 // reviewLight is one numbered circle in a story row's review-history strip
-// (sty_14f07f22, renumbered sty_a844aa55): one per reviewer-gate STAGE, in
-// workflow order. Index is its 1-based stage number; a gate that LOOPED keeps the
-// same number. State is "pass" (solid green), "fail" (solid red), or "current"
-// (hollow amber — the in-progress stage, shown only on a non-terminal story).
-// Loops is the extra attempts beyond the first; Gate/When feed the hover title.
+// (sty_14f07f22, sty_a844aa55, sty_24609877): one per reviewer-gate VERDICT.
+// Index is the gate's 1-based STAGE number (stable across a stage's retries);
+// State is "pass" (solid green), "fail" (solid red), or "current" (hollow amber —
+// the in-progress stage, shown only on a non-terminal story). Each attempt is its
+// own light, so a stage that failed twice then passed reads ①red ①red ①green —
+// the repeats are visible, sharing the stage number. Gate/When feed the title.
 type reviewLight struct {
 	Index int
 	State string
 	Gate  string
-	Loops int
 	When  string
 }
 
@@ -34,74 +34,53 @@ type reviewEvent struct {
 	When string // RFC3339
 }
 
-// buildReviewLights folds a story's chronological review_* events into a NUMBERED
-// per-STAGE strip (sty_a844aa55): each reviewer gate is one numbered step, and a
-// gate that LOOPED (rejected then re-run, or several attempts) keeps the SAME
-// number, showing its FINAL verdict. A completed step is "pass" (solid green) or
-// "fail" (solid red); the in-progress step — a gate whose latest event is an
-// unresolved request — is "current" (hollow amber), rendered only when the story
-// is not terminal. A terminal story (done/cancelled) shows no current step:
-// a dangling unresolved request is ignored, which fixes the stale trailing-amber
-// light on a closed story (the verdict it already reached shows instead).
+// buildReviewLights folds a story's chronological review_* events into the strip
+// (sty_24609877): one light PER VERDICT — review_accept → "pass" (green),
+// review_reject → "fail" (red) — each labelled with its gate's STAGE NUMBER,
+// assigned by the gate's first appearance (so the numbers read 1,2,3,… in
+// workflow order). A stage that loops keeps its number while each attempt shows
+// its own colour, so the repeats are visible (e.g. ①red ①red ①green ②red ②green).
+// A trailing unresolved request renders the in-progress "current" stage (hollow
+// amber), but only when the story is NOT terminal — a closed story (done/
+// cancelled) shows no current light (the trailing-amber-on-done fix).
 func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
-	type step struct {
-		gate        string
-		lastVerdict string // "pass" | "fail" | ""
-		pending     bool   // a request awaits a verdict
-		attempts    int    // resolved verdicts for this gate
-		when        string
-	}
-	idx := map[string]int{}
-	steps := []*step{}
-	get := func(gate string) *step {
+	stage := map[string]int{}
+	stageOf := func(gate string) int {
 		if strings.TrimSpace(gate) == "" {
 			gate = "?"
 		}
-		if i, ok := idx[gate]; ok {
-			return steps[i]
+		if n, ok := stage[gate]; ok {
+			return n
 		}
-		idx[gate] = len(steps)
-		s := &step{gate: gate}
-		steps = append(steps, s)
-		return s
+		n := len(stage) + 1
+		stage[gate] = n
+		return n
 	}
+
+	lights := []reviewLight{}
 	pendingGate := ""
+	pendingActive := false
 	for _, e := range evts {
 		switch e.Kind {
 		case "review_requested":
 			pendingGate = e.Gate
-			s := get(e.Gate)
-			s.pending, s.when = true, e.When
+			pendingActive = true
+			stageOf(e.Gate) // reserve the stage number at first sight
 		case "review_accept":
-			s := get(firstNonEmpty(e.Gate, pendingGate))
-			s.lastVerdict, s.pending, s.attempts, s.when = "pass", false, s.attempts+1, e.When
-			pendingGate = ""
+			g := firstNonEmpty(e.Gate, pendingGate)
+			lights = append(lights, reviewLight{Index: stageOf(g), State: "pass", Gate: g, When: e.When})
+			pendingGate, pendingActive = "", false
 		case "review_reject":
-			s := get(firstNonEmpty(e.Gate, pendingGate))
-			s.lastVerdict, s.pending, s.attempts, s.when = "fail", false, s.attempts+1, e.When
-			pendingGate = ""
+			g := firstNonEmpty(e.Gate, pendingGate)
+			lights = append(lights, reviewLight{Index: stageOf(g), State: "fail", Gate: g, When: e.When})
+			pendingGate, pendingActive = "", false
 		}
 	}
 
-	terminal := isTerminalReviewStatus(status)
-	lights := make([]reviewLight, 0, len(steps))
-	for _, s := range steps {
-		var state string
-		switch {
-		case s.pending && !terminal:
-			state = "current"
-		case s.lastVerdict != "":
-			state = s.lastVerdict
-		case terminal:
-			continue // a dangling request on a closed story renders nothing
-		default:
-			state = "current"
-		}
-		loops := s.attempts
-		if state != "current" && loops > 0 {
-			loops-- // a resolved step's first attempt is not a loop
-		}
-		lights = append(lights, reviewLight{Index: len(lights) + 1, State: state, Gate: s.gate, Loops: loops, When: s.when})
+	// A trailing request with no verdict is the in-progress stage — shown only
+	// when the story is not terminal (a closed story has no current stage).
+	if pendingActive && !isTerminalReviewStatus(status) {
+		lights = append(lights, reviewLight{Index: stageOf(pendingGate), State: "current", Gate: pendingGate})
 	}
 	return lights
 }
