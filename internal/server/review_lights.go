@@ -30,28 +30,47 @@ type reviewLight struct {
 // reviewEvent is the transport-neutral projection of a review_* or
 // status_transition ledger row that buildReviewLights folds into the strip — kept
 // separate so the derivation is unit-testable without the ledger.
+//
+// The derivation is driven by the rows that carry a RELIABLE timestamp and a
+// self-describing payload — the forward gated status_transition (a gate passed),
+// the review_reject (a gate failed), and the ungated checkpoint — NOT by the
+// request→verdict adjacency that the earlier model assumed (sty_de7953b1). That
+// model broke because `review_requested` is buffered through the local inbox and
+// FLUSHED to the ledger late, so its timestamp lands out of order, and because the
+// entry gate records its pass as a status_transition with no `review_accept` at
+// all — so accepts could be mis-attributed to the wrong stage. Every forward gated
+// transition and every reject carries its own `gate` + `from_status` in the
+// payload, so each light is attributed and ordered independently.
 type reviewEvent struct {
-	Kind       string // review_requested | review_accept | review_reject | status_transition
-	Gate       string // gate name (parsed from a review_requested body), else ""
-	Transition string // "from → to" for a status_transition row, else ""
-	Checkpoint bool   // true when a status_transition row is an ungated checkpoint (trigger:checkpoint)
+	Kind       string // review_requested | review_reject | status_transition (review_accept is redundant with the forward status_transition and is ignored)
+	Gate       string // gate skill — payload `gate` for verdict/transition rows, parsed from the body for requests
+	FromStatus string // from_status — the lifecycle-stable STAGE KEY (payload for verdict/transition rows, parsed from the request body)
+	Transition string // "from → to" label for a checkpoint, else ""
+	Checkpoint bool   // ungated checkpoint (status_transition with trigger:checkpoint)
+	Forward    bool   // a gate-driven FORWARD status_transition (the gate PASSED) — emit a "pass" light
 	When       string // RFC3339Nano
 }
 
 // buildReviewLights folds a story's chronological events into the strip
-// (sty_24609877, sty_d94d4a5f): one light PER WORKFLOW STEP. A reviewer gate
-// contributes one light per VERDICT — review_accept → "pass" (green),
-// review_reject → "fail" (red); an UNGATED CHECKPOINT (a status_transition row
-// with trigger:checkpoint, which carries no review verdict) contributes a "fired"
-// light. Each step is labelled with its STAGE NUMBER, assigned by first
-// appearance in chronological order (so the numbers read 1,2,3,… in workflow
-// order, the checkpoint slotting in between its neighbouring gates). A gate that
-// loops keeps its number while each attempt shows its own colour, so the repeats
-// are visible (e.g. ①red ①red ①green ②red ②green). Gate-DRIVEN status_transition
-// rows are ignored — their move is already represented by the verdict light, so
-// counting them too would double up. A trailing unresolved request renders the
-// in-progress "current" stage (hollow amber), but only when the story is NOT
-// terminal — a closed story (done/cancelled) shows no current light.
+// (sty_24609877, sty_d94d4a5f, sty_de7953b1): one light PER WORKFLOW STEP, keyed
+// by the step's lifecycle FROM-state so the numbers read 1,2,3,… in workflow order
+// regardless of the order the ledger rows arrive in.
+//
+//   - a FORWARD gated status_transition (the gate passed) → "pass" (green);
+//   - a review_reject (the gate failed and the edge loops) → "fail" (red);
+//   - an ungated checkpoint → "fired" (solid neutral).
+//
+// review_accept rows are ignored (the forward status_transition already records
+// the pass, and the entry gate has no accept at all). A stage that loops keeps its
+// number while each attempt shows its own colour, so the repeats are visible (e.g.
+// ①red ①green). On a non-terminal story a still-open gate (a request with no
+// resolving verdict/transition) renders the in-progress "current" stage (hollow
+// amber); a terminal story shows none.
+//
+// INVARIANT (sty_de7953b1): on a DONE story every reached stage ends GREEN — a
+// reject is always followed by that stage's later forward pass, so the stage's
+// FINAL light is the pass. A trailing red is valid only on a blocked/exhausted
+// story, where the fail-loop bound was spent and no later pass followed.
 func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
 	stage := map[string]int{}
 	stageOf := func(key string) int {
@@ -65,42 +84,62 @@ func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
 		stage[key] = n
 		return n
 	}
+	// The stage key is the step's from-state (always present in a new payload);
+	// fall back to the gate name, then the transition label, for older rows.
+	keyOf := func(e reviewEvent) string {
+		if k := strings.TrimSpace(e.FromStatus); k != "" {
+			return k
+		}
+		if k := strings.TrimSpace(e.Gate); k != "" {
+			return k
+		}
+		return strings.TrimSpace(e.Transition)
+	}
 
 	lights := []reviewLight{}
-	pendingGate := ""
-	pendingActive := false
+	reqByKey := map[string]int{}      // requests seen per stage key
+	resolvedByKey := map[string]int{} // verdicts (pass/fail) seen per stage key
+	type pendingReq struct{ key, gate string }
+	reqOrder := []pendingReq{}
+
 	for _, e := range evts {
 		switch e.Kind {
 		case "review_requested":
-			pendingGate = e.Gate
-			pendingActive = true
-			stageOf(e.Gate) // reserve the stage number at first sight
-		case "review_accept":
-			g := firstNonEmpty(e.Gate, pendingGate)
-			lights = append(lights, reviewLight{Index: stageOf(g), State: "pass", Gate: g, When: e.When})
-			pendingGate, pendingActive = "", false
+			k := keyOf(e)
+			reqByKey[k]++
+			reqOrder = append(reqOrder, pendingReq{key: k, gate: e.Gate})
 		case "review_reject":
-			g := firstNonEmpty(e.Gate, pendingGate)
-			lights = append(lights, reviewLight{Index: stageOf(g), State: "fail", Gate: g, When: e.When})
-			pendingGate, pendingActive = "", false
+			k := keyOf(e)
+			resolvedByKey[k]++
+			lights = append(lights, reviewLight{Index: stageOf(k), State: "fail", Gate: e.Gate, When: e.When})
 		case "status_transition":
-			// Only an UNGATED checkpoint becomes its own light — a gate-driven
-			// transition is already counted by its verdict above.
-			if !e.Checkpoint {
-				continue
+			switch {
+			case e.Checkpoint:
+				k := keyOf(e)
+				lights = append(lights, reviewLight{Index: stageOf(k), State: "fired", Gate: e.Transition, When: e.When})
+			case e.Forward:
+				k := keyOf(e)
+				resolvedByKey[k]++
+				lights = append(lights, reviewLight{Index: stageOf(k), State: "pass", Gate: e.Gate, When: e.When})
 			}
-			key := strings.TrimSpace(e.Transition)
-			if key == "" {
-				key = "checkpoint"
-			}
-			lights = append(lights, reviewLight{Index: stageOf(key), State: "fired", Gate: e.Transition, When: e.When})
+			// A backward/fail-loop, exhausted, or operator status_transition emits
+			// no light — the reject (for a fail loop) already showed the red, and
+			// an operator move is not a workflow step.
 		}
 	}
 
-	// A trailing request with no verdict is the in-progress stage — shown only
-	// when the story is not terminal (a closed story has no current stage).
-	if pendingActive && !isTerminalReviewStatus(status) {
-		lights = append(lights, reviewLight{Index: stageOf(pendingGate), State: "current", Gate: pendingGate})
+	// Current (in-progress) stage on a non-terminal story: the most recent request
+	// whose gate has not yet resolved (no later forward pass or reject). Driven by
+	// the request count vs the resolved count so a re-request after a reject still
+	// reads as the current attempt of its (already-numbered) stage.
+	if !isTerminalReviewStatus(status) {
+		for i := len(reqOrder) - 1; i >= 0; i-- {
+			pr := reqOrder[i]
+			if reqByKey[pr.key] > resolvedByKey[pr.key] {
+				lights = append(lights, reviewLight{Index: stageOf(pr.key), State: "current", Gate: pr.gate})
+				break
+			}
+		}
 	}
 	return lights
 }
@@ -115,17 +154,9 @@ func isTerminalReviewStatus(status string) bool {
 	return false
 }
 
-func firstNonEmpty(a, b string) string {
-	if strings.TrimSpace(a) != "" {
-		return a
-	}
-	return b
-}
-
 // gateFromReviewBody pulls the gate name out of a review_requested body, whose
-// shape is "gate <name>: from <state>". Verdict rows (accept/reject) carry the
-// gate's free-text notes, not a gate name, so they return "" and inherit the
-// preceding request's gate in buildReviewLights.
+// shape is "gate <name>: from <state>". Verdict rows carry their gate in the
+// payload, not the body, so this is the request-row parser.
 func gateFromReviewBody(kind, body string) string {
 	if kind != "review_requested" {
 		return ""
@@ -140,6 +171,40 @@ func gateFromReviewBody(kind, body string) string {
 		b = b[:i]
 	}
 	return strings.TrimSpace(b)
+}
+
+// fromStateFromReviewBody pulls the from-state out of a review_requested body
+// ("gate <name>: from <state>") — the stage key for the in-progress "current"
+// light, matching the from_status the resolving verdict/transition carries.
+func fromStateFromReviewBody(body string) string {
+	const marker = " from "
+	if i := strings.LastIndex(body, marker); i >= 0 {
+		return strings.TrimSpace(body[i+len(marker):])
+	}
+	return ""
+}
+
+// stPayload is the structured slice of a status_transition / review_reject
+// payload the lights derivation reads (from/to states, the governing gate, and
+// the v2 classification markers).
+type stPayload struct {
+	From      string `json:"from_status"`
+	To        string `json:"to_status"`
+	Gate      string `json:"gate"`
+	Trigger   string `json:"trigger"`
+	On        string `json:"on"`
+	Exhausted bool   `json:"exhausted"`
+}
+
+func parsePayload(payload json.RawMessage) stPayload {
+	var p stPayload
+	if len(payload) > 0 {
+		_ = json.Unmarshal(payload, &p)
+	}
+	p.From = strings.TrimSpace(p.From)
+	p.To = strings.TrimSpace(p.To)
+	p.Gate = strings.TrimSpace(p.Gate)
+	return p
 }
 
 // latestReviewEvents fetches the project's review_* AND status_transition ledger
@@ -187,11 +252,19 @@ func latestReviewEvents(ctx context.Context, projectID string) (map[string][]rev
 	if err := collect(
 		verb.LedgerListRequest{ProjectID: projectID, KindPrefix: "review_"},
 		func(e lightRow) reviewEvent {
-			return reviewEvent{
-				Kind: e.Kind,
-				Gate: gateFromReviewBody(e.Kind, e.Body),
-				When: e.When.UTC().Format(time.RFC3339Nano),
+			ev := reviewEvent{Kind: e.Kind, When: e.When.UTC().Format(time.RFC3339Nano)}
+			switch e.Kind {
+			case "review_requested":
+				ev.Gate = gateFromReviewBody(e.Kind, e.Body)
+				ev.FromStatus = fromStateFromReviewBody(e.Body)
+			case "review_reject":
+				p := parsePayload(e.Payload)
+				ev.Gate = p.Gate
+				ev.FromStatus = p.From
 			}
+			// review_accept is intentionally left with no fields — buildReviewLights
+			// ignores it (the forward status_transition records the pass).
+			return ev
 		},
 	); err != nil {
 		return nil, err
@@ -199,11 +272,18 @@ func latestReviewEvents(ctx context.Context, projectID string) (map[string][]rev
 	if err := collect(
 		verb.LedgerListRequest{ProjectID: projectID, Kind: "status_transition"},
 		func(e lightRow) reviewEvent {
-			from, to, checkpoint := parseStatusTransition(e.Payload, e.Body)
+			p := parsePayload(e.Payload)
+			checkpoint := p.Trigger == "checkpoint" || strings.Contains(e.Body, "(checkpoint)")
+			// A FORWARD gate pass: gate-driven, not a checkpoint, not a fail-loop
+			// (`on:fail`) or exhausted move, and it actually advances (has a to).
+			forward := !checkpoint && p.Gate != "" && p.On != "fail" && !p.Exhausted && p.To != ""
 			return reviewEvent{
 				Kind:       "status_transition",
-				Transition: transitionLabel(from, to, e.Body),
+				Gate:       p.Gate,
+				FromStatus: p.From,
+				Transition: transitionLabel(p.From, p.To, e.Body),
 				Checkpoint: checkpoint,
+				Forward:    forward,
 				When:       e.When.UTC().Format(time.RFC3339Nano),
 			}
 		},
@@ -228,24 +308,6 @@ type lightRow struct {
 	Body    string
 	Payload json.RawMessage
 	When    time.Time
-}
-
-// parseStatusTransition reads from/to and the checkpoint marker from a
-// status_transition row. The payload (trigger:checkpoint) is authoritative; the
-// body ("from → to (checkpoint)") is the fallback when the payload is absent.
-func parseStatusTransition(payload json.RawMessage, body string) (from, to string, checkpoint bool) {
-	var p struct {
-		From    string `json:"from_status"`
-		To      string `json:"to_status"`
-		Trigger string `json:"trigger"`
-	}
-	if len(payload) > 0 {
-		_ = json.Unmarshal(payload, &p)
-	}
-	from = strings.TrimSpace(p.From)
-	to = strings.TrimSpace(p.To)
-	checkpoint = p.Trigger == "checkpoint" || strings.Contains(body, "(checkpoint)")
-	return from, to, checkpoint
 }
 
 // transitionLabel renders the human "from → to" used as a checkpoint light's

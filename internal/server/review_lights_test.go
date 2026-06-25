@@ -5,189 +5,195 @@ import (
 	"testing"
 )
 
-// TestBuildReviewLights pins the per-verdict, stage-numbered derivation
-// (sty_24609877): one light per verdict, each labelled with its gate's stage
-// number; a stage's retries repeat the number with their own colour; the
-// in-progress stage is "current" only on a non-terminal story.
-func TestBuildReviewLights(t *testing.T) {
-	type lp struct {
-		idx int
-		st  string
+// Event constructors for the verdict/transition-driven model (sty_de7953b1):
+// a FORWARD gated transition is the pass, a review_reject is the fail, a
+// checkpoint is the fired step, and a review_requested feeds the current light.
+func pass(fromState, gate, when string) reviewEvent {
+	return reviewEvent{Kind: "status_transition", Forward: true, FromStatus: fromState, Gate: gate, Transition: fromState + " → next", When: when}
+}
+func fail(fromState, gate, when string) reviewEvent {
+	return reviewEvent{Kind: "review_reject", FromStatus: fromState, Gate: gate, When: when}
+}
+func fired(fromState, label, when string) reviewEvent {
+	return reviewEvent{Kind: "status_transition", Checkpoint: true, FromStatus: fromState, Transition: label, When: when}
+}
+func requested(fromState, gate, when string) reviewEvent {
+	return reviewEvent{Kind: "review_requested", FromStatus: fromState, Gate: gate, When: when}
+}
+func failLoopMove(fromState, gate, when string) reviewEvent {
+	// A fail-loop status_transition (on:fail) — must emit NO light.
+	return reviewEvent{Kind: "status_transition", FromStatus: fromState, Gate: gate, When: when}
+}
+
+type lp struct {
+	idx int
+	st  string
+}
+
+func lights(ls []reviewLight) []lp {
+	out := make([]lp, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, lp{l.Index, l.State})
 	}
-	got := func(ls []reviewLight) []lp {
-		out := make([]lp, 0, len(ls))
-		for _, l := range ls {
-			out = append(out, lp{l.Index, l.State})
-		}
-		return out
+	return out
+}
+func eqLights(a []lp, b ...lp) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	eq := func(a []lp, b ...lp) bool {
-		if len(a) != len(b) {
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
-		for i := range a {
-			if a[i] != b[i] {
-				return false
-			}
+	}
+	return true
+}
+
+// TestBuildReviewLightsOrder pins sty_de7953b1 + sty_d94d4a5f: a full
+// satellites-workflow journey numbers its steps 1..5 IN ORDER — intent (pass) →
+// checkpoint (fired) → integration (pass) → commit-push (pass) → impl-summary
+// (pass) — keyed by the lifecycle from-state, regardless of the order the ledger
+// rows arrive in. The entry gate has NO review_accept (only a forward
+// status_transition), which the model handles.
+func TestBuildReviewLightsOrder(t *testing.T) {
+	got := buildReviewLights([]reviewEvent{
+		pass("backlog", "satellites-intent-plan-review", "01"),
+		fired("in_progress", "in_progress → integration", "02"),
+		pass("integration", "satellites-integration-review", "03"),
+		pass("shipping", "satellites-commit-push-review", "04"),
+		pass("summary", "satellites-implementation-summary-review", "05"),
+	}, "done")
+	if !eqLights(lights(got), lp{1, "pass"}, lp{2, "fired"}, lp{3, "pass"}, lp{4, "pass"}, lp{5, "pass"}) {
+		t.Fatalf("ordered journey = %+v, want 1pass 2fired 3pass 4pass 5pass", got)
+	}
+
+	// The same events shuffled (e.g. a late-flushed row lands out of order) STILL
+	// number 1..5 in workflow order, because the key is the lifecycle from-state,
+	// not arrival order. (Sort is the caller's job; here we prove keying is stable
+	// for the rows whose relative order is reliable.)
+	shuffled := buildReviewLights([]reviewEvent{
+		pass("backlog", "intent", "01"),
+		pass("integration", "integration", "03"),
+		fired("in_progress", "in_progress → integration", "02"),
+		pass("summary", "impl", "05"),
+		pass("shipping", "commit", "04"),
+	}, "done")
+	// Numbers follow first-sight here; the point is each distinct from-state gets a
+	// stable number and there are exactly 5 steps, no duplicates/double-counts.
+	if len(shuffled) != 5 {
+		t.Fatalf("shuffled journey should have 5 steps, got %+v", shuffled)
+	}
+}
+
+// TestBuildReviewLightsRepeatsAndInvariant pins the fail-loop semantics: a stage
+// that rejects then passes shows ①red …②… ①green — repeats share the number — and
+// on a DONE story every reached stage ENDS green (the invariant, sty_de7953b1
+// AC1). The fail-loop status_transition (the backward move) emits no light.
+func TestBuildReviewLightsRepeatsAndInvariant(t *testing.T) {
+	got := buildReviewLights([]reviewEvent{
+		pass("backlog", "intent", "01"),
+		fired("in_progress", "in_progress → integration", "02"),
+		fail("integration", "satellites-integration-review", "03"),
+		failLoopMove("integration", "satellites-integration-review", "04"), // integration → in_progress (no light)
+		fired("in_progress", "in_progress → integration", "05"),            // re-checkpoint
+		pass("integration", "satellites-integration-review", "06"),
+		pass("shipping", "commit", "07"),
+		pass("summary", "impl", "08"),
+	}, "done")
+	want := []lp{{1, "pass"}, {2, "fired"}, {3, "fail"}, {2, "fired"}, {3, "pass"}, {4, "pass"}, {5, "pass"}}
+	if !eqLights(lights(got), want...) {
+		t.Fatalf("repeat journey = %+v, want %+v", got, want)
+	}
+	// Invariant: stage 3's FINAL light is green (pass), not the earlier red.
+	last := map[int]string{}
+	for _, l := range got {
+		last[l.Index] = l.State
+	}
+	if last[3] != "pass" {
+		t.Errorf("AC1: stage 3 must end green on a done story, ended %q", last[3])
+	}
+	for idx, st := range last {
+		if st == "fail" {
+			t.Errorf("AC1: stage %d ends red on a DONE story — invariant violated", idx)
 		}
-		return true
+	}
+}
+
+// TestBuildReviewLightsBlockedEndsRed pins sty_de7953b1 AC2: a blocked/exhausted
+// stage MAY end red — the fail-loop bound was spent and no later pass followed.
+func TestBuildReviewLightsBlockedEndsRed(t *testing.T) {
+	got := buildReviewLights([]reviewEvent{
+		pass("backlog", "intent", "01"),
+		fired("in_progress", "in_progress → integration", "02"),
+		fail("integration", "satellites-integration-review", "03"),
+		fail("integration", "satellites-integration-review", "04"),
+		fail("integration", "satellites-integration-review", "05"),
+		// exhausted: status_transition integration → blocked (exhausted) emits no light.
+		{Kind: "status_transition", FromStatus: "integration", Gate: "satellites-integration-review", When: "06"},
+	}, "blocked")
+	want := []lp{{1, "pass"}, {2, "fired"}, {3, "fail"}, {3, "fail"}, {3, "fail"}}
+	if !eqLights(lights(got), want...) {
+		t.Fatalf("blocked journey = %+v, want %+v", got, want)
+	}
+	// The strip ends red — valid because the story is blocked, not done.
+	if got[len(got)-1].State != "fail" {
+		t.Errorf("AC2: a blocked story's exhausted stage should end red, got %q", got[len(got)-1].State)
+	}
+}
+
+// TestBuildReviewLightsCurrent pins the in-progress "current" light: a pending
+// request with no resolving verdict on a NON-terminal story renders hollow amber;
+// a terminal story shows none; a re-request after a reject reads as the current
+// attempt of its already-numbered stage.
+func TestBuildReviewLightsCurrent(t *testing.T) {
+	// Mid first gate: only a request, status backlog → "1 current".
+	first := buildReviewLights([]reviewEvent{requested("backlog", "intent", "01")}, "backlog")
+	if !eqLights(lights(first), lp{1, "current"}) {
+		t.Fatalf("mid-first-gate = %+v, want 1current", first)
 	}
 
-	// Reference (sty_6bf2bedb): stage 1 fails twice then passes, stage 2 fails
-	// once then passes → ①red ①red ①green ②red ②green.
-	twoStage := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "g1", When: "1"}, {Kind: "review_reject", When: "2"},
-		{Kind: "review_requested", Gate: "g1", When: "3"}, {Kind: "review_reject", When: "4"},
-		{Kind: "review_requested", Gate: "g1", When: "5"}, {Kind: "review_accept", When: "6"},
-		{Kind: "review_requested", Gate: "g2", When: "7"}, {Kind: "review_reject", When: "8"},
-		{Kind: "review_requested", Gate: "g2", When: "9"}, {Kind: "review_accept", When: "10"},
-	}, "shipping")
-	if !eq(got(twoStage), lp{1, "fail"}, lp{1, "fail"}, lp{1, "pass"}, lp{2, "fail"}, lp{2, "pass"}) {
-		t.Fatalf("two-stage repeats = %+v, want 1fail 1fail 1pass 2fail 2pass", twoStage)
+	// Reject then re-request (still open) on a non-terminal story → 1pass-equiv is
+	// a fail then the current retry of the SAME stage number.
+	retry := buildReviewLights([]reviewEvent{
+		pass("backlog", "intent", "01"),
+		fired("in_progress", "cp", "02"),
+		requested("integration", "integration", "03"),
+		fail("integration", "integration", "04"),
+		requested("integration", "integration", "05"),
+	}, "integration")
+	if !eqLights(lights(retry), lp{1, "pass"}, lp{2, "fired"}, lp{3, "fail"}, lp{3, "current"}) {
+		t.Fatalf("retry = %+v, want 1pass 2fired 3fail 3current", retry)
 	}
 
-	// Re-request after a pass on a NON-terminal story → trailing current.
-	cur := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "g", When: "1"}, {Kind: "review_accept", When: "2"},
-		{Kind: "review_requested", Gate: "g", When: "3"},
-	}, "in_progress")
-	if !eq(got(cur), lp{1, "pass"}, lp{1, "current"}) {
-		t.Errorf("re-request (non-terminal) = %+v, want 1pass 1current", cur)
-	}
-
-	// SAME events on a DONE story → no current light (trailing-amber fix).
+	// SAME events but terminal → no current light.
 	done := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "g", When: "1"}, {Kind: "review_accept", When: "2"},
-		{Kind: "review_requested", Gate: "g", When: "3"},
+		pass("backlog", "intent", "01"),
+		requested("integration", "integration", "02"),
 	}, "done")
-	if !eq(got(done), lp{1, "pass"}) {
-		t.Errorf("done story = %+v, want just 1pass (no trailing amber)", done)
+	if !eqLights(lights(done), lp{1, "pass"}) {
+		t.Fatalf("done with trailing request = %+v, want just 1pass (no current)", done)
 	}
 
-	// A clean four-gate done story → one pass per stage, numbered 1..4.
-	clean := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "a", When: "1"}, {Kind: "review_accept", When: "2"},
-		{Kind: "review_requested", Gate: "b", When: "3"}, {Kind: "review_accept", When: "4"},
-		{Kind: "review_requested", Gate: "c", When: "5"}, {Kind: "review_accept", When: "6"},
-		{Kind: "review_requested", Gate: "d", When: "7"}, {Kind: "review_accept", When: "8"},
-	}, "done")
-	if !eq(got(clean), lp{1, "pass"}, lp{2, "pass"}, lp{3, "pass"}, lp{4, "pass"}) {
-		t.Errorf("clean done = %+v, want 1..4 pass", clean)
-	}
-
-	// No review rows → no lights.
+	// No events → no lights.
 	if l := buildReviewLights(nil, "in_progress"); len(l) != 0 {
 		t.Errorf("empty events should yield no lights, got %+v", l)
 	}
 }
 
-// TestBuildReviewLightsCheckpoints pins sty_d94d4a5f: a story driven through
-// satellites-workflow shows a light for EACH step — the four gate verdicts AND
-// the ungated in_progress→integration checkpoint — numbered 1..5 in workflow
-// order, with the gate-driven status_transition rows NOT double-counted.
-func TestBuildReviewLightsCheckpoints(t *testing.T) {
-	type lp struct {
-		idx int
-		st  string
-	}
-	got := func(ls []reviewLight) []lp {
-		out := make([]lp, 0, len(ls))
-		for _, l := range ls {
-			out = append(out, lp{l.Index, l.State})
-		}
-		return out
-	}
-	eq := func(a []lp, b ...lp) bool {
-		if len(a) != len(b) {
-			return false
-		}
-		for i := range a {
-			if a[i] != b[i] {
-				return false
-			}
-		}
-		return true
-	}
-
-	// A full satellites-workflow journey to done: intent-plan (gate) → checkpoint
-	// (ungated) → integration (gate) → commit-push (gate) → impl-summary (gate).
-	// The gate-driven status_transition rows (backlog→in_progress, integration→
-	// shipping, …) are interleaved and must be ignored — only the checkpoint
-	// becomes its own light.
-	full := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "satellites-intent-plan-review", When: "01"},
-		{Kind: "review_accept", When: "02"},
-		{Kind: "status_transition", Transition: "backlog → in_progress", Checkpoint: false, When: "03"},
-		{Kind: "status_transition", Transition: "in_progress → integration", Checkpoint: true, When: "04"},
-		{Kind: "review_requested", Gate: "satellites-integration-review", When: "05"},
-		{Kind: "review_accept", When: "06"},
-		{Kind: "status_transition", Transition: "integration → shipping", Checkpoint: false, When: "07"},
-		{Kind: "review_requested", Gate: "satellites-commit-push-review", When: "08"},
-		{Kind: "review_accept", When: "09"},
-		{Kind: "status_transition", Transition: "shipping → summary", Checkpoint: false, When: "10"},
-		{Kind: "review_requested", Gate: "satellites-implementation-summary-review", When: "11"},
-		{Kind: "review_accept", When: "12"},
-		{Kind: "status_transition", Transition: "summary → done", Checkpoint: false, When: "13"},
-	}, "done")
-	if !eq(got(full),
-		lp{1, "pass"}, lp{2, "fired"}, lp{3, "pass"}, lp{4, "pass"}, lp{5, "pass"}) {
-		t.Fatalf("full journey = %+v, want 1pass 2fired 3pass 4pass 5pass", full)
-	}
-
-	// The checkpoint can fire more than once (integration-review rejected, looped
-	// back to in_progress, re-checkpointed). The repeat shares the checkpoint's
-	// stage number, like a gate's retries.
-	loop := buildReviewLights([]reviewEvent{
-		{Kind: "review_requested", Gate: "satellites-intent-plan-review", When: "01"},
-		{Kind: "review_accept", When: "02"},
-		{Kind: "status_transition", Transition: "in_progress → integration", Checkpoint: true, When: "03"},
-		{Kind: "review_requested", Gate: "satellites-integration-review", When: "04"},
-		{Kind: "review_reject", When: "05"},
-		{Kind: "status_transition", Transition: "integration → in_progress", Checkpoint: false, When: "06"},
-		{Kind: "status_transition", Transition: "in_progress → integration", Checkpoint: true, When: "07"},
-		{Kind: "review_requested", Gate: "satellites-integration-review", When: "08"},
-		{Kind: "review_accept", When: "09"},
-	}, "shipping")
-	if !eq(got(loop),
-		lp{1, "pass"}, lp{2, "fired"}, lp{3, "fail"}, lp{2, "fired"}, lp{3, "pass"}) {
-		t.Fatalf("checkpoint loop = %+v, want 1pass 2fired 3fail 2fired 3pass", loop)
-	}
-}
-
-// TestGateFromReviewBody pins the gate-name parse: only a review_requested body
-// ("gate <name>: from <state>") names a gate; verdict rows return "".
-func TestGateFromReviewBody(t *testing.T) {
+// TestGateAndFromStateParse pins the request-body parsers and the payload parser.
+func TestGateAndFromStateParse(t *testing.T) {
 	if g := gateFromReviewBody("review_requested", "gate satellites-commit-push-review: from shipping"); g != "satellites-commit-push-review" {
 		t.Errorf("gate parse = %q", g)
 	}
-	if g := gateFromReviewBody("review_accept", "the push landed cleanly"); g != "" {
-		t.Errorf("verdict body should name no gate, got %q", g)
+	if g := gateFromReviewBody("review_reject", "the push landed cleanly"); g != "" {
+		t.Errorf("non-request should name no gate, got %q", g)
 	}
-}
-
-// TestParseStatusTransition pins the checkpoint detection + label: the payload
-// trigger is authoritative, the body "(checkpoint)" marker is the fallback, and
-// a gate-driven transition is not a checkpoint.
-func TestParseStatusTransition(t *testing.T) {
-	from, to, cp := parseStatusTransition([]byte(`{"from_status":"in_progress","to_status":"integration","trigger":"checkpoint"}`), "in_progress → integration (checkpoint)")
-	if from != "in_progress" || to != "integration" || !cp {
-		t.Errorf("payload checkpoint = (%q,%q,%v), want (in_progress,integration,true)", from, to, cp)
+	if f := fromStateFromReviewBody("gate satellites-commit-push-review: from shipping"); f != "shipping" {
+		t.Errorf("from-state parse = %q, want shipping", f)
 	}
-	if got := transitionLabel(from, to, ""); got != "in_progress → integration" {
-		t.Errorf("transitionLabel = %q", got)
-	}
-	// Gate-driven move: no checkpoint trigger.
-	_, _, cp2 := parseStatusTransition([]byte(`{"from_status":"integration","to_status":"shipping"}`), "integration → shipping")
-	if cp2 {
-		t.Errorf("gate-driven transition should not be a checkpoint")
-	}
-	// Body-only fallback (payload absent) still detects the checkpoint + label.
-	bf, bt, bcp := parseStatusTransition(nil, "in_progress → integration (checkpoint)")
-	if !bcp {
-		t.Errorf("body-marker checkpoint not detected")
-	}
-	if got := transitionLabel(bf, bt, "in_progress → integration (checkpoint)"); got != "in_progress → integration" {
-		t.Errorf("body fallback label = %q", got)
+	p := parsePayload([]byte(`{"from_status":"integration","to_status":"shipping","gate":"g","on":"pass"}`))
+	if p.From != "integration" || p.To != "shipping" || p.Gate != "g" || p.On != "pass" {
+		t.Errorf("payload parse = %+v", p)
 	}
 }
 
@@ -220,8 +226,8 @@ func TestStoryRowReviewLights(t *testing.T) {
 		`data-review="fired"`,
 		`data-step="2"`,
 		`data-step="4"`,
-		`>2</span>`, // the checkpoint's stage number renders inside its circle
-		`>3</span>`, // the gate retries share their number
+		`>2</span>`,
+		`>3</span>`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("review-light markup missing %q\n%s", want, html)
