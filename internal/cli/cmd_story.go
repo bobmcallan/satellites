@@ -30,6 +30,8 @@ func init() {
 	story.AddCommand(newStoryChildrenCmd(&configArg, &userArg))
 	story.AddCommand(newStoryValidateCmd(&configArg, &userArg))
 	story.AddCommand(newStoryOutputCmd(&configArg, &userArg))
+	story.AddCommand(newStoryEstimateCmd(&configArg, &userArg))
+	story.AddCommand(newStoryActualCmd(&configArg, &userArg))
 
 	register(story)
 }

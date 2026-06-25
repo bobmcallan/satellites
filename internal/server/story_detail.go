@@ -183,7 +183,7 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 		data.NoWorkflow = true
 		return data, nil
 	}
-	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries)
+	trace := processtrace.Reconcile(storyID, story.Category, story.Status, wf, entries, story.Tags)
 	data.WorkflowName = trace.WorkflowName
 	data.CloseOut = closeOutView(trace.CloseOut)
 	return data, nil
@@ -363,6 +363,7 @@ type storyMeta struct {
 	WorkspaceID        string
 	Description        string
 	AcceptanceCriteria string
+	Tags               []string
 }
 
 func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
@@ -387,6 +388,7 @@ func dispatchStoryMeta(ctx context.Context, id string) (storyMeta, error) {
 		WorkspaceID:        resp.Document.WorkspaceID,
 		Description:        resp.RawBody,
 		AcceptanceCriteria: resp.Document.AcceptanceCriteria,
+		Tags:               resp.Document.Tags,
 	}, nil
 }
 

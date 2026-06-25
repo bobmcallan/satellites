@@ -4,7 +4,7 @@ type: skill
 kind: reviewer
 when: plan
 tags: [kind:reviewer]
-description: The spine plan gate — judges that a story is satellites-formatted (Purpose, Approach, numbered acceptance criteria), carries a clear story→done goal, and RECORDS A GOVERNING WORKFLOW BY NAME (a `workflow:<name>` selector that resolves and covers the story's category), before an executor starts. The agent CHOOSES the workflow at planning (`workflow list` → `workflow embed`); a story with NO recorded selector is REJECTED — there is no silent category default. The embedded ## Workflow is display-only. It does NOT judge config-over-code (that is satellites-intent-code-review, on the diff) nor re-judge code grounding. Emits {decision, notes} JSON.
+description: The spine plan gate — judges that a story is satellites-formatted (Purpose, Approach, numbered acceptance criteria), carries a clear story→done goal, and RECORDS A GOVERNING WORKFLOW BY NAME (a `workflow:<name>` selector that resolves and covers the story's category), before an executor starts. The agent CHOOSES the workflow at planning (`workflow list` → `workflow embed`); a story with NO recorded selector is REJECTED — there is no silent category default. The embedded ## Workflow is display-only. It also requires a RECORDED PLAN ESTIMATE (an `estimate-minutes`/`estimate-tokens` tag set via `satellites story estimate`) so the close-out can compare estimate vs actual — a story with no estimate is REJECTED (presence judged, not accuracy). It does NOT judge config-over-code (that is satellites-intent-code-review, on the diff) nor re-judge code grounding. Emits {decision, notes} JSON.
 ---
 
 Decide ONE thing: is this story a well-formed, drivable contract — **satellites-formatted, with a clear story→done goal and a resolvable governing workflow**? This is the minimal spine gate every repo gets; it ensures the agent picks up a story it can actually drive to done. It does NOT judge config-over-code (satellites-intent-code-review owns that, on the diff) and does NOT re-judge code grounding (a comprehensive plan-review, where the repo runs one, owns that).
@@ -23,8 +23,9 @@ Judge the `story_body` and the story's **workflow selection** (below):
   - a **Purpose** (why this story exists) and an **Approach** (how it will be done),
   - **numbered acceptance criteria** that are concrete and testable at the story's completion,
   - a coherent goal that a single story can drive to a terminal `done` (not an open-ended programme, not a vague aspiration), and
-  - a **recorded governing workflow** — a `workflow:<name>` selector that resolves to a real workflow covering the story's category (see *Workflow selection*). The embedded `## Workflow` block is display-only and is never the authority.
-- **reject** — the story is malformed, its goal is not done-able, or its workflow selection is missing/invalid: missing Purpose/Approach, no numbered acceptance criteria (or vague/untestable ones), a goal too broad/ambiguous to reach `done`, **no recorded `workflow:` selector at all** (the agent must choose one at planning via `workflow list` → `workflow embed` — there is no silent category default), OR a `workflow:` selector that names no workflow in the source set / names one that does not match the story's category (see *Workflow selection*). Name exactly what is missing or unfollowable.
+  - a **recorded governing workflow** — a `workflow:<name>` selector that resolves to a real workflow covering the story's category (see *Workflow selection*). The embedded `## Workflow` block is display-only and is never the authority, and
+  - a **recorded plan estimate** — the story carries an `estimate-minutes` and/or `estimate-tokens` tag (set at planning via `satellites story estimate`; see *Estimate*).
+- **reject** — the story is malformed, its goal is not done-able, its workflow selection is missing/invalid, or it records no estimate: missing Purpose/Approach, no numbered acceptance criteria (or vague/untestable ones), a goal too broad/ambiguous to reach `done`, **no recorded `workflow:` selector at all** (the agent must choose one at planning via `workflow list` → `workflow embed` — there is no silent category default), a `workflow:` selector that names no workflow in the source set / names one that does not match the story's category (see *Workflow selection*), **or no recorded estimate** (no `estimate-minutes`/`estimate-tokens` tag — see *Estimate*). Name exactly what is missing or unfollowable.
 
 Fail closed: if the story body cannot be read or its shape cannot be judged, reject with the reason named.
 
@@ -55,6 +56,19 @@ You JUDGE the selection only — you do NOT set or change the `workflow:` tag. O
 reject the executor records a workflow (via `workflow list` → `workflow embed`)
 and re-requests this gate.
 
+## Estimate
+
+A drivable plan states up front what it expects to cost — the close-out panel
+compares that estimate against the actuals once the story is done. Judge the
+estimate's PRESENCE only (not its accuracy):
+
+- Read the story's tags: `satellites story get <story_id>`.
+- The story must carry an `estimate-minutes` and/or `estimate-tokens` tag. If it
+  does → the estimate is recorded.
+- If NEITHER is present → **reject**. Tell the executor to record one with
+  `satellites story estimate <story_id> --time <dur> --tokens <n> [--basis <note>]`
+  and re-request this gate. You JUDGE presence only — you do NOT set the tags.
+
 ## Environment
 
 You are a reviewer. You read the story body and judge it; you write NOTHING — no ledger rows, no `document_upsert`, no git/file mutation. The client enacts your verdict.
@@ -62,7 +76,7 @@ You are a reviewer. You read the story body and judge it; you write NOTHING — 
 ```yaml
 guardrails:
   always:
-    - Judge ONLY story format (Purpose/Approach/numbered AC), a clear story→done goal, and a RECORDED governing-workflow selection (a `workflow:` selector that resolves and covers the category — a MISSING selector is a reject; there is no category default).
+    - Judge ONLY story format (Purpose/Approach/numbered AC), a clear story→done goal, a RECORDED governing-workflow selection (a `workflow:` selector that resolves and covers the category — a MISSING selector is a reject; there is no category default), and a RECORDED plan estimate (an `estimate-minutes`/`estimate-tokens` tag — a MISSING estimate is a reject; judge presence, not accuracy).
     - Verify the GOVERNING workflow (the recorded `workflow:<name>` selector) declares a transition whose from == story_status AND reviewer_skill == satellites-intent-plan-review — if none exists, reject; the embedded ## Workflow, if present, is display only. The client enacts that edge on your accept.
     - Fail closed — if the story shape or its workflow selection cannot be judged, print reject with the reason named.
     - The gate writes nothing — emit exactly one JSON object {decision, notes} as its only output.

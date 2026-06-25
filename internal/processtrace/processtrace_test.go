@@ -59,7 +59,7 @@ func TestReconcile_FullRun_RejectThenAccept(t *testing.T) {
 		ent("step_summary", "the change closed the gap", map[string]any{"from_status": "in_progress", "to_status": "done", "gate_skill": "satellites-story-done-review", "decision": "accept"}, 6),
 	}
 
-	tr := Reconcile("sty_1", "fix", "done", fixWorkflow(), entries)
+	tr := Reconcile("sty_1", "fix", "done", fixWorkflow(), entries, nil)
 
 	plan, ok := find(tr, "backlog", "in_progress")
 	if !ok || plan.Status != StatusAccepted {
@@ -87,6 +87,57 @@ func TestReconcile_FullRun_RejectThenAccept(t *testing.T) {
 	}
 }
 
+// TestReconcile_CloseOutFromTags reads the plan estimate and actual tokens from
+// the story's KV tags (set by `story estimate` / `story actual`) into the
+// close-out, and lets an explicit actual-minutes tag override derived elapsed.
+func TestReconcile_CloseOutFromTags(t *testing.T) {
+	entries := []LedgerEntry{
+		ent("review_accept", "plan ready", map[string]any{"gate": "satellites-story-plan-review", "from_status": "backlog", "to_status": "in_progress"}, 0),
+		ent("status_transition", "backlog → in_progress", map[string]any{"from_status": "backlog", "to_status": "in_progress"}, 60),
+		ent("status_transition", "in_progress → done", map[string]any{"from_status": "in_progress", "to_status": "done"}, 600),
+	}
+	tags := []string{
+		"workflow:satellites-fix-workflow",
+		"estimate-minutes:30",
+		"estimate-tokens:40000",
+		"estimate-basis:2 files, gate loop x3",
+		"actual-tokens:38000",
+		"actual-minutes:28",
+	}
+	co := Reconcile("sty_est", "fix", "done", fixWorkflow(), entries, tags).CloseOut
+	if co.Estimate == nil {
+		t.Fatalf("estimate not read from tags")
+	}
+	if co.Estimate.TimeMinutes != 30 || co.Estimate.Tokens != 40000 || co.Estimate.Basis != "2 files, gate loop x3" {
+		t.Fatalf("estimate = %+v", co.Estimate)
+	}
+	if co.TokensActual == nil || *co.TokensActual != 38000 {
+		t.Fatalf("tokens actual = %v want 38000", co.TokensActual)
+	}
+	if co.ElapsedMinutes != 28 {
+		t.Fatalf("elapsed = %d want 28 (actual-minutes override)", co.ElapsedMinutes)
+	}
+}
+
+// TestReconcile_CloseOutNoTags leaves estimate/actual empty when the story
+// records none — derived elapsed stands and tokens actual stays nil.
+func TestReconcile_CloseOutNoTags(t *testing.T) {
+	entries := []LedgerEntry{
+		ent("status_transition", "backlog → in_progress", map[string]any{"from_status": "backlog", "to_status": "in_progress"}, 60),
+		ent("status_transition", "in_progress → done", map[string]any{"from_status": "in_progress", "to_status": "done"}, 600),
+	}
+	co := Reconcile("sty_noest", "fix", "done", fixWorkflow(), entries, nil).CloseOut
+	if co.Estimate != nil {
+		t.Fatalf("estimate should be nil, got %+v", co.Estimate)
+	}
+	if co.TokensActual != nil {
+		t.Fatalf("tokens actual should be nil, got %d", *co.TokensActual)
+	}
+	if co.ElapsedMinutes != 9 { // 600s - 60s = 540s ≈ 9m derived
+		t.Fatalf("elapsed = %d want 9 (derived)", co.ElapsedMinutes)
+	}
+}
+
 // TestReconcile_Pending marks the next outgoing edge from the current status
 // as pending when it has not fired.
 func TestReconcile_Pending(t *testing.T) {
@@ -94,7 +145,7 @@ func TestReconcile_Pending(t *testing.T) {
 		ent("review_accept", "plan ready", map[string]any{"gate": "satellites-story-plan-review", "from_status": "backlog", "to_status": "in_progress"}, 1),
 		ent("status_transition", "backlog → in_progress", map[string]any{"from_status": "backlog", "to_status": "in_progress"}, 2),
 	}
-	tr := Reconcile("sty_2", "fix", "in_progress", fixWorkflow(), entries)
+	tr := Reconcile("sty_2", "fix", "in_progress", fixWorkflow(), entries, nil)
 
 	done, _ := find(tr, "in_progress", "done")
 	if done.Status != StatusPending {
@@ -114,7 +165,7 @@ func TestReconcile_RejectedNotAdvanced(t *testing.T) {
 		ent("status_transition", "backlog → in_progress", map[string]any{"from_status": "backlog", "to_status": "in_progress"}, 2),
 		ent("review_reject", "AC3 has no test", map[string]any{"gate": "satellites-story-done-review", "from_status": "in_progress"}, 3),
 	}
-	tr := Reconcile("sty_3", "fix", "in_progress", fixWorkflow(), entries)
+	tr := Reconcile("sty_3", "fix", "in_progress", fixWorkflow(), entries, nil)
 	done, _ := find(tr, "in_progress", "done")
 	if done.Status != StatusRejected {
 		t.Fatalf("done status = %q want rejected", done.Status)
@@ -137,7 +188,7 @@ func TestReconcile_UnguardedTransitionFires(t *testing.T) {
 	entries := []LedgerEntry{
 		ent("status_transition", "a → b", map[string]any{"from_status": "a", "to_status": "b"}, 1),
 	}
-	tr := Reconcile("sty_4", "fix", "b", wf, entries)
+	tr := Reconcile("sty_4", "fix", "b", wf, entries, nil)
 	edge, _ := find(tr, "a", "b")
 	if edge.Status != StatusFired {
 		t.Fatalf("unguarded edge status = %q want fired", edge.Status)
@@ -146,7 +197,7 @@ func TestReconcile_UnguardedTransitionFires(t *testing.T) {
 
 // TestReconcile_NilWorkflow returns an empty, safe trace.
 func TestReconcile_NilWorkflow(t *testing.T) {
-	tr := Reconcile("sty_5", "fix", "backlog", nil, nil)
+	tr := Reconcile("sty_5", "fix", "backlog", nil, nil, nil)
 	if len(tr.Transitions) != 0 || tr.StoryID != "sty_5" {
 		t.Fatalf("nil workflow trace = %+v", tr)
 	}
@@ -182,7 +233,7 @@ func TestReconcile_AlienWorkflowEventsAndCloseOut(t *testing.T) {
 		ent("status_transition", "", map[string]any{"from_status": "vetting", "to_status": "sealed"}, 3601),
 	}
 
-	tr := Reconcile("sty_alien", "moon", "sealed", wf, entries)
+	tr := Reconcile("sty_alien", "moon", "sealed", wf, entries, nil)
 
 	seal, ok := find(tr, "vetting", "sealed")
 	if !ok || seal.Status != StatusAccepted || seal.RejectCount != 1 {
@@ -223,7 +274,7 @@ func TestReconcile_AlienWorkflowEventsAndCloseOut(t *testing.T) {
 	}
 
 	// Mid-flight: at vetting the seal edge reads pending, intake accepted.
-	mid := Reconcile("sty_alien", "moon", "vetting", wf, entries[:4])
+	mid := Reconcile("sty_alien", "moon", "vetting", wf, entries[:4], nil)
 	if got, _ := find(mid, "vetting", "sealed"); got.Status != StatusPending {
 		t.Errorf("mid-flight seal edge = %s, want pending", got.Status)
 	}

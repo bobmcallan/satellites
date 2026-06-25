@@ -12,9 +12,11 @@ package processtrace
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bobmcallan/satellites/internal/kvtag"
 	"github.com/bobmcallan/satellites/internal/workflow"
 )
 
@@ -115,10 +117,23 @@ type Estimate struct {
 	Basis       string `json:"basis,omitempty"`
 }
 
+// Close-out KV tag keys. The estimate and actual values are recorded ON THE
+// STORY by `satellites story estimate` / `satellites story actual` (sty_9643a847)
+// and read here — the story is the single recorded source. Elapsed time and
+// reject count are still derived from the ledger; an actual-minutes tag (when
+// present) overrides the derived elapsed.
+const (
+	tagEstimateMinutes = "estimate-minutes"
+	tagEstimateTokens  = "estimate-tokens"
+	tagEstimateBasis   = "estimate-basis"
+	tagActualMinutes   = "actual-minutes"
+	tagActualTokens    = "actual-tokens"
+)
+
 // CloseOut compares the recorded estimate against what the ledger shows
-// actually happened. TokensActual stays nil until a reviewer-metrics source
-// records token actuals — the view renders the slot as "—"; the shape does
-// not change when it lands.
+// actually happened. TokensActual stays nil until the executor self-reports it
+// via `satellites story actual` (there is no automatic metrics feed) — the view
+// renders the slot as "—" until then; the shape does not change when it lands.
 type CloseOut struct {
 	Estimate       *Estimate  `json:"estimate,omitempty"`
 	StartedAt      *time.Time `json:"started_at,omitempty"` // first spine event
@@ -145,7 +160,7 @@ type ProcessTrace struct {
 //
 // Observability only (see principle process-as-configuration, "the boundary"):
 // the workflow is parsed here to DISPLAY where a story sits, not to gate it.
-func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, entries []LedgerEntry) ProcessTrace {
+func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, entries []LedgerEntry, storyTags []string) ProcessTrace {
 	out := ProcessTrace{
 		StoryID:       storyID,
 		StoryType:     storyType,
@@ -225,7 +240,7 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 		}
 		out.Transitions = append(out.Transitions, tt)
 	}
-	out.CloseOut = closeOut(currentStatus, wf, sorted, out.Transitions)
+	out.CloseOut = closeOut(currentStatus, wf, sorted, out.Transitions, storyTags)
 	return out
 }
 
@@ -234,7 +249,7 @@ func Reconcile(storyID, storyType, currentStatus string, wf *workflow.Workflow, 
 // ledger rows that already land today (sty_a4257811). The estimate comes from
 // the FIRST review_accept payload carrying an `estimate` object — keyed on the
 // payload field, never on a gate skill's name.
-func closeOut(currentStatus string, wf *workflow.Workflow, sorted []LedgerEntry, transitions []TransitionTrace) CloseOut {
+func closeOut(currentStatus string, wf *workflow.Workflow, sorted []LedgerEntry, transitions []TransitionTrace, storyTags []string) CloseOut {
 	var co CloseOut
 
 	outgoing := map[string]bool{}
@@ -273,7 +288,49 @@ func closeOut(currentStatus string, wf *workflow.Workflow, sorted []LedgerEntry,
 	if co.StartedAt != nil && co.EndedAt != nil && co.EndedAt.After(*co.StartedAt) {
 		co.ElapsedMinutes = int(co.EndedAt.Sub(*co.StartedAt).Round(time.Minute) / time.Minute)
 	}
+
+	// The story is the recorded source for estimate and actual tokens
+	// (sty_9643a847): `story estimate` / `story actual` write KV tags read here.
+	// Tags take precedence over any ledger-payload estimate. Derived elapsed and
+	// reject count stand unless an explicit actual-minutes tag overrides elapsed.
+	if est := estimateFromTags(storyTags); est != nil {
+		co.Estimate = est
+	}
+	if mins, ok := intTag(storyTags, tagActualMinutes); ok && mins > 0 {
+		co.ElapsedMinutes = mins
+	}
+	if tok, ok := intTag(storyTags, tagActualTokens); ok {
+		t := tok
+		co.TokensActual = &t
+	}
 	return co
+}
+
+// estimateFromTags reads the plan estimate recorded on the story as KV tags
+// (estimate-minutes / estimate-tokens / estimate-basis). Returns nil when no
+// estimate component is present.
+func estimateFromTags(tags []string) *Estimate {
+	mins, hasMins := intTag(tags, tagEstimateMinutes)
+	tok, hasTok := intTag(tags, tagEstimateTokens)
+	basis := strings.TrimSpace(kvtag.Value(tags, tagEstimateBasis))
+	if !hasMins && !hasTok && basis == "" {
+		return nil
+	}
+	return &Estimate{TimeMinutes: mins, Tokens: tok, Basis: basis}
+}
+
+// intTag reads a non-negative integer KV tag value. Returns (0,false) when the
+// key is absent or its value does not parse.
+func intTag(tags []string, key string) (int, bool) {
+	v := strings.TrimSpace(kvtag.Value(tags, key))
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // AnnotatedEntry is one ledger row annotated with the workflow edge it
