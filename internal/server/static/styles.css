@@ -958,14 +958,14 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   text-transform: uppercase;
 }
 
-/* Even vertical rhythm between the page's top-level blocks, and a single prose
-   measure (~74ch) so every lede and the accept/reject mapping share one column
-   width instead of stretching to near-empty full-width bars. */
+/* Even vertical rhythm between the page's top-level blocks, and a single ~74ch
+   prose measure so every lede shares one readable line length. The accept/reject
+   mapping boxes are structural, not prose — they span the full content width to
+   match the lever cards below them (sty_ff7c7543). */
 .landing { gap: 2rem; }
 .landing .thesis-lede,
 .landing .realisation-lede,
-.landing .sm-lede,
-.landing .mapping-grid { max-width: 74ch; }
+.landing .sm-lede { max-width: 74ch; }
 
 /* Four-lever cards as a 2x2 grid on wide viewports, collapsing to one
    column under ~720px. Inline SVG icons share the .lever-icon class so
