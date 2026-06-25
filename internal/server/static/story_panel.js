@@ -56,6 +56,9 @@
             .then(function (html) {
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
+                // Render any ```mermaid blocks injected by this swap (sty_d206e263) —
+                // mermaid-init only runs at page load and never sees lazy fragments.
+                if (window.renderMermaid) { window.renderMermaid(el); }
             })
             .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
     };
@@ -75,6 +78,10 @@
             .then(function (html) {
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
+                // Render ```mermaid blocks (e.g. a change-doc's actual workflow)
+                // injected by this swap (sty_d206e263); covers the live-refresh
+                // path too, which re-enters here.
+                if (window.renderMermaid) { window.renderMermaid(el); }
             })
             .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
     };
