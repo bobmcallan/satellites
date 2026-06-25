@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/bobmcallan/satellites/internal/arbor"
 	"github.com/bobmcallan/satellites/internal/frontmatter"
@@ -23,32 +22,24 @@ type libraryData struct {
 	UserName    string
 	UserAvatar  string
 	ActiveNav   string
-	Skills      []librarySkillRow
-	Kinds       []libraryKindChip
-	ActiveKind  string
+	Tasks       []libraryTaskRow
 	DevMode     bool
 	FooterName  string
 	FooterEmail string
 	Version     string
 }
 
-type librarySkillRow struct {
+type libraryTaskRow struct {
 	Name        string
-	Kind        string
 	Description string
 	Publisher   string
 }
 
-type libraryKindChip struct {
-	Kind   string
-	Active bool
-}
-
 // libraryHandler renders /library — the global library browse page
-// (epic:workspace-agents, sty_b2f77307; tasks added sty_35d8e166). It lists
-// library-scope skills AND tasks in one table with a server-side kind filter
-// (?kind=<k>) mirroring the stories panel's filter — skills carry their kind
-// (default "skill"), tasks carry "task", so the chips give a task-vs-skill split.
+// (epic:workspace-agents, sty_b2f77307). The library surface is published TASKS
+// ONLY (sty_98956dbb): a library-scope task is the published COPY of a project
+// task, adoptable across workspaces. Skills, gates/reviewers, and workflows stay
+// project/user-local and never list here.
 func libraryHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := cfg.Sessions.UserID(r)
@@ -58,11 +49,10 @@ func libraryHandler(cfg Config) http.HandlerFunc {
 		}
 		ctx := withSessionUser(r.Context(), cfg, userID)
 
-		activeKind := strings.TrimSpace(r.URL.Query().Get("kind"))
-		skills, kinds, err := loadLibraryRows(ctx, activeKind)
+		tasks, err := loadLibraryTasks(ctx)
 		if err != nil {
-			arbor.ErrorCtx(ctx, "library: load rows", "user_id", userID, "err", err)
-			http.Error(w, "could not list library artifacts", http.StatusInternalServerError)
+			arbor.ErrorCtx(ctx, "library: load tasks", "user_id", userID, "err", err)
+			http.Error(w, "could not list library tasks", http.StatusInternalServerError)
 			return
 		}
 
@@ -76,14 +66,12 @@ func libraryHandler(cfg Config) http.HandlerFunc {
 		}
 
 		data := libraryData{
-			Title:       "skill library · satellites",
+			Title:       "task library · satellites",
 			UserEmail:   userEmail,
 			UserName:    userName,
 			UserAvatar:  userAvatar,
 			ActiveNav:   "library",
-			Skills:      skills,
-			Kinds:       kinds,
-			ActiveKind:  activeKind,
+			Tasks:       tasks,
 			DevMode:     cfg.DevMode,
 			FooterName:  footerName,
 			FooterEmail: footerEmail,
@@ -123,91 +111,32 @@ func listLibraryDocs(ctx context.Context, docType string) ([]libraryDocItem, err
 	return listResp.Items, nil
 }
 
-// loadLibraryRows lists library-scope skills AND tasks, enriches each with kind +
-// description, applies the kind filter, and returns the filtered rows plus the
-// full set of kinds present (chips, computed before filtering so clearing always
-// restores). A skill's kind is its `kind:` tag / frontmatter kind, defaulting to
-// "skill"; a task's kind is always "task" — so the chips give a task-vs-skill
-// split (sty_35d8e166). A failed per-item read degrades to an empty description,
-// never a page error.
-func loadLibraryRows(ctx context.Context, activeKind string) ([]librarySkillRow, []libraryKindChip, error) {
-	skills, err := listLibraryDocs(ctx, "skill")
-	if err != nil {
-		return nil, nil, err
-	}
+// loadLibraryTasks lists library-scope TASKS only and enriches each with its
+// frontmatter description (sty_98956dbb). A library-scope task is the published
+// distribution copy of a project task; skills, gates/reviewers, and workflows
+// are never listed — they stay project/user-local. A failed per-item read
+// degrades to an empty description, never a page error.
+func loadLibraryTasks(ctx context.Context) ([]libraryTaskRow, error) {
 	tasks, err := listLibraryDocs(ctx, "task")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-
-	rows := make([]librarySkillRow, 0, len(skills)+len(tasks))
-	kindSet := map[string]bool{}
-	add := func(items []libraryDocItem, forceKind, defaultKind string) {
-		for _, it := range items {
-			desc, fmKind := "", ""
-			getBody, _ := json.Marshal(map[string]string{"scope": "library", "name": it.Name, "project_id": it.ProjectID})
-			if graw, gerr := verb.Dispatch(ctx, "document_get", getBody); gerr == nil {
-				var gr struct {
-					RawBody string `json:"raw_body"`
-				}
-				if json.Unmarshal(graw, &gr) == nil {
-					if fm, _, ferr := frontmatter.Parse([]byte(gr.RawBody)); ferr == nil {
-						desc, fmKind = fm.Description, fm.Kind
-					}
+	rows := make([]libraryTaskRow, 0, len(tasks))
+	for _, it := range tasks {
+		desc := ""
+		getBody, _ := json.Marshal(map[string]string{"scope": "library", "name": it.Name, "project_id": it.ProjectID})
+		if graw, gerr := verb.Dispatch(ctx, "document_get", getBody); gerr == nil {
+			var gr struct {
+				RawBody string `json:"raw_body"`
+			}
+			if json.Unmarshal(graw, &gr) == nil {
+				if fm, _, ferr := frontmatter.Parse([]byte(gr.RawBody)); ferr == nil {
+					desc = fm.Description
 				}
 			}
-			kind := libraryRowKind(forceKind, it.Tags, fmKind, defaultKind)
-			if kind != "" {
-				kindSet[kind] = true
-			}
-			if activeKind != "" && kind != activeKind {
-				continue
-			}
-			rows = append(rows, librarySkillRow{Name: it.Name, Kind: kind, Description: desc, Publisher: it.ProjectID})
 		}
+		rows = append(rows, libraryTaskRow{Name: it.Name, Description: desc, Publisher: it.ProjectID})
 	}
-	add(skills, "", "skill") // skills keep their own kind, defaulting to "skill"
-	add(tasks, "task", "task")
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Kind != rows[j].Kind {
-			return rows[i].Kind < rows[j].Kind
-		}
-		return rows[i].Name < rows[j].Name
-	})
-
-	kinds := make([]libraryKindChip, 0, len(kindSet))
-	for k := range kindSet {
-		kinds = append(kinds, libraryKindChip{Kind: k, Active: k == activeKind})
-	}
-	sort.Slice(kinds, func(i, j int) bool { return kinds[i].Kind < kinds[j].Kind })
-	return rows, kinds, nil
-}
-
-// libraryRowKind resolves the displayed/filterable kind of a library row. A
-// non-empty forceKind wins outright (a task is always "task"). Otherwise the
-// `kind:` tag, then a frontmatter kind override, then defaultKind when both are
-// empty — so a skill with no declared kind still falls into the "skill" chip,
-// giving a clean task-vs-skill split (sty_35d8e166).
-func libraryRowKind(forceKind string, tags []string, fmKind, defaultKind string) string {
-	if strings.TrimSpace(forceKind) != "" {
-		return forceKind
-	}
-	kind := kindFromTags(tags)
-	if strings.TrimSpace(fmKind) != "" {
-		kind = fmKind
-	}
-	if strings.TrimSpace(kind) == "" {
-		kind = defaultKind
-	}
-	return kind
-}
-
-// kindFromTags extracts a skill's kind from its `kind:<k>` tag, "" if absent.
-func kindFromTags(tags []string) string {
-	for _, t := range tags {
-		if strings.HasPrefix(t, "kind:") {
-			return strings.TrimPrefix(t, "kind:")
-		}
-	}
-	return ""
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	return rows, nil
 }

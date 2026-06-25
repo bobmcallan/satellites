@@ -26,38 +26,29 @@
     <div class="panel-header">
       <h2>library</h2>
     </div>
-    <p class="muted">Global skills and tasks published to the <code>library</code> scope and adoptable across workspaces. Browse by kind (e.g. <code>task</code>, <code>skill</code>).</p>
+    <p class="muted">Global <code>task</code>s published to the <code>library</code> scope and adoptable across workspaces. Each is the published copy of a project task; adopt one with <code>satellites task copy</code>.</p>
 
-    <div class="library-filter" data-field="library-filter">
-      <a href="/library" class="btn {{if .ActiveKind}}secondary{{else}}primary{{end}}" data-kind-filter="all">ALL</a>
-      {{range .Kinds}}
-      <a href="/library?kind={{.Kind}}" class="btn {{if .Active}}primary{{else}}secondary{{end}}" data-kind-filter="{{.Kind}}">{{.Kind}}</a>
-      {{end}}
-    </div>
-
-    {{if .Skills}}
+    {{if .Tasks}}
     <table class="panel-table" data-field="library-table">
       <thead>
         <tr>
           <th>NAME</th>
-          <th>KIND</th>
           <th>DESCRIPTION</th>
           <th>PUBLISHER</th>
         </tr>
       </thead>
       <tbody>
-        {{range .Skills}}
-        <tr data-field="skill-row" data-skill-name="{{.Name}}" data-skill-kind="{{.Kind}}">
-          <td class="skill-name"><code>{{.Name}}</code></td>
-          <td class="skill-kind">{{.Kind}}</td>
-          <td class="skill-desc muted">{{.Description}}</td>
-          <td class="skill-publisher"><code>{{.Publisher}}</code></td>
+        {{range .Tasks}}
+        <tr data-field="task-row" data-task-name="{{.Name}}">
+          <td class="task-name"><code>{{.Name}}</code></td>
+          <td class="task-desc muted">{{.Description}}</td>
+          <td class="task-publisher"><code>{{.Publisher}}</code></td>
         </tr>
         {{end}}
       </tbody>
     </table>
     {{else}}
-    <p class="empty" data-field="library-empty">No library artifacts{{if .ActiveKind}} of kind <code>{{.ActiveKind}}</code>{{end}}. Publish one with <code>satellites skill publish</code> or <code>satellites task publish</code>.</p>
+    <p class="empty" data-field="library-empty">No library tasks yet. Publish one with <code>satellites task publish</code>.</p>
     {{end}}
   </section>
 </main>

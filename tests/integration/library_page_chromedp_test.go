@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,10 +16,10 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestLibraryPage_Chromedp drives the /library skill-library page (sty_b2f77307):
-// the navbar item is present, library-scope skills render (name/kind/description/
-// publisher), and selecting a kind filter narrows the rendered rows while
-// clearing restores the full list.
+// TestLibraryPage_Chromedp drives the /library page (sty_b2f77307, tasks-only
+// sty_98956dbb): the navbar item is present, published library-scope TASKS
+// render (name/description/publisher), and the surface is tasks-only — a
+// library-scope SKILL never appears and there are no kind-filter chips.
 func TestLibraryPage_Chromedp(t *testing.T) {
 	env := testbootstrap.SetUpWithServer(t)
 
@@ -47,20 +48,23 @@ func TestLibraryPage_Chromedp(t *testing.T) {
 		t.Fatalf("create publisher project: %v", err)
 	}
 
-	// Two library skills of different kinds so the kind filter has something to
-	// narrow. The kind + description resolve from the skill's frontmatter.
-	seedSkill := func(name, kind, desc string) {
-		t.Helper()
-		body := "---\nname: " + name + "\nkind: " + kind + "\ndescription: " + desc + "\n---\n## Spec\n" + desc + "\n"
-		if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
-			Key:  document.Key{Scope: document.ScopeLibrary, ProjectID: pub.ID, Name: name},
-			Type: document.TypeSkill, Body: body, CreatedBy: "system:test",
-		}, now); err != nil {
-			t.Fatalf("seed skill %s: %v", name, err)
-		}
+	// A published library-scope TASK — the only thing the library surfaces. Its
+	// description resolves from the body frontmatter.
+	taskBody := "---\ndescription: Generate the repo's high-level codegraph.\n---\n# Codegraph\n\n## Task\n\nGenerate the codegraph.\n"
+	if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+		Key:  document.Key{Scope: document.ScopeLibrary, ProjectID: pub.ID, Name: "Codegraph"},
+		Type: document.TypeTask, Body: taskBody, CreatedBy: "system:test",
+	}, now); err != nil {
+		t.Fatalf("seed library task: %v", err)
 	}
-	seedSkill("corpus-summarise", "task", "Summarise the workspace corpus.")
-	seedSkill("ship-it", "workflow", "The shipping lifecycle.")
+	// A library-scope SKILL — tasks-only means this must NOT list on /library.
+	skillBody := "---\nname: corpus-summarise\nkind: task\ndescription: Summarise the workspace corpus.\n---\n## Spec\nSummarise.\n"
+	if _, _, err := docStore.Upsert(ctx, document.UpsertInput{
+		Key:  document.Key{Scope: document.ScopeLibrary, ProjectID: pub.ID, Name: "corpus-summarise"},
+		Type: document.TypeSkill, Body: skillBody, CreatedBy: "system:test",
+	}, now); err != nil {
+		t.Fatalf("seed library skill: %v", err)
+	}
 
 	bctx := newBrowserCtx(t)
 	if err := chromedp.Run(bctx,
@@ -91,41 +95,32 @@ func TestLibraryPage_Chromedp(t *testing.T) {
 		t.Fatalf("navbar library item href = %q, want /library", navHref)
 	}
 
-	// AC2: both library skills render.
-	if n := count(`[data-field="skill-row"]`); n != 2 {
-		t.Fatalf("expected 2 library skill rows, got %d", n)
+	// AC1: exactly the one published task renders, with its description.
+	if n := count(`[data-field="task-row"]`); n != 1 {
+		t.Fatalf("expected 1 library task row, got %d", n)
 	}
-	// Description + publisher rendered for the task skill.
 	var taskDesc string
-	if err := chromedp.Run(bctx, chromedp.Evaluate(`(document.querySelector('[data-skill-name="corpus-summarise"] .skill-desc')||{}).textContent || ''`, &taskDesc)); err != nil {
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`(document.querySelector('[data-task-name="Codegraph"] .task-desc')||{}).textContent || ''`, &taskDesc)); err != nil {
 		t.Fatalf("task desc: %v", err)
 	}
-	if taskDesc == "" {
-		t.Fatal("task skill description did not render")
+	if !strings.Contains(taskDesc, "Generate the repo's high-level codegraph") {
+		t.Fatalf("task description did not render, got %q", taskDesc)
 	}
 
-	// AC3: selecting the "task" kind filter narrows to one row.
-	if err := chromedp.Run(bctx,
-		chromedp.Click(`[data-kind-filter="task"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-field="library-table"]`, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("click task filter: %v", err)
+	// AC1/AC3: tasks-only — the library skill never lists, and there is no skill markup.
+	var bodyHTML string
+	if err := chromedp.Run(bctx, chromedp.Evaluate(`document.body.innerHTML`, &bodyHTML)); err != nil {
+		t.Fatalf("read body html: %v", err)
 	}
-	if n := count(`[data-field="skill-row"]`); n != 1 {
-		t.Fatalf("after task filter: expected 1 row, got %d", n)
+	if strings.Contains(bodyHTML, "corpus-summarise") {
+		t.Errorf("a library skill leaked onto the tasks-only library page")
 	}
-	if n := count(`[data-skill-kind="workflow"]`); n != 0 {
-		t.Fatalf("after task filter: workflow row should be hidden, got %d", n)
+	if count(`[data-skill-name]`) != 0 || count(`[data-skill-kind]`) != 0 {
+		t.Errorf("skill-row markup present on the tasks-only library page")
 	}
 
-	// Clearing (ALL) restores the full list.
-	if err := chromedp.Run(bctx,
-		chromedp.Click(`[data-kind-filter="all"]`, chromedp.ByQuery),
-		chromedp.WaitVisible(`[data-field="library-table"]`, chromedp.ByQuery),
-	); err != nil {
-		t.Fatalf("click all filter: %v", err)
-	}
-	if n := count(`[data-field="skill-row"]`); n != 2 {
-		t.Fatalf("after clearing filter: expected 2 rows, got %d", n)
+	// AC2: no kind-filter chips anywhere on the page.
+	if count(`[data-kind-filter]`) != 0 {
+		t.Errorf("kind-filter chips still rendered on the tasks-only library page")
 	}
 }
