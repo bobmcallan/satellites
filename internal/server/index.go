@@ -36,7 +36,7 @@ func emailLocalPart(email string) string {
 //go:embed templates/*.html static/*
 var assets embed.FS
 
-var indexTmpl = template.Must(template.ParseFS(assets, "templates/index.html", "templates/_user_menu.html"))
+var indexTmpl = template.Must(template.ParseFS(assets, "templates/index.html", "templates/_user_menu.html", "templates/_pitch.html"))
 
 type indexData struct {
 	Title       string

@@ -1,0 +1,29 @@
+{{define "pitch"}}
+<section class="thesis" data-section="thesis">
+  <h2 class="thesis-title">Reviewer-gated execution for agentic engineering.</h2>
+  <p class="thesis-lede">An agent can write the code. It can't decide the code is done. Only a <strong>reviewer</strong> moves the work forward — and every verdict is recorded.</p>
+</section>
+
+<section class="levers" data-section="problem">
+  <h2 class="section-heading">The problem</h2>
+  <p class="realisation-lede">Agentic coding fails in a way unit tests don't catch: the agent declares success on work that's plausible and wrong, or loops until it times out. More tools, more autonomy, and more retries scale that problem — they don't gate it. What's missing isn't a smarter model. It's a structural boundary between <em>doing the work</em> and <em>deciding the work is acceptable</em>.</p>
+</section>
+
+<section class="realisation" data-section="what-it-does">
+  <h2 class="section-heading">What Satellites does</h2>
+  <p class="realisation-lede">Satellites makes that boundary structural, not advisory. Work moves as <strong>stories</strong> through a declared <strong>workflow</strong> of phases. The executor — the agent — can start a phase and signal it's ready. That's all. It cannot change a story's status, and it cannot approve itself. Only a <strong>reviewer</strong> advances the story, by running a gate against the work and returning a verdict:</p>
+  <div class="mapping-grid">
+    <div class="mapping-row">
+      <span class="mapping-lever">accept</span>
+      <span class="mapping-arrow" aria-hidden="true">→</span>
+      <span class="mapping-impl">the story moves to the next phase.</span>
+    </div>
+    <div class="mapping-row">
+      <span class="mapping-lever">reject</span>
+      <span class="mapping-arrow" aria-hidden="true">→</span>
+      <span class="mapping-impl">the story stays where it is, the reason appended to its log.</span>
+    </div>
+  </div>
+  <p class="realisation-lede">Reject-stays is deliberate. A phase advances only when the work passes the gate its workflow declares — so "done" means <em>reviewed</em>, every time.</p>
+</section>
+{{end}}

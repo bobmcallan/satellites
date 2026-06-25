@@ -9,7 +9,7 @@ import (
 	"github.com/bobmcallan/satellites/internal/auth"
 )
 
-var loginTmpl = template.Must(template.ParseFS(assets, "templates/login.html"))
+var loginTmpl = template.Must(template.ParseFS(assets, "templates/login.html", "templates/_pitch.html"))
 
 type loginData struct {
 	Title       string

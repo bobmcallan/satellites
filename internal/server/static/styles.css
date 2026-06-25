@@ -444,7 +444,19 @@ a.type-chip:focus-visible { outline: 2px solid #6a9fb5; outline-offset: 1px; }
   justify-content: center;
   padding: 2rem;
 }
-.login-panel { width: 360px; max-width: 100%; }
+
+/* The signed-out login page leads with the product pitch (the shared landing
+   partial), then the login + install panels (sty_f42414cd). It reuses the
+   .landing column so width/rhythm stay owned by the layout, not per element.
+   The two panels sit side by side on wide viewports and stack on narrow. */
+.login-row {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 720px) { .login-row { grid-template-columns: 1fr; } }
+.login-panel { width: auto; max-width: 100%; }
 .dev-login { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #222; }
 .dev-quick { margin: 0; }
 

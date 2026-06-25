@@ -16,7 +16,10 @@
   </nav>
 </header>
 
-<main class="login-main">
+<main class="landing login-page">
+  {{template "pitch" .}}
+
+  <div class="login-row">
   <section class="panel login-panel">
     <h2>login</h2>
     {{if .Error}}<p class="error" data-field="login-error">{{.Error}}</p>{{end}}
@@ -75,6 +78,7 @@
 satellites auth     # browser login → executor key
 satellites status   # db up, MCP connected</code></pre>
   </section>
+  </div>
 </main>
 
 <footer class="site-footer">
