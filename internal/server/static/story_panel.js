@@ -76,8 +76,23 @@
                 return r.ok ? r.text() : null;
             })
             .then(function (html) {
+                // Preserve which documents were expanded across the swap
+                // (sty_e9b55be7): the SSE live refresh re-enters here, and a plain
+                // innerHTML swap would drop the native <details open> state,
+                // collapsing the document the user was reading.
+                var openIds = [];
+                el.querySelectorAll('.story-doc-item[data-id] > details[open]')
+                  .forEach(function (d) {
+                      var li = d.closest('.story-doc-item');
+                      if (li) { openIds.push(li.getAttribute('data-id')); }
+                  });
                 el.innerHTML = (html !== null && html !== '')
                     ? html : '<p class="empty">nothing to show</p>';
+                openIds.forEach(function (id) {
+                    var sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+                    var d = el.querySelector('.story-doc-item[data-id="' + sel + '"] > details');
+                    if (d) { d.open = true; }
+                });
                 // Render ```mermaid blocks (e.g. a change-doc's actual workflow)
                 // injected by this swap (sty_d206e263); covers the live-refresh
                 // path too, which re-enters here.
