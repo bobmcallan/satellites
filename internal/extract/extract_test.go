@@ -28,3 +28,48 @@ func TestText_MalformedPDF_NoPanic(t *testing.T) {
 		t.Error("malformed PDF should extract nothing (ok=false)")
 	}
 }
+
+// TestSupportedAndIsImage pins the accepted-upload set (sty_49a3762e): PDFs,
+// plain text/markdown, AND images are Supported; images are classified by IsImage
+// (by content-type prefix or extension) so ingest stores them as metadata-only
+// documents. Text extraction for an image stays ok=false (OCR deferred).
+func TestSupportedAndIsImage(t *testing.T) {
+	supported := []struct{ fn, ct string }{
+		{"a.pdf", "application/pdf"},
+		{"a.md", "text/markdown"},
+		{"photo.png", "image/png"},
+		{"photo.JPG", ""},        // by extension, case-insensitive
+		{"x", "image/webp"},      // by content-type alone
+		{"diagram.gif", ""},
+	}
+	for _, c := range supported {
+		if !Supported(c.fn, c.ct) {
+			t.Errorf("Supported(%q,%q) = false, want true", c.fn, c.ct)
+		}
+	}
+
+	images := []struct {
+		fn, ct string
+		want   bool
+	}{
+		{"photo.png", "", true},
+		{"p.jpg", "", true},
+		{"p.jpeg", "", true},
+		{"p.gif", "", true},
+		{"p.webp", "", true},
+		{"x", "image/svg+xml", true},
+		{"notes.md", "text/markdown", false},
+		{"a.pdf", "application/pdf", false},
+		{"data.bin", "application/octet-stream", false},
+	}
+	for _, c := range images {
+		if got := IsImage(c.fn, c.ct); got != c.want {
+			t.Errorf("IsImage(%q,%q) = %v, want %v", c.fn, c.ct, got, c.want)
+		}
+	}
+
+	// A truly-unsupported binary is still rejected.
+	if Supported("data.bin", "application/octet-stream") {
+		t.Error("Supported(data.bin) = true, want false")
+	}
+}

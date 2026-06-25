@@ -71,8 +71,13 @@ func StoreBlobAndExtract(ctx context.Context, blobStore *blob.Store, docStore *d
 		SizeBytes: b.SizeBytes, SHA256: b.SHA256,
 	}
 
-	text, ok := extract.Text(up.Filename, up.ContentType, up.Content)
-	if !ok {
+	text, hasText := extract.Text(up.Filename, up.ContentType, up.Content)
+	// An image is an accepted upload with no extractable text (sty_49a3762e): it
+	// still becomes a metadata-only document so it appears in the documents panel.
+	// A truly-unsupported/unreadable input (no text, not an image) keeps the blob
+	// but creates no document row.
+	isImage := extract.IsImage(up.Filename, up.ContentType)
+	if !hasText && !isImage {
 		return ref, nil
 	}
 
@@ -94,8 +99,17 @@ func StoreBlobAndExtract(ctx context.Context, blobStore *blob.Store, docStore *d
 		return ref, nil
 	}
 	key = resolved
-	body := fmt.Sprintf("# %s\n\n> Extracted from attachment `%s` (%s, %d bytes). Original: %s\n\n%s",
-		b.Filename, b.ID, b.ContentType, b.SizeBytes, origin, text)
+	// Text uploads embed the extracted text; an image carries none, so its body is
+	// the metadata header alone ("Uploaded attachment" rather than "Extracted from").
+	lead := "Extracted from attachment"
+	if !hasText {
+		lead = "Uploaded attachment"
+	}
+	body := fmt.Sprintf("# %s\n\n> %s `%s` (%s, %d bytes). Original: %s",
+		b.Filename, lead, b.ID, b.ContentType, b.SizeBytes, origin)
+	if hasText {
+		body += "\n\n" + text
+	}
 	doc, _, derr := docStore.Upsert(ctx, document.UpsertInput{
 		Key:       key,
 		Type:      document.TypeDocument,

@@ -50,7 +50,7 @@ func workspaceDocumentUploadHandler(cfg Config) http.HandlerFunc {
 
 		contentType := header.Header.Get("Content-Type")
 		if !extract.Supported(header.Filename, contentType) {
-			http.Error(w, "unsupported file type — upload a PDF or a text/markdown document", http.StatusBadRequest)
+			http.Error(w, "unsupported file type — upload a PDF, an image, or a text/markdown document", http.StatusBadRequest)
 			return
 		}
 

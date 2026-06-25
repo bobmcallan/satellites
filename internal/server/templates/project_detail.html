@@ -295,9 +295,9 @@
     </table>
 
     <div class="dropzone" data-field="project-doc-upload" data-project-id="{{.Project.ID}}" role="button" tabindex="0">
-      <span data-field="project-doc-dropzone-label">Drop a PDF or text/markdown file here, or</span>
+      <span data-field="project-doc-dropzone-label">Drop a PDF, image, or text/markdown file here, or</span>
       <button type="button" class="btn secondary" data-action="project-doc-browse">Browse…</button>
-      <input type="file" data-field="project-doc-file-input" accept=".pdf,.txt,.md,.markdown,.csv,.log,text/*,application/pdf" hidden>
+      <input type="file" data-field="project-doc-file-input" accept=".pdf,.txt,.md,.markdown,.csv,.log,.png,.jpg,.jpeg,.gif,.webp,text/*,application/pdf,image/*" hidden>
     </div>
     <p class="empty" data-field="project-doc-upload-error" hidden></p>
     </div>

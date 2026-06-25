@@ -1,9 +1,11 @@
 // Package extract turns an uploaded binary into readable text for the
 // document-collection corpus (sty_52c2393f): PDFs via a pure-Go reader,
-// plain-text/markdown by passthrough. Image OCR is deferred — it needs an
-// external engine (tesseract) in the server image. Extraction is best-effort:
-// an unsupported or unreadable input yields ok=false and the caller stores the
-// blob with no text document.
+// plain-text/markdown by passthrough. Images are an accepted upload type
+// (sty_49a3762e) but carry NO extractable text — OCR is deferred (it needs an
+// external engine, e.g. tesseract, in the server image), so an image is stored
+// as a metadata-only document. Extraction is best-effort: an unsupported or
+// unreadable input yields ok=false and the caller stores the blob with no text
+// document.
 package extract
 
 import (
@@ -37,12 +39,29 @@ func Text(filename, contentType string, content []byte) (string, bool) {
 	}
 }
 
-// Supported reports whether a filename/content-type is an extractable document
-// type (PDF or plain text/markdown) — the same set Text can turn into corpus
-// text. A caller can pre-check this to reject an unsupported upload before
-// storing a blob that would yield no document (sty_5d97b972).
+// Supported reports whether a filename/content-type is an acceptable document
+// upload. A caller pre-checks this to reject an unsupported upload before storing
+// a blob (sty_5d97b972). PDFs and plain text/markdown yield corpus text via Text;
+// images are accepted too (sty_49a3762e) but carry NO extractable text — they are
+// stored as a metadata-only document (OCR is still deferred, see the package doc).
 func Supported(filename, contentType string) bool {
-	return isPDF(filename, contentType) || isPlainText(filename, contentType)
+	return isPDF(filename, contentType) || isPlainText(filename, contentType) || IsImage(filename, contentType)
+}
+
+// IsImage reports whether a filename/content-type is an image — an accepted
+// upload that has no extractable text, so the ingest path stores it as a
+// metadata-only document rather than skipping the document row (sty_49a3762e).
+func IsImage(filename, contentType string) bool {
+	if strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		return true
+	}
+	fn := strings.ToLower(filename)
+	for _, ext := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp"} {
+		if strings.HasSuffix(fn, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func isPDF(filename, contentType string) bool {

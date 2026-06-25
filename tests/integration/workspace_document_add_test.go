@@ -151,8 +151,18 @@ func TestWorkspaceDocumentAdd(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// Unsupported type is rejected 400 with a clear message (not a 500).
-	if resp := postDoc(adminClient, "logo.png", "image/png", []byte("\x89PNG\r\n\x1a\n")); resp.StatusCode != http.StatusBadRequest {
+	// An image now uploads successfully (sty_49a3762e) — accepted as a
+	// metadata-only document, status 201.
+	if resp := postDoc(adminClient, "logo.png", "image/png", []byte("\x89PNG\r\n\x1a\n")); resp.StatusCode != http.StatusCreated {
+		resp.Body.Close()
+		t.Fatalf("image upload status = %d, want 201", resp.StatusCode)
+	} else {
+		resp.Body.Close()
+	}
+
+	// A genuinely unsupported binary is still rejected 400 with a clear message
+	// (not a 500).
+	if resp := postDoc(adminClient, "data.bin", "application/octet-stream", []byte{0x00, 0x01, 0x02}); resp.StatusCode != http.StatusBadRequest {
 		resp.Body.Close()
 		t.Fatalf("unsupported-type upload status = %d, want 400", resp.StatusCode)
 	} else {
