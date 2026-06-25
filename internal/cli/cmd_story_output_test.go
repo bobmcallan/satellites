@@ -117,3 +117,29 @@ func TestDatedOutputTaskSteer(t *testing.T) {
 		}
 	})
 }
+
+// TestWithActualWorkflowMermaid pins sty_135ac76d: a summary body gains a
+// "## Actual workflow" mermaid section, but never a duplicate when one is already
+// present, and never an empty fence when there is no diagram.
+func TestWithActualWorkflowMermaid(t *testing.T) {
+	const m = "flowchart LR\n  a --> b"
+
+	got := withActualWorkflowMermaid("# Summary\n\nwhat changed", m)
+	if !strings.Contains(got, "## Actual workflow") || !strings.Contains(got, "```mermaid\nflowchart LR") {
+		t.Fatalf("expected appended mermaid section, got:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "```\n") {
+		t.Errorf("mermaid block should be fenced and newline-terminated:\n%s", got)
+	}
+
+	// Already has a mermaid block → unchanged (no duplication).
+	withBlock := "# Summary\n\n```mermaid\nflowchart LR\n  x --> y\n```\n"
+	if out := withActualWorkflowMermaid(withBlock, m); out != withBlock {
+		t.Errorf("body with an existing mermaid block must be left unchanged, got:\n%s", out)
+	}
+
+	// Empty diagram → unchanged.
+	if out := withActualWorkflowMermaid("body", "   "); out != "body" {
+		t.Errorf("empty mermaid should be a no-op, got %q", out)
+	}
+}

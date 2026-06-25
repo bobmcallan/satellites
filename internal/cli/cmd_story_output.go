@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/bobmcallan/satellites/internal/kvtag"
+	"github.com/bobmcallan/satellites/internal/processtrace"
 	"github.com/bobmcallan/satellites/internal/verb"
 	"github.com/spf13/cobra"
 )
@@ -139,6 +140,14 @@ func runStoryOutput(ctx context.Context, out io.Writer, configPath, userArg, sto
 	}
 	workspaceID := storyResp.Document.WorkspaceID
 
+	// A summary output carries the story's ACTUAL workflow as a rendered mermaid
+	// diagram (sty_135ac76d), so the closed story's implementation-summary document
+	// shows the journey it took — sourced from processtrace, the same generator
+	// changedoc uses, not hand-authored.
+	if strings.EqualFold(kind, "summary") {
+		body = appendActualWorkflowMermaid(ctx, configPath, userArg, storyID, storyResp, body, out)
+	}
+
 	// Create the output document, attached to the story's project and tagged for
 	// traceability.
 	tags := buildStoryOutputTags(kind, o.Phase, o.Format, storyID)
@@ -188,6 +197,47 @@ func runStoryOutput(ctx context.Context, out io.Writer, configPath, userArg, sto
 		fmt.Fprintln(out, w)
 	}
 	return nil
+}
+
+// appendActualWorkflowMermaid enriches a summary output body with a rendered
+// ```mermaid diagram of the story's ACTUAL workflow (sty_135ac76d), sourced from
+// processtrace — the same reconciled declared-vs-actual projection changedoc and
+// the portal trace view use, so it reflects the real traversal (including reject
+// loops). No-op when the body already embeds a ```mermaid block (a hand-authored
+// diagram is never duplicated), or when no governing workflow or ledger resolves
+// — the output still lands, just without the diagram.
+func appendActualWorkflowMermaid(ctx context.Context, configPath, userArg, storyID string, story verb.DocumentGetResponse, body string, out io.Writer) string {
+	if strings.Contains(body, "```mermaid") {
+		return body
+	}
+	wf := resolveStoryWorkflow(configPath, story.RawBody, story.Document.Category)
+	if wf == nil {
+		return body
+	}
+	entries, err := dispatchStoryLedgerEntries(ctx, storyID, configPath, userArg)
+	if err != nil {
+		fmt.Fprintf(out, "warning: ledger unavailable, actual-workflow diagram omitted: %v\n", err)
+		return body
+	}
+	pt := processtrace.Reconcile(storyID, story.Document.Category, story.Document.Status, wf, entries, nil)
+	return withActualWorkflowMermaid(body, processtrace.MermaidActualWorkflow(pt))
+}
+
+// withActualWorkflowMermaid appends a "## Actual workflow" section carrying the
+// mermaid diagram to a summary body. Pure (no I/O): a no-op when the body already
+// embeds a ```mermaid block or the diagram is empty, so it never duplicates a
+// hand-authored diagram.
+func withActualWorkflowMermaid(body, mermaid string) string {
+	mermaid = strings.TrimSpace(mermaid)
+	if mermaid == "" || strings.Contains(body, "```mermaid") {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(body, "\n"))
+	b.WriteString("\n\n## Actual workflow\n\n```mermaid\n")
+	b.WriteString(mermaid)
+	b.WriteString("\n```\n")
+	return b.String()
 }
 
 // datedReStamp matches a YYYY-MM-DD date embedded anywhere in an output name —
