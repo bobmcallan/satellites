@@ -484,10 +484,28 @@ func dispatchStoryList(ctx context.Context, projectID, cursor string, limit int)
 			ID: d.ID, ParentID: d.ParentID, Title: d.Name,
 			AcceptanceCriteria: d.AcceptanceCriteria,
 			Status:             d.Status, Priority: d.Priority, Category: d.Category,
-			Tags: d.Tags, UpdatedAt: d.UpdatedAt, CreatedAt: d.CreatedAt,
+			Tags: displayStoryTags(d.Tags), UpdatedAt: d.UpdatedAt, CreatedAt: d.CreatedAt,
 		})
 	}
 	return out, resp.NextCursor, nil
+}
+
+// displayStoryTags strips tags that are stored on the story for close-out
+// derivation but must NOT surface as story-row chips (sty_f10fcf69). The
+// estimate-basis tag set by `story estimate --basis` is a long free-text note,
+// not a filter facet, so it would render as an unfilterable chip and bleed into
+// the row's data-tags/data-search. It stays on the document — processtrace reads
+// it for the close-out's EstimateBasis from the document tags, never from this
+// display row — so dropping it here is a display-only exclusion.
+func displayStoryTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if strings.HasPrefix(t, "estimate-basis:") {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // gatherAllStories pages through document_list (cursor) to collect every
