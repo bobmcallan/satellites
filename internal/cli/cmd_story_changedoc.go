@@ -8,10 +8,11 @@
 // record carrying
 //   - the GIT RECORD — the commits that reference the story and the files they
 //     changed (`git log --grep <sty>`);
-//   - the ACTUAL WORKFLOW as a YAML projection AND a mermaid flowchart, both
-//     rendered from the reconciled processtrace (declared-vs-actual), so the
-//     traversal — including reject loops — reads at a glance; mermaid renders
-//     natively in the portal markdown view.
+//   - the ACTUAL WORKFLOW as a mermaid flowchart, rendered from the reconciled
+//     processtrace (declared-vs-actual), so the traversal — including reject
+//     loops — reads at a glance; mermaid renders natively in the portal markdown
+//     view. (The raw YAML projection is fed only to the stage reviewer as
+//     internal context — sty_18b3f374 dropped it from the visible document.)
 //
 // It is built-in MECHANISM, not a per-story hand-authored doc: the executor may
 // pass a short narrative (the "why", like a PR description) and the command
@@ -47,14 +48,14 @@ func newStoryChangedocCmd(configArg, userArg *string) *cobra.Command {
 	var o storyChangedocOpts
 	cmd := &cobra.Command{
 		Use:   "changedoc <story-id> [--summary <md> | --summary-file <path>]",
-		Short: "Generate and attach a story's PR-like change document (git record + actual-workflow YAML + mermaid)",
+		Short: "Generate and attach a story's PR-like change document (git record + actual-workflow mermaid)",
 		Long: `changedoc assembles a concise, PR-shaped change document for a story and
 attaches it as a story-linked type:summary project document. It composes a short
 narrative you supply (--summary / --summary-file, optional) with a deterministic
 git record (commits referencing the story + files changed) and the actual
-workflow rendered as YAML and a mermaid flowchart from the reconciled
-processtrace. Run it at the done boundary, after the story's commit has landed,
-then request the done gate — which requires the attached change document.`,
+workflow rendered as a mermaid flowchart from the reconciled processtrace. Run it
+at the done boundary, after the story's commit has landed, then request the done
+gate — which requires the attached change document.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -276,14 +277,11 @@ func assembleChangedoc(storyID, title, narrative string, git gitRecord, entries 
 		return b.String()
 	}
 	pt := processtrace.Reconcile(storyID, category, status, wf, entries, nil)
-	if y, err := processtrace.ActualWorkflow(pt).YAML(); err == nil {
-		b.WriteString("```yaml\n")
-		b.WriteString(y)
-		if !strings.HasSuffix(y, "\n") {
-			b.WriteString("\n")
-		}
-		b.WriteString("```\n\n")
-	}
+	// The change DOCUMENT shows only the rendered mermaid diagram of the actual
+	// workflow (sty_18b3f374) — the raw YAML projection is redundant clutter now
+	// that mermaid renders (sty_d206e263). gatherStageFacts still feeds the YAML
+	// to the stage reviewer as internal context; only this visible document drops
+	// it.
 	b.WriteString("```mermaid\n")
 	b.WriteString(processtrace.MermaidActualWorkflow(pt))
 	b.WriteString("```\n")
