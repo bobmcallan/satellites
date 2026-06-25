@@ -739,6 +739,22 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   flex-direction: column;
   gap: 0.75rem;
 }
+/* Story-row review-history lights (sty_14f07f22): a strip of small dots, one
+   per reviewer-gate verdict — green pass, red fail, amber pending. */
+.col-reviews { white-space: nowrap; }
+.review-light {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 3px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: #444;
+}
+.review-light-pass { background: #2ecc71; }
+.review-light-fail { background: #e74c3c; }
+.review-light-pending { background: #f1c40f; }
+
 .story-detail-block { min-width: 0; }
 /* Attached-documents list in the inline panel's Documents tab (sty_bf2fc8e1):
    a native <details> per document — summary carries name + id/type/updated,

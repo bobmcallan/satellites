@@ -117,6 +117,10 @@ type storyRow struct {
 	// the server pushes no timeout state.
 	EngLastSeen   string
 	EngLeaseUntil string
+	// Reviews is the story's review-history light strip (sty_14f07f22): one dot
+	// per reviewer-gate verdict (pass/fail) in order, plus a trailing pending dot
+	// for an unresolved request. Distinct from the engagement freshness dot.
+	Reviews []reviewLight
 }
 
 // statusRankUnknown sorts unworkflowed / unknown-status rows to the end of a
@@ -322,6 +326,7 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 		stories[i].StatusRank = statusRank(stories[i].Body, stories[i].Status)
 	}
 	attachEngagements(ctx, projectID, stories)
+	attachReviewLights(ctx, projectID, stories)
 	return stories, paginator, nil
 }
 

@@ -99,6 +99,7 @@
             <th class="col-id">id</th>
             <th class="col-title">title</th>
             <th class="col-status">status</th>
+            <th class="col-reviews">reviews</th>
             <th class="col-priority">priority</th>
             <th class="col-updated">updated</th>
           </tr>
@@ -491,6 +492,11 @@
               {{end}}
             </td>
             <td class="col-status"><code class="status-pill">{{.Status}}</code></td>
+            {{/* Review-history lights (sty_14f07f22): one dot per gate verdict,
+                 oldest→newest — green pass, red fail, amber pending. */}}
+            <td class="col-reviews" data-field="story-reviews">
+              {{range .Reviews}}<span class="review-light review-light-{{.State}}" data-review="{{.State}}"{{if .Gate}} title="{{.Gate}} — {{.State}}"{{end}}></span>{{end}}
+            </td>
             <td class="col-priority">{{if .Priority}}<code class="priority-pill">{{.Priority}}</code>{{end}}</td>
             <td class="col-updated muted">{{formatTime .UpdatedAt}}</td>
           </tr>
@@ -499,7 +505,7 @@
               x-show="isExpanded($el)"
               x-cloak
               data-field="story-detail">
-            <td colspan="5">
+            <td colspan="6">
               {{/* sty_762730ad: tabbed inline panel (Description/ACs · Ledger/Log)
                    with readable markdown content; the merged Ledger/Log lazy-loads
                    on first open (epic:graduated-workflow ledger-log-merge). Tab
@@ -551,7 +557,7 @@
           </tr>
 {{else}}
           <tr class="panel-empty-row" data-field="stories-empty">
-            <td colspan="5" class="empty">{{if .StoryTotal}}No stories match the active filter.{{else}}No stories under this project yet.{{end}}</td>
+            <td colspan="6" class="empty">{{if .StoryTotal}}No stories match the active filter.{{else}}No stories under this project yet.{{end}}</td>
           </tr>
 {{end}}
 {{end}}
