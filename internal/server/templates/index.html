@@ -22,7 +22,7 @@
   </nav>
 </header>
 
-<main>
+<main class="landing">
   <section class="thesis" data-section="thesis">
     <h2 class="thesis-title">Reviewer-gated execution for agentic engineering.</h2>
     <p class="thesis-lede">An agent can write the code. It can't decide the code is done. Only a <strong>reviewer</strong> moves the work forward — and every verdict is recorded.</p>
@@ -127,6 +127,11 @@
     </svg>
   </section>
 
+  <section class="realisation" data-section="why-not">
+    <h2 class="section-heading">Why not just a workflow runner or an agent harness</h2>
+    <p class="realisation-lede">A workflow runner sequences steps and trusts each step to report its own success. An agent harness tunes context, tools, and the loop — and then lets the agent decide it's finished. Satellites' difference is the one thing neither does: the actor that produces the work is structurally barred from being the actor that accepts it, and the acceptance is recorded. That single boundary turns <em>"the agent said it's done"</em> into <em>"the work passed a gate, and here is the record."</em></p>
+  </section>
+
   <section class="panel" data-section="install">
     <h2>install the client</h2>
     <p>The <code>satellites</code> CLI is a per-platform release binary, installed the way <code>claude install</code> works — client only, no server. The one-line bootstrap fetches the installer, sha-verifies the platform binary, and places it at <code>~/.local/bin/satellites</code> (on PATH):</p>
@@ -148,11 +153,6 @@ satellites status   # → db UP, MCP connected — no flags, no hand-edits</code
 satellites story status_transition --skill &lt;gate&gt; &lt;story-id&gt; # reviewer-gated transition
 satellites story set-status &lt;story-id&gt; done                  # advance an ungated edge</code></pre>
     <p><code>.claude/skills</code> holds <strong>no gates by default</strong>: reviewer skills resolve <em>local → embed → server</em>, so a fresh repo is governable empty. The baseline workflow gates the entry transition with the spine reviewer <code>satellites-intent-plan-review</code>, resolved from the binary embed — but it is ordinary, editable substrate: a repo MAY override it (or any reviewer) by authoring <code>.claude/skills/&lt;name&gt;</code>, which the resolver consults first. The agent's goal is simply to reach <code>done</code> through the transitions its workflow declares.</p>
-  </section>
-
-  <section class="realisation" data-section="why-not">
-    <h2 class="section-heading">Why not just a workflow runner or an agent harness</h2>
-    <p class="realisation-lede">A workflow runner sequences steps and trusts each step to report its own success. An agent harness tunes context, tools, and the loop — and then lets the agent decide it's finished. Satellites' difference is the one thing neither does: the actor that produces the work is structurally barred from being the actor that accepts it, and the acceptance is recorded. That single boundary turns <em>"the agent said it's done"</em> into <em>"the work passed a gate, and here is the record."</em></p>
   </section>
 
   <section class="panel" data-section="server">

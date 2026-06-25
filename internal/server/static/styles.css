@@ -947,6 +947,26 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   text-transform: uppercase;
 }
 
+/* One heading voice on the landing page (sty_e32382c2): the operator-panel
+   headings (install / out of the box / server / endpoints) adopt the same
+   uppercase, tracked treatment as the narrative section eyebrows, so the casing
+   and size no longer flip as the page scrolls. Scoped to .landing so shared
+   .panel headings on other pages keep their own style. */
+.landing .panel h2 {
+  font-size: 1.05rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Even vertical rhythm between the page's top-level blocks, and a single prose
+   measure (~74ch) so every lede and the accept/reject mapping share one column
+   width instead of stretching to near-empty full-width bars. */
+.landing { gap: 2rem; }
+.landing .thesis-lede,
+.landing .realisation-lede,
+.landing .sm-lede,
+.landing .mapping-grid { max-width: 74ch; }
+
 /* Four-lever cards as a 2x2 grid on wide viewports, collapsing to one
    column under ~720px. Inline SVG icons share the .lever-icon class so
    their stroke matches surrounding text colour. */
@@ -966,24 +986,16 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   flex-direction: column;
   gap: 0.75rem;
 }
-.lever-card-head {
-  display: grid;
-  grid-template-columns: 1.6rem 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 0.6rem;
-  align-items: center;
-}
-.lever-icon {
-  width: 1.4rem;
-  height: 1.4rem;
-  color: #4ade80;
-  grid-row: 1 / span 2;
-}
+/* The card head is a plain full-width block — the heading reads on one line and
+   wraps only at the card edge. (It was a 1.6rem icon + 1fr grid for an icon the
+   markup never renders, which squeezed each heading into the icon track and wrapped
+   it one word per line — sty_e32382c2.) */
+.lever-card-head { margin: 0; }
 .lever-card h3 {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
   color: #fff;
 }
 .lever-sub {
