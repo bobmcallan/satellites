@@ -24,110 +24,60 @@
 
 <main>
   <section class="thesis" data-section="thesis">
-    <h2 class="thesis-title">A reviewer-gated harness for agentic engineering.</h2>
-    <p class="thesis-lede">As AI moves from stateless prompt-response to autonomous agents that determine their own path over time, systemic failures emerge. Agents loop endlessly, run down wrong roads, stall, or declare success on a stalled task. These are rarely problems with the underlying model — they are failures of <strong>the harness</strong>.</p>
-    <p class="thesis-lede">Harness engineering optimises four levers: <strong>context</strong>, <strong>tools</strong>, <strong>loop</strong>, <strong>governance</strong>. Satellites is opinionated about all four.</p>
+    <h2 class="thesis-title">Reviewer-gated execution for agentic engineering.</h2>
+    <p class="thesis-lede">An agent can write the code. It can't decide the code is done. Only a <strong>reviewer</strong> moves the work forward — and every verdict is recorded.</p>
   </section>
 
-  <section class="levers" data-section="levers">
-    <h2 class="section-heading">The four levers</h2>
-    <div class="levers-grid">
-
-      <article class="lever-card" data-lever="context">
-        <header class="lever-card-head">
-          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-            <path d="M12 3C8 3 5 6 5 10v3a3 3 0 0 0 3 3v2a3 3 0 0 0 6 0v-2a3 3 0 0 0 3-3v-3c0-4-3-7-5-7Z"/>
-            <path d="M9 11h6M9 14h6"/>
-          </svg>
-          <h3>1 · Context</h3>
-          <p class="lever-sub">what the model sees</p>
-        </header>
-        <p class="lever-body">The complete state-space available at the millisecond the model picks its next action — system prompts, prior execution steps, retrieved documents, memory, active variables.</p>
-        <dl class="lever-pair">
-          <dt>Failure mode</dt><dd>Missing, contextually disconnected, or over-saturated — bloat buries the high-priority signal.</dd>
-          <dt>Architecture lens</dt><dd>The right information, shaped precisely, injected at the right moment.</dd>
-        </dl>
-      </article>
-
-      <article class="lever-card" data-lever="tools">
-        <header class="lever-card-head">
-          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-            <path d="M14 4l6 6-9 9-6-6 9-9Z"/>
-            <path d="M4 20l3-3"/>
-            <circle cx="16" cy="8" r="1.2" fill="currentColor"/>
-          </svg>
-          <h3>2 · Tools</h3>
-          <p class="lever-sub">what the model can do</p>
-        </header>
-        <p class="lever-body">The exposed action surface that lets a text-generation engine execute state changes — codebase endpoints, MCP, sandboxed CLIs.</p>
-        <dl class="lever-pair">
-          <dt>Failure mode</dt><dd>Raw integrations without semantic schemas, or unstructured shells with no safety boundary.</dd>
-          <dt>Architecture lens</dt><dd>Tools packaged as precise, self-describing schemas tailored to one capability boundary.</dd>
-        </dl>
-      </article>
-
-      <article class="lever-card" data-lever="loop">
-        <header class="lever-card-head">
-          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-            <path d="M4 12a8 8 0 0 1 13.7-5.7L20 9"/>
-            <path d="M20 4v5h-5"/>
-            <path d="M20 12a8 8 0 0 1-13.7 5.7L4 15"/>
-            <path d="M4 20v-5h5"/>
-          </svg>
-          <h3>3 · Loop</h3>
-          <p class="lever-sub">how the agent runs</p>
-        </header>
-        <p class="lever-body">Intake context → execute tool → interpret output → evaluate continuation → repeat until complete.</p>
-        <dl class="lever-pair">
-          <dt>Failure mode</dt><dd>Runaway chains, infinite generation, false-positive completion when the task has stalled.</dd>
-          <dt>Architecture lens</dt><dd>Deterministic wrapper assertions — step counts, timeouts, progression detection, definitive exit states.</dd>
-        </dl>
-      </article>
-
-      <article class="lever-card" data-lever="governance">
-        <header class="lever-card-head">
-          <svg class="lever-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-            <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z"/>
-            <path d="M9 12l2 2 4-4"/>
-          </svg>
-          <h3>4 · Governance</h3>
-          <p class="lever-sub">what boundaries it has</p>
-        </header>
-        <p class="lever-body">Permissions, sandboxes, environment limits, audit logging, human-in-the-loop approval gates that keep automated actions safely bounded.</p>
-        <dl class="lever-pair">
-          <dt>Failure mode</dt><dd>Broad write/delete permissions without verification — or restrictions so tight the agent can't make necessary updates.</dd>
-          <dt>Architecture lens</dt><dd>Separated permissioned boundaries — deciding what runs autonomously vs. what requires a hard stop.</dd>
-        </dl>
-      </article>
-
-    </div>
+  <section class="levers" data-section="problem">
+    <h2 class="section-heading">The problem</h2>
+    <p class="realisation-lede">Agentic coding fails in a way unit tests don't catch: the agent declares success on work that's plausible and wrong, or loops until it times out. More tools, more autonomy, and more retries scale that problem — they don't gate it. What's missing isn't a smarter model. It's a structural boundary between <em>doing the work</em> and <em>deciding the work is acceptable</em>.</p>
   </section>
 
-  <section class="realisation" data-section="realisation">
-    <h2 class="section-heading">How Satellites realises the four levers</h2>
-    <p class="realisation-lede">Satellites does not let a single model manage an open-ended loop over a giant context window. The framework is built around a single load-bearing premise: <strong>Separation of roles is structural, not advisory.</strong></p>
-
+  <section class="realisation" data-section="what-it-does">
+    <h2 class="section-heading">What Satellites does</h2>
+    <p class="realisation-lede">Satellites makes that boundary structural, not advisory. Work moves as <strong>stories</strong> through a declared <strong>workflow</strong> of phases. The executor — the agent — can start a phase and signal it's ready. That's all. It cannot change a story's status, and it cannot approve itself. Only a <strong>reviewer</strong> advances the story, by running a gate against the work and returning a verdict:</p>
     <div class="mapping-grid">
       <div class="mapping-row">
-        <span class="mapping-lever">Context</span>
+        <span class="mapping-lever">accept</span>
         <span class="mapping-arrow" aria-hidden="true">→</span>
-        <span class="mapping-impl">The satellite as an isolated sub-harness — a dedicated compartment with a minimised context surface. Stories are the working spine; the ledger is bookkeeping the model needn't read most of the time.</span>
+        <span class="mapping-impl">the story moves to the next phase.</span>
       </div>
       <div class="mapping-row">
-        <span class="mapping-lever">Tools</span>
+        <span class="mapping-lever">reject</span>
         <span class="mapping-arrow" aria-hidden="true">→</span>
-        <span class="mapping-impl">Packaged capability through <code>document_*</code> / <code>variable_*</code> / <code>project_*</code> / <code>apikey_*</code> verbs over MCP, plus operator-authored <em>skills</em>. Skills are pure capability — they report, they do not decide what the result means.</span>
+        <span class="mapping-impl">the story stays where it is, the reason appended to its log.</span>
       </div>
-      <div class="mapping-row">
-        <span class="mapping-lever">Loop</span>
-        <span class="mapping-arrow" aria-hidden="true">→</span>
-        <span class="mapping-impl">Orchestrated phases. The executor has two verbs — <code>start</code> and <code>done</code> — and cannot mark its own work complete. No runaway loops, no false-positive completion.</span>
-      </div>
-      <div class="mapping-row">
-        <span class="mapping-lever">Governance</span>
-        <span class="mapping-arrow" aria-hidden="true">→</span>
-        <span class="mapping-impl">Embedded reviewers as the gate — <code>agent</code> · <code>static</code> · <code>external</code> · <code>process</code> · <code>composite</code>. Only reviewers can change story status. Scopes (<code>system</code>, <code>workspace</code>, <code>project</code>) gate the verb layer.</span>
-      </div>
+    </div>
+    <p class="realisation-lede">Reject-stays is deliberate. A phase advances only when the work passes the gate its workflow declares — so "done" means <em>reviewed</em>, every time.</p>
+  </section>
+
+  <section class="levers" data-section="whats-real">
+    <h2 class="section-heading">What's real today</h2>
+    <div class="levers-grid">
+      <article class="lever-card" data-real="state-machine">
+        <header class="lever-card-head"><h3>Reviewer-gated state machine</h3></header>
+        <p class="lever-body">Three states per phase — <code>pending → inprogress → done</code>. Accept moves; reject loops back with its reason. The dispatcher refuses to advance an ambiguous transition rather than guessing, and a workflow with an unbounded loop is rejected when it's parsed.</p>
+      </article>
+      <article class="lever-card" data-real="gates">
+        <header class="lever-card-head"><h3>Two kinds of gate</h3></header>
+        <p class="lever-body">A gate is either an <strong>LLM reviewer</strong> judging the work against an operator-authored contract, or a <strong>deterministic command</strong> whose exit code selects the pass or fail edge (lint, tests, schema validation). Soft judgement and hard stops, in the same machine.</p>
+      </article>
+      <article class="lever-card" data-real="evidence">
+        <header class="lever-card-head"><h3>A durable evidence trail</h3></header>
+        <p class="lever-body">Every gate run and CI outcome is written as a <code>qa_evidence</code> record — decision, from/to status, the reject reason, and the commit it ran against. The record <em>is</em> the audit log and the metric source, not a console line that scrolls away.</p>
+      </article>
+      <article class="lever-card" data-real="retry">
+        <header class="lever-card-head"><h3>Bounded retry with recovery</h3></header>
+        <p class="lever-body">Repeated rejects on the same edge spend a quota and block the story; a recovery gate brings it back with a fresh quota. Loops on trivia are the contract being enforced, not a defect.</p>
+      </article>
+      <article class="lever-card" data-real="roles">
+        <header class="lever-card-head"><h3>Roles enforced at the verb layer</h3></header>
+        <p class="lever-body">Executor, reviewer, and operator hold different keys, and the server — not a policy document — rejects an executor that tries to approve its own work. The reviewer key is minted per review and revoked after it.</p>
+      </article>
+      <article class="lever-card" data-real="surface">
+        <header class="lever-card-head"><h3>MCP gateway + live portal + code indexing</h3></header>
+        <p class="lever-body">Stories, documents, projects, variables, the ledger, and the reviewer surfaces are scope-checked MCP verbs; the portal renders stories, gate verdicts, the evidence trail, and a code graph in real time. Satellites indexes the target repo — symbol map and semantic search — so a reviewer judges against the actual codebase.</p>
+      </article>
     </div>
   </section>
 
@@ -198,6 +148,11 @@ satellites status   # → db UP, MCP connected — no flags, no hand-edits</code
 satellites story status_transition --skill &lt;gate&gt; &lt;story-id&gt; # reviewer-gated transition
 satellites story set-status &lt;story-id&gt; done                  # advance an ungated edge</code></pre>
     <p><code>.claude/skills</code> holds <strong>no gates by default</strong>: reviewer skills resolve <em>local → embed → server</em>, so a fresh repo is governable empty. The baseline workflow gates the entry transition with the spine reviewer <code>satellites-intent-plan-review</code>, resolved from the binary embed — but it is ordinary, editable substrate: a repo MAY override it (or any reviewer) by authoring <code>.claude/skills/&lt;name&gt;</code>, which the resolver consults first. The agent's goal is simply to reach <code>done</code> through the transitions its workflow declares.</p>
+  </section>
+
+  <section class="realisation" data-section="why-not">
+    <h2 class="section-heading">Why not just a workflow runner or an agent harness</h2>
+    <p class="realisation-lede">A workflow runner sequences steps and trusts each step to report its own success. An agent harness tunes context, tools, and the loop — and then lets the agent decide it's finished. Satellites' difference is the one thing neither does: the actor that produces the work is structurally barred from being the actor that accepts it, and the acceptance is recorded. That single boundary turns <em>"the agent said it's done"</em> into <em>"the work passed a gate, and here is the record."</em></p>
   </section>
 
   <section class="panel" data-section="server">
