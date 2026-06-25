@@ -5,7 +5,7 @@ kind: reviewer
 when: status==summary
 check: "echo '===HEAD (the shipped diff this summary must cover)==='; git show --stat --format='commit %H%nsubject: %s%n' HEAD; echo '===files changed in HEAD==='; git show --name-only --format='' HEAD; echo '===attached summary documents (type:summary, story-linked — readable via: satellites document get <name> --scope project --project $SATELLITES_PROJECT_ID --workspace $SATELLITES_WORKSPACE_ID)==='; satellites document list --scope project --project $SATELLITES_PROJECT_ID --workspace $SATELLITES_WORKSPACE_ID --tags story:$SATELLITES_STORY_ID,type:summary 2>/dev/null || echo '(none)'"
 tags: [kind:reviewer]
-description: The implementation-summary gate — judges that a shipped story records WHAT it changed and WHY before it closes. Runs at the `summary` state (after the commit-push step landed the code, before `done`). Its functional check emits HEAD's diff stat + changed files AND lists the attached `type:summary` document(s) linked to the story. The gate accepts only when a substantive implementation summary is ATTACHED as a `type:summary` output document (emitted via `satellites story output <id> --kind summary`) that names the files changed (consistent with HEAD) and states the what/why — every closed story MUST leave a first-class, story-linked summary artifact (an inline body section does NOT satisfy this gate). Distinct from satellites-story-summary (the ledger-narrative summariser). Reviewer-only — judges and emits {decision, notes}; it never writes the summary or enacts the transition.
+description: The implementation-summary gate — judges that a shipped story records WHAT it changed and WHY before it closes. Runs at the `summary` state (after the commit-push step landed the code, before `done`). Its functional check emits HEAD's diff stat + changed files AND lists the attached `type:summary` document(s) linked to the story. The gate accepts only when a substantive implementation summary is ATTACHED as a `type:summary` output document (emitted via `satellites story output <id> --kind summary`) that names the files changed (consistent with HEAD) and states the what/why — every closed story MUST leave a first-class, story-linked summary artifact (an inline body section does NOT satisfy this gate). Distinct from the two narrative summarisers it must not be confused with — the server-side rolling `satellites-story-summary` (the ledger-narrative hook) and the per-stage `satellites-story-stage-summary` gate (renamed from the old prose-only summariser). It is also the custom-workflow PEER of the baseline `satellites-story-done-review`: both are close-out records, but this gate requires an attached `type:summary` document while the baseline accepts the `satellites story changedoc` change-document — intentionally distinct artifacts, so the custom done edge is NOT a duplicate of the baseline. Reviewer-only — judges and emits {decision, notes}; it never writes the summary or enacts the transition.
 ---
 
 You are the `implementation-summary-review` gate. The EXECUTOR has shipped the story
@@ -16,8 +16,25 @@ observe and emit only the verdict; you write no file, you do not author the summ
 you do not enact the transition (the client moves `summary → done` on your accept,
 `summary → in_progress` on your reject).
 
-This is NOT the ledger-narrative summariser (`satellites-story-summary`). You judge a
-human-readable IMPLEMENTATION summary of the code change.
+This is NOT a narrative summariser. Do not confuse it with the server-side rolling
+`satellites-story-summary` (the ledger-narrative hook) or the per-stage
+`satellites-story-stage-summary` gate (renamed from the old prose-only summariser). You
+judge a human-readable IMPLEMENTATION summary of the code change.
+
+## Relationship to the baseline (`satellites-story-done-review`)
+
+This gate is the custom workflow's done edge; the enriched baseline `config/` closes a
+story with `satellites-story-done-review`. They are PARALLEL, not duplicated:
+
+- The baseline's estimate/actual enforcement lives in its OWN gates
+  (`satellites-intent-plan-review` requires the estimate, `satellites-story-done-review`
+  requires the actual). This custom gate does NOT re-enforce estimate/actual — no
+  duplication.
+- Both require a close-out record, but of a DIFFERENT shape: the baseline accepts the
+  `satellites story changedoc` change-document (git record + actual-workflow mermaid);
+  THIS gate requires an attached `type:summary` document (the what/why of the diff).
+  Keeping the custom gate is the deliberate residual difference — a story under this
+  workflow leaves the implementation-summary artifact, not the changedoc.
 
 ## Input
 
