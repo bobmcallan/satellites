@@ -695,12 +695,19 @@
 
             // openDocuments switches the expanded row's panel to Documents and
             // lazy-loads the attached-documents fragment on first open
-            // (sty_bf2fc8e1), peer to openLedger.
+            // (sty_bf2fc8e1), peer to openLedger. The DOM read is deferred to
+            // $nextTick (sty_cdc111c1): flipping detailTab is a reactive change, so
+            // querying the documents panel in the SAME tick can miss it and the
+            // load no-ops, leaving the "Loading…" placeholder until a later
+            // re-render. Matches the deep-link + sort handlers, which also read the
+            // DOM in $nextTick after a state change.
             openDocuments(id) {
                 this.detailTab = 'documents';
                 if (this._docsLoaded) { return; }
                 this._docsLoaded = true;
-                window.loadStoryDocsFragment(id, this.docsPanelFor(id));
+                this.$nextTick(() => {
+                    window.loadStoryDocsFragment(id, this.docsPanelFor(id));
+                });
             },
 
             // copyStoryID writes the story id to the clipboard and flips
