@@ -132,7 +132,7 @@ func storyDetailHandler(cfg Config) http.HandlerFunc {
 // declared workflow reconciled against the ledger) for storyID. Shared by the
 // full-page handler and the live trace fragment (sty_96cc0ade). Read-only: it
 // dispatches only read verbs and never writes a ledger row or patches status.
-func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, error) {
+func buildStoryDetail(ctx context.Context, storyID string, resolveActorFn func(string) string) (storyDetailData, error) {
 	story, err := dispatchStoryMeta(ctx, storyID)
 	if err != nil {
 		return storyDetailData{}, err
@@ -178,7 +178,7 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 	// The merged rows render with or without a declared workflow — the
 	// ledger is the spine; the workflow only annotates (nil wf = rows pass
 	// through with gate/CI badges only).
-	data.MergedRows = mergedRows(processtrace.AnnotateLedger(wf, entries))
+	data.MergedRows = mergedRows(processtrace.AnnotateLedger(wf, entries), resolveActorFn)
 	if wf == nil {
 		data.NoWorkflow = true
 		return data, nil
@@ -213,7 +213,7 @@ func gatherStoryDocs(ctx context.Context, storyID string, q url.Values) ([]docRo
 // mergedRows maps annotated ledger entries into the merged Ledger/Log view,
 // newest first so the latest activity reads at the top. Badge classes are
 // derived from the annotation, never from state or gate names.
-func mergedRows(entries []processtrace.AnnotatedEntry) []storyMergedRowView {
+func mergedRows(entries []processtrace.AnnotatedEntry, resolve func(string) string) []storyMergedRowView {
 	rows := make([]storyMergedRowView, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
@@ -221,7 +221,9 @@ func mergedRows(entries []processtrace.AnnotatedEntry) []storyMergedRowView {
 		if !e.CreatedAt.IsZero() {
 			when = e.CreatedAt.UTC().Format("2006-01-02 15:04")
 		}
-		actor := strings.TrimSpace(e.Actor)
+		// Resolve the actor id to its email (sty_4a3a9ebf) — the operator-facing
+		// identity — falling back to the raw id when unresolved.
+		actor := strings.TrimSpace(resolveActor(resolve, e.Actor))
 		if actor == "" {
 			actor = "—"
 		}
@@ -299,7 +301,7 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := buildStoryDetail(ctx, storyID)
+		data, err := buildStoryDetail(ctx, storyID, newActorResolver(ctx, cfg))
 		if err != nil {
 			arbor.WarnCtx(ctx, "story_trace_fragment: build", "id", storyID, "err", err)
 			http.NotFound(w, r)

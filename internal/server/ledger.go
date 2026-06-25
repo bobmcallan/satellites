@@ -167,7 +167,7 @@ func ledgerHandler(cfg Config) http.HandlerFunc {
 			arbor.WarnCtx(ctx, "ledger page: ledger_list", "err", err)
 			data.ErrorMsg = err.Error()
 		} else {
-			data.Entries = renderLedgerEntries(resp.Entries)
+			data.Entries = renderLedgerEntries(resp.Entries, newActorResolver(ctx, cfg))
 			data.Empty = len(data.Entries) == 0
 			if resp.NextCursor != "" {
 				data.HasNext = true
@@ -269,7 +269,7 @@ func dispatchLedgerList(ctx context.Context, in ledgerListInput) (verb.LedgerLis
 // renderLedgerEntries shapes verb-response rows for the template.
 // Long bodies are truncated for the table; the full body and the
 // JSON-pretty payload/refs ride along for the row's expand panel.
-func renderLedgerEntries(entries any) []ledgerEntryView {
+func renderLedgerEntries(entries any, resolve func(string) string) []ledgerEntryView {
 	out := []ledgerEntryView{}
 	b, err := json.Marshal(entries)
 	if err != nil {
@@ -290,7 +290,7 @@ func renderLedgerEntries(entries any) []ledgerEntryView {
 			SessionID:   e.SessionID,
 			ProjectID:   e.ProjectID,
 			WorkspaceID: e.WorkspaceID,
-			Actor:       e.Actor,
+			Actor:       resolveActor(resolve, e.Actor),
 			BodyFull:    e.Body,
 			BodyTrunc:   truncateBody(e.Body, 160),
 		}

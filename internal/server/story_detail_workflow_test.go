@@ -62,7 +62,7 @@ func TestMergedLedgerMappers(t *testing.T) {
 		mk("review_reject", "still leaking", `{"from_status":"vetting","gate":"qa-seal","on":"fail"}`, 4),
 		mk("status_transition", "exhausted: 2/2 rejects on vetting — escalating to marooned", `{"from_status":"vetting","to_status":"marooned","exhausted":true}`, 5),
 	}
-	rows := mergedRows(processtrace.AnnotateLedger(wf, entries))
+	rows := mergedRows(processtrace.AnnotateLedger(wf, entries), nil)
 	if len(rows) != 6 {
 		t.Fatalf("rows = %d, want 6", len(rows))
 	}

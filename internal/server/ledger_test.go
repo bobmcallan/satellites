@@ -63,7 +63,7 @@ func TestRenderLedgerEntries_LevelDerivedFromKindPrefix(t *testing.T) {
 		{ID: "evt_1", Kind: "log:warn", Body: "boom", CreatedAt: time.Now()},
 		{ID: "evt_2", Kind: "story_created", Body: "x", CreatedAt: time.Now()},
 	}
-	out := renderLedgerEntries(rows)
+	out := renderLedgerEntries(rows, nil)
 	if len(out) != 2 {
 		t.Fatalf("got %d", len(out))
 	}
@@ -84,7 +84,7 @@ func TestRenderLedgerEntries_StepSummaryInline(t *testing.T) {
 		{ID: "evt_s", Kind: "step_summary", Body: "Started feature X; plan accepted.", CreatedAt: time.Now()},
 		{ID: "evt_t", Kind: "status_transition", Body: "ready → in_progress", CreatedAt: time.Now()},
 	}
-	out := renderLedgerEntries(rows)
+	out := renderLedgerEntries(rows, nil)
 	if len(out) != 2 {
 		t.Fatalf("got %d", len(out))
 	}
@@ -110,7 +110,7 @@ func TestRenderLedgerEntries_SourceFirstNonEmpty(t *testing.T) {
 		{ID: "d", Kind: "log:info", ProjectID: "proj_d", CreatedAt: time.Now()},
 		{ID: "e", Kind: "log:info", CreatedAt: time.Now()},
 	}
-	out := renderLedgerEntries(rows)
+	out := renderLedgerEntries(rows, nil)
 	if !strings.HasPrefix(out[0].Source, "run ") {
 		t.Errorf("run wins: %q", out[0].Source)
 	}
