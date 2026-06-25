@@ -519,21 +519,28 @@
                 <nav class="story-tabs" role="tablist" data-field="story-tabs">
                   <button type="button" class="story-tab" role="tab" data-tab="description"
                           :class="detailTab==='description' ? 'is-active' : ''" :aria-selected="detailTab==='description' ? 'true' : 'false'"
-                          @click.stop="detailTab='description'">Description / ACs</button>
+                          @click.stop="detailTab='description'">Description</button>
+                  <button type="button" class="story-tab" role="tab" data-tab="documents"
+                          :class="detailTab==='documents' ? 'is-active' : ''" :aria-selected="detailTab==='documents' ? 'true' : 'false'"
+                          @click.stop="openDocuments('{{.ID}}')">Documents</button>
                   <button type="button" class="story-tab" role="tab" data-tab="ledger"
                           :class="detailTab==='ledger' ? 'is-active' : ''" :aria-selected="detailTab==='ledger' ? 'true' : 'false'"
                           @click.stop="openLedger('{{.ID}}')">Ledger / Log</button>
                 </nav>
 
+                {{/* ACs live inside the story body, so there is no separate
+                     acceptance-criteria block (sty_bf2fc8e1). */}}
                 <div class="story-tabpanel" role="tabpanel" data-tabpanel="description" x-show="detailTab==='description'">
                   <section class="story-detail-block" data-field="story-description">
                     <h4>description</h4>
                     {{if .BodyHTML}}<div class="changelog-content" data-field="story-description-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
                   </section>
-                  <section class="story-detail-block" data-field="story-acceptance">
-                    <h4>acceptance criteria</h4>
-                    {{if .AcceptanceCriteriaHTML}}<div class="changelog-content" data-field="story-acceptance-body">{{.AcceptanceCriteriaHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
-                  </section>
+                </div>
+
+                {{/* Documents tab (sty_bf2fc8e1) — the story's attached output
+                     documents, lazy-loaded on first open like the ledger. */}}
+                <div class="story-tabpanel" role="tabpanel" data-tabpanel="documents" x-show="detailTab==='documents'" x-cloak>
+                  <div class="story-detail-block" data-field="story-documents"><p class="empty">Loading…</p></div>
                 </div>
 
                 <div class="story-tabpanel" role="tabpanel" data-tabpanel="ledger" x-show="detailTab==='ledger'" x-cloak>

@@ -567,6 +567,41 @@ func TestStoryPanelClient_LedgerLazyLoad(t *testing.T) {
 	}
 }
 
+// TestStoryPanelClient_DocumentsLazyLoad covers the Documents tab (sty_bf2fc8e1):
+// clicking it lazy-loads the attached-documents fragment via
+// window.loadStoryDocsFragment (stubbed in the mux) and swaps it into the
+// documents container — peer to the ledger lazy-load.
+func TestStoryPanelClient_DocumentsLazyLoad(t *testing.T) {
+	skipClientJSInCI(t)
+	r := row("sty_x", "tabbed story", "in_progress", "medium", "feature")
+	r.BodyHTML = "<p>the description body</p>"
+	url := servePanel(t, panelData(r), map[string]http.HandlerFunc{
+		"/stories/sty_x/documents.fragment": func(w http.ResponseWriter, req *http.Request) {
+			_, _ = w.Write([]byte(`<div data-field="docs-loaded">DOC LIST HERE</div>`))
+		},
+	})
+	ctx := browserCtx(t)
+	waitPanelReady(t, ctx, url)
+
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`tr[data-id="sty_x"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`tr.story-detail[data-detail-for="sty_x"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("expand row: %v", err)
+	}
+
+	// Click the Documents tab → openDocuments → loadStoryDocsFragment fetches the stub.
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`tr.story-detail[data-detail-for="sty_x"] [data-tab="documents"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`[data-field="docs-loaded"]`, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("documents lazy-load: %v", err)
+	}
+	if got := evalString(t, ctx, `document.querySelector('tr.story-detail[data-detail-for="sty_x"] [data-field="story-documents"]').textContent`); !strings.Contains(got, "DOC LIST HERE") {
+		t.Errorf("documents fragment not swapped in: %q", got)
+	}
+}
+
 // TestStoryPanelClient_CategoryChip covers the row category chip: clicking it
 // runs addCategoryToQuery → applyToServer, navigating to ?stories_q=category:<v>.
 // (Replaces TestStoryCategoryChip.)

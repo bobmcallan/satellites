@@ -83,11 +83,16 @@ func TestStoryPanelRendersRowContract(t *testing.T) {
 		}
 	}
 
-	// Inline detail panel: tab scaffold + lazy-load ledger placeholder.
+	// Inline detail panel: tab scaffold + lazy-load ledger/documents placeholders
+	// (Documents tab sty_bf2fc8e1).
 	for _, want := range []string{
 		`data-field="story-tabs"`,
 		`data-tab="description"`,
 		`@click.stop="detailTab='description'"`,
+		`data-tab="documents"`,
+		`@click.stop="openDocuments('sty_alpha')"`,
+		`data-tabpanel="documents"`,
+		`data-field="story-documents"`,
 		`@click.stop="openLedger('sty_alpha')"`,
 		`data-tabpanel="ledger"`,
 		`data-field="story-ledger"`,
@@ -95,6 +100,11 @@ func TestStoryPanelRendersRowContract(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("inline detail panel missing %q", want)
 		}
+	}
+	// AC1: the standalone acceptance-criteria block is gone from the inline panel
+	// (ACs live in the description body).
+	if strings.Contains(html, `data-field="story-acceptance"`) {
+		t.Errorf("inline panel still renders a separate acceptance-criteria block:\n%s", html)
 	}
 }
 

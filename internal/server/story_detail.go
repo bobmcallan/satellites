@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -188,6 +189,34 @@ func buildStoryDetail(ctx context.Context, storyID string) (storyDetailData, err
 	return data, nil
 }
 
+// gatherStoryDocs lists the documents attached to a story (story outputs carry a
+// `story:<id>` back-reference tag — see `satellites story output`) and renders
+// each body as markdown for inline expand/collapse, newest-first. Read-only and
+// best-effort: a list/body error degrades to fewer rows, never a page error
+// (sty_bf2fc8e1). Mirrors the project documents panel (gatherDocPanelFrom).
+func gatherStoryDocs(ctx context.Context, storyID string) []docRow {
+	rows, err := dispatchDocRows(ctx, verb.DocumentListRequest{
+		Type: "document", Tags: []string{"story:" + storyID}, Limit: 200,
+	})
+	if err != nil {
+		arbor.WarnCtx(ctx, "story_detail: list documents", "id", storyID, "err", err)
+		return nil
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].UpdatedAt.After(rows[j].UpdatedAt) })
+	for i := range rows {
+		rows[i].Expandable = true
+		body, gErr := dispatchStoryBody(ctx, rows[i].ID)
+		if gErr != nil {
+			arbor.WarnCtx(ctx, "story_detail: doc body", "id", rows[i].ID, "err", gErr)
+			continue
+		}
+		if strings.TrimSpace(body) != "" {
+			rows[i].BodyHTML = renderMarkdown(body)
+		}
+	}
+	return rows
+}
+
 // mergedRows maps annotated ledger entries into the merged Ledger/Log view,
 // newest first so the latest activity reads at the top. Badge classes are
 // derived from the annotation, never from state or gate names.
@@ -285,6 +314,36 @@ func storyTraceFragmentHandler(cfg Config) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := storyDetailTmpl.ExecuteTemplate(w, "story-trace", data); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+// storyDocsData is the view model for the story Documents fragment.
+type storyDocsData struct {
+	Documents []docRow
+}
+
+// storyDocsFragmentHandler renders just the attached-documents list for a story
+// — the lazy-load target the inline panel's Documents tab fetches on first open
+// (sty_bf2fc8e1), peer to the trace fragment. Plain HTML (native <details> for
+// expand/collapse) so the inline-panel innerHTML swap needs no Alpine. Read-only.
+func storyDocsFragmentHandler(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := cfg.Sessions.UserID(r)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := withSessionUser(r.Context(), cfg, userID)
+		storyID := strings.TrimSpace(r.PathValue("id"))
+		if storyID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		data := storyDocsData{Documents: gatherStoryDocs(ctx, storyID)}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := storyDetailTmpl.ExecuteTemplate(w, "story-docs", data); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}

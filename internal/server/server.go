@@ -174,6 +174,9 @@ func Build(cfg Config) http.Handler {
 	// wins under Go 1.22 pattern precedence. Replaces the retired per-story SSE
 	// (/api/stories/{id}/events); the QA view now refetches off the shared bus.
 	mux.HandleFunc("GET /stories/{id}/trace.fragment", storyTraceFragmentHandler(cfg))
+	// Lazy-loaded attached-documents fragment for the inline panel's Documents
+	// tab (sty_bf2fc8e1) — peer to trace.fragment, more specific than /stories/.
+	mux.HandleFunc("GET /stories/{id}/documents.fragment", storyDocsFragmentHandler(cfg))
 	mux.HandleFunc("/stories/", storyDetailHandler(cfg))
 	// Read-only task detail view (epic:workflow-steps order-6) — the task body
 	// + its execution episodes/log. Status still moves only via reviewer gates.

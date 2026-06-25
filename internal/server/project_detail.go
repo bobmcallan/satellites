@@ -92,11 +92,12 @@ type storyRow struct {
 	Title              string
 	Body               string
 	AcceptanceCriteria string
-	// Rendered-markdown projections for the readable expanded panel
+	// Rendered-markdown projection for the readable expanded panel
 	// (sty_762730ad) — the same safe goldmark renderer the changelog uses.
-	BodyHTML               template.HTML
-	AcceptanceCriteriaHTML template.HTML
-	Status                 string
+	// ACs are part of the body, so there is no separate AC projection
+	// (sty_bf2fc8e1).
+	BodyHTML template.HTML
+	Status   string
 	// StatusRank is the index of Status within the story's OWN ## Workflow
 	// states (lifecycle order), or statusRankUnknown when the story carries no
 	// workflow block or its status is not one of the declared states. The portal
@@ -315,9 +316,6 @@ func gatherStoryPage(ctx context.Context, projectID string, q url.Values) ([]sto
 		}
 		if strings.TrimSpace(stories[i].Body) != "" {
 			stories[i].BodyHTML = renderStoryMarkdown(stories[i].Body)
-		}
-		if strings.TrimSpace(stories[i].AcceptanceCriteria) != "" {
-			stories[i].AcceptanceCriteriaHTML = renderStoryMarkdown(stories[i].AcceptanceCriteria)
 		}
 		// Workflow-ordered status rank for `order:status` (order:3). The body is
 		// now loaded, so the row's own ## Workflow is parseable here.

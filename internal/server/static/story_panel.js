@@ -60,6 +60,25 @@
             .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
     };
 
+    // loadStoryDocsFragment lazy-loads the attached-documents fragment into el on
+    // first Documents-tab open (sty_bf2fc8e1), peer to loadStoryFragment. The
+    // fetched markup is plain HTML (native <details>, no Alpine directives), so a
+    // direct innerHTML swap is safe.
+    window.loadStoryDocsFragment = function (storyID, el) {
+        if (!el) { return; }
+        fetch('/stories/' + encodeURIComponent(storyID) + '/documents.fragment',
+              { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
+            .then(function (r) {
+                if (r.status === 401) { bounceToLogin(); return null; }
+                return r.ok ? r.text() : null;
+            })
+            .then(function (html) {
+                el.innerHTML = (html !== null && html !== '')
+                    ? html : '<p class="empty">nothing to show</p>';
+            })
+            .catch(function () { el.innerHTML = '<p class="empty">failed to load</p>'; });
+    };
+
     // debounce coalesces a burst of calls into one trailing invocation after
     // ms of quiet — used so a flurry of SSE triggers yields a single refetch
     // (sty_8f69be8b).
@@ -334,6 +353,7 @@
             // so a single field suffices.
             detailTab: 'description',
             _ledgerLoaded: false,
+            _docsLoaded: false,
             // _originalRowOrder is the snapshot of story-row ids in
             // server-rendered order, captured once on init() so removing
             // the order chip can restore the table.
@@ -456,11 +476,13 @@
                     window.satAgeEngagementDots();
                 }
 
-                // The swap wiped the expanded row's lazily-loaded ledger
-                // fragment; detailTab survived (component state, not DOM),
-                // so re-load the content the open tab is showing.
+                // The swap wiped the expanded row's lazily-loaded ledger /
+                // documents fragment; detailTab survived (component state, not
+                // DOM), so re-load the content the open tab is showing.
                 if (this.expanded && this.detailTab === 'ledger') {
                     window.loadStoryFragment(this.expanded, this.ledgerPanelFor(this.expanded));
+                } else if (this.expanded && this.detailTab === 'documents') {
+                    window.loadStoryDocsFragment(this.expanded, this.docsPanelFor(this.expanded));
                 }
 
                 // Re-capture the server order for the freshly-rendered rows,
@@ -577,6 +599,7 @@
                 // Description tab with a fresh ledger lazy-load state.
                 this.detailTab = 'description';
                 this._ledgerLoaded = false;
+                this._docsLoaded = false;
             },
 
             // ledgerPanelFor locates the expanded row's ledger container.
@@ -596,6 +619,25 @@
                 if (this._ledgerLoaded) { return; }
                 this._ledgerLoaded = true;
                 window.loadStoryFragment(id, this.ledgerPanelFor(id));
+            },
+
+            // docsPanelFor locates the expanded row's documents container — by
+            // data attribute, mirroring ledgerPanelFor (refs would collide).
+            docsPanelFor(id) {
+                const host = this.$root || this.$el;
+                const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+                return host && host.querySelector(
+                    'tr.story-detail[data-detail-for="' + sel + '"] [data-field="story-documents"]');
+            },
+
+            // openDocuments switches the expanded row's panel to Documents and
+            // lazy-loads the attached-documents fragment on first open
+            // (sty_bf2fc8e1), peer to openLedger.
+            openDocuments(id) {
+                this.detailTab = 'documents';
+                if (this._docsLoaded) { return; }
+                this._docsLoaded = true;
+                window.loadStoryDocsFragment(id, this.docsPanelFor(id));
             },
 
             // copyStoryID writes the story id to the clipboard and flips

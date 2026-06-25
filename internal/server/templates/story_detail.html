@@ -217,5 +217,32 @@
   </section>
 {{end}}
 
+{{/* story-docs: the lazy-loaded attached-documents list for the inline panel's
+     Documents tab (sty_bf2fc8e1). Plain HTML — native <details> drives
+     expand/collapse, so the innerHTML swap needs no Alpine. Each entry lists the
+     document name/id/updated in the summary and its rendered markdown body when
+     expanded; mirrors the project documents panel. */}}
+{{define "story-docs"}}
+  {{if .Documents}}
+  <ul class="story-doc-list" data-field="story-doc-list">
+    {{range .Documents}}
+    <li class="story-doc-item" data-field="story-document-row" data-id="{{.ID}}">
+      <details class="story-doc-details">
+        <summary class="story-doc-summary">
+          <span class="story-doc-name" data-field="document-row-title">{{.Name}}</span>
+          <span class="story-doc-meta muted" data-field="document-row-meta"><code>{{.ID}}</code>{{if .TypeTag}} · <code>type:{{.TypeTag}}</code>{{end}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}</span>
+        </summary>
+        <div class="story-detail-block" data-field="document-content">
+          {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+        </div>
+      </details>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="empty" data-field="story-documents-empty">No documents attached to this story.</p>
+  {{end}}
+{{end}}
+
 </body>
 </html>
