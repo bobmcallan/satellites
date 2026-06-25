@@ -763,6 +763,9 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 /* Completed stages: solid fill, dark legible number. */
 .review-light-pass { background: #2ecc71; border-color: #2ecc71; color: #07321c; }
 .review-light-fail { background: #e74c3c; border-color: #e74c3c; color: #3a0807; }
+/* Fired ungated checkpoint (sty_d94d4a5f): a completed step that carried no
+   review verdict — solid neutral slate, distinct from pass/green and fail/red. */
+.review-light-fired { background: #4a6fa5; border-color: #4a6fa5; color: #07182e; }
 /* Current (in-progress) stage: hollow amber ring + amber number. */
 .review-light-current { background: transparent; border-color: #f1c40f; color: #f1c40f; }
 /* Back-compat alias for any cached "pending" markup. */
