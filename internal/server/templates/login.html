@@ -64,6 +64,17 @@
     </div>
     {{end}}
   </section>
+
+  <section class="panel login-install" data-section="install">
+    <h2>install the client</h2>
+    <p>No account yet? Get the <code>satellites</code> CLI first — a per-platform release binary, client only. The one-line bootstrap fetches the installer, sha-verifies the platform binary, and places it at <code>~/.local/bin/satellites</code> (on PATH):</p>
+    <pre class="code"><code>curl -fsSL https://github.com/bobmcallan/satellites/releases/latest/download/install.sh | sh</code></pre>
+    <p>Pass <code>--local</code> for the in-repo dev binary, or <code>--version &lt;tag&gt;</code> to pin a release (<code>sh -s -- --local</code>). A <code>--local</code> install also scaffolds an uninitialized repo (writes <code>.mcp.json</code> + <code>.satellites/</code>).</p>
+    <p>Then bind a repo and sign in:</p>
+    <pre class="code"><code>satellites init     # scaffold + bind to your project (.satellites/, .mcp.json)
+satellites auth     # browser login → executor key
+satellites status   # db up, MCP connected</code></pre>
+  </section>
 </main>
 
 <footer class="site-footer">

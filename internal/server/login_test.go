@@ -24,6 +24,8 @@ func TestLogin_GET_RendersForm(t *testing.T) {
 		"login", `name="email"`, `name="password"`, `data-form="login"`,
 		`data-field="footer-name"`, `data-field="footer-email"`, `data-field="footer-version"`,
 		"/static/alpine.min.js", `x-data`,
+		// Install instructions for unauthenticated visitors (sty_48adcb56).
+		`data-section="install"`, "install.sh | sh", "satellites init", "satellites auth",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
