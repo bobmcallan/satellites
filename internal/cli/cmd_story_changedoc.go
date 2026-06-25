@@ -106,7 +106,7 @@ func runStoryChangedoc(ctx context.Context, out io.Writer, configPath, userArg, 
 	if lErr != nil {
 		fmt.Fprintf(out, "warning: ledger unavailable, workflow projection omitted: %v\n", lErr)
 	}
-	wf, _ := workflow.ParseBody([]byte(body))
+	wf := resolveStoryWorkflow(configPath, body, storyResp.Document.Category)
 
 	name := strings.TrimSpace(o.Name)
 	if name == "" {
@@ -165,7 +165,7 @@ func gatherStageFacts(ctx context.Context, configPath, userArg, storyID, body, c
 			b.WriteString("file: " + f + "\n")
 		}
 	}
-	wf, _ := workflow.ParseBody([]byte(body))
+	wf := resolveStoryWorkflow(configPath, body, category)
 	if wf != nil {
 		entries, _ := dispatchStoryLedgerEntries(ctx, storyID, configPath, userArg)
 		pt := processtrace.Reconcile(storyID, category, status, wf, entries, nil)
@@ -229,6 +229,22 @@ func gitStoryRecord(storyID string) gitRecord {
 
 // assembleChangedoc renders the PR-like change document markdown: an optional
 // narrative, the git record, and the actual-workflow YAML + mermaid projections.
+// resolveStoryWorkflow resolves the story's governing workflow for the
+// actual-workflow projection (sty_e61afcf5): the embedded `## Workflow` in the
+// body wins when present, else it falls back to the same governing-workflow
+// resolution the gates use (by category/selector), so a story whose body lacks
+// the embed (e.g. it was rewritten via document_upsert) still gets a faithful
+// projection rather than an omitted one. Returns nil when neither resolves.
+func resolveStoryWorkflow(configPath, body, category string) *workflow.Workflow {
+	if wf, err := workflow.ParseBody([]byte(body)); err == nil && wf != nil {
+		return wf
+	}
+	if wf, _, ok := verb.ResolveGoverningWorkflow(category, governingWorkflowSources(configPath)); ok {
+		return wf
+	}
+	return nil
+}
+
 func assembleChangedoc(storyID, title, narrative string, git gitRecord, entries []processtrace.LedgerEntry, category, status string, wf *workflow.Workflow) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s — change document\n\n", strings.TrimSpace(title))
