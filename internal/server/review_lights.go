@@ -133,12 +133,24 @@ func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
 	// the request count vs the resolved count so a re-request after a reject still
 	// reads as the current attempt of its (already-numbered) stage.
 	if !isTerminalReviewStatus(status) {
+		emitted := false
 		for i := len(reqOrder) - 1; i >= 0; i-- {
 			pr := reqOrder[i]
 			if reqByKey[pr.key] > resolvedByKey[pr.key] {
 				lights = append(lights, reviewLight{Index: stageOf(pr.key), State: "current", Gate: pr.gate})
+				emitted = true
 				break
 			}
+		}
+		// No open review request, but the story is actively WORKING a stage (it has
+		// already cleared at least one and isn't blocked/backlog) — the gate for the
+		// current stage simply hasn't been requested yet. Without this the strip goes
+		// dark between gates and the in-progress signal vanishes (sty_c049bb5f, a
+		// sty_6cfaa15e follow-up). Key the pulsing "current" light by the story's
+		// current lifecycle status — the from-state the next forward transition will
+		// carry — so the indicator is always present while work is in progress.
+		if !emitted && len(lights) > 0 && isWorkingReviewStatus(status) {
+			lights = append(lights, reviewLight{Index: stageOf(strings.ToLower(strings.TrimSpace(status))), State: "current"})
 		}
 	}
 	return lights
@@ -152,6 +164,18 @@ func isTerminalReviewStatus(status string) bool {
 		return true
 	}
 	return false
+}
+
+// isWorkingReviewStatus reports whether a story is actively progressing a stage
+// — the precondition for the between-gates fallback "current" light. A story not
+// yet started (backlog), stuck (blocked), or finished (terminal) is NOT working,
+// so it never gets the pulsing indicator without an explicit open review request.
+func isWorkingReviewStatus(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "", "backlog", "blocked", "done", "cancelled", "canceled":
+		return false
+	}
+	return true
 }
 
 // gateFromReviewBody pulls the gate name out of a review_requested body, whose

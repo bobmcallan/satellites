@@ -178,6 +178,27 @@ func TestBuildReviewLightsCurrent(t *testing.T) {
 	if l := buildReviewLights(nil, "in_progress"); len(l) != 0 {
 		t.Errorf("empty events should yield no lights, got %+v", l)
 	}
+
+	// Between gates (sty_c049bb5f): a story that cleared its first gate and advanced
+	// to in_progress, with NO open review request for the next stage, STILL shows the
+	// pulsing current light — keyed by the current lifecycle status — so the strip
+	// never goes dark while work is in progress.
+	between := buildReviewLights([]reviewEvent{
+		fail("backlog", "satellites-intent-plan-review", "01"),
+		pass("backlog", "satellites-intent-plan-review", "02"),
+	}, "in_progress")
+	if !eqLights(lights(between), lp{1, "fail"}, lp{1, "pass"}, lp{2, "current"}) {
+		t.Fatalf("between-gates = %+v, want 1fail 1pass 2current", between)
+	}
+
+	// A blocked story between gates gets NO fallback current light (it is stuck, not
+	// working) — only a backlog story with no request likewise stays dark.
+	blocked := buildReviewLights([]reviewEvent{
+		fail("integration", "satellites-integration-review", "01"),
+	}, "blocked")
+	if !eqLights(lights(blocked), lp{1, "fail"}) {
+		t.Fatalf("blocked between-gates = %+v, want just 1fail (no current)", blocked)
+	}
 }
 
 // TestGateAndFromStateParse pins the request-body parsers and the payload parser.
