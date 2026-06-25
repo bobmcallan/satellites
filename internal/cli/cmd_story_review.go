@@ -608,6 +608,61 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stdout, "notes: %s\n", gateOut.Notes)
 	}
 
+	// 7a. Stage gate (sty_201dc6c6): on a domain ACCEPT, run the fail-fast
+	// per-stage reviewer BEFORE enacting. It validates the executor provided
+	// this stage's required data and produces the stage summary, fed
+	// deterministic facts (actual-workflow YAML+mermaid + git record). A stage
+	// reject converts the verdict to reject so the existing enactment leaves the
+	// story put and pushes back to the executor; an accept carries the summary
+	// to step 9. Skipped on the deterministic satellites-actor lane. A dispatch
+	// error is non-fatal — the stage gate degrades to observability, never a
+	// wedged story; only an explicit reject blocks.
+	const defaultStageReviewerSkill = "satellites-story-stage-summary"
+	var stageSummary string
+	// The stage reviewer defaults to satellites-story-stage-summary for every
+	// workflow; an explicit project-config step_summariser_skill overrides it.
+	// The pre-rename name is migrated forward to the new reviewer (sty_201dc6c6).
+	stageReviewerSkill := summariserSkill
+	if stageReviewerSkill == "" || stageReviewerSkill == "satellites-story-summary" {
+		stageReviewerSkill = defaultStageReviewerSkill
+	}
+	if gateOut.Decision == verb.GateDecisionAccept && edges.Actor != "satellites" && stageReviewerSkill != "" {
+		facts := gatherStageFacts(ctx, opts.ConfigPath, opts.UserArg, story.ID, body, story.Category, story.Status)
+		stageReviewer := verb.ClaudeCLISummariser{
+			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
+			Model:          reviewerModel(opts.ConfigPath),
+			DefaultTimeout: summariserTimeout,
+			Fetch:          serverGateFetcher(opts.ConfigPath, opts.UserArg),
+		}
+		sr, srErr := stageReviewer.StageReview(ctx, verb.SummariserInput{
+			SkillName:    stageReviewerSkill,
+			StoryID:      story.ID,
+			ProjectID:    story.ProjectID,
+			WorkspaceID:  story.WorkspaceID,
+			StoryBody:    body,
+			FromStatus:   story.Status,
+			Decision:     gateOut.Decision,
+			RecentLedger: recent,
+			WorktreeRoot: opts.WorktreeRoot,
+			Facts:        facts,
+		})
+		switch {
+		case srErr != nil:
+			fmt.Fprintf(opts.Stderr, "warn: stage reviewer %q errored, proceeding: %v\n", stageReviewerSkill, srErr)
+		case sr.Decision == verb.GateDecisionReject:
+			fmt.Fprintf(opts.Stdout, "stage: reject\n")
+			gateOut.Decision = verb.GateDecisionReject
+			if n := strings.TrimSpace(sr.Notes); n != "" {
+				gateOut.Notes = "stage review: " + n
+			} else {
+				gateOut.Notes = "stage review: required stage data missing"
+			}
+		default:
+			fmt.Fprintf(opts.Stdout, "stage: accept\n")
+			stageSummary = sr.Summary
+		}
+	}
+
 	// 7b. Client enactment (epic:enactment-convergence): the gate JUDGED; the
 	// CLIENT writes the transition. No gate writes its own status_transition —
 	// legacy-self-enact is retired, so a judge-only gate can never stall a story.
@@ -709,54 +764,23 @@ func runReview(ctx context.Context, opts reviewOpts) error {
 		fmt.Fprintf(opts.Stderr, "warn: capture gate evidence for %s: %v\n", story.ID, eErr)
 	}
 
-	// 9. Per-transition step summary (sty_2517f6b8). When project-config names
-	// a step_summariser_skill, run it and record its prose as a step_summary
-	// ledger row, tied to this transition. The to_status is the status the gate
-	// enacted (read back at step 8) — the client does not compute it. Best-
-	// effort: the transition has already happened, so a summariser failure warns
-	// but does not fail the review. Inlined (not a helper) so the recent-ledger
-	// slice flows by inference and the CLI never names internal/ledger.
-	// Skipped on the satellites-actor path: that lane is deterministic
-	// end-to-end — no claude -p anywhere in it, the summariser included.
-	if edges.Actor == "satellites" {
-		summariserSkill = ""
-	}
-	if summariserSkill != "" {
+	// 9. Per-stage summary (sty_201dc6c6). The stage reviewer (step 7a) produced
+	// the summary alongside its verdict; record it as a step_summary ledger row
+	// tied to this transition when the story advanced. The to_status is the
+	// status read back at step 8 — the client does not compute it. Best-effort:
+	// the transition has already happened, so a record failure warns but does
+	// not fail the review. The satellites-actor lane (and a stage reject)
+	// produced no summary, so this is skipped there.
+	if strings.TrimSpace(stageSummary) != "" {
 		toStatus := observed
 		if toStatus == "" {
 			toStatus = story.Status
 		}
-		summariser := verb.ClaudeCLISummariser{
-			BinaryPath:     strings.TrimSpace(opts.ClaudeBin),
-			Model:          reviewerModel(opts.ConfigPath),
-			DefaultTimeout: summariserTimeout,
-			// Server-fetch fallback (sty_b8de4776): a summariser skill absent from
-			// .claude/skills resolves from the server, like a gate — so the
-			// summariser needs no local install.
-			Fetch: serverGateFetcher(opts.ConfigPath, opts.UserArg),
-		}
-		summary, sErr := summariser.Summarise(ctx, verb.SummariserInput{
-			SkillName:    summariserSkill,
-			StoryID:      story.ID,
-			ProjectID:    story.ProjectID,
-			WorkspaceID:  story.WorkspaceID,
-			StoryBody:    body,
-			FromStatus:   story.Status,
-			ToStatus:     toStatus,
-			Decision:     gateOut.Decision,
-			RecentLedger: recent,
-			WorktreeRoot: opts.WorktreeRoot,
-		})
-		switch {
-		case sErr != nil:
-			fmt.Fprintf(opts.Stderr, "warn: step summariser %q failed: %v\n", summariserSkill, sErr)
-		case strings.TrimSpace(summary) != "":
-			sumPayload, _ := json.Marshal(map[string]any{"from_status": story.Status, "to_status": toStatus, "gate_skill": gateSkill, "decision": gateOut.Decision})
-			if _, aErr := store.InboxAppend(story.ID, "step_summary", summary, sumPayload, time.Now()); aErr != nil {
-				fmt.Fprintf(opts.Stderr, "warn: stage step_summary to inbox: %v\n", aErr)
-			} else {
-				fmt.Fprintf(opts.Stdout, "step summary recorded (%d chars)\n", len(summary))
-			}
+		sumPayload, _ := json.Marshal(map[string]any{"from_status": story.Status, "to_status": toStatus, "gate_skill": gateSkill, "decision": gateOut.Decision})
+		if _, aErr := store.InboxAppend(story.ID, "step_summary", stageSummary, sumPayload, time.Now()); aErr != nil {
+			fmt.Fprintf(opts.Stderr, "warn: stage step_summary to inbox: %v\n", aErr)
+		} else {
+			fmt.Fprintf(opts.Stdout, "step summary recorded (%d chars)\n", len(stageSummary))
 		}
 	}
 

@@ -32,6 +32,7 @@ func init() {
 	story.AddCommand(newStoryOutputCmd(&configArg, &userArg))
 	story.AddCommand(newStoryEstimateCmd(&configArg, &userArg))
 	story.AddCommand(newStoryActualCmd(&configArg, &userArg))
+	story.AddCommand(newStoryChangedocCmd(&configArg, &userArg))
 
 	register(story)
 }

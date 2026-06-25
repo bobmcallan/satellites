@@ -36,6 +36,22 @@ type SummariserInput struct {
 	RecentLedger []ledger.Entry
 	WorktreeRoot string
 	Timeout      time.Duration
+	// Facts is the deterministic, Go-gathered context the stage reviewer is
+	// fed (the reconciled actual-workflow YAML + mermaid and the git record),
+	// so the structured artifacts stay faithful while the markdown owns the
+	// requirement logic, judgment, and generation (sty_201dc6c6). Empty for the
+	// prose-only Summarise path.
+	Facts string
+}
+
+// StageReviewOutput is the verdict-bearing stage reviewer's output: a gate
+// decision PLUS the stage summary prose to record on accept (sty_201dc6c6).
+// Unlike the prose-only summariser, the stage reviewer GATES — a reject pushes
+// the story back to the executor.
+type StageReviewOutput struct {
+	Decision string `json:"decision"`
+	Notes    string `json:"notes,omitempty"`
+	Summary  string `json:"summary,omitempty"`
 }
 
 // ClaudeCLISummariser runs the summariser skill as `claude -p
@@ -103,4 +119,88 @@ func (c ClaudeCLISummariser) Summarise(ctx context.Context, in SummariserInput) 
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// StageReview runs the per-stage reviewer skill and parses its
+// {decision, notes, summary} verdict (sty_201dc6c6). It threads the same
+// claude -p primitive as Summarise — read-only tools, the same skill
+// resolution — but the skill returns a verdict object, not bare prose: the
+// caller rejects-or-enacts on the decision and records the summary on accept.
+// in.Facts carries the deterministic context (actual-workflow YAML + mermaid,
+// git record) so the structured artifacts stay faithful.
+func (c ClaudeCLISummariser) StageReview(ctx context.Context, in SummariserInput) (StageReviewOutput, error) {
+	if strings.TrimSpace(in.SkillName) == "" {
+		return StageReviewOutput{}, fmt.Errorf("stage review: skill_name required")
+	}
+	ctx, cancel := withClaudeTimeout(ctx, in.Timeout, c.DefaultTimeout)
+	defer cancel()
+
+	payload, err := json.Marshal(map[string]any{
+		"story_id":      in.StoryID,
+		"project_id":    in.ProjectID,
+		"workspace_id":  in.WorkspaceID,
+		"story_body":    in.StoryBody,
+		"from_status":   in.FromStatus,
+		"to_status":     in.ToStatus,
+		"decision":      in.Decision,
+		"recent_ledger": in.RecentLedger,
+		"facts":         in.Facts,
+	})
+	if err != nil {
+		return StageReviewOutput{}, fmt.Errorf("stage review: marshal payload: %w", err)
+	}
+
+	_, systemPrompt, err := resolveSkillEmbedLocalServer(ctx, c.Fetch, in.WorktreeRoot, in.SkillName)
+	if err != nil {
+		return StageReviewOutput{}, err
+	}
+
+	out, err := runClaudeCLI(ctx, c.BinaryPath,
+		claudeArgs(systemPrompt, summariserAllowedTools, c.Model),
+		string(payload), in.WorktreeRoot, "stage-review")
+	if err != nil {
+		return StageReviewOutput{}, err
+	}
+	return ParseStageOutput(out)
+}
+
+// ParseStageOutput extracts the last balanced {…} block carrying a valid
+// decision, mirroring ParseGateOutput's leniency (prose/fence tolerant, never
+// defaults to accept) but also capturing the `summary` field the stage
+// reviewer emits alongside its verdict.
+func ParseStageOutput(raw []byte) (StageReviewOutput, error) {
+	s := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(s, "```") {
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+			s = s[nl+1:]
+		}
+		if end := strings.LastIndex(s, "```"); end >= 0 {
+			s = s[:end]
+		}
+		s = strings.TrimSpace(s)
+	}
+	var found *StageReviewOutput
+	var badDecision string
+	for _, block := range balancedObjects(s) {
+		var out StageReviewOutput
+		if err := json.Unmarshal([]byte(block), &out); err != nil {
+			continue
+		}
+		switch out.Decision {
+		case GateDecisionAccept, GateDecisionReject:
+			d := out
+			found = &d // keep the last valid decision object
+		default:
+			if out.Decision != "" {
+				badDecision = out.Decision
+			}
+		}
+	}
+	if found != nil {
+		return *found, nil
+	}
+	if badDecision != "" {
+		return StageReviewOutput{}, fmt.Errorf("stage review: invalid decision %q (want accept|reject)", badDecision)
+	}
+	return StageReviewOutput{}, fmt.Errorf("stage review: no valid decision object (want one {\"decision\":\"accept|reject\",\"summary\":...}) (raw=%q)", raw)
 }
