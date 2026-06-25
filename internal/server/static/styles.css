@@ -739,21 +739,34 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
   flex-direction: column;
   gap: 0.75rem;
 }
-/* Story-row review-history lights (sty_14f07f22): a strip of small dots, one
-   per reviewer-gate verdict — green pass, red fail, amber pending. */
+/* Story-row review-history lights (sty_14f07f22, renumbered sty_a844aa55): a
+   strip of numbered circles, one per reviewer-gate STAGE — solid green pass,
+   solid red fail, hollow amber current (the in-progress stage). A looped stage
+   keeps its number. */
 .col-reviews { white-space: nowrap; }
 .review-light {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   margin-right: 3px;
   border-radius: 50%;
   vertical-align: middle;
-  background: #444;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1.5px solid #444;
+  background: transparent;
+  color: #bbb;
 }
-.review-light-pass { background: #2ecc71; }
-.review-light-fail { background: #e74c3c; }
-.review-light-pending { background: #f1c40f; }
+/* Completed stages: solid fill, dark legible number. */
+.review-light-pass { background: #2ecc71; border-color: #2ecc71; color: #07321c; }
+.review-light-fail { background: #e74c3c; border-color: #e74c3c; color: #3a0807; }
+/* Current (in-progress) stage: hollow amber ring + amber number. */
+.review-light-current { background: transparent; border-color: #f1c40f; color: #f1c40f; }
+/* Back-compat alias for any cached "pending" markup. */
+.review-light-pending { background: transparent; border-color: #f1c40f; color: #f1c40f; }
 
 .story-detail-block { min-width: 0; }
 /* Attached-documents list in the inline panel's Documents tab (sty_bf2fc8e1):

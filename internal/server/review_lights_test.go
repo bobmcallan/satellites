@@ -5,46 +5,74 @@ import (
 	"testing"
 )
 
-// TestBuildReviewLights pins the ledger→lights derivation (sty_14f07f22): one
-// light per verdict in order (accept→pass, reject→fail), a repeated gate adds a
-// light per run, and a trailing unresolved request yields a single pending light.
+// TestBuildReviewLights pins the numbered per-stage derivation (sty_a844aa55):
+// a gate is ONE numbered step, a looped gate keeps its number and shows its final
+// verdict, the in-progress step is "current" only on a non-terminal story, and a
+// terminal story shows no current step (the trailing-amber-on-done fix).
 func TestBuildReviewLights(t *testing.T) {
-	// A gate rejected twice then accepted, each request naming its gate.
-	evts := []reviewEvent{
+	// A gate rejected twice then accepted = ONE step, final pass, looped ×2.
+	looped := buildReviewLights([]reviewEvent{
 		{Kind: "review_requested", Gate: "satellites-integration-review", When: "2026-06-25T01:00:00Z"},
 		{Kind: "review_reject", When: "2026-06-25T01:01:00Z"},
 		{Kind: "review_requested", Gate: "satellites-integration-review", When: "2026-06-25T02:00:00Z"},
 		{Kind: "review_reject", When: "2026-06-25T02:01:00Z"},
 		{Kind: "review_requested", Gate: "satellites-integration-review", When: "2026-06-25T03:00:00Z"},
 		{Kind: "review_accept", When: "2026-06-25T03:01:00Z"},
+	}, "shipping")
+	if len(looped) != 1 {
+		t.Fatalf("looped gate should collapse to 1 step, got %+v", looped)
 	}
-	got := buildReviewLights(evts)
-	want := []string{"fail", "fail", "pass"}
-	if len(got) != len(want) {
-		t.Fatalf("light count = %d, want %d (%+v)", len(got), len(want), got)
+	if looped[0].Index != 1 || looped[0].State != "pass" || looped[0].Loops != 2 {
+		t.Fatalf("looped step = %+v, want {Index:1 State:pass Loops:2}", looped[0])
 	}
-	for i, w := range want {
-		if got[i].State != w {
-			t.Errorf("light[%d].State = %q, want %q", i, got[i].State, w)
-		}
-	}
-	// The verdict inherits the preceding request's gate (the verdict row names none).
-	if got[2].Gate != "satellites-integration-review" {
-		t.Errorf("verdict gate = %q, want the preceding request's gate", got[2].Gate)
+	if looped[0].Gate != "satellites-integration-review" {
+		t.Errorf("step gate = %q, want the gate name", looped[0].Gate)
 	}
 
-	// A trailing request with no verdict → a single pending light after the verdicts.
-	pend := buildReviewLights([]reviewEvent{
+	// A re-request after a pass, on a NON-terminal story → the step is "current".
+	cur := buildReviewLights([]reviewEvent{
 		{Kind: "review_requested", Gate: "g", When: "t1"},
 		{Kind: "review_accept", When: "t2"},
 		{Kind: "review_requested", Gate: "g", When: "t3"},
-	})
-	if len(pend) != 2 || pend[0].State != "pass" || pend[1].State != "pending" {
-		t.Errorf("pending derivation = %+v, want [pass pending]", pend)
+	}, "in_progress")
+	if len(cur) != 1 || cur[0].State != "current" {
+		t.Errorf("re-request (non-terminal) = %+v, want [current]", cur)
+	}
+
+	// SAME events on a DONE story → NO current; the step shows its reached pass.
+	// This is the trailing-amber-on-done fix.
+	done := buildReviewLights([]reviewEvent{
+		{Kind: "review_requested", Gate: "g", When: "t1"},
+		{Kind: "review_accept", When: "t2"},
+		{Kind: "review_requested", Gate: "g", When: "t3"},
+	}, "done")
+	if len(done) != 1 || done[0].State != "pass" {
+		t.Errorf("done story with dangling request = %+v, want [pass] (no trailing amber)", done)
+	}
+
+	// A pure dangling request (never verdicted) on a done story → no light.
+	if d := buildReviewLights([]reviewEvent{{Kind: "review_requested", Gate: "g", When: "t1"}}, "done"); len(d) != 0 {
+		t.Errorf("dangling request on done story should render nothing, got %+v", d)
+	}
+
+	// A clean four-gate done story → 4 numbered pass steps, in order.
+	clean := buildReviewLights([]reviewEvent{
+		{Kind: "review_requested", Gate: "satellites-intent-plan-review", When: "1"}, {Kind: "review_accept", When: "2"},
+		{Kind: "review_requested", Gate: "satellites-integration-review", When: "3"}, {Kind: "review_accept", When: "4"},
+		{Kind: "review_requested", Gate: "satellites-commit-push-review", When: "5"}, {Kind: "review_accept", When: "6"},
+		{Kind: "review_requested", Gate: "satellites-implementation-summary-review", When: "7"}, {Kind: "review_accept", When: "8"},
+	}, "done")
+	if len(clean) != 4 {
+		t.Fatalf("clean done story = %d steps, want 4 (%+v)", len(clean), clean)
+	}
+	for i, l := range clean {
+		if l.Index != i+1 || l.State != "pass" {
+			t.Errorf("clean step[%d] = %+v, want Index %d pass", i, l, i+1)
+		}
 	}
 
 	// No review rows → no lights.
-	if got := buildReviewLights(nil); len(got) != 0 {
+	if got := buildReviewLights(nil, "in_progress"); len(got) != 0 {
 		t.Errorf("empty events should yield no lights, got %+v", got)
 	}
 }
@@ -60,18 +88,16 @@ func TestGateFromReviewBody(t *testing.T) {
 	}
 }
 
-// TestStoryRowReviewLights is the render test (AC1/AC2): a story row emits a
-// reviews column whose lights carry the per-verdict state classes, and the
-// stories table carries the reviews header.
+// TestStoryRowReviewLights is the render test: a story row emits numbered review
+// circles carrying their stage number, state class, and a looped-stage title.
 func TestStoryRowReviewLights(t *testing.T) {
 	html := renderProjectDetail(t, projectDetailData{
 		Project: projectRow{ID: "proj_x", Name: "panel"},
 		Stories: []storyRow{{
 			ID: "sty_x", Title: "lit story", Status: "in_progress",
 			Reviews: []reviewLight{
-				{State: "fail", Gate: "satellites-integration-review"},
-				{State: "pass", Gate: "satellites-integration-review"},
-				{State: "pending", Gate: "satellites-commit-push-review"},
+				{Index: 1, State: "pass", Gate: "satellites-intent-plan-review"},
+				{Index: 2, State: "current", Gate: "satellites-integration-review", Loops: 1},
 			},
 		}},
 	})
@@ -83,13 +109,15 @@ func TestStoryRowReviewLights(t *testing.T) {
 		t.Errorf("review lights cell missing")
 	}
 	for _, want := range []string{
-		`review-light review-light-fail`,
 		`review-light review-light-pass`,
-		`review-light review-light-pending`,
-		`data-review="pending"`,
+		`review-light review-light-current`,
+		`data-review="current"`,
+		`data-step="2"`,
+		`>1</span>`, // the stage number renders inside the circle
+		`looped ×1`, // looped-stage title
 	} {
 		if !strings.Contains(html, want) {
-			t.Errorf("review-light markup missing %q", want)
+			t.Errorf("review-light markup missing %q\n%s", want, html)
 		}
 	}
 }

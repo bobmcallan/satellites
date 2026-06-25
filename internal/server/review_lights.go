@@ -11,52 +11,109 @@ import (
 	"github.com/bobmcallan/satellites/internal/verb"
 )
 
-// reviewLight is one dot in a story row's review-history strip (sty_14f07f22):
-// a single reviewer-gate outcome. State is "pass" (a review_accept), "fail" (a
-// review_reject), or "pending" (a review_requested with no verdict yet). Gate is
-// the gate name for the hover title; When is its RFC3339 timestamp.
+// reviewLight is one numbered circle in a story row's review-history strip
+// (sty_14f07f22, renumbered sty_a844aa55): one per reviewer-gate STAGE, in
+// workflow order. Index is its 1-based stage number; a gate that LOOPED keeps the
+// same number. State is "pass" (solid green), "fail" (solid red), or "current"
+// (hollow amber — the in-progress stage, shown only on a non-terminal story).
+// Loops is the extra attempts beyond the first; Gate/When feed the hover title.
 type reviewLight struct {
+	Index int
 	State string
 	Gate  string
+	Loops int
 	When  string
 }
 
 // reviewEvent is the transport-neutral projection of a review_* ledger row that
-// buildReviewLights folds into the light strip — kept separate so the derivation
-// is unit-testable without the ledger.
+// buildReviewLights folds into the strip — kept separate so the derivation is
+// unit-testable without the ledger.
 type reviewEvent struct {
 	Kind string // review_requested | review_accept | review_reject
 	Gate string // gate name (parsed from a review_requested body), else ""
 	When string // RFC3339
 }
 
-// buildReviewLights folds a story's chronological review_* events into the light
-// strip: one light per VERDICT — review_accept → pass, review_reject → fail — in
-// order, so a gate that ran repeatedly contributes one light per run. A trailing
-// review_requested with no following verdict yields a single "pending" light.
-// Each verdict carries the gate name from its preceding review_requested (the
-// verdict row itself does not name the gate).
-func buildReviewLights(evts []reviewEvent) []reviewLight {
-	lights := make([]reviewLight, 0, len(evts))
+// buildReviewLights folds a story's chronological review_* events into a NUMBERED
+// per-STAGE strip (sty_a844aa55): each reviewer gate is one numbered step, and a
+// gate that LOOPED (rejected then re-run, or several attempts) keeps the SAME
+// number, showing its FINAL verdict. A completed step is "pass" (solid green) or
+// "fail" (solid red); the in-progress step — a gate whose latest event is an
+// unresolved request — is "current" (hollow amber), rendered only when the story
+// is not terminal. A terminal story (done/cancelled) shows no current step:
+// a dangling unresolved request is ignored, which fixes the stale trailing-amber
+// light on a closed story (the verdict it already reached shows instead).
+func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
+	type step struct {
+		gate        string
+		lastVerdict string // "pass" | "fail" | ""
+		pending     bool   // a request awaits a verdict
+		attempts    int    // resolved verdicts for this gate
+		when        string
+	}
+	idx := map[string]int{}
+	steps := []*step{}
+	get := func(gate string) *step {
+		if strings.TrimSpace(gate) == "" {
+			gate = "?"
+		}
+		if i, ok := idx[gate]; ok {
+			return steps[i]
+		}
+		idx[gate] = len(steps)
+		s := &step{gate: gate}
+		steps = append(steps, s)
+		return s
+	}
 	pendingGate := ""
-	pending := false
 	for _, e := range evts {
 		switch e.Kind {
 		case "review_requested":
 			pendingGate = e.Gate
-			pending = true
+			s := get(e.Gate)
+			s.pending, s.when = true, e.When
 		case "review_accept":
-			lights = append(lights, reviewLight{State: "pass", Gate: firstNonEmpty(e.Gate, pendingGate), When: e.When})
-			pending, pendingGate = false, ""
+			s := get(firstNonEmpty(e.Gate, pendingGate))
+			s.lastVerdict, s.pending, s.attempts, s.when = "pass", false, s.attempts+1, e.When
+			pendingGate = ""
 		case "review_reject":
-			lights = append(lights, reviewLight{State: "fail", Gate: firstNonEmpty(e.Gate, pendingGate), When: e.When})
-			pending, pendingGate = false, ""
+			s := get(firstNonEmpty(e.Gate, pendingGate))
+			s.lastVerdict, s.pending, s.attempts, s.when = "fail", false, s.attempts+1, e.When
+			pendingGate = ""
 		}
 	}
-	if pending {
-		lights = append(lights, reviewLight{State: "pending", Gate: pendingGate})
+
+	terminal := isTerminalReviewStatus(status)
+	lights := make([]reviewLight, 0, len(steps))
+	for _, s := range steps {
+		var state string
+		switch {
+		case s.pending && !terminal:
+			state = "current"
+		case s.lastVerdict != "":
+			state = s.lastVerdict
+		case terminal:
+			continue // a dangling request on a closed story renders nothing
+		default:
+			state = "current"
+		}
+		loops := s.attempts
+		if state != "current" && loops > 0 {
+			loops-- // a resolved step's first attempt is not a loop
+		}
+		lights = append(lights, reviewLight{Index: len(lights) + 1, State: state, Gate: s.gate, Loops: loops, When: s.when})
 	}
 	return lights
+}
+
+// isTerminalReviewStatus reports the canonical terminal states for the lights
+// derivation — a story here is closed when done or cancelled.
+func isTerminalReviewStatus(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "done", "cancelled", "canceled":
+		return true
+	}
+	return false
 }
 
 func firstNonEmpty(a, b string) string {
@@ -86,11 +143,13 @@ func gateFromReviewBody(kind, body string) string {
 	return strings.TrimSpace(b)
 }
 
-// latestReviewLights fetches the project's review_* ledger rows in one batched,
-// paginated ledger_list (kind_prefix "review_") and derives the ordered light
-// strip per story_id — one ledger query for the whole list render, bucketed by
-// story (mirrors latestEngagements). Read-only.
-func latestReviewLights(ctx context.Context, projectID string) (map[string][]reviewLight, error) {
+// latestReviewEvents fetches the project's review_* ledger rows in one batched,
+// paginated ledger_list (kind_prefix "review_") and returns the chronological
+// event projection per story_id — one ledger query for the whole list render,
+// bucketed by story (mirrors latestEngagements). Read-only. The per-story
+// derivation (buildReviewLights) runs in attachReviewLights, where each story's
+// status is in hand (the strip is status-aware: sty_a844aa55).
+func latestReviewEvents(ctx context.Context, projectID string) (map[string][]reviewEvent, error) {
 	byStory := map[string][]reviewEvent{}
 	cursor := ""
 	for {
@@ -126,28 +185,29 @@ func latestReviewLights(ctx context.Context, projectID string) (map[string][]rev
 		}
 		cursor = resp.NextCursor
 	}
-	out := make(map[string][]reviewLight, len(byStory))
-	for sid, evts := range byStory {
+	for sid := range byStory {
+		evts := byStory[sid]
 		// ledger_list returns oldest-first; sort defensively so the strip is
 		// chronological even across pages.
 		sort.SliceStable(evts, func(i, j int) bool { return evts[i].When < evts[j].When })
-		out[sid] = buildReviewLights(evts)
+		byStory[sid] = evts
 	}
-	return out, nil
+	return byStory, nil
 }
 
-// attachReviewLights decorates the story rows with their review-history light
-// strip (sty_14f07f22), via one batched ledger read for the project. A failed
-// read degrades to no lights, never a page error.
+// attachReviewLights decorates the story rows with their numbered review-history
+// strip (sty_14f07f22, sty_a844aa55), via one batched ledger read for the
+// project. The derivation is status-aware (a terminal story shows no current
+// step). A failed read degrades to no lights, never a page error.
 func attachReviewLights(ctx context.Context, projectID string, stories []storyRow) {
-	byStory, err := latestReviewLights(ctx, projectID)
+	byStory, err := latestReviewEvents(ctx, projectID)
 	if err != nil {
 		arbor.WarnCtx(ctx, "project_detail: review lights", "id", projectID, "err", err)
 		return
 	}
 	for i := range stories {
-		if lights, ok := byStory[stories[i].ID]; ok {
-			stories[i].Reviews = lights
+		if evts, ok := byStory[stories[i].ID]; ok {
+			stories[i].Reviews = buildReviewLights(evts, stories[i].Status)
 		}
 	}
 }
