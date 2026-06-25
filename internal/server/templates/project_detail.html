@@ -479,7 +479,7 @@
                 title="Copy story id to clipboard"
                 data-field="story-id-copy"><code>{{.ID}}</code></td>
             <td class="col-title">
-              <div class="story-row-title">{{.Title}}{{if .EngLastSeen}}<span class="activity-spinner" data-field="activity-spinner" data-last-seen="{{.EngLastSeen}}" data-lease-until="{{.EngLeaseUntil}}"></span>{{end}}</div>
+              <div class="story-row-title">{{.Title}}</div>
               {{if .Category}}
               <div class="story-row-category" data-field="story-row-category">
                 <button type="button" class="category-chip is-clickable" data-category="{{.Category}}" @click.stop="addCategoryToQuery" title="Click to filter by this category">category:{{.Category}}</button>

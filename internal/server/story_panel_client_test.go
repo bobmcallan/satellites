@@ -433,94 +433,11 @@ func TestStoryPanelClient_FilterURL(t *testing.T) {
 	}
 }
 
-// TestStoryPanelClient_EngagementDotAging drives window.satAgeEngagementDots
-// with a fixed now over rows seeded with fixed timestamps: fresh→plain,
-// past-orange→is-orange, past-red→is-red, expired-lease→is-stale (dormant but
-// visible), the tooltip text, and row-height invariance. Deterministic — no
-// reload, no wall-clock. (Replaces TestEngagementDot_Chromedp's aging half; the
-// status qualification is covered by engagements_test.go + the spinner emit by
-// story_panel_render_test.go.)
-func TestStoryPanelClient_EngagementDotAging(t *testing.T) {
-	skipClientJSInCI(t)
-	const base = "2026-01-01T00:00:00Z"    // last_seen for the aging rows
-	const lease = "2026-01-01T02:00:00Z"   // far-future lease (not stale)
-	const expired = "2025-12-31T23:59:00Z" // past lease → stale
-
-	data := panelData(
-		func() storyRow {
-			r := row("sty_fresh", "fresh", "in_progress", "medium", "feature")
-			r.EngLastSeen = base
-			r.EngLeaseUntil = lease
-			return r
-		}(),
-		func() storyRow {
-			r := row("sty_stale", "stale", "in_progress", "medium", "feature")
-			r.EngLastSeen = base
-			r.EngLeaseUntil = expired
-			return r
-		}(),
-		row("sty_none", "none", "in_progress", "medium", "feature"),
-	)
-	url := servePanel(t, data, nil)
-	ctx := browserCtx(t)
-	waitPanelReady(t, ctx, url)
-
-	spinnerClass := func(id string) string {
-		return evalString(t, ctx, fmt.Sprintf(
-			`(function(){var d=document.querySelector('tr[data-id=%q] .activity-spinner');return d?d.className:'<missing>'})()`, id))
-	}
-	age := func(iso string) {
-		if err := chromedp.Run(ctx, chromedp.Evaluate(
-			fmt.Sprintf(`window.satAgeEngagementDots(Date.parse(%q))`, iso), nil)); err != nil {
-			t.Fatalf("age %s: %v", iso, err)
-		}
-	}
-
-	// now = base → fresh is plain (no color), within thresholds.
-	age("2026-01-01T00:00:00Z")
-	if cls := spinnerClass("sty_fresh"); cls != "activity-spinner" {
-		t.Errorf("fresh at t=0 should be plain, got %q", cls)
-	}
-	// now = base+6m (> 300s orange) → is-orange.
-	age("2026-01-01T00:06:00Z")
-	if cls := spinnerClass("sty_fresh"); !strings.Contains(cls, "is-orange") {
-		t.Errorf("fresh at +6m should be is-orange, got %q", cls)
-	}
-	// now = base+16m (> 900s red) → is-red.
-	age("2026-01-01T00:16:00Z")
-	if cls := spinnerClass("sty_fresh"); !strings.Contains(cls, "is-red") {
-		t.Errorf("fresh at +16m should be is-red, got %q", cls)
-	}
-	// Expired lease → is-stale regardless of age, and still visible (dormant).
-	if cls := spinnerClass("sty_stale"); !strings.Contains(cls, "is-stale") {
-		t.Errorf("expired-lease spinner should be is-stale, got %q", cls)
-	}
-	var staleVisible bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`(function(){var d=document.querySelector('tr[data-id="sty_stale"] .activity-spinner');return !!(d && d.offsetParent !== null)})()`, &staleVisible)); err != nil {
-		t.Fatal(err)
-	}
-	if !staleVisible {
-		t.Error("stale (lapsed-lease) spinner must remain visible (dormant), not hidden")
-	}
-	// Tooltip honesty: "last activity Xm ago".
-	if got := evalString(t, ctx, `document.querySelector('tr[data-id="sty_fresh"] .activity-spinner').title`); !strings.HasPrefix(got, "last activity ") || !strings.HasSuffix(got, "m ago") {
-		t.Errorf("tooltip = %q, want 'last activity Xm ago'", got)
-	}
-	// Un-engaged row carries no spinner.
-	if cls := spinnerClass("sty_none"); cls != "<missing>" {
-		t.Errorf("un-engaged row must render no spinner, got %q", cls)
-	}
-	// Row height unchanged with vs without the spinner.
-	var heights []float64
-	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`(function(){var r=document.querySelector('tr[data-id="sty_fresh"]');var b=r.offsetHeight;var d=r.querySelector('.activity-spinner');var p=d.parentNode;p.removeChild(d);var a=r.offsetHeight;p.appendChild(d);return [b,a]})()`, &heights)); err != nil {
-		t.Fatal(err)
-	}
-	if len(heights) != 2 || heights[0] != heights[1] {
-		t.Errorf("spinner changed row height: %v", heights)
-	}
-}
+// The title-row activity spinner and its aging pass (satAgeEngagementDots) were
+// removed in sty_6cfaa15e — the in-progress signal is now the CSS pulse on the
+// REVIEWS column's current-step light. The old TestStoryPanelClient_EngagementDotAging
+// chromedp test was retired with it; the no-spinner emit is pinned by
+// story_panel_render_test.go.
 
 // TestStoryPanelClient_LedgerLazyLoad covers the inline tab panel: expanding a
 // row shows the Description tab, clicking Ledger lazy-loads the trace fragment

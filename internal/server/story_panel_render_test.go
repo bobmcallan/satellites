@@ -108,13 +108,12 @@ func TestStoryPanelRendersRowContract(t *testing.T) {
 	}
 }
 
-// TestStoryPanelRendersEngagementSpinner pins the {{if .EngLastSeen}} spinner
-// emit: a row with an engagement signal carries the activity-spinner span +
-// its data-last-seen / data-lease-until (the inputs the client aging pass
-// reads), and a row without one carries no spinner. The status gate that
-// decides whether EngLastSeen is set lives in attachEngagements /
-// engagementVisibleStatus (covered by engagements_test.go).
-func TestStoryPanelRendersEngagementSpinner(t *testing.T) {
+// TestStoryPanelNoEngagementSpinner pins sty_6cfaa15e: the title-row activity
+// spinner is gone — even a row with an engagement signal renders no
+// activity-spinner span (the in-progress signal moved to the REVIEWS column,
+// where the current-step light pulses via CSS). The current light still renders
+// with its review-light-current class, which carries the pulse animation.
+func TestStoryPanelNoEngagementSpinner(t *testing.T) {
 	html := renderProjectDetail(t, projectDetailData{
 		Project:       projectRow{ID: "proj_x", Name: "panel"},
 		EngOrangeSecs: 300,
@@ -124,24 +123,16 @@ func TestStoryPanelRendersEngagementSpinner(t *testing.T) {
 				ID: "sty_live", Title: "engaged", Status: "in_progress",
 				EngLastSeen:   "2026-05-27T16:00:00Z",
 				EngLeaseUntil: "2026-05-27T18:00:00Z",
+				Reviews:       []reviewLight{{Index: 1, State: "current", Gate: "satellites-intent-plan-review"}},
 			},
-			{ID: "sty_quiet", Title: "no engagement", Status: "in_progress"},
 		},
 	})
 
-	// Engaged row: spinner present, after the title, with the age inputs.
-	for _, want := range []string{
-		`class="activity-spinner" data-field="activity-spinner"`,
-		`data-last-seen="2026-05-27T16:00:00Z"`,
-		`data-lease-until="2026-05-27T18:00:00Z"`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("engaged row missing spinner markup %q", want)
-		}
+	if strings.Contains(html, "activity-spinner") {
+		t.Errorf("activity-spinner must no longer be rendered:\n%s", html)
 	}
-
-	// Exactly one spinner — the un-engaged row must not carry one.
-	if n := strings.Count(html, `class="activity-spinner"`); n != 1 {
-		t.Errorf("expected exactly 1 activity-spinner (only the engaged row), got %d", n)
+	// The current-step light (the new pulsing in-progress signal) is present.
+	if !strings.Contains(html, `review-light review-light-current`) {
+		t.Errorf("current-step light missing — the in-progress signal:\n%s", html)
 	}
 }

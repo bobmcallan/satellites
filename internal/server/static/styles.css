@@ -1470,43 +1470,20 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
    omits it on backlog/terminal rows). Sits inline after the title, sized to
    the line so the row never grows. Color is a pure function of
    time-since-last-client-activity, computed CLIENT-side against the panel's
-   data-eng-*-secs thresholds: fresh = softly spinning ring; aging = static
-   soft amber/red; stale or expired lease = not shown. */
-.activity-spinner {
-  display: inline-block;
-  box-sizing: border-box; /* border inside the 10px box — the title line must not grow */
-  width: 10px;
-  height: 10px;
-  margin-left: 0.5rem;
-  vertical-align: middle;
-  border-radius: 50%;
-  border: 2px solid rgba(46, 204, 113, 0.18);
-  border-top-color: rgba(46, 204, 113, 0.65);
-  animation: activity-spin 1.1s linear infinite;
+   the current-step light pulses instead (sty_6cfaa15e). */
+/* The in-progress (current) review light fades its number in and out to signal
+   that this is the live step — replacing the old title-row activity spinner
+   (sty_6cfaa15e). Pure CSS: it pulses whenever a current light is rendered, i.e.
+   while a gate is in flight. */
+.review-light-current {
+  animation: review-light-pulse 1.4s ease-in-out infinite;
 }
-.activity-spinner.is-orange {
-  animation: none;
-  border-color: rgba(245, 166, 35, 0.4);
-  border-top-color: rgba(245, 166, 35, 0.4);
+@keyframes review-light-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
-.activity-spinner.is-red {
-  animation: none;
-  border-color: rgba(229, 72, 77, 0.4);
-  border-top-color: rgba(229, 72, 77, 0.4);
-}
-/* A lapsed lease (engaged but quiet) degrades the dot to a visible DORMANT
-   state — grey, not spinning — rather than hiding it, so a long-running
-   engagement keeps an affordance (sty_a7253546). The dot clears only when the
-   engagement is genuinely idle (closed / aged out of the window), handled
-   server-side by the fold, not here. */
-.activity-spinner.is-stale {
-  animation: none;
-  border-color: rgba(120, 120, 120, 0.35);
-  border-top-color: rgba(120, 120, 120, 0.35);
-  opacity: 0.6;
-}
-@keyframes activity-spin {
-  to { transform: rotate(360deg); }
+@media (prefers-reduced-motion: reduce) {
+  .review-light-current { animation: none; }
 }
 
 /* Codegraph viewer (epic:codegraph-usability B2, epic:codegraph-portable story 3).
