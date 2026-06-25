@@ -3,6 +3,7 @@ package server
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Event constructors for the verdict/transition-driven model (sty_de7953b1):
@@ -62,7 +63,7 @@ func TestBuildReviewLightsOrder(t *testing.T) {
 		pass("integration", "satellites-integration-review", "03"),
 		pass("shipping", "satellites-commit-push-review", "04"),
 		pass("summary", "satellites-implementation-summary-review", "05"),
-	}, "done")
+	}, "done", false)
 	if !eqLights(lights(got), lp{1, "pass"}, lp{2, "fired"}, lp{3, "pass"}, lp{4, "pass"}, lp{5, "pass"}) {
 		t.Fatalf("ordered journey = %+v, want 1pass 2fired 3pass 4pass 5pass", got)
 	}
@@ -77,7 +78,7 @@ func TestBuildReviewLightsOrder(t *testing.T) {
 		fired("in_progress", "in_progress → integration", "02"),
 		pass("summary", "impl", "05"),
 		pass("shipping", "commit", "04"),
-	}, "done")
+	}, "done", false)
 	// Numbers follow first-sight here; the point is each distinct from-state gets a
 	// stable number and there are exactly 5 steps, no duplicates/double-counts.
 	if len(shuffled) != 5 {
@@ -99,7 +100,7 @@ func TestBuildReviewLightsRepeatsAndInvariant(t *testing.T) {
 		pass("integration", "satellites-integration-review", "06"),
 		pass("shipping", "commit", "07"),
 		pass("summary", "impl", "08"),
-	}, "done")
+	}, "done", false)
 	want := []lp{{1, "pass"}, {2, "fired"}, {3, "fail"}, {2, "fired"}, {3, "pass"}, {4, "pass"}, {5, "pass"}}
 	if !eqLights(lights(got), want...) {
 		t.Fatalf("repeat journey = %+v, want %+v", got, want)
@@ -130,7 +131,7 @@ func TestBuildReviewLightsBlockedEndsRed(t *testing.T) {
 		fail("integration", "satellites-integration-review", "05"),
 		// exhausted: status_transition integration → blocked (exhausted) emits no light.
 		{Kind: "status_transition", FromStatus: "integration", Gate: "satellites-integration-review", When: "06"},
-	}, "blocked")
+	}, "blocked", true)
 	want := []lp{{1, "pass"}, {2, "fired"}, {3, "fail"}, {3, "fail"}, {3, "fail"}}
 	if !eqLights(lights(got), want...) {
 		t.Fatalf("blocked journey = %+v, want %+v", got, want)
@@ -141,13 +142,15 @@ func TestBuildReviewLightsBlockedEndsRed(t *testing.T) {
 	}
 }
 
-// TestBuildReviewLightsCurrent pins the in-progress "current" light: a pending
-// request with no resolving verdict on a NON-terminal story renders hollow amber;
-// a terminal story shows none; a re-request after a reject reads as the current
-// attempt of its already-numbered stage.
+// TestBuildReviewLightsCurrent pins the in-progress "current" light: on a LIVE,
+// non-terminal story a pending request (or a worked-between-gates stage) renders
+// hollow amber; a terminal story shows none; a re-request after a reject reads as
+// the current attempt of its already-numbered stage. The trailing bool is the
+// live-engagement gate (sty_39644f69); these cases pass it true to exercise the
+// current-light shapes, and TestBuildReviewLightsLiveGate pins the gate itself.
 func TestBuildReviewLightsCurrent(t *testing.T) {
 	// Mid first gate: only a request, status backlog → "1 current".
-	first := buildReviewLights([]reviewEvent{requested("backlog", "intent", "01")}, "backlog")
+	first := buildReviewLights([]reviewEvent{requested("backlog", "intent", "01")}, "backlog", true)
 	if !eqLights(lights(first), lp{1, "current"}) {
 		t.Fatalf("mid-first-gate = %+v, want 1current", first)
 	}
@@ -160,22 +163,22 @@ func TestBuildReviewLightsCurrent(t *testing.T) {
 		requested("integration", "integration", "03"),
 		fail("integration", "integration", "04"),
 		requested("integration", "integration", "05"),
-	}, "integration")
+	}, "integration", true)
 	if !eqLights(lights(retry), lp{1, "pass"}, lp{2, "fired"}, lp{3, "fail"}, lp{3, "current"}) {
 		t.Fatalf("retry = %+v, want 1pass 2fired 3fail 3current", retry)
 	}
 
-	// SAME events but terminal → no current light.
+	// SAME events but terminal → no current light (even with a live engagement).
 	done := buildReviewLights([]reviewEvent{
 		pass("backlog", "intent", "01"),
 		requested("integration", "integration", "02"),
-	}, "done")
+	}, "done", true)
 	if !eqLights(lights(done), lp{1, "pass"}) {
 		t.Fatalf("done with trailing request = %+v, want just 1pass (no current)", done)
 	}
 
 	// No events → no lights.
-	if l := buildReviewLights(nil, "in_progress"); len(l) != 0 {
+	if l := buildReviewLights(nil, "in_progress", true); len(l) != 0 {
 		t.Errorf("empty events should yield no lights, got %+v", l)
 	}
 
@@ -186,7 +189,7 @@ func TestBuildReviewLightsCurrent(t *testing.T) {
 	between := buildReviewLights([]reviewEvent{
 		fail("backlog", "satellites-intent-plan-review", "01"),
 		pass("backlog", "satellites-intent-plan-review", "02"),
-	}, "in_progress")
+	}, "in_progress", true)
 	if !eqLights(lights(between), lp{1, "fail"}, lp{1, "pass"}, lp{2, "current"}) {
 		t.Fatalf("between-gates = %+v, want 1fail 1pass 2current", between)
 	}
@@ -195,9 +198,63 @@ func TestBuildReviewLightsCurrent(t *testing.T) {
 	// working) — only a backlog story with no request likewise stays dark.
 	blocked := buildReviewLights([]reviewEvent{
 		fail("integration", "satellites-integration-review", "01"),
-	}, "blocked")
+	}, "blocked", true)
 	if !eqLights(lights(blocked), lp{1, "fail"}) {
 		t.Fatalf("blocked between-gates = %+v, want just 1fail (no current)", blocked)
+	}
+}
+
+// TestBuildReviewLightsLiveGate pins sty_39644f69: the in-progress current light is
+// gated on a live engagement. The SAME events that pulse for a live story stay dark
+// when the engagement is not live — so a dangling unresolved request (or a worked
+// stage) on an abandoned story renders no current light.
+func TestBuildReviewLightsLiveGate(t *testing.T) {
+	// Dangling open request, NOT live → no current (the stale-dogfood case).
+	openReq := []reviewEvent{
+		pass("backlog", "intent", "01"),
+		requested("integration", "integration", "02"),
+	}
+	if l := buildReviewLights(openReq, "integration", false); !eqLights(lights(l), lp{1, "pass"}) {
+		t.Fatalf("open request, not live = %+v, want just 1pass (no current)", l)
+	}
+	if l := buildReviewLights(openReq, "integration", true); !eqLights(lights(l), lp{1, "pass"}, lp{2, "current"}) {
+		t.Fatalf("open request, live = %+v, want 1pass 2current", l)
+	}
+
+	// Between-gates fallback is gated too: not live → no current.
+	between := []reviewEvent{
+		fail("backlog", "intent", "01"),
+		pass("backlog", "intent", "02"),
+	}
+	if l := buildReviewLights(between, "in_progress", false); !eqLights(lights(l), lp{1, "fail"}, lp{1, "pass"}) {
+		t.Fatalf("between-gates, not live = %+v, want 1fail 1pass (no current)", l)
+	}
+}
+
+// TestIsLiveEngagement pins the keep-alive gate (sty_39644f69): a future lease is
+// live, a recent last_seen with no lease is live, and an expired lease / stale
+// last_seen / empty inputs are not.
+func TestIsLiveEngagement(t *testing.T) {
+	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+	rfc := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
+
+	cases := []struct {
+		name              string
+		lastSeen, leaseTo string
+		want              bool
+	}{
+		{"future lease → live", "", rfc(30 * time.Minute), true},
+		{"expired lease → not live", "", rfc(-30 * time.Minute), false},
+		{"no lease, recent last_seen → live", rfc(-1 * time.Minute), "", true},
+		{"no lease, stale last_seen → not live", rfc(-30 * time.Minute), "", false},
+		{"expired lease wins over recent last_seen", rfc(-1 * time.Minute), rfc(-30 * time.Minute), false},
+		{"both empty → not live", "", "", false},
+		{"garbage → not live", "nope", "nope", false},
+	}
+	for _, c := range cases {
+		if got := isLiveEngagement(c.lastSeen, c.leaseTo, now); got != c.want {
+			t.Errorf("%s: isLiveEngagement(%q,%q) = %v, want %v", c.name, c.lastSeen, c.leaseTo, got, c.want)
+		}
 	}
 }
 

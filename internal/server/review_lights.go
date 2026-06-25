@@ -71,7 +71,7 @@ type reviewEvent struct {
 // reject is always followed by that stage's later forward pass, so the stage's
 // FINAL light is the pass. A trailing red is valid only on a blocked/exhausted
 // story, where the fail-loop bound was spent and no later pass followed.
-func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
+func buildReviewLights(evts []reviewEvent, status string, liveEngagement bool) []reviewLight {
 	stage := map[string]int{}
 	stageOf := func(key string) int {
 		if strings.TrimSpace(key) == "" {
@@ -128,11 +128,13 @@ func buildReviewLights(evts []reviewEvent, status string) []reviewLight {
 		}
 	}
 
-	// Current (in-progress) stage on a non-terminal story: the most recent request
-	// whose gate has not yet resolved (no later forward pass or reject). Driven by
-	// the request count vs the resolved count so a re-request after a reject still
-	// reads as the current attempt of its (already-numbered) stage.
-	if !isTerminalReviewStatus(status) {
+	// Current (in-progress) stage — shown ONLY on a non-terminal story with a LIVE
+	// engagement (sty_39644f69). The pulse is the keep-alive signal re-unified with
+	// the old activity spinner: without a live lease it must stay dark, even when a
+	// stale unresolved review_requested row lingers in the ledger (a dangling
+	// request on an abandoned story would otherwise pulse forever). liveEngagement
+	// is computed by the caller from the row's engagement lease.
+	if !isTerminalReviewStatus(status) && liveEngagement {
 		emitted := false
 		for i := len(reqOrder) - 1; i >= 0; i-- {
 			pr := reqOrder[i]
@@ -176,6 +178,28 @@ func isWorkingReviewStatus(status string) bool {
 		return false
 	}
 	return true
+}
+
+// isLiveEngagement reports whether a story's engagement is still LIVE — the
+// keep-alive gate for the in-progress current light (sty_39644f69). A live lease
+// (lease_until in the future) means a session currently holds the story; the lease
+// stops renewing and expires once the keep-alive ticker dies. When no lease was
+// recorded, fall back to the keep-alive tick recency (last_seen within the engaged
+// "stale" window). Empty/unparseable inputs — and a story with no working
+// engagement at all (only candidate reads, which never populate these) — read as
+// not live. now is injected so the derivation stays pure/testable.
+func isLiveEngagement(lastSeen, leaseUntil string, now time.Time) bool {
+	if s := strings.TrimSpace(leaseUntil); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return now.Before(t)
+		}
+	}
+	if s := strings.TrimSpace(lastSeen); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return now.Sub(t) <= engRedSecsFallback*time.Second
+		}
+	}
+	return false
 }
 
 // gateFromReviewBody pulls the gate name out of a review_requested body, whose
@@ -347,16 +371,21 @@ func transitionLabel(from, to, body string) string {
 // attachReviewLights decorates the story rows with their numbered review-history
 // strip (sty_14f07f22, sty_a844aa55), via one batched ledger read for the
 // project. The derivation is status-aware (a terminal story shows no current
-// step). A failed read degrades to no lights, never a page error.
+// step) and engagement-aware: the in-progress current light is gated on a live
+// engagement lease (sty_39644f69), so it MUST run after attachEngagements has
+// populated each row's EngLastSeen/EngLeaseUntil. A failed read degrades to no
+// lights, never a page error.
 func attachReviewLights(ctx context.Context, projectID string, stories []storyRow) {
 	byStory, err := latestReviewEvents(ctx, projectID)
 	if err != nil {
 		arbor.WarnCtx(ctx, "project_detail: review lights", "id", projectID, "err", err)
 		return
 	}
+	now := time.Now().UTC()
 	for i := range stories {
 		if evts, ok := byStory[stories[i].ID]; ok {
-			stories[i].Reviews = buildReviewLights(evts, stories[i].Status)
+			live := isLiveEngagement(stories[i].EngLastSeen, stories[i].EngLeaseUntil, now)
+			stories[i].Reviews = buildReviewLights(evts, stories[i].Status, live)
 		}
 	}
 }
