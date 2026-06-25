@@ -223,25 +223,39 @@
      document name/id/updated in the summary and its rendered markdown body when
      expanded; mirrors the project documents panel. */}}
 {{define "story-docs"}}
-  {{if .Documents}}
-  <ul class="story-doc-list" data-field="story-doc-list">
-    {{range .Documents}}
-    <li class="story-doc-item" data-field="story-document-row" data-id="{{.ID}}">
-      <details class="story-doc-details">
-        <summary class="story-doc-summary">
-          <span class="story-doc-name" data-field="document-row-title">{{.Name}}</span>
-          <span class="story-doc-meta muted" data-field="document-row-meta"><code>{{.ID}}</code>{{if .TypeTag}} · <code>type:{{.TypeTag}}</code>{{end}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}</span>
-        </summary>
-        <div class="story-detail-block" data-field="document-content">
-          {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
-        </div>
-      </details>
-    </li>
+  {{/* Story Documents tab — same search/filter/count grammar as the project
+       documents panel (sty_c017a274). Plain HTML (no Alpine): the search box and
+       tag chips are wired in story_panel.js after the innerHTML swap, which
+       re-fetches this fragment with ?docs_q=<query>. */}}
+  <div class="story-docs-panel" data-field="story-docs-panel" data-docs-query="{{.Query}}">
+    <div class="panel-header">
+      <span class="stories-count-indicator" data-field="story-documents-count"
+            title="matching the active filter / story total">{{.Filtered}} / {{.Total}}</span>
+    </div>
+    <input type="text" class="panel-search"
+           placeholder="search then press Enter (free text + chips: phase:discovery tags:foo)"
+           value="{{.Query}}" data-field="story-documents-search">
+    {{if .Documents}}
+    <ul class="story-doc-list" data-field="story-doc-list">
+      {{range .Documents}}
+      <li class="story-doc-item" data-field="story-document-row" data-id="{{.ID}}">
+        <details class="story-doc-details">
+          <summary class="story-doc-summary">
+            <span class="story-doc-name" data-field="document-row-title">{{.Name}}</span>
+            <span class="story-doc-meta muted" data-field="document-row-meta"><code>{{.ID}}</code>{{if .TypeTag}} · <code>type:{{.TypeTag}}</code>{{end}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}</span>
+            <span class="document-row-tags" data-field="document-row-tags">{{if .PhaseTag}}<button type="button" class="phase-chip is-clickable" data-chip="phase:{{.PhaseTag}}" title="Filter by this phase">phase:{{.PhaseTag}}</button>{{end}}{{range .OtherTags}}<button type="button" class="tag-chip is-clickable" data-chip="tags:{{.}}" title="Filter by this tag">{{.}}</button>{{end}}</span>
+          </summary>
+          <div class="story-detail-block" data-field="document-content">
+            {{if .BodyHTML}}<div class="changelog-content" data-field="document-content-body">{{.BodyHTML}}</div>{{else}}<p class="empty">—</p>{{end}}
+          </div>
+        </details>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="empty" data-field="story-documents-empty">{{if .Query}}No documents match the filter.{{else}}No documents attached to this story.{{end}}</p>
     {{end}}
-  </ul>
-  {{else}}
-  <p class="empty" data-field="story-documents-empty">No documents attached to this story.</p>
-  {{end}}
+  </div>
 {{end}}
 
 </body>

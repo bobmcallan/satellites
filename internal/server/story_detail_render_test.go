@@ -55,3 +55,30 @@ func TestStoryDocsFragmentEmpty(t *testing.T) {
 		t.Errorf("AC3: empty-documents state not rendered:\n%s", html)
 	}
 }
+
+// TestStoryDocsFragmentSearchParity pins sty_c017a274: the story Documents tab
+// renders the same search box + count badge + tag chips as the project panel,
+// with the active query rehydrated.
+func TestStoryDocsFragmentSearchParity(t *testing.T) {
+	html := renderStoryDocsFragment(t, storyDocsData{
+		Query: "tags:area:portal", Filtered: 1, Total: 3,
+		Documents: []docRow{{
+			ID: "doc_abc", Name: "summary", TypeTag: "summary",
+			PhaseTag: "build", OtherTags: []string{"area:portal"},
+			UpdatedAt: time.Date(2026, 6, 25, 2, 2, 0, 0, time.UTC),
+		}},
+	})
+	for _, want := range []string{
+		`data-field="story-documents-search"`, // the search input
+		`value="tags:area:portal"`,            // query rehydrated
+		`data-field="story-documents-count"`,  // count badge present
+		`1 / 3`,                               // filtered / total
+		`data-chip="phase:build"`,             // phase chip (clickable filter)
+		`data-chip="tags:area:portal"`,        // tag chip
+		`data-docs-query="tags:area:portal"`,  // panel carries the query for the JS
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("docs-tab parity missing %q\n%s", want, html)
+		}
+	}
+}

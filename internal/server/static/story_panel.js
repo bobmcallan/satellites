@@ -67,10 +67,16 @@
     // first Documents-tab open (sty_bf2fc8e1), peer to loadStoryFragment. The
     // fetched markup is plain HTML (native <details>, no Alpine directives), so a
     // direct innerHTML swap is safe.
-    window.loadStoryDocsFragment = function (storyID, el) {
+    window.loadStoryDocsFragment = function (storyID, el, query) {
         if (!el) { return; }
-        fetch('/stories/' + encodeURIComponent(storyID) + '/documents.fragment',
-              { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
+        // The active search persists on el so the SSE live refresh (which calls
+        // this with no query) keeps the filter (sty_c017a274).
+        if (query === undefined) { query = el.dataset.storyDocsQuery || ''; }
+        query = (query || '').trim();
+        el.dataset.storyDocsQuery = query;
+        var url = '/stories/' + encodeURIComponent(storyID) + '/documents.fragment';
+        if (query) { url += '?docs_q=' + encodeURIComponent(query); }
+        fetch(url, { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' })
             .then(function (r) {
                 if (r.status === 401) { bounceToLogin(); return null; }
                 return r.ok ? r.text() : null;
@@ -92,6 +98,24 @@
                     var sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
                     var d = el.querySelector('.story-doc-item[data-id="' + sel + '"] > details');
                     if (d) { d.open = true; }
+                });
+                // Wire the search box + tag chips (no Alpine in this fragment):
+                // each re-fetches the fragment with the new docs_q (sty_c017a274).
+                var input = el.querySelector('[data-field="story-documents-search"]');
+                if (input) {
+                    input.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            window.loadStoryDocsFragment(storyID, el, input.value);
+                        }
+                    });
+                }
+                el.querySelectorAll('[data-chip]').forEach(function (btn) {
+                    btn.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation(); // don't toggle the <details> we sit in
+                        window.loadStoryDocsFragment(storyID, el, btn.getAttribute('data-chip'));
+                    });
                 });
                 // Render ```mermaid blocks (e.g. a change-doc's actual workflow)
                 // injected by this swap (sty_d206e263); covers the live-refresh
