@@ -762,9 +762,10 @@ button.category-chip.is-clickable:focus-visible { outline: 2px solid #c9a86a; ou
 .panel-table-stories th.col-updated,
 .panel-table-stories td.col-updated { width: 8rem; }
 .panel-table-stories td.col-title { overflow-wrap: anywhere; }
-/* The expanded detail cell spans all columns; keep its rich content from forcing
-   any intrinsic width back onto the fixed grid. */
-.panel-table-stories tr.story-detail > td { overflow-wrap: anywhere; }
+/* NB: do NOT add overflow-wrap:anywhere to tr.story-detail > td — it leaks into
+   the NESTED ledger/log table and collapses its columns to one character
+   (sty_b4b7c0df). table-layout:fixed already pins the parent columns, so the
+   expanded detail cell cannot reshape the grid regardless of its content. */
 .review-light {
   display: inline-flex;
   align-items: center;
