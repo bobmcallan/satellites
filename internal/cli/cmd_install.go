@@ -108,7 +108,54 @@ func installRunE(ctx context.Context, out io.Writer, f installFlags, src release
 		OnPath:          dirOnPath(filepath.Dir(target), envPathDirs()),
 		Global:          !f.Local,
 	}
-	return runInstall(ctx, out, plan)
+	if err := runInstall(ctx, out, plan); err != nil {
+		return err
+	}
+	// A --local (in-repo) install should leave a USABLE repo: ensure the init
+	// scaffold (.satellites/, .mcp.json, hooks) is present so the agent can reach
+	// the MCP gateway (sty_9755c533). A --global install places only the binary —
+	// it has no single repo context.
+	if f.Local {
+		// target is <repo>/.satellites/satellites → repo root is two dirs up.
+		repoRoot := filepath.Dir(filepath.Dir(target))
+		return ensureScaffoldOnLocalInstall(out, repoRoot, ttyConfirm(out))
+	}
+	return nil
+}
+
+// ensureScaffoldOnLocalInstall runs the init scaffold after an in-repo install
+// when the repo is not yet initialized (no .satellites/satellites.toml). When it
+// IS initialized, it does not clobber: it asks via `confirm` (interactive) before
+// re-running init, and otherwise steers the operator to `satellites init`.
+func ensureScaffoldOnLocalInstall(out io.Writer, repoRoot string, confirm func(prompt string) bool) error {
+	tomlPath := filepath.Join(repoRoot, ".satellites", "satellites.toml")
+	if _, err := os.Stat(tomlPath); err != nil {
+		fmt.Fprintln(out, "  → repo not initialized; running init scaffold (.satellites/, .mcp.json, hooks)")
+		return runInit(out, repoRoot)
+	}
+	if confirm != nil && confirm("repo already initialized — re-run `satellites init` to refresh .mcp.json/hooks?") {
+		return runInit(out, repoRoot)
+	}
+	fmt.Fprintln(out, "  → repo already initialized; left as-is. Run `satellites init` to refresh .mcp.json/hooks if needed.")
+	return nil
+}
+
+// ttyConfirm returns a confirm function that prompts on stdin only when stdin is
+// an interactive terminal; in a non-interactive context (CI, pipe) it returns a
+// function that always declines, so an install never blocks on a prompt.
+func ttyConfirm(out io.Writer) func(string) bool {
+	fi, err := os.Stdin.Stat()
+	interactive := err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+	if !interactive {
+		return func(string) bool { return false }
+	}
+	return func(prompt string) bool {
+		fmt.Fprintf(out, "%s [y/N]: ", prompt)
+		var resp string
+		_, _ = fmt.Fscanln(os.Stdin, &resp)
+		resp = strings.ToLower(strings.TrimSpace(resp))
+		return resp == "y" || resp == "yes"
+	}
 }
 
 type installPlan struct {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -213,4 +214,50 @@ func TestGlobalBinaryPath(t *testing.T) {
 	if got := globalBinaryPath("/home/u"); got != "/home/u/.local/bin/satellites" {
 		t.Errorf("globalBinaryPath = %q", got)
 	}
+}
+
+// TestEnsureScaffoldOnLocalInstall pins sty_9755c533: an uninitialized repo gets
+// the init scaffold (so .mcp.json appears); an already-initialized repo is left
+// untouched when the operator declines (confirm=false).
+func TestEnsureScaffoldOnLocalInstall(t *testing.T) {
+	t.Run("uninitialized → scaffolds and writes .mcp.json", func(t *testing.T) {
+		repo := t.TempDir()
+		var out bytes.Buffer
+		if err := ensureScaffoldOnLocalInstall(&out, repo, func(string) bool { return false }); err != nil {
+			t.Fatalf("ensureScaffold: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(repo, ".mcp.json")); err != nil {
+			t.Errorf(".mcp.json not written by scaffold: %v\n%s", err, out.String())
+		}
+		if _, err := os.Stat(filepath.Join(repo, ".satellites", "satellites.toml")); err != nil {
+			t.Errorf(".satellites/satellites.toml not written by scaffold: %v", err)
+		}
+	})
+
+	t.Run("already initialized + declined → no clobber, steers", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(repo, ".satellites"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		marker := filepath.Join(repo, ".satellites", "satellites.toml")
+		if err := os.WriteFile(marker, []byte("# pre-existing\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := ensureScaffoldOnLocalInstall(&out, repo, func(string) bool { return false }); err != nil {
+			t.Fatalf("ensureScaffold: %v", err)
+		}
+		// The pre-existing toml is untouched (init would rewrite it), and there is
+		// no .mcp.json because init did not run.
+		b, _ := os.ReadFile(marker)
+		if string(b) != "# pre-existing\n" {
+			t.Errorf("declined re-init must not clobber satellites.toml, got:\n%s", b)
+		}
+		if _, err := os.Stat(filepath.Join(repo, ".mcp.json")); err == nil {
+			t.Errorf("declined re-init must not write .mcp.json")
+		}
+		if !strings.Contains(out.String(), "already initialized") {
+			t.Errorf("expected a steer message, got:\n%s", out.String())
+		}
+	})
 }
